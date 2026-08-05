@@ -1,0 +1,134 @@
+# =============================================================================
+# Unreal Engine 5.7 - Lyra / Rider
+# =============================================================================
+
+# --- Binaries ---
+Binaries/
+Plugins/*/Binaries/
+
+# --- Build artifacts ---
+Build/
+!Build/
+Build/*
+!Build/Windows/
+Build/Windows/*
+!Build/Windows/Application.ico
+Intermediate/
+Plugins/*/Intermediate/
+
+# --- Derived data cache ---
+DerivedDataCache/
+
+# --- Saved (logs, crashes, screenshots, etc.) ---
+Saved/
+
+# --- Rider / JetBrains ---
+.idea/
+*.sln
+*.suo
+*.user
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# --- Visual Studio ---
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# --- CMake (Rider may generate these) ---
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# --- Compiled object files ---
+*.o
+*.obj
+*.pch
+
+# --- Precompiled headers ---
+*.gch
+
+# --- Debug symbols ---
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+
+# --- Unreal crash reports ---
+Saved/Crashes/
+Saved/CrashReportClient/
+
+# --- Unreal automation test results ---
+Saved/Automation/
+
+# --- Unreal shader cache ---
+Saved/ShaderDebugInfo/
+
+# --- Config (keep DefaultGame.ini, DefaultEngine.ini, etc. in source) ---
+# Only ignore generated / per-user config overrides
+Saved/Config/
+
+# --- Content cooking output ---
+Saved/Cooked/
+Saved/StagedBuilds/
+
+# --- Perforce / Swarm leftovers ---
+*.p4ignore
+*.p4config
+
+# --- OS junk ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- Logs ---
+*.log
+
+# --- Backup files ---
+*~
+*.bak
+*.tmp
+
+# --- Pak / bulk data (build output) ---
+*.pak
+*.ucas
+*.utoc
+*.bulk
+*.ubulk
+
+# --- Marketplace / plugin zips ---
+*.zip
+*.7z
+
+# --- Python bytecode (Unreal Python plugin) ---
+__pycache__/
+*.py[cod]
+
+# =============================================================================
+# Keep these tracked (do NOT ignore)
+# =============================================================================
+!Config/
+!Config/**
+!Content/
+!Content/**
+!Plugins/
+!Plugins/**/Source/
+!Plugins/**/Resources/
+!Plugins/**/Config/
+!Plugins/**/*.uplugin
+!Source/
+!Source/**
+!*.uproject
+
+Content/SwordTrailVFX/
+
+CLAUDE.md
