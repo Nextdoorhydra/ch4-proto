@@ -72,11 +72,21 @@ public:
 	bool GetSearchResultByHandle(const FListenServerSearchResultHandle& Handle, FListenServerSearchResult& OutResult) const;
 
 	UFUNCTION(BlueprintPure, Category="Listen Server Network")
+	int32 GetParticipantCount() const;
+
+	UFUNCTION(BlueprintPure, Category="Listen Server Network")
+	bool GetParticipantByIndex(int32 Index, FListenServerParticipant& OutParticipant) const;
+
+	UFUNCTION(BlueprintPure, Category="Listen Server Network")
+	TArray<FListenServerParticipant> GetParticipants() const;
+
+	UFUNCTION(BlueprintPure, Category="Listen Server Network")
 	FListenServerDebugSnapshot GetDebugSnapshot() const;
 
 	FListenServerConfigurationReport ValidateConfiguration() const;
 	void LogConfigurationReport() const;
 	TConstArrayView<FListenServerSearchResult> GetSearchResultsView() const;
+	TConstArrayView<FListenServerParticipant> GetParticipantsView() const;
 
 	UPROPERTY(BlueprintAssignable, Category="Listen Server Network")
 	FListenServerStateChanged OnStateChanged;
@@ -86,6 +96,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="Listen Server Network")
 	FListenServerSearchResultsChanged OnSearchResultsChanged;
+
+	UPROPERTY(BlueprintAssignable, Category="Listen Server Network")
+	FListenServerParticipantsChanged OnParticipantsChanged;
 
 	UPROPERTY(BlueprintAssignable, Category="Listen Server Network")
 	FListenServerNetworkFailure OnNetworkFailure;

@@ -10,7 +10,9 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "Interfaces/IPluginManager.h"
 #include "Interfaces/OnlineExternalUIInterface.h"
 #include "Interfaces/OnlineIdentityInterface.h"
@@ -126,6 +128,7 @@ struct FListenServerSessionSubsystemImpl
 	int32 SearchGeneration = INDEX_NONE;
 	TArray<FListenServerSearchResult> SearchResults;
 	TArray<FOnlineSessionSearchResult> RawSearchResults;
+	TArray<FListenServerParticipant> Participants;
 	TSharedPtr<FOnlineSessionSearch> ActiveSearch;
 	FListenServerSearchRequest ActiveSearchRequest;
 	FListenServerHostRequest ActiveHostRequest;
@@ -161,6 +164,7 @@ struct FListenServerSessionSubsystemImpl
 	FDelegateHandle PreLoadMapHandle;
 	FDelegateHandle PostLoadMapHandle;
 	FTSTicker::FDelegateHandle TimeoutHandle;
+	FTSTicker::FDelegateHandle ParticipantObservationHandle;
 
 	IOnlineSubsystem* GetOnlineSubsystem() const
 	{
@@ -208,6 +212,9 @@ struct FListenServerSessionSubsystemImpl
 	void ClearPersistentDelegates();
 	void ClearOperationDelegates();
 	int32 GetRegisteredDelegateCount() const;
+	bool TickParticipantObservation(float DeltaTime);
+	void RefreshParticipants();
+	void ClearParticipants();
 
 	bool ValidateOnlineAccess(EListenServerOperation RequestedOperation);
 	bool Reject(EListenServerOperation RequestedOperation, EListenServerError Error, const TCHAR* UserMessage, const FString& InternalError);
@@ -343,6 +350,10 @@ void FListenServerSessionSubsystemImpl::Initialize()
 	});
 
 	EnsurePersistentDelegates();
+	ParticipantObservationHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateRaw(this, &FListenServerSessionSubsystemImpl::TickParticipantObservation),
+		0.5f
+	);
 	const IOnlineSubsystem* OnlineSubsystem = GetOnlineSubsystem();
 	UE_LOG(LogListenServerNetwork, Log, TEXT("Initialized. OSS=%s Role=None Connection=Offline Operation=None"), OnlineSubsystem != nullptr ? *OnlineSubsystem->GetSubsystemName().ToString() : TEXT("Unavailable"));
 }
@@ -355,6 +366,11 @@ void FListenServerSessionSubsystemImpl::Deinitialize()
 	}
 
 	ClearTimeout();
+	if (ParticipantObservationHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(ParticipantObservationHandle);
+		ParticipantObservationHandle.Reset();
+	}
 	ClearOperationDelegates();
 	ClearPersistentDelegates();
 	if (GEngine != nullptr)
@@ -381,8 +397,110 @@ void FListenServerSessionSubsystemImpl::Deinitialize()
 	ActiveSearch.Reset();
 	RawSearchResults.Reset();
 	SearchResults.Reset();
+	Participants.Reset();
 	bInitialized = false;
 	UE_LOG(LogListenServerNetwork, Log, TEXT("Deinitialized and removed all delegates"));
+}
+
+bool FListenServerSessionSubsystemImpl::TickParticipantObservation(float)
+{
+	RefreshParticipants();
+	return true;
+}
+
+void FListenServerSessionSubsystemImpl::RefreshParticipants()
+{
+	TArray<FListenServerParticipant> NewParticipants;
+	UWorld* World = GetWorld();
+	AGameStateBase* GameState = World != nullptr ? World->GetGameState() : nullptr;
+	if (ConnectionState != EListenServerConnectionState::Offline && GameState != nullptr)
+	{
+		FString HostPlatformUserId;
+		IOnlineSessionPtr Sessions = GetSessionInterface();
+		if (Sessions.IsValid())
+		{
+			if (const FNamedOnlineSession* NamedSession = Sessions->GetNamedSession(NAME_GameSession))
+			{
+				if (NamedSession->OwningUserId.IsValid())
+				{
+					HostPlatformUserId = NamedSession->OwningUserId->ToString();
+				}
+			}
+		}
+
+		TSet<const APlayerState*> LocalPlayerStates;
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			for (ULocalPlayer* LocalPlayer : GameInstance->GetLocalPlayers())
+			{
+				APlayerController* PlayerController = LocalPlayer != nullptr
+					? LocalPlayer->GetPlayerController(World)
+					: nullptr;
+				if (PlayerController != nullptr && PlayerController->PlayerState != nullptr)
+				{
+					LocalPlayerStates.Add(PlayerController->PlayerState);
+				}
+			}
+		}
+
+		NewParticipants.Reserve(GameState->PlayerArray.Num());
+		for (const APlayerState* PlayerState : GameState->PlayerArray)
+		{
+			if (!IsValid(PlayerState) || PlayerState->IsOnlyASpectator())
+			{
+				continue;
+			}
+
+			FListenServerParticipant& Participant = NewParticipants.AddDefaulted_GetRef();
+			Participant.PlayerId = PlayerState->GetPlayerId();
+			Participant.DisplayName = PlayerState->GetPlayerName();
+			const FUniqueNetIdRepl& UniqueId = PlayerState->GetUniqueId();
+			Participant.PlatformUserId = UniqueId.IsValid() ? UniqueId.ToString() : FString();
+			Participant.PingMilliseconds = FMath::Max(0, FMath::RoundToInt(PlayerState->GetPingInMilliseconds()));
+			Participant.bIsLocalPlayer = LocalPlayerStates.Contains(PlayerState);
+			Participant.bIsHost = !HostPlatformUserId.IsEmpty()
+				? Participant.PlatformUserId == HostPlatformUserId
+				: Role == EListenServerRole::Host && Participant.bIsLocalPlayer;
+		}
+	}
+
+	NewParticipants.Sort([](const FListenServerParticipant& Left, const FListenServerParticipant& Right)
+	{
+		if (Left.PlayerId != Right.PlayerId)
+		{
+			return Left.PlayerId < Right.PlayerId;
+		}
+		if (Left.PlatformUserId != Right.PlatformUserId)
+		{
+			return Left.PlatformUserId < Right.PlatformUserId;
+		}
+		return Left.DisplayName < Right.DisplayName;
+	});
+
+	if (Participants == NewParticipants)
+	{
+		return;
+	}
+
+	Participants = MoveTemp(NewParticipants);
+	if (UListenServerSessionSubsystem* Subsystem = Owner.Get())
+	{
+		Subsystem->OnParticipantsChanged.Broadcast();
+	}
+}
+
+void FListenServerSessionSubsystemImpl::ClearParticipants()
+{
+	if (Participants.IsEmpty())
+	{
+		return;
+	}
+
+	Participants.Reset();
+	if (UListenServerSessionSubsystem* Subsystem = Owner.Get())
+	{
+		Subsystem->OnParticipantsChanged.Broadcast();
+	}
 }
 
 void FListenServerSessionSubsystemImpl::EnsurePersistentDelegates()
@@ -572,6 +690,14 @@ void FListenServerSessionSubsystemImpl::SetRoleAndConnection(EListenServerRole N
 	UE_LOG(LogListenServerNetwork, Log, TEXT("Role/connection %d/%d -> %d/%d, Reason=%s"), static_cast<int32>(Role), static_cast<int32>(ConnectionState), static_cast<int32>(NewRole), static_cast<int32>(NewConnection), Reason);
 	Role = NewRole;
 	ConnectionState = NewConnection;
+	if (ConnectionState == EListenServerConnectionState::Offline)
+	{
+		ClearParticipants();
+	}
+	else
+	{
+		RefreshParticipants();
+	}
 	BroadcastState();
 }
 
@@ -2433,6 +2559,26 @@ bool UListenServerSessionSubsystem::GetSearchResultByHandle(const FListenServerS
 	return true;
 }
 
+int32 UListenServerSessionSubsystem::GetParticipantCount() const
+{
+	return Impl->Participants.Num();
+}
+
+bool UListenServerSessionSubsystem::GetParticipantByIndex(int32 Index, FListenServerParticipant& OutParticipant) const
+{
+	if (!Impl->Participants.IsValidIndex(Index))
+	{
+		return false;
+	}
+	OutParticipant = Impl->Participants[Index];
+	return true;
+}
+
+TArray<FListenServerParticipant> UListenServerSessionSubsystem::GetParticipants() const
+{
+	return Impl->Participants;
+}
+
 FListenServerDebugSnapshot UListenServerSessionSubsystem::GetDebugSnapshot() const
 {
 	return Impl->GetDebugSnapshot();
@@ -2456,4 +2602,9 @@ void UListenServerSessionSubsystem::LogConfigurationReport() const
 TConstArrayView<FListenServerSearchResult> UListenServerSessionSubsystem::GetSearchResultsView() const
 {
 	return Impl->SearchResults;
+}
+
+TConstArrayView<FListenServerParticipant> UListenServerSessionSubsystem::GetParticipantsView() const
+{
+	return Impl->Participants;
 }

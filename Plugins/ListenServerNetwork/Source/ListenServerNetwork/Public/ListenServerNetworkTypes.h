@@ -235,6 +235,40 @@ struct LISTENSERVERNETWORK_API FListenServerSearchResult
 };
 
 USTRUCT(BlueprintType)
+struct LISTENSERVERNETWORK_API FListenServerParticipant
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	int32 PlayerId = INDEX_NONE;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	FString DisplayName;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	FString PlatformUserId;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	int32 PingMilliseconds = INDEX_NONE;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	bool bIsHost = false;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	bool bIsLocalPlayer = false;
+
+	bool operator==(const FListenServerParticipant& Other) const
+	{
+		return PlayerId == Other.PlayerId
+			&& DisplayName == Other.DisplayName
+			&& PlatformUserId == Other.PlatformUserId
+			&& PingMilliseconds == Other.PingMilliseconds
+			&& bIsHost == Other.bIsHost
+			&& bIsLocalPlayer == Other.bIsLocalPlayer;
+	}
+};
+
+USTRUCT(BlueprintType)
 struct LISTENSERVERNETWORK_API FListenServerDebugSnapshot
 {
 	GENERATED_BODY()
@@ -329,4 +363,5 @@ struct LISTENSERVERNETWORK_API FListenServerConfigurationReport
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FListenServerStateChanged, EListenServerRole, Role, EListenServerConnectionState, ConnectionState, EListenServerOperation, Operation);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FListenServerOperationCompleted, EListenServerOperation, CompletedOperation, const FListenServerOperationResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FListenServerSearchResultsChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FListenServerParticipantsChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FListenServerNetworkFailure, const FListenServerOperationResult&, Result);

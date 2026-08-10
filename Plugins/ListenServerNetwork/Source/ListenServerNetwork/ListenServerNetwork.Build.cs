@@ -16,6 +16,7 @@ public class ListenServerNetwork : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"CoreOnline",
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
 			"Projects"
