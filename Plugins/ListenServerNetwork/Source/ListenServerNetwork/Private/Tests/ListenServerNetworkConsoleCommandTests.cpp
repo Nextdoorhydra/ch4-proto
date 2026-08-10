@@ -3,7 +3,9 @@
 #include "ListenServerNetworkConsoleCommands.h"
 
 #include "Engine/Console.h"
+#include "HAL/IConsoleManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/StringOutputDevice.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FListenServerNetworkConsoleStateParserTest,
@@ -51,6 +53,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FListenServerNetworkConsoleAutoCompleteTest::RunTest(const FString& Parameters)
 {
+	IConsoleObject* DiagnosticsObject = IConsoleManager::Get().FindConsoleObject(TEXT("LSN.ConnectionDiagnostics"));
+	TestNotNull(TEXT("Connection diagnostics command is registered"), DiagnosticsObject);
+	if (DiagnosticsObject != nullptr)
+	{
+		FStringOutputDevice Output;
+		TArray<FString> Args;
+		static_cast<IConsoleCommand*>(DiagnosticsObject)->Execute(Args, nullptr, Output);
+		TestFalse(TEXT("Connection diagnostics command writes to its output device"), Output.IsEmpty());
+	}
+
 	TArray<FAutoCompleteCommand> Entries;
 	UConsole::RegisterConsoleAutoCompleteEntries.Broadcast(Entries);
 	const auto ContainsCommand = [&Entries](const TCHAR* Expected)

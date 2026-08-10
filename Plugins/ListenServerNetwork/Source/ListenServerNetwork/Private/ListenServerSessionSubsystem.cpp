@@ -1,5 +1,6 @@
 #include "ListenServerSessionSubsystem.h"
 
+#include "ListenServerNetworkDiagnostics.h"
 #include "ListenServerNetworkLog.h"
 #include "ListenServerNetworkPolicy.h"
 #include "ListenServerNetworkSettings.h"
@@ -8,6 +9,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/NetConnection.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
@@ -159,6 +161,7 @@ struct FListenServerSessionSubsystemImpl
 	TArray<FListenServerSearchResult> SearchResults;
 	TArray<FOnlineSessionSearchResult> RawSearchResults;
 	TArray<FListenServerParticipant> Participants;
+	FListenServerConnectionDiagnostics ConnectionDiagnostics;
 	TSharedPtr<FOnlineSessionSearch> ActiveSearch;
 	FListenServerSearchRequest ActiveSearchRequest;
 	FListenServerHostRequest ActiveHostRequest;
@@ -197,6 +200,7 @@ struct FListenServerSessionSubsystemImpl
 	FDelegateHandle PostLoadMapHandle;
 	FTSTicker::FDelegateHandle TimeoutHandle;
 	FTSTicker::FDelegateHandle ParticipantObservationHandle;
+	FTSTicker::FDelegateHandle ConnectionDiagnosticsHandle;
 
 	IOnlineSubsystem* GetOnlineSubsystem() const
 	{
@@ -247,6 +251,8 @@ struct FListenServerSessionSubsystemImpl
 	bool TickParticipantObservation(float DeltaTime);
 	void RefreshParticipants();
 	void ClearParticipants();
+	bool TickConnectionDiagnostics(float DeltaTime);
+	void RefreshConnectionDiagnostics();
 
 	bool ValidateOnlineAccess(EListenServerOperation RequestedOperation);
 	bool Reject(EListenServerOperation RequestedOperation, EListenServerError Error, const TCHAR* UserMessage, const FString& InternalError);
@@ -388,6 +394,10 @@ void FListenServerSessionSubsystemImpl::Initialize()
 		FTickerDelegate::CreateRaw(this, &FListenServerSessionSubsystemImpl::TickParticipantObservation),
 		0.5f
 	);
+	ConnectionDiagnosticsHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateRaw(this, &FListenServerSessionSubsystemImpl::TickConnectionDiagnostics),
+		1.0f
+	);
 	const IOnlineSubsystem* OnlineSubsystem = GetOnlineSubsystem();
 	UE_LOG(LogListenServerNetwork, Log, TEXT("Initialized. OSS=%s Role=None Connection=Offline Operation=None"), OnlineSubsystem != nullptr ? *OnlineSubsystem->GetSubsystemName().ToString() : TEXT("Unavailable"));
 }
@@ -404,6 +414,11 @@ void FListenServerSessionSubsystemImpl::Deinitialize()
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(ParticipantObservationHandle);
 		ParticipantObservationHandle.Reset();
+	}
+	if (ConnectionDiagnosticsHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(ConnectionDiagnosticsHandle);
+		ConnectionDiagnosticsHandle.Reset();
 	}
 	ClearOperationDelegates();
 	ClearPersistentDelegates();
@@ -534,6 +549,62 @@ void FListenServerSessionSubsystemImpl::ClearParticipants()
 	if (UListenServerSessionSubsystem* Subsystem = Owner.Get())
 	{
 		Subsystem->OnParticipantsChanged.Broadcast();
+	}
+}
+
+bool FListenServerSessionSubsystemImpl::TickConnectionDiagnostics(float)
+{
+	RefreshConnectionDiagnostics();
+	return true;
+}
+
+void FListenServerSessionSubsystemImpl::RefreshConnectionDiagnostics()
+{
+	FListenServerConnectionDiagnostics NewDiagnostics;
+	NewDiagnostics.Role = Role;
+	NewDiagnostics.ConnectionState = ConnectionState;
+
+	if (Role == EListenServerRole::Host && ConnectionState != EListenServerConnectionState::Offline)
+	{
+		NewDiagnostics.LinkState = EListenServerLinkState::LocalHost;
+	}
+	else
+	{
+		UWorld* World = GetWorld();
+		UNetDriver* NetDriver = World != nullptr ? World->GetNetDriver() : nullptr;
+		UNetConnection* ServerConnection = NetDriver != nullptr ? NetDriver->ServerConnection.Get() : nullptr;
+		if (ServerConnection != nullptr && ServerConnection->GetConnectionState() == USOCK_Open)
+		{
+			NewDiagnostics.LinkState = EListenServerLinkState::Connected;
+			if (ServerConnection->InTotalPackets > 0 && ServerConnection->OutTotalPackets > 0)
+			{
+				NewDiagnostics.PingMilliseconds = FMath::Max(0, FMath::RoundToInt(ServerConnection->AvgLag * 1000.0f));
+				NewDiagnostics.IncomingPacketLossPercent = FMath::Clamp(ServerConnection->GetInLossPercentage().GetAvgLossPercentage() * 100.0f, 0.0f, 100.0f);
+				NewDiagnostics.OutgoingPacketLossPercent = FMath::Clamp(ServerConnection->GetOutLossPercentage().GetAvgLossPercentage() * 100.0f, 0.0f, 100.0f);
+				NewDiagnostics.Quality = ListenServerNetworkDiagnostics::EvaluateQuality(
+					NewDiagnostics.PingMilliseconds,
+					NewDiagnostics.IncomingPacketLossPercent,
+					NewDiagnostics.OutgoingPacketLossPercent
+				);
+			}
+		}
+		else if ((ServerConnection != nullptr && ServerConnection->GetConnectionState() == USOCK_Pending)
+			|| Operation == EListenServerOperation::Joining
+			|| (PendingTravel.IsValid() && PendingTravel->Role == EListenServerRole::Client))
+		{
+			NewDiagnostics.LinkState = EListenServerLinkState::Connecting;
+		}
+	}
+
+	if (ConnectionDiagnostics == NewDiagnostics)
+	{
+		return;
+	}
+
+	ConnectionDiagnostics = NewDiagnostics;
+	if (UListenServerSessionSubsystem* Subsystem = Owner.Get())
+	{
+		Subsystem->OnConnectionDiagnosticsChanged.Broadcast(ConnectionDiagnostics);
 	}
 }
 
@@ -732,6 +803,7 @@ void FListenServerSessionSubsystemImpl::SetRoleAndConnection(EListenServerRole N
 	{
 		RefreshParticipants();
 	}
+	RefreshConnectionDiagnostics();
 	BroadcastState();
 }
 
@@ -2719,6 +2791,11 @@ bool UListenServerSessionSubsystem::GetParticipantByIndex(int32 Index, FListenSe
 TArray<FListenServerParticipant> UListenServerSessionSubsystem::GetParticipants() const
 {
 	return Impl->Participants;
+}
+
+FListenServerConnectionDiagnostics UListenServerSessionSubsystem::GetConnectionDiagnostics() const
+{
+	return Impl->ConnectionDiagnostics;
 }
 
 FListenServerDebugSnapshot UListenServerSessionSubsystem::GetDebugSnapshot() const

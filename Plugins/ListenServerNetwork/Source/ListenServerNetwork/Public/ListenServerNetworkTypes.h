@@ -30,6 +30,24 @@ enum class EListenServerAdvertisedSessionState : uint8
 };
 
 UENUM(BlueprintType)
+enum class EListenServerLinkState : uint8
+{
+	Offline,
+	Connecting,
+	Connected,
+	LocalHost
+};
+
+UENUM(BlueprintType)
+enum class EListenServerConnectionQuality : uint8
+{
+	Unknown,
+	Good,
+	Fair,
+	Poor
+};
+
+UENUM(BlueprintType)
 enum class EListenServerOperation : uint8
 {
 	None,
@@ -281,6 +299,46 @@ struct LISTENSERVERNETWORK_API FListenServerParticipant
 };
 
 USTRUCT(BlueprintType)
+struct LISTENSERVERNETWORK_API FListenServerConnectionDiagnostics
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	EListenServerRole Role = EListenServerRole::None;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	EListenServerConnectionState ConnectionState = EListenServerConnectionState::Offline;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	EListenServerLinkState LinkState = EListenServerLinkState::Offline;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	EListenServerConnectionQuality Quality = EListenServerConnectionQuality::Unknown;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	int32 PingMilliseconds = INDEX_NONE;
+
+	/** Rolling average of packets lost while receiving, expressed from 0 to 100. */
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	float IncomingPacketLossPercent = 0.0f;
+
+	/** Rolling average of packets lost while sending, expressed from 0 to 100. */
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	float OutgoingPacketLossPercent = 0.0f;
+
+	bool operator==(const FListenServerConnectionDiagnostics& Other) const
+	{
+		return Role == Other.Role
+			&& ConnectionState == Other.ConnectionState
+			&& LinkState == Other.LinkState
+			&& Quality == Other.Quality
+			&& PingMilliseconds == Other.PingMilliseconds
+			&& IncomingPacketLossPercent == Other.IncomingPacketLossPercent
+			&& OutgoingPacketLossPercent == Other.OutgoingPacketLossPercent;
+	}
+};
+
+USTRUCT(BlueprintType)
 struct LISTENSERVERNETWORK_API FListenServerDebugSnapshot
 {
 	GENERATED_BODY()
@@ -376,4 +434,5 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FListenServerStateChanged, EListe
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FListenServerOperationCompleted, EListenServerOperation, CompletedOperation, const FListenServerOperationResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FListenServerSearchResultsChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FListenServerParticipantsChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FListenServerConnectionDiagnosticsChanged, const FListenServerConnectionDiagnostics&, Diagnostics);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FListenServerNetworkFailure, const FListenServerOperationResult&, Result);

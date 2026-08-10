@@ -52,11 +52,18 @@ namespace
 {
 #if !UE_BUILD_SHIPPING
 	template <typename CallbackType>
-	void ForEachRuntimeSubsystem(CallbackType&& Callback)
+	void ForEachRuntimeSubsystem(CallbackType&& Callback, FOutputDevice* OutputDevice = nullptr)
 	{
 		if (GEngine == nullptr)
 		{
-			UE_LOG(LogListenServerNetwork, Warning, TEXT("GEngine is unavailable"));
+			if (OutputDevice != nullptr)
+			{
+				OutputDevice->Logf(TEXT("GEngine is unavailable"));
+			}
+			else
+			{
+				UE_LOG(LogListenServerNetwork, Warning, TEXT("GEngine is unavailable"));
+			}
 			return;
 		}
 		int32 MatchCount = 0;
@@ -72,13 +79,27 @@ namespace
 			if (Subsystem != nullptr)
 			{
 				++MatchCount;
-				UE_LOG(LogListenServerNetwork, Log, TEXT("World[%d] Name=%s Type=%d"), MatchCount - 1, *World->GetName(), static_cast<int32>(World->WorldType));
+				if (OutputDevice != nullptr)
+				{
+					OutputDevice->Logf(TEXT("World[%d] Name=%s Type=%d"), MatchCount - 1, *World->GetName(), static_cast<int32>(World->WorldType));
+				}
+				else
+				{
+					UE_LOG(LogListenServerNetwork, Log, TEXT("World[%d] Name=%s Type=%d"), MatchCount - 1, *World->GetName(), static_cast<int32>(World->WorldType));
+				}
 				Callback(*Subsystem);
 			}
 		}
 		if (MatchCount == 0)
 		{
-			UE_LOG(LogListenServerNetwork, Warning, TEXT("No Game or PIE ListenServerSessionSubsystem was found"));
+			if (OutputDevice != nullptr)
+			{
+				OutputDevice->Logf(TEXT("No Game or PIE ListenServerSessionSubsystem was found"));
+			}
+			else
+			{
+				UE_LOG(LogListenServerNetwork, Warning, TEXT("No Game or PIE ListenServerSessionSubsystem was found"));
+			}
 		}
 	}
 
@@ -101,6 +122,21 @@ namespace
 		{
 			Subsystem.LogConfigurationReport();
 		});
+	}
+
+	void ConsoleConnectionDiagnostics(FOutputDevice& OutputDevice)
+	{
+		ForEachRuntimeSubsystem([&OutputDevice](UListenServerSessionSubsystem& Subsystem)
+		{
+			const FListenServerConnectionDiagnostics Diagnostics = Subsystem.GetConnectionDiagnostics();
+			const FString RoleName = StaticEnum<EListenServerRole>()->GetNameStringByValue(static_cast<int64>(Diagnostics.Role));
+			const FString ConnectionStateName = StaticEnum<EListenServerConnectionState>()->GetNameStringByValue(static_cast<int64>(Diagnostics.ConnectionState));
+			const FString LinkStateName = StaticEnum<EListenServerLinkState>()->GetNameStringByValue(static_cast<int64>(Diagnostics.LinkState));
+			const FString QualityName = StaticEnum<EListenServerConnectionQuality>()->GetNameStringByValue(static_cast<int64>(Diagnostics.Quality));
+			OutputDevice.Logf(TEXT("ConnectionDiagnostics Role=%s SessionState=%s LinkState=%s Quality=%s PingMs=%d IncomingLoss=%.2f%% OutgoingLoss=%.2f%%"),
+				*RoleName, *ConnectionStateName, *LinkStateName, *QualityName, Diagnostics.PingMilliseconds,
+				Diagnostics.IncomingPacketLossPercent, Diagnostics.OutgoingPacketLossPercent);
+		}, &OutputDevice);
 	}
 
 	void ConsoleDumpSearchResults()
@@ -163,6 +199,7 @@ void FListenServerNetworkConsoleCommands::Register()
 	IConsoleManager& ConsoleManager = IConsoleManager::Get();
 	RegisteredCommands.Add(ConsoleManager.RegisterConsoleCommand(TEXT("LSN.Status"), TEXT("Print Listen Server Network status for each Game/PIE world."), FConsoleCommandDelegate::CreateStatic(&ConsoleStatus), ECVF_Default));
 	RegisteredCommands.Add(ConsoleManager.RegisterConsoleCommand(TEXT("LSN.Validate"), TEXT("Validate Listen Server Network configuration."), FConsoleCommandDelegate::CreateStatic(&ConsoleValidate), ECVF_Default));
+	RegisteredCommands.Add(ConsoleManager.RegisterConsoleCommand(TEXT("LSN.ConnectionDiagnostics"), TEXT("Print connection state, ping, packet loss, and quality."), FConsoleCommandWithOutputDeviceDelegate::CreateStatic(&ConsoleConnectionDiagnostics), ECVF_Default));
 	RegisteredCommands.Add(ConsoleManager.RegisterConsoleCommand(TEXT("LSN.DumpSearchResults"), TEXT("Print cached compatible search results."), FConsoleCommandDelegate::CreateStatic(&ConsoleDumpSearchResults), ECVF_Default));
 	RegisteredCommands.Add(ConsoleManager.RegisterConsoleCommand(TEXT("LSN.DumpStructLayouts"), TEXT("Print important structure sizes and alignments."), FConsoleCommandDelegate::CreateStatic(&ConsoleDumpStructLayouts), ECVF_Default));
 	RegisteredCommands.Add(ConsoleManager.RegisterConsoleCommand(TEXT("LSN.UpdateHostedSessionState"), TEXT("Update hosted session advertisement. Usage: LSN.UpdateHostedSessionState <Lobby|InGame|Closed> <0|1>."), FConsoleCommandWithArgsDelegate::CreateStatic(&ConsoleUpdateHostedSessionState), ECVF_Default));

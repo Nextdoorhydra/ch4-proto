@@ -84,6 +84,9 @@ public:
 	TArray<FListenServerParticipant> GetParticipants() const;
 
 	UFUNCTION(BlueprintPure, Category="Listen Server Network")
+	FListenServerConnectionDiagnostics GetConnectionDiagnostics() const;
+
+	UFUNCTION(BlueprintPure, Category="Listen Server Network")
 	FListenServerDebugSnapshot GetDebugSnapshot() const;
 
 	FListenServerConfigurationReport ValidateConfiguration() const;
@@ -102,6 +105,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="Listen Server Network")
 	FListenServerParticipantsChanged OnParticipantsChanged;
+
+	UPROPERTY(BlueprintAssignable, Category="Listen Server Network")
+	FListenServerConnectionDiagnosticsChanged OnConnectionDiagnosticsChanged;
 
 	UPROPERTY(BlueprintAssignable, Category="Listen Server Network")
 	FListenServerNetworkFailure OnNetworkFailure;
