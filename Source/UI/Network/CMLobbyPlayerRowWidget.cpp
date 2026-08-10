@@ -1,8 +1,8 @@
-#include "ChimeraLobbyPlayerRowWidget.h"
+#include "CMLobbyPlayerRowWidget.h"
 
 #include "Components/TextBlock.h"
 
-void UChimeraLobbyPlayerRowWidget::SetPlayerDisplayName(
+void UCMLobbyPlayerRowWidget::SetPlayerDisplayName(
     const FString& NewPlayerDisplayName,
     const FLinearColor& NewPlayerDisplayColor
 )
@@ -16,7 +16,7 @@ void UChimeraLobbyPlayerRowWidget::SetPlayerDisplayName(
     }
 }
 
-void UChimeraLobbyPlayerRowWidget::NativePreConstruct()
+void UCMLobbyPlayerRowWidget::NativePreConstruct()
 {
     Super::NativePreConstruct();
 

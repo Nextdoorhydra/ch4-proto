@@ -3,12 +3,12 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 
-#include "ChimeraLobbyPlayerRowWidget.generated.h"
+#include "CMLobbyPlayerRowWidget.generated.h"
 
 class UTextBlock;
 
 UCLASS(Abstract, Blueprintable)
-class CHIMERA_API UChimeraLobbyPlayerRowWidget : public UUserWidget
+class UI_API UCMLobbyPlayerRowWidget : public UUserWidget
 {
     GENERATED_BODY()
 

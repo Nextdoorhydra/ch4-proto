@@ -4,11 +4,11 @@
 #include "Blueprint/UserWidget.h"
 #include "ListenServerNetworkTypes.h"
 
-#include "ChimeraNetworkWidget.generated.h"
+#include "CMNetworkWidget.generated.h"
 
 class ACMGameState;
 class UButton;
-class UChimeraLobbyPlayerRowWidget;
+class UCMLobbyPlayerRowWidget;
 class UListenServerSessionSubsystem;
 class UPanelWidget;
 class UScrollBox;
@@ -16,7 +16,7 @@ class UTextBlock;
 class UWidget;
 
 UCLASS(Abstract, Blueprintable)
-class CHIMERA_API UChimeraNetworkWidget : public UUserWidget
+class UI_API UCMNetworkWidget : public UUserWidget
 {
     GENERATED_BODY()
 
@@ -25,7 +25,7 @@ protected:
     virtual void NativeDestruct() override;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Lobby")
-    TSubclassOf<UChimeraLobbyPlayerRowWidget> LobbyPlayerRowClass;
+    TSubclassOf<UCMLobbyPlayerRowWidget> LobbyPlayerRowClass;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|UI")
     FText ShowDetailsText = NSLOCTEXT(
