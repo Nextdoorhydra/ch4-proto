@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Player/CMControlTypes.h"
 
-struct FCMControlAssignmentPolicy
+struct GAMEPLAY_API FCMControlAssignmentPolicy
 {
     static void Rebalance(
         const TArray<TArray<ECMControlPart>>& ExistingAssignments,

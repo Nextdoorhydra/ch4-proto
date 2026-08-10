@@ -13,6 +13,7 @@ public class UI : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"UMG",
+			"Chimera",
 			"Shared",
 			"Gameplay",
 			"ListenServerNetwork",

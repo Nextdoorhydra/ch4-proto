@@ -7,7 +7,21 @@ public class Chimera : ModuleRules
 	public Chimera(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		PublicIncludePaths.Add(ModuleDirectory);
 	
-		PublicDependencyModuleNames.Add("Core");
+		PublicDependencyModuleNames.AddRange(new[]
+		{
+			"Core",
+			"CoreUObject",
+			"Engine",
+			"Gameplay"
+		});
+
+		PrivateDependencyModuleNames.AddRange(new[]
+		{
+			"ListenServerNetwork",
+			"EnhancedInput",
+			"InputCore"
+		});
 	}
 }

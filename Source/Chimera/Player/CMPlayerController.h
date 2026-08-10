@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
-#include "CMControlTypes.h"
+#include "Player/CMControlTypes.h"
 
 #include "CMPlayerController.generated.h"
 
@@ -10,7 +10,7 @@ class ACMPawn;
 class UInputMappingContext;
 
 UCLASS()
-class GAMEPLAY_API ACMPlayerController : public APlayerController
+class CHIMERA_API ACMPlayerController : public APlayerController
 {
     GENERATED_BODY()
 

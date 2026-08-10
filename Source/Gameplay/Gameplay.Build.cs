@@ -17,8 +17,6 @@ public class Gameplay : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
-			"EnhancedInput",
-			"InputCore",
 			"ListenServerNetwork"
 		});
 	}

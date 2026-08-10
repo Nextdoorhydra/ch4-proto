@@ -1,7 +1,7 @@
 #include "CMPlayerController.h"
 
-#include "CMPawn.h"
-#include "CMPlayerState.h"
+#include "Player/CMPawn.h"
+#include "Player/CMPlayerState.h"
 #include "Game/CMGameState.h"
 #include "Game/CMGameMode.h"
 #include "Components/InputComponent.h"

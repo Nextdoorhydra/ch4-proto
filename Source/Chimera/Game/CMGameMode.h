@@ -9,7 +9,7 @@ class ACMPlayerState;
 class ACMPawn;
 
 UCLASS()
-class GAMEPLAY_API ACMGameMode : public AGameModeBase
+class CHIMERA_API ACMGameMode : public AGameModeBase
 {
     GENERATED_BODY()
 

@@ -1,7 +1,7 @@
 #include "CMGameMode.h"
 
-#include "CMControlAssignmentPolicy.h"
-#include "CMGameState.h"
+#include "Game/CMControlAssignmentPolicy.h"
+#include "Game/CMGameState.h"
 #include "Player/CMPawn.h"
 #include "Player/CMPlayerState.h"
 #include "Player/CMPlayerController.h"
