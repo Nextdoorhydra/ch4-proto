@@ -1,58 +1,58 @@
-#include "ChimeraPlayerState.h"
+#include "CMPlayerState.h"
 
-#include "Chimera/Game/ChimeraGameState.h"
+#include "Game/CMGameState.h"
 #include "Net/UnrealNetwork.h"
 
-AChimeraPlayerState::AChimeraPlayerState()
+ACMPlayerState::ACMPlayerState()
 {
     SetReplicates(true);
 }
 
-void AChimeraPlayerState::GetLifetimeReplicatedProps(
+void ACMPlayerState::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    DOREPLIFETIME(AChimeraPlayerState, AssignedControlParts);
-    DOREPLIFETIME(AChimeraPlayerState, PlayerColorIndex);
+    DOREPLIFETIME(ACMPlayerState, AssignedControlParts);
+    DOREPLIFETIME(ACMPlayerState, PlayerColorIndex);
 }
 
-void AChimeraPlayerState::SetPlayerName(const FString& NewPlayerName)
+void ACMPlayerState::SetPlayerName(const FString& NewPlayerName)
 {
     Super::SetPlayerName(NewPlayerName);
 
-    if (AChimeraGameState* ChimeraGameState = GetWorld()
-        ? GetWorld()->GetGameState<AChimeraGameState>()
+    if (ACMGameState* GameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr)
     {
-        ChimeraGameState->NotifyLobbyRosterChanged();
+        GameState->NotifyLobbyRosterChanged();
     }
 }
 
-void AChimeraPlayerState::OnRep_PlayerName()
+void ACMPlayerState::OnRep_PlayerName()
 {
     Super::OnRep_PlayerName();
 
-    if (AChimeraGameState* ChimeraGameState = GetWorld()
-        ? GetWorld()->GetGameState<AChimeraGameState>()
+    if (ACMGameState* GameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr)
     {
-        ChimeraGameState->NotifyLobbyRosterChanged();
+        GameState->NotifyLobbyRosterChanged();
     }
 }
 
-EChimeraControlPart AChimeraPlayerState::GetControlPartForSlot(
+ECMControlPart ACMPlayerState::GetControlPartForSlot(
     int32 SlotIndex
 ) const
 {
     return AssignedControlParts.IsValidIndex(SlotIndex)
         ? AssignedControlParts[SlotIndex]
-        : EChimeraControlPart::None;
+        : ECMControlPart::None;
 }
 
-void AChimeraPlayerState::SetAssignedControlParts(
-    const TArray<EChimeraControlPart>& NewAssignments
+void ACMPlayerState::SetAssignedControlParts(
+    const TArray<ECMControlPart>& NewAssignments
 )
 {
     if (!HasAuthority() || AssignedControlParts == NewAssignments)
@@ -65,12 +65,12 @@ void AChimeraPlayerState::SetAssignedControlParts(
     ForceNetUpdate();
 }
 
-int32 AChimeraPlayerState::GetAssignedControlCount() const
+int32 ACMPlayerState::GetAssignedControlCount() const
 {
     return AssignedControlParts.Num();
 }
 
-void AChimeraPlayerState::SetPlayerColorIndex(int32 NewPlayerColorIndex)
+void ACMPlayerState::SetPlayerColorIndex(int32 NewPlayerColorIndex)
 {
     if (!HasAuthority() || PlayerColorIndex == NewPlayerColorIndex)
     {
@@ -82,7 +82,7 @@ void AChimeraPlayerState::SetPlayerColorIndex(int32 NewPlayerColorIndex)
     ForceNetUpdate();
 }
 
-FLinearColor AChimeraPlayerState::GetPlayerColor() const
+FLinearColor ACMPlayerState::GetPlayerColor() const
 {
     static const FLinearColor PlayerColors[] =
     {
@@ -102,24 +102,24 @@ FLinearColor AChimeraPlayerState::GetPlayerColor() const
         : FLinearColor::White;
 }
 
-int32 AChimeraPlayerState::GetPlayerColorIndex() const
+int32 ACMPlayerState::GetPlayerColorIndex() const
 {
     return PlayerColorIndex;
 }
 
-void AChimeraPlayerState::OnRep_AssignedControlParts()
+void ACMPlayerState::OnRep_AssignedControlParts()
 {
     OnControlAssignmentsChanged.Broadcast();
 }
 
-void AChimeraPlayerState::OnRep_PlayerColorIndex()
+void ACMPlayerState::OnRep_PlayerColorIndex()
 {
     OnPlayerColorChanged.Broadcast();
 
-    if (AChimeraGameState* ChimeraGameState = GetWorld()
-        ? GetWorld()->GetGameState<AChimeraGameState>()
+    if (ACMGameState* GameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr)
     {
-        ChimeraGameState->NotifyLobbyRosterChanged();
+        GameState->NotifyLobbyRosterChanged();
     }
 }

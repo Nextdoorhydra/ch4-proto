@@ -1,10 +1,10 @@
-#include "PrototypeGameMode.h"
+#include "CMGameMode.h"
 
-#include "ChimeraControlAssignmentPolicy.h"
-#include "ChimeraGameState.h"
-#include "Chimera/Player/ChimeraPrototypePawn.h"
-#include "Chimera/Player/ChimeraPlayerState.h"
-#include "Chimera/Player/PrototypePlayerController.h"
+#include "CMControlAssignmentPolicy.h"
+#include "CMGameState.h"
+#include "Player/CMPawn.h"
+#include "Player/CMPlayerState.h"
+#include "Player/CMPlayerController.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
@@ -13,16 +13,16 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraMultiplayer, Log, All);
 
-APrototypeGameMode::APrototypeGameMode()
+ACMGameMode::ACMGameMode()
 {
-    PlayerControllerClass = APrototypePlayerController::StaticClass();
-    PlayerStateClass = AChimeraPlayerState::StaticClass();
-    GameStateClass = AChimeraGameState::StaticClass();
-    DefaultPawnClass = AChimeraPrototypePawn::StaticClass();
+    PlayerControllerClass = ACMPlayerController::StaticClass();
+    PlayerStateClass = ACMPlayerState::StaticClass();
+    GameStateClass = ACMGameState::StaticClass();
+    DefaultPawnClass = ACMPawn::StaticClass();
     bUseSeamlessTravel = true;
 }
 
-void APrototypeGameMode::BeginPlay()
+void ACMGameMode::BeginPlay()
 {
     Super::BeginPlay();
 
@@ -35,10 +35,10 @@ void APrototypeGameMode::BeginPlay()
     }
 }
 
-void APrototypeGameMode::Logout(AController* Exiting)
+void ACMGameMode::Logout(AController* Exiting)
 {
-    const AChimeraPlayerState* ExitingPlayerState = Exiting
-        ? Exiting->GetPlayerState<AChimeraPlayerState>()
+    const ACMPlayerState* ExitingPlayerState = Exiting
+        ? Exiting->GetPlayerState<ACMPlayerState>()
         : nullptr;
 
     Super::Logout(Exiting);
@@ -49,14 +49,14 @@ void APrototypeGameMode::Logout(AController* Exiting)
     }
 }
 
-void APrototypeGameMode::RestartPlayer(AController* NewPlayer)
+void ACMGameMode::RestartPlayer(AController* NewPlayer)
 {
     if (!IsGameplayMap())
     {
         return;
     }
 
-    AChimeraPrototypePawn* SharedChimera = EnsureSharedChimera();
+    ACMPawn* SharedChimera = EnsureSharedChimera();
     if (APlayerController* PlayerController =
         Cast<APlayerController>(NewPlayer))
     {
@@ -67,7 +67,7 @@ void APrototypeGameMode::RestartPlayer(AController* NewPlayer)
     }
 }
 
-void APrototypeGameMode::GenericPlayerInitialization(AController* C)
+void ACMGameMode::GenericPlayerInitialization(AController* C)
 {
     Super::GenericPlayerInitialization(C);
 
@@ -78,7 +78,7 @@ void APrototypeGameMode::GenericPlayerInitialization(AController* C)
         return;
     }
 
-    AChimeraPrototypePawn* SharedChimera = EnsureSharedChimera();
+    ACMPawn* SharedChimera = EnsureSharedChimera();
     RebalanceControlAssignments();
 
     if (APlayerController* PlayerController = Cast<APlayerController>(C))
@@ -90,50 +90,50 @@ void APrototypeGameMode::GenericPlayerInitialization(AController* C)
     }
 }
 
-void APrototypeGameMode::AssignPlayerColors()
+void ACMGameMode::AssignPlayerColors()
 {
     if (!HasAuthority())
     {
         return;
     }
 
-    AChimeraGameState* ChimeraGameState = GetGameState<AChimeraGameState>();
-    if (!ChimeraGameState)
+    ACMGameState* CMGameState = GetGameState<ACMGameState>();
+    if (!CMGameState)
     {
         return;
     }
 
     TSet<int32> UsedColorIndices;
-    for (APlayerState* PlayerState : ChimeraGameState->PlayerArray)
+    for (APlayerState* PlayerState : CMGameState->PlayerArray)
     {
-        const AChimeraPlayerState* ChimeraPlayerState =
-            Cast<AChimeraPlayerState>(PlayerState);
-        if (ChimeraPlayerState
-            && ChimeraPlayerState->GetPlayerColorIndex() != INDEX_NONE)
+        const ACMPlayerState* CMPlayerState =
+            Cast<ACMPlayerState>(PlayerState);
+        if (CMPlayerState
+            && CMPlayerState->GetPlayerColorIndex() != INDEX_NONE)
         {
             UsedColorIndices.Add(
-                ChimeraPlayerState->GetPlayerColorIndex()
+                CMPlayerState->GetPlayerColorIndex()
             );
         }
     }
 
-    for (APlayerState* PlayerState : ChimeraGameState->PlayerArray)
+    for (APlayerState* PlayerState : CMGameState->PlayerArray)
     {
-        AChimeraPlayerState* ChimeraPlayerState =
-            Cast<AChimeraPlayerState>(PlayerState);
-        if (!ChimeraPlayerState
-            || ChimeraPlayerState->GetPlayerColorIndex() != INDEX_NONE)
+        ACMPlayerState* CMPlayerState =
+            Cast<ACMPlayerState>(PlayerState);
+        if (!CMPlayerState
+            || CMPlayerState->GetPlayerColorIndex() != INDEX_NONE)
         {
             continue;
         }
 
         for (int32 ColorIndex = 0;
-            ColorIndex < ChimeraControl::MaxPlayers;
+            ColorIndex < CMControl::MaxPlayers;
             ++ColorIndex)
         {
             if (!UsedColorIndices.Contains(ColorIndex))
             {
-                ChimeraPlayerState->SetPlayerColorIndex(ColorIndex);
+                CMPlayerState->SetPlayerColorIndex(ColorIndex);
                 UsedColorIndices.Add(ColorIndex);
                 break;
             }
@@ -141,7 +141,7 @@ void APrototypeGameMode::AssignPlayerColors()
     }
 }
 
-bool APrototypeGameMode::TryRetryGame(APlayerController* RequestingPlayer)
+bool ACMGameMode::TryRetryGame(APlayerController* RequestingPlayer)
 {
     if (!HasAuthority()
         || GetNetMode() != NM_ListenServer
@@ -163,7 +163,7 @@ bool APrototypeGameMode::TryRetryGame(APlayerController* RequestingPlayer)
     return bRetryInProgress;
 }
 
-bool APrototypeGameMode::IsGameplayMap() const
+bool ACMGameMode::IsGameplayMap() const
 {
     const UWorld* World = GetWorld();
     const UListenServerNetworkSettings* NetworkSettings =
@@ -185,26 +185,26 @@ bool APrototypeGameMode::IsGameplayMap() const
     return !GameMapName.IsEmpty() && CurrentMapName == GameMapName;
 }
 
-AChimeraPrototypePawn* APrototypeGameMode::EnsureSharedChimera()
+ACMPawn* ACMGameMode::EnsureSharedChimera()
 {
     if (!HasAuthority() || !IsGameplayMap())
     {
         return nullptr;
     }
 
-    AChimeraGameState* ChimeraGameState = GetGameState<AChimeraGameState>();
-    if (!ChimeraGameState)
+    ACMGameState* CMGameState = GetGameState<ACMGameState>();
+    if (!CMGameState)
     {
         return nullptr;
     }
 
-    if (IsValid(ChimeraGameState->SharedChimera))
+    if (IsValid(CMGameState->SharedChimera))
     {
-        return ChimeraGameState->SharedChimera;
+        return CMGameState->SharedChimera;
     }
 
-    AChimeraPrototypePawn* SharedChimera = nullptr;
-    for (TActorIterator<AChimeraPrototypePawn> It(GetWorld()); It; ++It)
+    ACMPawn* SharedChimera = nullptr;
+    for (TActorIterator<ACMPawn> It(GetWorld()); It; ++It)
     {
         SharedChimera = *It;
         break;
@@ -222,17 +222,17 @@ AChimeraPrototypePawn* APrototypeGameMode::EnsureSharedChimera()
         UClass* SharedPawnClass = DefaultPawnClass;
         if (!SharedPawnClass
             || !SharedPawnClass->IsChildOf(
-                AChimeraPrototypePawn::StaticClass()
+                ACMPawn::StaticClass()
             ))
         {
-            SharedPawnClass = AChimeraPrototypePawn::StaticClass();
+            SharedPawnClass = ACMPawn::StaticClass();
         }
 
         FActorSpawnParameters SpawnParameters;
         SpawnParameters.SpawnCollisionHandlingOverride =
             ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-        SharedChimera = GetWorld()->SpawnActor<AChimeraPrototypePawn>(
+        SharedChimera = GetWorld()->SpawnActor<ACMPawn>(
             SharedPawnClass,
             SpawnTransform,
             SpawnParameters
@@ -254,7 +254,7 @@ AChimeraPrototypePawn* APrototypeGameMode::EnsureSharedChimera()
         ExistingController->UnPossess();
     }
 
-    ChimeraGameState->SetSharedChimera(SharedChimera);
+    CMGameState->SetSharedChimera(SharedChimera);
     UE_LOG(
         LogChimeraMultiplayer,
         Log,
@@ -264,8 +264,8 @@ AChimeraPrototypePawn* APrototypeGameMode::EnsureSharedChimera()
     return SharedChimera;
 }
 
-void APrototypeGameMode::RebalanceControlAssignments(
-    const AChimeraPlayerState* ExcludedPlayerState
+void ACMGameMode::RebalanceControlAssignments(
+    const ACMPlayerState* ExcludedPlayerState
 )
 {
     if (!HasAuthority() || !IsGameplayMap())
@@ -273,37 +273,37 @@ void APrototypeGameMode::RebalanceControlAssignments(
         return;
     }
 
-    AChimeraGameState* ChimeraGameState = GetGameState<AChimeraGameState>();
-    if (!ChimeraGameState || !ChimeraGameState->SharedChimera)
+    ACMGameState* CMGameState = GetGameState<ACMGameState>();
+    if (!CMGameState || !CMGameState->SharedChimera)
     {
         return;
     }
 
-    ChimeraGameState->SharedChimera->ClearPressedControlParts();
+    CMGameState->SharedChimera->ClearPressedControlParts();
 
-    TArray<AChimeraPlayerState*> Players;
-    for (APlayerState* PlayerState : ChimeraGameState->PlayerArray)
+    TArray<ACMPlayerState*> Players;
+    for (APlayerState* PlayerState : CMGameState->PlayerArray)
     {
-        AChimeraPlayerState* ChimeraPlayerState =
-            Cast<AChimeraPlayerState>(PlayerState);
-        if (ChimeraPlayerState
-            && ChimeraPlayerState != ExcludedPlayerState
-            && !ChimeraPlayerState->IsOnlyASpectator())
+        ACMPlayerState* CMPlayerState =
+            Cast<ACMPlayerState>(PlayerState);
+        if (CMPlayerState
+            && CMPlayerState != ExcludedPlayerState
+            && !CMPlayerState->IsOnlyASpectator())
         {
-            Players.Add(ChimeraPlayerState);
+            Players.Add(CMPlayerState);
         }
     }
 
-    TArray<TArray<EChimeraControlPart>> ExistingAssignments;
+    TArray<TArray<ECMControlPart>> ExistingAssignments;
     ExistingAssignments.Reserve(Players.Num());
-    for (const AChimeraPlayerState* Player : Players)
+    for (const ACMPlayerState* Player : Players)
     {
         ExistingAssignments.Add(Player->AssignedControlParts);
     }
 
-    TArray<TArray<EChimeraControlPart>> NewAssignments;
+    TArray<TArray<ECMControlPart>> NewAssignments;
     FRandomStream RandomStream(FMath::Rand());
-    FChimeraControlAssignmentPolicy::Rebalance(
+    FCMControlAssignmentPolicy::Rebalance(
         ExistingAssignments,
         RandomStream,
         NewAssignments

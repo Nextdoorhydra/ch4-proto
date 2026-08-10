@@ -1,25 +1,25 @@
-#include "PrototypePlayerController.h"
+#include "CMPlayerController.h"
 
-#include "ChimeraPrototypePawn.h"
-#include "ChimeraPlayerState.h"
-#include "Chimera/Game/ChimeraGameState.h"
-#include "Chimera/Game/PrototypeGameMode.h"
+#include "CMPawn.h"
+#include "CMPlayerState.h"
+#include "Game/CMGameState.h"
+#include "Game/CMGameMode.h"
 #include "Components/InputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 
-APrototypePlayerController::APrototypePlayerController()
+ACMPlayerController::ACMPlayerController()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    for (EChimeraControlPart& PressedPart : PressedControlParts)
+    for (ECMControlPart& PressedPart : PressedControlParts)
     {
-        PressedPart = EChimeraControlPart::None;
+        PressedPart = ECMControlPart::None;
     }
 }
 
-bool APrototypePlayerController::CanRequestRetryGame() const
+bool ACMPlayerController::CanRequestRetryGame() const
 {
     return IsLocalController()
         && HasAuthority()
@@ -27,7 +27,7 @@ bool APrototypePlayerController::CanRequestRetryGame() const
         && IsValid(GetSharedChimera());
 }
 
-void APrototypePlayerController::RequestRetryGame()
+void ACMPlayerController::RequestRetryGame()
 {
     if (!IsLocalController())
     {
@@ -37,10 +37,10 @@ void APrototypePlayerController::RequestRetryGame()
     ServerRequestRetryGame();
 }
 
-void APrototypePlayerController::ServerRequestRetryGame_Implementation()
+void ACMPlayerController::ServerRequestRetryGame_Implementation()
 {
-    APrototypeGameMode* GameMode = GetWorld()
-        ? GetWorld()->GetAuthGameMode<APrototypeGameMode>()
+    ACMGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMGameMode>()
         : nullptr;
     if (GameMode)
     {
@@ -48,7 +48,7 @@ void APrototypePlayerController::ServerRequestRetryGame_Implementation()
     }
 }
 
-void APrototypePlayerController::BeginPlay()
+void ACMPlayerController::BeginPlay()
 {
     Super::BeginPlay();
 
@@ -77,7 +77,7 @@ void APrototypePlayerController::BeginPlay()
     }
 }
 
-void APrototypePlayerController::SetupInputComponent()
+void ACMPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
 
@@ -90,58 +90,58 @@ void APrototypePlayerController::SetupInputComponent()
         EKeys::Q,
         IE_Pressed,
         this,
-        &APrototypePlayerController::FirstControlKeyPressed
+        &ACMPlayerController::FirstControlKeyPressed
     );
     InputComponent->BindKey(
         EKeys::W,
         IE_Pressed,
         this,
-        &APrototypePlayerController::SecondControlKeyPressed
+        &ACMPlayerController::SecondControlKeyPressed
     );
     InputComponent->BindKey(
         EKeys::E,
         IE_Pressed,
         this,
-        &APrototypePlayerController::ThirdControlKeyPressed
+        &ACMPlayerController::ThirdControlKeyPressed
     );
     InputComponent->BindKey(
         EKeys::R,
         IE_Pressed,
         this,
-        &APrototypePlayerController::FourthControlKeyPressed
+        &ACMPlayerController::FourthControlKeyPressed
     );
     InputComponent->BindKey(
         EKeys::Q,
         IE_Released,
         this,
-        &APrototypePlayerController::FirstControlKeyReleased
+        &ACMPlayerController::FirstControlKeyReleased
     );
     InputComponent->BindKey(
         EKeys::W,
         IE_Released,
         this,
-        &APrototypePlayerController::SecondControlKeyReleased
+        &ACMPlayerController::SecondControlKeyReleased
     );
     InputComponent->BindKey(
         EKeys::E,
         IE_Released,
         this,
-        &APrototypePlayerController::ThirdControlKeyReleased
+        &ACMPlayerController::ThirdControlKeyReleased
     );
     InputComponent->BindKey(
         EKeys::R,
         IE_Released,
         this,
-        &APrototypePlayerController::FourthControlKeyReleased
+        &ACMPlayerController::FourthControlKeyReleased
     );
     InputComponent->BindAxisKey(
         EKeys::MouseWheelAxis,
         this,
-        &APrototypePlayerController::ZoomCamera
+        &ACMPlayerController::ZoomCamera
     );
 }
 
-void APrototypePlayerController::PlayerTick(float DeltaTime)
+void ACMPlayerController::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
 
@@ -150,7 +150,7 @@ void APrototypePlayerController::PlayerTick(float DeltaTime)
         return;
     }
 
-    AChimeraPrototypePawn* SharedChimera = GetSharedChimera();
+    ACMPawn* SharedChimera = GetSharedChimera();
     if (CachedSharedChimera != SharedChimera)
     {
         CachedSharedChimera = SharedChimera;
@@ -176,54 +176,54 @@ void APrototypePlayerController::PlayerTick(float DeltaTime)
     SharedChimera->SetLocalCameraRotation(LocalCameraRotation);
 }
 
-void APrototypePlayerController::FirstControlKeyPressed()
+void ACMPlayerController::FirstControlKeyPressed()
 {
     SetControlSlotPressed(0, true);
 }
 
-void APrototypePlayerController::SecondControlKeyPressed()
+void ACMPlayerController::SecondControlKeyPressed()
 {
     SetControlSlotPressed(1, true);
 }
 
-void APrototypePlayerController::ThirdControlKeyPressed()
+void ACMPlayerController::ThirdControlKeyPressed()
 {
     SetControlSlotPressed(2, true);
 }
 
-void APrototypePlayerController::FourthControlKeyPressed()
+void ACMPlayerController::FourthControlKeyPressed()
 {
     SetControlSlotPressed(3, true);
 }
 
-void APrototypePlayerController::FirstControlKeyReleased()
+void ACMPlayerController::FirstControlKeyReleased()
 {
     SetControlSlotPressed(0, false);
 }
 
-void APrototypePlayerController::SecondControlKeyReleased()
+void ACMPlayerController::SecondControlKeyReleased()
 {
     SetControlSlotPressed(1, false);
 }
 
-void APrototypePlayerController::ThirdControlKeyReleased()
+void ACMPlayerController::ThirdControlKeyReleased()
 {
     SetControlSlotPressed(2, false);
 }
 
-void APrototypePlayerController::FourthControlKeyReleased()
+void ACMPlayerController::FourthControlKeyReleased()
 {
     SetControlSlotPressed(3, false);
 }
 
-void APrototypePlayerController::SetControlSlotPressed(
+void ACMPlayerController::SetControlSlotPressed(
     int32 SlotIndex,
     bool bPressed
 )
 {
     if (!IsLocalController()
         || SlotIndex < 0
-        || SlotIndex >= ChimeraControl::MaxKeysPerPlayer)
+        || SlotIndex >= CMControl::MaxKeysPerPlayer)
     {
         return;
     }
@@ -231,52 +231,52 @@ void APrototypePlayerController::SetControlSlotPressed(
     ServerSetControlSlotPressed(SlotIndex, bPressed);
 }
 
-void APrototypePlayerController::ServerSetControlSlotPressed_Implementation(
+void ACMPlayerController::ServerSetControlSlotPressed_Implementation(
     int32 SlotIndex,
     bool bPressed
 )
 {
-    if (SlotIndex < 0 || SlotIndex >= ChimeraControl::MaxKeysPerPlayer)
+    if (SlotIndex < 0 || SlotIndex >= CMControl::MaxKeysPerPlayer)
     {
         return;
     }
 
-    AChimeraPlayerState* ChimeraPlayerState =
-        GetPlayerState<AChimeraPlayerState>();
-    if (!ChimeraPlayerState)
+    ACMPlayerState* CMPlayerState =
+        GetPlayerState<ACMPlayerState>();
+    if (!CMPlayerState)
     {
         return;
     }
 
-    AChimeraGameState* ChimeraGameState =
-        GetWorld() ? GetWorld()->GetGameState<AChimeraGameState>() : nullptr;
-    AChimeraPrototypePawn* SharedChimera = ChimeraGameState
-        ? ChimeraGameState->SharedChimera
+    ACMGameState* GameState =
+        GetWorld() ? GetWorld()->GetGameState<ACMGameState>() : nullptr;
+    ACMPawn* SharedChimera = GameState
+        ? GameState->SharedChimera
         : nullptr;
     if (!SharedChimera)
     {
         return;
     }
 
-    EChimeraControlPart& PressedPart = PressedControlParts[SlotIndex];
+    ECMControlPart& PressedPart = PressedControlParts[SlotIndex];
     if (!bPressed)
     {
-        if (ChimeraControl::IsValidPart(PressedPart))
+        if (CMControl::IsValidPart(PressedPart))
         {
             SharedChimera->SetControlPartPressed(PressedPart, false);
         }
-        PressedPart = EChimeraControlPart::None;
+        PressedPart = ECMControlPart::None;
         return;
     }
 
-    const EChimeraControlPart ControlPart =
-        ChimeraPlayerState->GetControlPartForSlot(SlotIndex);
-    if (!ChimeraControl::IsValidPart(ControlPart))
+    const ECMControlPart ControlPart =
+        CMPlayerState->GetControlPartForSlot(SlotIndex);
+    if (!CMControl::IsValidPart(ControlPart))
     {
         return;
     }
 
-    if (ChimeraControl::IsValidPart(PressedPart)
+    if (CMControl::IsValidPart(PressedPart)
         && PressedPart != ControlPart)
     {
         SharedChimera->SetControlPartPressed(PressedPart, false);
@@ -286,13 +286,13 @@ void APrototypePlayerController::ServerSetControlSlotPressed_Implementation(
     SharedChimera->SetControlPartPressed(ControlPart, true);
     SharedChimera->ActivateControlPart(
         ControlPart,
-        ChimeraPlayerState
+        CMPlayerState
     );
 }
 
-void APrototypePlayerController::LookYaw(float AxisValue)
+void ACMPlayerController::LookYaw(float AxisValue)
 {
-    AChimeraPrototypePawn* SharedChimera = GetSharedChimera();
+    ACMPawn* SharedChimera = GetSharedChimera();
     if (!SharedChimera || FMath::IsNearlyZero(AxisValue))
     {
         return;
@@ -302,9 +302,9 @@ void APrototypePlayerController::LookYaw(float AxisValue)
         AxisValue * SharedChimera->GetMouseLookSensitivity();
 }
 
-void APrototypePlayerController::LookPitch(float AxisValue)
+void ACMPlayerController::LookPitch(float AxisValue)
 {
-    AChimeraPrototypePawn* SharedChimera = GetSharedChimera();
+    ACMPawn* SharedChimera = GetSharedChimera();
     if (!SharedChimera || FMath::IsNearlyZero(AxisValue))
     {
         return;
@@ -322,19 +322,19 @@ void APrototypePlayerController::LookPitch(float AxisValue)
     );
 }
 
-void APrototypePlayerController::ZoomCamera(float AxisValue)
+void ACMPlayerController::ZoomCamera(float AxisValue)
 {
-    AChimeraPrototypePawn* SharedChimera = GetSharedChimera();
+    ACMPawn* SharedChimera = GetSharedChimera();
     if (SharedChimera)
     {
         SharedChimera->AdjustLocalCameraZoom(AxisValue);
     }
 }
 
-AChimeraPrototypePawn*
-APrototypePlayerController::GetSharedChimera() const
+ACMPawn*
+ACMPlayerController::GetSharedChimera() const
 {
-    const AChimeraGameState* ChimeraGameState =
-        GetWorld() ? GetWorld()->GetGameState<AChimeraGameState>() : nullptr;
-    return ChimeraGameState ? ChimeraGameState->SharedChimera : nullptr;
+    const ACMGameState* GameState =
+        GetWorld() ? GetWorld()->GetGameState<ACMGameState>() : nullptr;
+    return GameState ? GameState->SharedChimera : nullptr;
 }

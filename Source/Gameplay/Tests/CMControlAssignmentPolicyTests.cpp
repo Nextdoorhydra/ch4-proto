@@ -1,21 +1,21 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
-#include "Chimera/Game/ChimeraControlAssignmentPolicy.h"
+#include "Game/CMControlAssignmentPolicy.h"
 
 namespace
 {
     bool HasUniqueValidParts(
-        const TArray<TArray<EChimeraControlPart>>& Assignments
+        const TArray<TArray<ECMControlPart>>& Assignments
     )
     {
-        TSet<EChimeraControlPart> SeenParts;
-        for (const TArray<EChimeraControlPart>& PlayerAssignments
+        TSet<ECMControlPart> SeenParts;
+        for (const TArray<ECMControlPart>& PlayerAssignments
             : Assignments)
         {
-            for (EChimeraControlPart Part : PlayerAssignments)
+            for (ECMControlPart Part : PlayerAssignments)
             {
-                if (!ChimeraControl::IsValidPart(Part)
+                if (!CMControl::IsValidPart(Part)
                     || SeenParts.Contains(Part))
                 {
                     return false;
@@ -50,15 +50,15 @@ bool FChimeraControlAssignmentCountTest::RunTest(const FString& Parameters)
     };
 
     for (int32 PlayerCount = 1;
-        PlayerCount <= ChimeraControl::MaxPlayers;
+        PlayerCount <= CMControl::MaxPlayers;
         ++PlayerCount)
     {
-        TArray<TArray<EChimeraControlPart>> ExistingAssignments;
+        TArray<TArray<ECMControlPart>> ExistingAssignments;
         ExistingAssignments.SetNum(PlayerCount);
-        TArray<TArray<EChimeraControlPart>> NewAssignments;
+        TArray<TArray<ECMControlPart>> NewAssignments;
         FRandomStream RandomStream(1000 + PlayerCount);
 
-        FChimeraControlAssignmentPolicy::Rebalance(
+        FCMControlAssignmentPolicy::Rebalance(
             ExistingAssignments,
             RandomStream,
             NewAssignments
@@ -104,49 +104,49 @@ bool FChimeraControlAssignmentFullShuffleTest::RunTest(
     const FString& Parameters
 )
 {
-    TArray<TArray<EChimeraControlPart>> FirstExistingAssignments = {
+    TArray<TArray<ECMControlPart>> FirstExistingAssignments = {
         {
-            EChimeraControlPart::FirstLeft,
-            EChimeraControlPart::FirstRight,
-            EChimeraControlPart::SecondLeft,
-            EChimeraControlPart::SecondRight
+            ECMControlPart::FirstLeft,
+            ECMControlPart::FirstRight,
+            ECMControlPart::SecondLeft,
+            ECMControlPart::SecondRight
         },
         {
-            EChimeraControlPart::ThirdLeft,
-            EChimeraControlPart::ThirdRight,
-            EChimeraControlPart::FourthLeft,
-            EChimeraControlPart::FourthRight
+            ECMControlPart::ThirdLeft,
+            ECMControlPart::ThirdRight,
+            ECMControlPart::FourthLeft,
+            ECMControlPart::FourthRight
         },
         {}
     };
-    TArray<TArray<EChimeraControlPart>> SecondExistingAssignments = {
+    TArray<TArray<ECMControlPart>> SecondExistingAssignments = {
         {},
         {
-            EChimeraControlPart::FourthRight,
-            EChimeraControlPart::ThirdRight
+            ECMControlPart::FourthRight,
+            ECMControlPart::ThirdRight
         },
         {
-            EChimeraControlPart::FirstLeft
+            ECMControlPart::FirstLeft
         }
     };
-    TArray<TArray<EChimeraControlPart>> FirstResult;
-    TArray<TArray<EChimeraControlPart>> SecondResult;
-    TArray<TArray<EChimeraControlPart>> DifferentSeedResult;
+    TArray<TArray<ECMControlPart>> FirstResult;
+    TArray<TArray<ECMControlPart>> SecondResult;
+    TArray<TArray<ECMControlPart>> DifferentSeedResult;
     FRandomStream FirstRandomStream(42);
     FRandomStream SecondRandomStream(42);
     FRandomStream DifferentRandomStream(99);
 
-    FChimeraControlAssignmentPolicy::Rebalance(
+    FCMControlAssignmentPolicy::Rebalance(
         FirstExistingAssignments,
         FirstRandomStream,
         FirstResult
     );
-    FChimeraControlAssignmentPolicy::Rebalance(
+    FCMControlAssignmentPolicy::Rebalance(
         SecondExistingAssignments,
         SecondRandomStream,
         SecondResult
     );
-    FChimeraControlAssignmentPolicy::Rebalance(
+    FCMControlAssignmentPolicy::Rebalance(
         FirstExistingAssignments,
         DifferentRandomStream,
         DifferentSeedResult

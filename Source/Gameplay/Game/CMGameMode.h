@@ -3,18 +3,18 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 
-#include "PrototypeGameMode.generated.h"
+#include "CMGameMode.generated.h"
 
-class AChimeraPlayerState;
-class AChimeraPrototypePawn;
+class ACMPlayerState;
+class ACMPawn;
 
 UCLASS()
-class CHIMERA_API APrototypeGameMode : public AGameModeBase
+class GAMEPLAY_API ACMGameMode : public AGameModeBase
 {
     GENERATED_BODY()
 
 public:
-    APrototypeGameMode();
+    ACMGameMode();
 
     virtual void BeginPlay() override;
     virtual void Logout(AController* Exiting) override;
@@ -26,9 +26,9 @@ public:
 private:
     bool IsGameplayMap() const;
     void AssignPlayerColors();
-    AChimeraPrototypePawn* EnsureSharedChimera();
+    ACMPawn* EnsureSharedChimera();
     void RebalanceControlAssignments(
-        const AChimeraPlayerState* ExcludedPlayerState = nullptr
+        const ACMPlayerState* ExcludedPlayerState = nullptr
     );
 
     bool bRetryInProgress = false;

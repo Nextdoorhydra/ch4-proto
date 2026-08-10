@@ -3,19 +3,19 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerState.h"
 
-#include "ChimeraControlTypes.h"
-#include "ChimeraPlayerState.generated.h"
+#include "CMControlTypes.h"
+#include "CMPlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraControlAssignmentsChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraPlayerColorChanged);
 
 UCLASS()
-class CHIMERA_API AChimeraPlayerState : public APlayerState
+class GAMEPLAY_API ACMPlayerState : public APlayerState
 {
     GENERATED_BODY()
 
 public:
-    AChimeraPlayerState();
+    ACMPlayerState();
 
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
@@ -23,9 +23,9 @@ public:
     virtual void SetPlayerName(const FString& NewPlayerName) override;
     virtual void OnRep_PlayerName() override;
 
-    EChimeraControlPart GetControlPartForSlot(int32 SlotIndex) const;
+    ECMControlPart GetControlPartForSlot(int32 SlotIndex) const;
     void SetAssignedControlParts(
-        const TArray<EChimeraControlPart>& NewAssignments
+        const TArray<ECMControlPart>& NewAssignments
     );
     void SetPlayerColorIndex(int32 NewPlayerColorIndex);
 
@@ -43,7 +43,7 @@ public:
         BlueprintReadOnly,
         Category = "Chimera|Controls"
     )
-    TArray<EChimeraControlPart> AssignedControlParts;
+    TArray<ECMControlPart> AssignedControlParts;
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Controls")
     FChimeraControlAssignmentsChanged OnControlAssignmentsChanged;

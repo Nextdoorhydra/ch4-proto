@@ -1,8 +1,8 @@
 #include "ChimeraNetworkWidget.h"
 
-#include "Chimera/Game/ChimeraGameState.h"
-#include "Chimera/Player/ChimeraPlayerState.h"
-#include "Chimera/Player/PrototypePlayerController.h"
+#include "Game/CMGameState.h"
+#include "Player/CMPlayerState.h"
+#include "Player/CMPlayerController.h"
 #include "ChimeraLobbyPlayerRowWidget.h"
 #include "Components/Button.h"
 #include "Components/PanelWidget.h"
@@ -170,8 +170,8 @@ void UChimeraNetworkWidget::NativeDestruct()
 
 void UChimeraNetworkWidget::BindCurrentGameState()
 {
-    AChimeraGameState* CurrentGameState = GetWorld()
-        ? GetWorld()->GetGameState<AChimeraGameState>()
+    ACMGameState* CurrentGameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr;
     if (BoundGameState == CurrentGameState)
     {
@@ -245,10 +245,10 @@ void UChimeraNetworkWidget::RefreshLobbyRoster()
 
     for (APlayerState* PlayerState : BoundGameState->PlayerArray)
     {
-        const AChimeraPlayerState* ChimeraPlayerState =
-            Cast<AChimeraPlayerState>(PlayerState);
-        if (!ChimeraPlayerState
-            || ChimeraPlayerState->IsOnlyASpectator())
+        const ACMPlayerState* CMPlayerState =
+            Cast<ACMPlayerState>(PlayerState);
+        if (!CMPlayerState
+            || CMPlayerState->IsOnlyASpectator())
         {
             continue;
         }
@@ -269,8 +269,8 @@ void UChimeraNetworkWidget::RefreshLobbyRoster()
         if (PlayerRow)
         {
             PlayerRow->SetPlayerDisplayName(
-                ChimeraPlayerState->GetPlayerName(),
-                ChimeraPlayerState->GetPlayerColor()
+                CMPlayerState->GetPlayerName(),
+                CMPlayerState->GetPlayerColor()
             );
             if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(
                 SB_LobbyPlayers->AddChild(PlayerRow)
@@ -645,8 +645,8 @@ void UChimeraNetworkWidget::HandleRetryClicked()
         OwningPlayer = GetWorld()->GetFirstPlayerController();
     }
 
-    if (APrototypePlayerController* PlayerController =
-        Cast<APrototypePlayerController>(OwningPlayer))
+    if (ACMPlayerController* PlayerController =
+        Cast<ACMPlayerController>(OwningPlayer))
     {
         PlayerController->RequestRetryGame();
     }

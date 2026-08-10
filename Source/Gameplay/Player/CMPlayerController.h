@@ -2,20 +2,20 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
-#include "ChimeraControlTypes.h"
+#include "CMControlTypes.h"
 
-#include "PrototypePlayerController.generated.h"
+#include "CMPlayerController.generated.h"
 
-class AChimeraPrototypePawn;
+class ACMPawn;
 class UInputMappingContext;
 
 UCLASS()
-class CHIMERA_API APrototypePlayerController : public APlayerController
+class GAMEPLAY_API ACMPlayerController : public APlayerController
 {
     GENERATED_BODY()
 
 public:
-    APrototypePlayerController();
+    ACMPlayerController();
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Game")
     bool CanRequestRetryGame() const;
@@ -49,7 +49,7 @@ private:
     void LookPitch(float AxisValue);
     void ZoomCamera(float AxisValue);
 
-    AChimeraPrototypePawn* GetSharedChimera() const;
+    ACMPawn* GetSharedChimera() const;
 
     UFUNCTION(Server, Reliable)
     void ServerSetControlSlotPressed(int32 SlotIndex, bool bPressed);
@@ -58,12 +58,12 @@ private:
     void ServerRequestRetryGame();
 
     UPROPERTY(Transient)
-    TObjectPtr<AChimeraPrototypePawn> CachedSharedChimera;
+    TObjectPtr<ACMPawn> CachedSharedChimera;
 
     FRotator LocalCameraRotation = FRotator::ZeroRotator;
     bool bLocalCameraInitialized = false;
 
-    EChimeraControlPart PressedControlParts[
-        ChimeraControl::MaxKeysPerPlayer
+    ECMControlPart PressedControlParts[
+        CMControl::MaxKeysPerPlayer
     ];
 };

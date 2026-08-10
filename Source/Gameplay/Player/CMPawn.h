@@ -3,8 +3,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 
-#include "ChimeraControlTypes.h"
-#include "ChimeraPrototypePawn.generated.h"
+#include "CMControlTypes.h"
+#include "CMPawn.generated.h"
 
 class UStaticMeshComponent;
 class USceneComponent;
@@ -13,10 +13,10 @@ class USpringArmComponent;
 class UCameraComponent;
 class UMaterialInstanceDynamic;
 class UTextRenderComponent;
-class AChimeraPlayerState;
+class ACMPlayerState;
 
 USTRUCT()
-struct FChimeraReplicatedSegmentState
+struct FCMReplicatedSegmentState
 {
     GENERATED_BODY()
 
@@ -28,12 +28,12 @@ struct FChimeraReplicatedSegmentState
 };
 
 UCLASS()
-class CHIMERA_API AChimeraPrototypePawn : public APawn
+class GAMEPLAY_API ACMPawn : public APawn
 {
     GENERATED_BODY()
 
 public:
-    AChimeraPrototypePawn();
+    ACMPawn();
 
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
@@ -41,12 +41,12 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Controls")
     void ActivateControlPart(
-        EChimeraControlPart ControlPart,
-        AChimeraPlayerState* ContributingPlayerState
+        ECMControlPart ControlPart,
+        ACMPlayerState* ContributingPlayerState
     );
 
     void SetControlPartPressed(
-        EChimeraControlPart ControlPart,
+        ECMControlPart ControlPart,
         bool bPressed
     );
 
@@ -312,17 +312,17 @@ private:
     void TryApplyLegImpulse(
         int32 SegmentIndex,
         bool bRightLeg,
-        AChimeraPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState
     );
 
     void ApplyLegImpulse(
         UStaticMeshComponent* SegmentBody,
         USceneComponent* FootPoint,
-        AChimeraPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState
     );
 
     void RegisterCooperativeInput(
-        AChimeraPlayerState* ContributingPlayerState,
+        ACMPlayerState* ContributingPlayerState,
         const FVector& PlanarImpulse,
         float YawAngularImpulse
     );
@@ -348,7 +348,7 @@ private:
     ) const;
 
     UPROPERTY(ReplicatedUsing = OnRep_SegmentStates)
-    TArray<FChimeraReplicatedSegmentState> ReplicatedSegmentStates;
+    TArray<FCMReplicatedSegmentState> ReplicatedSegmentStates;
 
     UPROPERTY(Replicated)
     uint8 PressedControlPartMask = 0;

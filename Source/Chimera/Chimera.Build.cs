@@ -18,7 +18,8 @@ public class Chimera : ModuleRules
 			"UMG",
 			"ListenServerNetwork",
 			"GameplayTags",
-			"GameplayMessageRuntime"
+			"GameplayMessageRuntime",
+			"Gameplay"
 		});
 	}
 }

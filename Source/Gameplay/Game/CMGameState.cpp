@@ -1,33 +1,33 @@
-#include "ChimeraGameState.h"
+#include "CMGameState.h"
 
-#include "Chimera/Player/ChimeraControlTypes.h"
+#include "Player/CMControlTypes.h"
 #include "GameFramework/PlayerState.h"
 #include "ListenServerNetworkSettings.h"
 #include "Net/UnrealNetwork.h"
 
-void AChimeraGameState::AddPlayerState(APlayerState* PlayerState)
+void ACMGameState::AddPlayerState(APlayerState* PlayerState)
 {
     Super::AddPlayerState(PlayerState);
     NotifyLobbyRosterChanged();
 }
 
-void AChimeraGameState::RemovePlayerState(APlayerState* PlayerState)
+void ACMGameState::RemovePlayerState(APlayerState* PlayerState)
 {
     Super::RemovePlayerState(PlayerState);
     NotifyLobbyRosterChanged();
 }
 
-void AChimeraGameState::GetLifetimeReplicatedProps(
+void ACMGameState::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    DOREPLIFETIME(AChimeraGameState, SharedChimera);
+    DOREPLIFETIME(ACMGameState, SharedChimera);
 }
 
-void AChimeraGameState::SetSharedChimera(
-    AChimeraPrototypePawn* NewSharedChimera
+void ACMGameState::SetSharedChimera(
+    ACMPawn* NewSharedChimera
 )
 {
     if (!HasAuthority() || SharedChimera == NewSharedChimera)
@@ -40,12 +40,12 @@ void AChimeraGameState::SetSharedChimera(
     ForceNetUpdate();
 }
 
-void AChimeraGameState::NotifyLobbyRosterChanged()
+void ACMGameState::NotifyLobbyRosterChanged()
 {
     OnLobbyRosterChanged.Broadcast();
 }
 
-int32 AChimeraGameState::GetLobbyPlayerCount() const
+int32 ACMGameState::GetLobbyPlayerCount() const
 {
     int32 PlayerCount = 0;
     for (const APlayerState* PlayerState : PlayerArray)
@@ -59,16 +59,16 @@ int32 AChimeraGameState::GetLobbyPlayerCount() const
     return PlayerCount;
 }
 
-int32 AChimeraGameState::GetLobbyMaxPlayers() const
+int32 ACMGameState::GetLobbyMaxPlayers() const
 {
     const UListenServerNetworkSettings* NetworkSettings =
         GetDefault<UListenServerNetworkSettings>();
     return NetworkSettings
         ? NetworkSettings->DefaultMaxPlayers
-        : ChimeraControl::MaxPlayers;
+        : CMControl::MaxPlayers;
 }
 
-TArray<FString> AChimeraGameState::GetLobbyPlayerNames() const
+TArray<FString> ACMGameState::GetLobbyPlayerNames() const
 {
     TArray<FString> PlayerNames;
     PlayerNames.Reserve(PlayerArray.Num());
@@ -84,7 +84,7 @@ TArray<FString> AChimeraGameState::GetLobbyPlayerNames() const
     return PlayerNames;
 }
 
-void AChimeraGameState::OnRep_SharedChimera()
+void ACMGameState::OnRep_SharedChimera()
 {
     OnSharedChimeraChanged.Broadcast();
 }

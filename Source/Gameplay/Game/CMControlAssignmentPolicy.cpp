@@ -1,18 +1,18 @@
-#include "ChimeraControlAssignmentPolicy.h"
+#include "CMControlAssignmentPolicy.h"
 
-void FChimeraControlAssignmentPolicy::Rebalance(
-    const TArray<TArray<EChimeraControlPart>>& ExistingAssignments,
+void FCMControlAssignmentPolicy::Rebalance(
+    const TArray<TArray<ECMControlPart>>& ExistingAssignments,
     FRandomStream& RandomStream,
-    TArray<TArray<EChimeraControlPart>>& OutAssignments
+    TArray<TArray<ECMControlPart>>& OutAssignments
 )
 {
     const int32 AssignedPlayerCount = FMath::Min(
         ExistingAssignments.Num(),
-        ChimeraControl::MaxPlayers
+        CMControl::MaxPlayers
     );
     const int32 TotalAssignedParts = FMath::Min(
-        ChimeraControl::MaxControlParts,
-        AssignedPlayerCount * ChimeraControl::MaxKeysPerPlayer
+        CMControl::MaxControlParts,
+        AssignedPlayerCount * CMControl::MaxKeysPerPlayer
     );
 
     TArray<int32> TargetCounts;
@@ -30,12 +30,12 @@ void FChimeraControlAssignmentPolicy::Rebalance(
         }
     }
 
-    TArray<EChimeraControlPart> AvailableParts;
+    TArray<ECMControlPart> AvailableParts;
     for (int32 PartIndex = 0;
-        PartIndex < ChimeraControl::MaxControlParts;
+        PartIndex < CMControl::MaxControlParts;
         ++PartIndex)
     {
-        AvailableParts.Add(static_cast<EChimeraControlPart>(PartIndex));
+        AvailableParts.Add(static_cast<ECMControlPart>(PartIndex));
     }
 
     for (int32 Index = AvailableParts.Num() - 1; Index > 0; --Index)

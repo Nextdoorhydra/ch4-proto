@@ -2,10 +2,10 @@
 
 #include "CoreMinimal.h"
 
-#include "ChimeraControlTypes.generated.h"
+#include "CMControlTypes.generated.h"
 
 UENUM(BlueprintType)
-enum class EChimeraControlPart : uint8
+enum class ECMControlPart : uint8
 {
     FirstLeft,
     FirstRight,
@@ -18,23 +18,23 @@ enum class EChimeraControlPart : uint8
     None = 255 UMETA(Hidden)
 };
 
-namespace ChimeraControl
+namespace CMControl
 {
     constexpr int32 MaxControlParts = 8;
     constexpr int32 MaxKeysPerPlayer = 4;
     constexpr int32 MaxPlayers = 8;
 
-    inline bool IsValidPart(EChimeraControlPart Part)
+    inline bool IsValidPart(ECMControlPart Part)
     {
         return static_cast<uint8>(Part) < MaxControlParts;
     }
 
-    inline int32 GetSegmentIndex(EChimeraControlPart Part)
+    inline int32 GetSegmentIndex(ECMControlPart Part)
     {
         return static_cast<uint8>(Part) / 2;
     }
 
-    inline bool IsRightLeg(EChimeraControlPart Part)
+    inline bool IsRightLeg(ECMControlPart Part)
     {
         return static_cast<uint8>(Part) % 2 == 1;
     }

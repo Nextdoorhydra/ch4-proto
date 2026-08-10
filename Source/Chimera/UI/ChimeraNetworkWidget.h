@@ -6,7 +6,7 @@
 
 #include "ChimeraNetworkWidget.generated.h"
 
-class AChimeraGameState;
+class ACMGameState;
 class UButton;
 class UChimeraLobbyPlayerRowWidget;
 class UListenServerSessionSubsystem;
@@ -181,7 +181,7 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UListenServerSessionSubsystem> NetworkSubsystem;
 
-    TWeakObjectPtr<AChimeraGameState> BoundGameState;
+    TWeakObjectPtr<ACMGameState> BoundGameState;
 
     bool bGameDetailsVisible = false;
     EListenServerConnectionState CurrentConnectionState =

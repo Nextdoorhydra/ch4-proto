@@ -1,7 +1,7 @@
-#include "ChimeraPrototypePawn.h"
+#include "CMPawn.h"
 
-#include "Chimera/Game/ChimeraGameState.h"
-#include "Chimera/Player/ChimeraPlayerState.h"
+#include "Game/CMGameState.h"
+#include "Player/CMPlayerState.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
@@ -17,7 +17,7 @@
 #include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
 
-AChimeraPrototypePawn::AChimeraPrototypePawn()
+ACMPawn::ACMPawn()
 {
     constexpr int32 MaxSegmentCount = 4;
 
@@ -144,14 +144,14 @@ AChimeraPrototypePawn::AChimeraPrototypePawn()
     }
 
     for (int32 ControlIndex = 0;
-        ControlIndex < ChimeraControl::MaxControlParts;
+        ControlIndex < CMControl::MaxControlParts;
         ++ControlIndex)
     {
-        const EChimeraControlPart ControlPart =
-            static_cast<EChimeraControlPart>(ControlIndex);
+        const ECMControlPart ControlPart =
+            static_cast<ECMControlPart>(ControlIndex);
         const int32 SegmentIndex =
-            ChimeraControl::GetSegmentIndex(ControlPart);
-        USceneComponent* FootPoint = ChimeraControl::IsRightLeg(ControlPart)
+            CMControl::GetSegmentIndex(ControlPart);
+        USceneComponent* FootPoint = CMControl::IsRightLeg(ControlPart)
             ? RightFootPoints[SegmentIndex]
             : LeftFootPoints[SegmentIndex];
 
@@ -219,7 +219,7 @@ AChimeraPrototypePawn::AChimeraPrototypePawn()
 
 }
 
-void AChimeraPrototypePawn::BeginPlay()
+void ACMPawn::BeginPlay()
 {
     Super::BeginPlay();
 
@@ -253,13 +253,13 @@ void AChimeraPrototypePawn::BeginPlay()
     UpdateControlAssignmentMarkers(0.0f);
 }
 
-void AChimeraPrototypePawn::OnConstruction(const FTransform& Transform)
+void ACMPawn::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
     ApplyBlueprintSettings();
 }
 
-void AChimeraPrototypePawn::Tick(float DeltaTime)
+void ACMPawn::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
@@ -305,39 +305,39 @@ void AChimeraPrototypePawn::Tick(float DeltaTime)
     UpdateReplicatedSegmentStates();
 }
 
-void AChimeraPrototypePawn::GetLifetimeReplicatedProps(
+void ACMPawn::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    DOREPLIFETIME(AChimeraPrototypePawn, ReplicatedSegmentStates);
-    DOREPLIFETIME(AChimeraPrototypePawn, PressedControlPartMask);
+    DOREPLIFETIME(ACMPawn, ReplicatedSegmentStates);
+    DOREPLIFETIME(ACMPawn, PressedControlPartMask);
 }
 
-void AChimeraPrototypePawn::ActivateControlPart(
-    EChimeraControlPart ControlPart,
-    AChimeraPlayerState* ContributingPlayerState
+void ACMPawn::ActivateControlPart(
+    ECMControlPart ControlPart,
+    ACMPlayerState* ContributingPlayerState
 )
 {
-    if (!HasAuthority() || !ChimeraControl::IsValidPart(ControlPart))
+    if (!HasAuthority() || !CMControl::IsValidPart(ControlPart))
     {
         return;
     }
 
     TryApplyLegImpulse(
-        ChimeraControl::GetSegmentIndex(ControlPart),
-        ChimeraControl::IsRightLeg(ControlPart),
+        CMControl::GetSegmentIndex(ControlPart),
+        CMControl::IsRightLeg(ControlPart),
         ContributingPlayerState
     );
 }
 
-void AChimeraPrototypePawn::SetControlPartPressed(
-    EChimeraControlPart ControlPart,
+void ACMPawn::SetControlPartPressed(
+    ECMControlPart ControlPart,
     bool bPressed
 )
 {
-    if (!HasAuthority() || !ChimeraControl::IsValidPart(ControlPart))
+    if (!HasAuthority() || !CMControl::IsValidPart(ControlPart))
     {
         return;
     }
@@ -356,7 +356,7 @@ void AChimeraPrototypePawn::SetControlPartPressed(
     ForceNetUpdate();
 }
 
-void AChimeraPrototypePawn::ClearPressedControlParts()
+void ACMPawn::ClearPressedControlParts()
 {
     if (!HasAuthority() || PressedControlPartMask == 0)
     {
@@ -367,22 +367,22 @@ void AChimeraPrototypePawn::ClearPressedControlParts()
     ForceNetUpdate();
 }
 
-FRotator AChimeraPrototypePawn::GetInitialCameraRotation() const
+FRotator ACMPawn::GetInitialCameraRotation() const
 {
     return FRotator(-90.0f, 0.0f, 0.0f);
 }
 
-float AChimeraPrototypePawn::GetMouseLookSensitivity() const
+float ACMPawn::GetMouseLookSensitivity() const
 {
     return MouseLookSensitivity;
 }
 
-bool AChimeraPrototypePawn::IsMousePitchInverted() const
+bool ACMPawn::IsMousePitchInverted() const
 {
     return bInvertMousePitch;
 }
 
-void AChimeraPrototypePawn::SetLocalCameraRotation(
+void ACMPawn::SetLocalCameraRotation(
     const FRotator& NewCameraRotation
 )
 {
@@ -392,7 +392,7 @@ void AChimeraPrototypePawn::SetLocalCameraRotation(
     }
 }
 
-void AChimeraPrototypePawn::AdjustLocalCameraZoom(float AxisValue)
+void ACMPawn::AdjustLocalCameraZoom(float AxisValue)
 {
     if (!CameraBoom || FMath::IsNearlyZero(AxisValue))
     {
@@ -406,10 +406,10 @@ void AChimeraPrototypePawn::AdjustLocalCameraZoom(float AxisValue)
     );
 }
 
-void AChimeraPrototypePawn::TryApplyLegImpulse(
+void ACMPawn::TryApplyLegImpulse(
     int32 SegmentIndex,
     bool bRightLeg,
-    AChimeraPlayerState* ContributingPlayerState
+    ACMPlayerState* ContributingPlayerState
 )
 {
     if (SegmentIndex < 0
@@ -430,10 +430,10 @@ void AChimeraPrototypePawn::TryApplyLegImpulse(
     );
 }
 
-void AChimeraPrototypePawn::ApplyLegImpulse(
+void ACMPawn::ApplyLegImpulse(
     UStaticMeshComponent* SegmentBody,
     USceneComponent* FootPoint,
-    AChimeraPlayerState* ContributingPlayerState
+    ACMPlayerState* ContributingPlayerState
 )
 {
     if (!SegmentBody || !FootPoint)
@@ -487,8 +487,8 @@ void AChimeraPrototypePawn::ApplyLegImpulse(
     );
 }
 
-void AChimeraPrototypePawn::RegisterCooperativeInput(
-    AChimeraPlayerState* ContributingPlayerState,
+void ACMPawn::RegisterCooperativeInput(
+    ACMPlayerState* ContributingPlayerState,
     const FVector& PlanarImpulse,
     float YawAngularImpulse
 )
@@ -524,17 +524,17 @@ void AChimeraPrototypePawn::RegisterCooperativeInput(
     }
 }
 
-void AChimeraPrototypePawn::FlushCooperativeInput()
+void ACMPawn::FlushCooperativeInput()
 {
     const int32 ContributorCount =
         PendingCooperationContributions.Num();
-    const AChimeraGameState* ChimeraGameState = GetWorld()
-        ? GetWorld()->GetGameState<AChimeraGameState>()
+    const ACMGameState* GameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr;
     const int32 ActivePlayerCount = FMath::Clamp(
-        ChimeraGameState ? ChimeraGameState->GetLobbyPlayerCount() : 1,
+        GameState ? GameState->GetLobbyPlayerCount() : 1,
         1,
-        ChimeraControl::MaxPlayers
+        CMControl::MaxPlayers
     );
     if (!HasAuthority()
         || !BodyMesh
@@ -660,7 +660,7 @@ void AChimeraPrototypePawn::FlushCooperativeInput()
     CooperationWindowRemaining = 0.0f;
 }
 
-void AChimeraPrototypePawn::ApplyBlueprintSettings()
+void ACMPawn::ApplyBlueprintSettings()
 {
     ActiveSegmentCount = FMath::Clamp(
         ActiveSegmentCount,
@@ -796,7 +796,7 @@ void AChimeraPrototypePawn::ApplyBlueprintSettings()
 
 }
 
-void AChimeraPrototypePawn::UpdateCameraFollowOffset()
+void ACMPawn::UpdateCameraFollowOffset()
 {
     if (!CameraBoom || !BodyMesh)
     {
@@ -810,45 +810,45 @@ void AChimeraPrototypePawn::UpdateCameraFollowOffset()
     );
 }
 
-void AChimeraPrototypePawn::UpdateControlAssignmentMarkers(float DeltaTime)
+void ACMPawn::UpdateControlAssignmentMarkers(float DeltaTime)
 {
     if (GetNetMode() == NM_DedicatedServer)
     {
         return;
     }
 
-    TArray<const AChimeraPlayerState*> ControlOwners;
-    ControlOwners.Init(nullptr, ChimeraControl::MaxControlParts);
+    TArray<const ACMPlayerState*> ControlOwners;
+    ControlOwners.Init(nullptr, CMControl::MaxControlParts);
     TArray<int32> ControlSlotIndices;
-    ControlSlotIndices.Init(INDEX_NONE, ChimeraControl::MaxControlParts);
+    ControlSlotIndices.Init(INDEX_NONE, CMControl::MaxControlParts);
 
-    const AChimeraGameState* ChimeraGameState = GetWorld()
-        ? GetWorld()->GetGameState<AChimeraGameState>()
+    const ACMGameState* GameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr;
-    if (ChimeraGameState)
+    if (GameState)
     {
         for (APlayerState* RosterPlayerState
-            : ChimeraGameState->PlayerArray)
+            : GameState->PlayerArray)
         {
-            const AChimeraPlayerState* ChimeraPlayerState =
-                Cast<AChimeraPlayerState>(RosterPlayerState);
-            if (!ChimeraPlayerState
-                || ChimeraPlayerState->IsOnlyASpectator())
+            const ACMPlayerState* CMPlayerState =
+                Cast<ACMPlayerState>(RosterPlayerState);
+            if (!CMPlayerState
+                || CMPlayerState->IsOnlyASpectator())
             {
                 continue;
             }
 
             for (int32 SlotIndex = 0;
-                SlotIndex < ChimeraPlayerState->AssignedControlParts.Num();
+                SlotIndex < CMPlayerState->AssignedControlParts.Num();
                 ++SlotIndex)
             {
-                const EChimeraControlPart ControlPart =
-                    ChimeraPlayerState->AssignedControlParts[SlotIndex];
-                if (ChimeraControl::IsValidPart(ControlPart))
+                const ECMControlPart ControlPart =
+                    CMPlayerState->AssignedControlParts[SlotIndex];
+                if (CMControl::IsValidPart(ControlPart))
                 {
                     const int32 ControlIndex =
                         static_cast<uint8>(ControlPart);
-                    ControlOwners[ControlIndex] = ChimeraPlayerState;
+                    ControlOwners[ControlIndex] = CMPlayerState;
                     ControlSlotIndices[ControlIndex] = SlotIndex;
                 }
             }
@@ -905,7 +905,7 @@ void AChimeraPrototypePawn::UpdateControlAssignmentMarkers(float DeltaTime)
             ControlAssignmentMarkerTexts.IsValidIndex(MarkerIndex)
                 ? ControlAssignmentMarkerTexts[MarkerIndex]
                 : nullptr;
-        const AChimeraPlayerState* ControlOwner =
+        const ACMPlayerState* ControlOwner =
             ControlOwners.IsValidIndex(MarkerIndex)
                 ? ControlOwners[MarkerIndex]
                 : nullptr;
@@ -1021,15 +1021,15 @@ void AChimeraPrototypePawn::UpdateControlAssignmentMarkers(float DeltaTime)
     }
 }
 
-float AChimeraPrototypePawn::GetPlayerCountSpeedMultiplier() const
+float ACMPawn::GetPlayerCountSpeedMultiplier() const
 {
-    const AChimeraGameState* ChimeraGameState = GetWorld()
-        ? GetWorld()->GetGameState<AChimeraGameState>()
+    const ACMGameState* GameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr;
     const int32 PlayerCount = FMath::Clamp(
-        ChimeraGameState ? ChimeraGameState->GetLobbyPlayerCount() : 1,
+        GameState ? GameState->GetLobbyPlayerCount() : 1,
         1,
-        ChimeraControl::MaxPlayers
+        CMControl::MaxPlayers
     );
 
     float TargetSeconds = OnePlayerTurnTargetSeconds;
@@ -1050,24 +1050,24 @@ float AChimeraPrototypePawn::GetPlayerCountSpeedMultiplier() const
         / FMath::Max(TargetSeconds, 0.1f);
 }
 
-float AChimeraPrototypePawn::GetPerControlImpulseMultiplier() const
+float ACMPawn::GetPerControlImpulseMultiplier() const
 {
-    const AChimeraGameState* ChimeraGameState = GetWorld()
-        ? GetWorld()->GetGameState<AChimeraGameState>()
+    const ACMGameState* GameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr;
     int32 AssignedControlCount = 0;
-    if (ChimeraGameState)
+    if (GameState)
     {
         for (APlayerState* RosterPlayerState
-            : ChimeraGameState->PlayerArray)
+            : GameState->PlayerArray)
         {
-            const AChimeraPlayerState* ChimeraPlayerState =
-                Cast<AChimeraPlayerState>(RosterPlayerState);
-            if (ChimeraPlayerState
-                && !ChimeraPlayerState->IsOnlyASpectator())
+            const ACMPlayerState* CMPlayerState =
+                Cast<ACMPlayerState>(RosterPlayerState);
+            if (CMPlayerState
+                && !CMPlayerState->IsOnlyASpectator())
             {
                 AssignedControlCount +=
-                    ChimeraPlayerState->GetAssignedControlCount();
+                    CMPlayerState->GetAssignedControlCount();
             }
         }
     }
@@ -1078,7 +1078,7 @@ float AChimeraPrototypePawn::GetPerControlImpulseMultiplier() const
         / FMath::Max(static_cast<float>(AssignedControlCount), 1.0f);
 }
 
-void AChimeraPrototypePawn::ConfigureSegments()
+void ACMPawn::ConfigureSegments()
 {
     ApplyBlueprintSettings();
 
@@ -1172,7 +1172,7 @@ void AChimeraPrototypePawn::ConfigureSegments()
     }
 }
 
-void AChimeraPrototypePawn::ConfigureBodyRotationLock(
+void ACMPawn::ConfigureBodyRotationLock(
     UStaticMeshComponent* SegmentBody
 )
 {
@@ -1188,7 +1188,7 @@ void AChimeraPrototypePawn::ConfigureBodyRotationLock(
     BodyInstance.SetDOFLock(EDOFMode::SixDOF);
 }
 
-void AChimeraPrototypePawn::ConfigureNetworkPhysics()
+void ACMPawn::ConfigureNetworkPhysics()
 {
     if (HasAuthority())
     {
@@ -1220,7 +1220,7 @@ void AChimeraPrototypePawn::ConfigureNetworkPhysics()
     }
 }
 
-void AChimeraPrototypePawn::UpdateReplicatedSegmentStates()
+void ACMPawn::UpdateReplicatedSegmentStates()
 {
     const int32 ReplicatedSegmentCount = FMath::Max(
         0,
@@ -1246,7 +1246,7 @@ void AChimeraPrototypePawn::UpdateReplicatedSegmentStates()
     }
 }
 
-void AChimeraPrototypePawn::ApplyReplicatedSegmentStates(float DeltaTime)
+void ACMPawn::ApplyReplicatedSegmentStates(float DeltaTime)
 {
     if (!bHasReceivedSegmentStates)
     {
@@ -1268,7 +1268,7 @@ void AChimeraPrototypePawn::ApplyReplicatedSegmentStates(float DeltaTime)
         }
 
         UStaticMeshComponent* SegmentBody = BodySegments[SegmentIndex];
-        const FChimeraReplicatedSegmentState& TargetState =
+        const FCMReplicatedSegmentState& TargetState =
             ReplicatedSegmentStates[StateIndex];
         const FVector TargetLocation = TargetState.Location;
         const FVector CurrentLocation = SegmentBody->GetComponentLocation();
@@ -1305,12 +1305,12 @@ void AChimeraPrototypePawn::ApplyReplicatedSegmentStates(float DeltaTime)
     }
 }
 
-void AChimeraPrototypePawn::OnRep_SegmentStates()
+void ACMPawn::OnRep_SegmentStates()
 {
     bHasReceivedSegmentStates = true;
 }
 
-bool AChimeraPrototypePawn::TraceGround(
+bool ACMPawn::TraceGround(
     USceneComponent* FootPoint,
     FHitResult& OutHit
 ) const
