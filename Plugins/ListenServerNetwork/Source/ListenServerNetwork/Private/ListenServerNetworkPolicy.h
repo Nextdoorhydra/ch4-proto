@@ -11,6 +11,7 @@ namespace ListenServerNetworkKeys
 	extern const FName MapId;
 	extern const FName Region;
 	extern const FName LobbyState;
+	extern const FName Joinable;
 	extern const FName SessionDisplayName;
 }
 
@@ -43,6 +44,7 @@ namespace ListenServerNetworkPolicy
 		FName GameMode;
 		FName Region;
 		int32 OpenPublicConnections = 0;
+		bool bJoinable = true;
 		TMap<FName, FString> Attributes;
 	};
 

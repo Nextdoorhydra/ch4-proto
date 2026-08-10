@@ -50,6 +50,8 @@ bool FListenServerAttributePolicyTest::RunTest(const FString& Parameters)
 	Attributes.SetNum(1);
 	Attributes[0].Key = ListenServerNetworkKeys::ProjectKey;
 	TestFalse(TEXT("Reserved key override is rejected"), ListenServerNetworkPolicy::ValidateAttributes(Attributes, true, Reason));
+	Attributes[0].Key = ListenServerNetworkKeys::Joinable;
+	TestFalse(TEXT("Joinability key override is rejected"), ListenServerNetworkPolicy::ValidateAttributes(Attributes, true, Reason));
 	TestTrue(TEXT("Reserved key may be a required search value"), ListenServerNetworkPolicy::ValidateAttributes(Attributes, false, Reason));
 	return true;
 }
@@ -92,6 +94,9 @@ bool FListenServerCompatibilityPolicyTest::RunTest(const FString& Parameters)
 	Request.RequiredAttributes[0].Value = TEXT("Easy");
 	TestEqual(TEXT("Required attribute mismatch"), ListenServerNetworkPolicy::CheckCompatibility(Candidate, Request), EListenServerError::IncompatibleAttribute);
 	Request.RequiredAttributes[0].Value = TEXT("Hard");
+	Candidate.bJoinable = false;
+	TestEqual(TEXT("Closed session is rejected"), ListenServerNetworkPolicy::CheckCompatibility(Candidate, Request), EListenServerError::SessionClosed);
+	Candidate.bJoinable = true;
 	Candidate.OpenPublicConnections = 0;
 	TestEqual(TEXT("Full session is rejected"), ListenServerNetworkPolicy::CheckCompatibility(Candidate, Request), EListenServerError::SessionFull);
 

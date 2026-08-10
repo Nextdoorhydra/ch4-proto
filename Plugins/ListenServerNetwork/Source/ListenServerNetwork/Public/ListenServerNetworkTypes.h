@@ -22,6 +22,14 @@ enum class EListenServerConnectionState : uint8
 };
 
 UENUM(BlueprintType)
+enum class EListenServerAdvertisedSessionState : uint8
+{
+	Lobby,
+	InGame,
+	Closed
+};
+
+UENUM(BlueprintType)
 enum class EListenServerOperation : uint8
 {
 	None,
@@ -62,6 +70,7 @@ enum class EListenServerError : uint8
 	InvalidSearchHandle,
 	JoinFailed,
 	SessionFull,
+	SessionClosed,
 	SessionNotFound,
 	IncompatibleProject,
 	IncompatibleBuild,
@@ -220,6 +229,9 @@ struct LISTENSERVERNETWORK_API FListenServerSearchResult
 
 	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
 	FName LobbyState;
+
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	bool bIsJoinable = true;
 
 	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
 	int32 CurrentPlayers = 0;

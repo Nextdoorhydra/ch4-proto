@@ -31,6 +31,9 @@ public:
 	bool LeaveSession();
 	bool HostTravelToMap(const FSoftObjectPath& Map);
 
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Listen Server Network")
+	bool UpdateHostedSessionState(EListenServerAdvertisedSessionState NewState, bool bAllowNewParticipants);
+
 	UFUNCTION(BlueprintCallable, Category="Listen Server Network")
 	bool ShowInviteUI();
 

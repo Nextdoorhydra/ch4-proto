@@ -8,6 +8,7 @@ namespace ListenServerNetworkKeys
 	const FName MapId(TEXT("MAP_ID"));
 	const FName Region(TEXT("REGION"));
 	const FName LobbyState(TEXT("LOBBY_STATE"));
+	const FName Joinable(TEXT("JOINABLE"));
 	const FName SessionDisplayName(TEXT("SESSION_DISPLAY_NAME"));
 }
 
@@ -91,6 +92,7 @@ namespace ListenServerNetworkPolicy
 			|| Key == ListenServerNetworkKeys::MapId
 			|| Key == ListenServerNetworkKeys::Region
 			|| Key == ListenServerNetworkKeys::LobbyState
+			|| Key == ListenServerNetworkKeys::Joinable
 			|| Key == ListenServerNetworkKeys::SessionDisplayName;
 	}
 
@@ -150,6 +152,10 @@ namespace ListenServerNetworkPolicy
 		if (!Request.Region.IsNone() && Candidate.Region != Request.Region)
 		{
 			return EListenServerError::IncompatibleRegion;
+		}
+		if (!Candidate.bJoinable)
+		{
+			return EListenServerError::SessionClosed;
 		}
 		if (Candidate.OpenPublicConnections <= 0)
 		{

@@ -38,6 +38,7 @@ namespace
 		Join,
 		QuickJoin,
 		InviteJoin,
+		SessionStateUpdate,
 		HostGameUpdate,
 		HostGameStart,
 		LeaveEnd,
@@ -45,6 +46,35 @@ namespace
 		RecoveryDestroy,
 		InviteDestroy
 	};
+
+	const TCHAR* GetAdvertisedSessionStateValue(EListenServerAdvertisedSessionState State)
+	{
+		switch (State)
+		{
+		case EListenServerAdvertisedSessionState::Lobby:
+			return TEXT("Lobby");
+		case EListenServerAdvertisedSessionState::InGame:
+			return TEXT("InGame");
+		case EListenServerAdvertisedSessionState::Closed:
+			return TEXT("Closed");
+		default:
+			return TEXT("Closed");
+		}
+	}
+
+	void ApplySessionJoinability(FOnlineSessionSettings& Settings, bool bJoinable)
+	{
+		Settings.bShouldAdvertise = bJoinable;
+		Settings.bAllowJoinInProgress = bJoinable;
+		Settings.bAllowInvites = bJoinable;
+		Settings.bAllowJoinViaPresence = bJoinable;
+		Settings.bAllowJoinViaPresenceFriendsOnly = false;
+		Settings.Set(
+			ListenServerNetworkKeys::Joinable,
+			bJoinable ? FString(TEXT("1")) : FString(TEXT("0")),
+			EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
+		);
+	}
 
 	struct FPendingTravel
 	{
@@ -142,6 +172,8 @@ struct FListenServerSessionSubsystemImpl
 	FString PendingInviteSessionId;
 	TUniquePtr<FPendingTravel> PendingTravel;
 	FSoftObjectPath PendingHostGameMap;
+	EListenServerAdvertisedSessionState PendingAdvertisedSessionState = EListenServerAdvertisedSessionState::Closed;
+	bool bPendingAllowNewParticipants = false;
 	EListenServerAsyncPurpose Purpose = EListenServerAsyncPurpose::None;
 	bool bLeaveEndFailed = false;
 	EListenServerError RecoveryError = EListenServerError::Unknown;
@@ -259,6 +291,8 @@ struct FListenServerSessionSubsystemImpl
 	void CompleteLocalCleanup();
 
 	bool HostTravel(const FSoftObjectPath& Map);
+	bool UpdateHostedSessionState(EListenServerAdvertisedSessionState NewState, bool bAllowNewParticipants);
+	void StartSessionStateUpdate(uint64 OperationId);
 	void StartHostGameUpdate(uint64 OperationId);
 	void HandleUpdateComplete(uint64 CallbackOperationId, FName SessionName, bool bWasSuccessful);
 	void StartHostGameSession(uint64 OperationId);
@@ -918,7 +952,8 @@ void FListenServerSessionSubsystemImpl::StartCreate(uint64 OperationId)
 	SessionSettings.Set(ListenServerNetworkKeys::GameMode, ActiveHostRequest.GameModeId.ToString(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	SessionSettings.Set(ListenServerNetworkKeys::MapId, ActiveHostRequest.LobbyMap.GetAssetName(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	SessionSettings.Set(ListenServerNetworkKeys::Region, ActiveHostRequest.Region.ToString(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	SessionSettings.Set(ListenServerNetworkKeys::LobbyState, FString(TEXT("Waiting")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	SessionSettings.Set(ListenServerNetworkKeys::LobbyState, FString(TEXT("Lobby")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	SessionSettings.Set(ListenServerNetworkKeys::Joinable, FString(TEXT("1")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	SessionSettings.Set(ListenServerNetworkKeys::SessionDisplayName, ActiveHostRequest.SessionDisplayName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	for (const FListenServerSessionAttribute& Attribute : ActiveHostRequest.ExtraAdvertisedAttributes)
 	{
@@ -1268,6 +1303,7 @@ EListenServerError FListenServerSessionSubsystemImpl::CheckRawCompatibility(cons
 	FString Region;
 	FString MapId;
 	FString LobbyState;
+	FString Joinable;
 	FString DisplayName;
 	if (!GetStringSetting(RawSettings, ListenServerNetworkKeys::ProjectKey, ProjectKey)
 		|| !GetStringSetting(RawSettings, ListenServerNetworkKeys::BuildVersion, BuildVersion)
@@ -1289,6 +1325,11 @@ EListenServerError FListenServerSessionSubsystemImpl::CheckRawCompatibility(cons
 	{
 		return EListenServerError::Unknown;
 	}
+	const bool bHasJoinable = GetStringSetting(RawSettings, ListenServerNetworkKeys::Joinable, Joinable);
+	if (bHasJoinable && Joinable != TEXT("0") && Joinable != TEXT("1"))
+	{
+		return EListenServerError::Unknown;
+	}
 	int32 AdvertisedBuildUniqueId = 0;
 	if (!LexTryParseString(AdvertisedBuildUniqueId, *BuildVersion))
 	{
@@ -1302,6 +1343,7 @@ EListenServerError FListenServerSessionSubsystemImpl::CheckRawCompatibility(cons
 	Candidate.GameMode = FName(*GameMode);
 	Candidate.Region = FName(*Region);
 	Candidate.OpenPublicConnections = bRequireOpenSlot ? RawResult.Session.NumOpenPublicConnections : 1;
+	Candidate.bJoinable = !bHasJoinable || Joinable == TEXT("1");
 	for (const FListenServerSessionAttribute& Required : Request.RequiredAttributes)
 	{
 		FString Value;
@@ -1381,6 +1423,7 @@ void FListenServerSessionSubsystemImpl::FillPublicSearchResult(const FOnlineSess
 	if (GetStringSetting(Settings, ListenServerNetworkKeys::MapId, Value)) OutResult.MapId = FName(*ListenServerNetworkPolicy::SanitizeExternalString(Value, ListenServerNetworkPolicy::MaxAttributeKeyLength));
 	if (GetStringSetting(Settings, ListenServerNetworkKeys::Region, Value)) OutResult.Region = FName(*ListenServerNetworkPolicy::SanitizeExternalString(Value, ListenServerNetworkPolicy::MaxAttributeKeyLength));
 	if (GetStringSetting(Settings, ListenServerNetworkKeys::LobbyState, Value)) OutResult.LobbyState = FName(*ListenServerNetworkPolicy::SanitizeExternalString(Value, ListenServerNetworkPolicy::MaxAttributeKeyLength));
+	OutResult.bIsJoinable = !GetStringSetting(Settings, ListenServerNetworkKeys::Joinable, Value) || Value == TEXT("1");
 	OutResult.MaxPlayers = Settings.NumPublicConnections;
 	OutResult.CurrentPlayers = FMath::Clamp(Settings.NumPublicConnections - RawResult.Session.NumOpenPublicConnections, 0, Settings.NumPublicConnections);
 	OutResult.PingMilliseconds = RawResult.PingInMs >= 0 ? RawResult.PingInMs : INDEX_NONE;
@@ -1766,6 +1809,90 @@ bool FListenServerSessionSubsystemImpl::HostTravel(const FSoftObjectPath& Map)
 	return true;
 }
 
+bool FListenServerSessionSubsystemImpl::UpdateHostedSessionState(
+	EListenServerAdvertisedSessionState NewState,
+	bool bAllowNewParticipants
+)
+{
+	UWorld* World = GetWorld();
+	IOnlineSessionPtr Sessions = GetSessionInterface();
+	if (Role != EListenServerRole::Host
+		|| ConnectionState == EListenServerConnectionState::Offline
+		|| World == nullptr
+		|| World->GetNetMode() == NM_Client)
+	{
+		return Reject(EListenServerOperation::Updating, EListenServerError::InvalidState, TEXT("Only the listen-server host can update session availability."), TEXT("Role, connection, World, or NetMode authority check failed"));
+	}
+	if (NewState == EListenServerAdvertisedSessionState::Closed && bAllowNewParticipants)
+	{
+		return Reject(EListenServerOperation::Updating, EListenServerError::InvalidRequest, TEXT("A closed session cannot allow new participants."), TEXT("Closed state requested with bAllowNewParticipants=true"));
+	}
+	const bool bStateMatchesWorld =
+		(NewState == EListenServerAdvertisedSessionState::Lobby
+			&& ConnectionState == EListenServerConnectionState::Lobby)
+		|| (NewState == EListenServerAdvertisedSessionState::InGame
+			&& ConnectionState == EListenServerConnectionState::InGame)
+		|| NewState == EListenServerAdvertisedSessionState::Closed;
+	if (!bStateMatchesWorld)
+	{
+		return Reject(EListenServerOperation::Updating, EListenServerError::InvalidState, TEXT("The advertised session state does not match the current world state."), TEXT("Lobby/InGame advertisement must match ConnectionState"));
+	}
+	if (!Sessions.IsValid() || Sessions->GetNamedSession(NAME_GameSession) == nullptr)
+	{
+		return Reject(EListenServerOperation::Updating, EListenServerError::SessionNotFound, TEXT("The host Steam session no longer exists."), TEXT("No NAME_GameSession before session state update"));
+	}
+	if (!BeginOperation(EListenServerOperation::Updating))
+	{
+		return false;
+	}
+
+	PendingAdvertisedSessionState = NewState;
+	bPendingAllowNewParticipants = bAllowNewParticipants;
+	StartSessionStateUpdate(ActiveOperationId);
+	return true;
+}
+
+void FListenServerSessionSubsystemImpl::StartSessionStateUpdate(uint64 OperationId)
+{
+	IOnlineSessionPtr Sessions = GetSessionInterface();
+	FOnlineSessionSettings* ExistingSettings = Sessions.IsValid()
+		? Sessions->GetSessionSettings(NAME_GameSession)
+		: nullptr;
+	if (ExistingSettings == nullptr)
+	{
+		FinishFailure(EListenServerError::UpdateFailed, TEXT("The host session settings are unavailable."), TEXT("GetSessionSettings returned null"));
+		return;
+	}
+
+	SetOperation(EListenServerOperation::Updating, TEXT("updating advertised session state and joinability"));
+	Purpose = EListenServerAsyncPurpose::SessionStateUpdate;
+	FOnlineSessionSettings UpdatedSettings = *ExistingSettings;
+	UpdatedSettings.Set(
+		ListenServerNetworkKeys::LobbyState,
+		FString(GetAdvertisedSessionStateValue(PendingAdvertisedSessionState)),
+		EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
+	);
+	ApplySessionJoinability(UpdatedSettings, bPendingAllowNewParticipants);
+
+	TWeakObjectPtr<UListenServerSessionSubsystem> WeakOwner = Owner;
+	UpdateHandle = Sessions->AddOnUpdateSessionCompleteDelegate_Handle(FOnUpdateSessionCompleteDelegate::CreateLambda([WeakOwner, OperationId](FName SessionName, bool bWasSuccessful)
+	{
+		if (UListenServerSessionSubsystem* Subsystem = WeakOwner.Get())
+		{
+			Subsystem->Impl->HandleUpdateComplete(OperationId, SessionName, bWasSuccessful);
+		}
+	}));
+	StartTimeout(GetSettings()->UpdateTimeoutSeconds, EListenServerOperation::Updating);
+	UE_LOG(LogListenServerNetwork, Log, TEXT("Session state UpdateSession started. Id=%llu State=%d Joinable=%d"), OperationId, static_cast<int32>(PendingAdvertisedSessionState), bPendingAllowNewParticipants);
+	if (!Sessions->UpdateSession(NAME_GameSession, UpdatedSettings, true))
+	{
+		Sessions->ClearOnUpdateSessionCompleteDelegate_Handle(UpdateHandle);
+		UpdateHandle.Reset();
+		ClearTimeout();
+		HandleUpdateComplete(OperationId, NAME_GameSession, false);
+	}
+}
+
 void FListenServerSessionSubsystemImpl::StartHostGameUpdate(uint64 OperationId)
 {
 	IOnlineSessionPtr Sessions = GetSessionInterface();
@@ -1780,6 +1907,7 @@ void FListenServerSessionSubsystemImpl::StartHostGameUpdate(uint64 OperationId)
 	FOnlineSessionSettings UpdatedSettings = *ExistingSettings;
 	UpdatedSettings.Set(ListenServerNetworkKeys::MapId, PendingHostGameMap.GetAssetName(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	UpdatedSettings.Set(ListenServerNetworkKeys::LobbyState, FString(TEXT("InGame")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	ApplySessionJoinability(UpdatedSettings, GetSettings()->bAllowJoinInProgress);
 	TWeakObjectPtr<UListenServerSessionSubsystem> WeakOwner = Owner;
 	UpdateHandle = Sessions->AddOnUpdateSessionCompleteDelegate_Handle(FOnUpdateSessionCompleteDelegate::CreateLambda([WeakOwner, OperationId](FName SessionName, bool bWasSuccessful)
 	{
@@ -1801,6 +1929,7 @@ void FListenServerSessionSubsystemImpl::StartHostGameUpdate(uint64 OperationId)
 
 void FListenServerSessionSubsystemImpl::HandleUpdateComplete(uint64 CallbackOperationId, FName SessionName, bool bWasSuccessful)
 {
+	const EListenServerAsyncPurpose CompletedPurpose = Purpose;
 	IOnlineSessionPtr Sessions = GetSessionInterface();
 	if (Sessions.IsValid() && UpdateHandle.IsValid())
 	{
@@ -1822,6 +1951,11 @@ void FListenServerSessionSubsystemImpl::HandleUpdateComplete(uint64 CallbackOper
 	if (!bWasSuccessful)
 	{
 		FinishFailure(EListenServerError::UpdateFailed, TEXT("The host session advertisement could not be updated."), TEXT("UpdateSession completion reported failure"));
+		return;
+	}
+	if (CompletedPurpose == EListenServerAsyncPurpose::SessionStateUpdate)
+	{
+		FinishSuccess(TEXT("The hosted session state and joinability were updated."));
 		return;
 	}
 	if (Sessions->GetSessionState(NAME_GameSession) == EOnlineSessionState::InProgress)
@@ -2454,6 +2588,14 @@ bool UListenServerSessionSubsystem::LeaveSession()
 bool UListenServerSessionSubsystem::HostTravelToMap(const FSoftObjectPath& Map)
 {
 	return Impl->HostTravel(Map);
+}
+
+bool UListenServerSessionSubsystem::UpdateHostedSessionState(
+	EListenServerAdvertisedSessionState NewState,
+	bool bAllowNewParticipants
+)
+{
+	return Impl->UpdateHostedSessionState(NewState, bAllowNewParticipants);
 }
 
 bool UListenServerSessionSubsystem::ShowInviteUI()
