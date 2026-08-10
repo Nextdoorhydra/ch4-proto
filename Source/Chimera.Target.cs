@@ -10,6 +10,13 @@ public class ChimeraTarget : TargetRules
 		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.V6;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_7;
-		ExtraModuleNames.Add("Chimera");
+		ExtraModuleNames.AddRange(new[]
+		{
+			"Chimera",
+			"Shared",
+			"Gameplay",
+			"AI",
+			"UI"
+		});
 	}
 }
