@@ -14,7 +14,6 @@ public class ChimeraTarget : TargetRules
 		{
 			"Chimera",
 			"Shared",
-			"Gameplay",
 			"AI",
 			"UI"
 		});

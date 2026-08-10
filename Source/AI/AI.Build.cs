@@ -13,7 +13,7 @@ public class AI : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"Shared",
-			"Gameplay"
+			"Chimera"
 		});
 	}
 }

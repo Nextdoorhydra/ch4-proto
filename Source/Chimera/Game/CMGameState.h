@@ -12,7 +12,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraSharedPawnChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraLobbyRosterChanged);
 
 UCLASS()
-class GAMEPLAY_API ACMGameState : public AGameStateBase
+class CHIMERA_API ACMGameState : public AGameStateBase
 {
     GENERATED_BODY()
 

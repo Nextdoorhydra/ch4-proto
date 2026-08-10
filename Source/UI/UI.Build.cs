@@ -15,7 +15,6 @@ public class UI : ModuleRules
 			"UMG",
 			"Chimera",
 			"Shared",
-			"Gameplay",
 			"ListenServerNetwork",
 			"GameplayMessageRuntime"
 		});

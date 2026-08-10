@@ -28,7 +28,7 @@ struct FCMReplicatedSegmentState
 };
 
 UCLASS()
-class GAMEPLAY_API ACMPawn : public APawn
+class CHIMERA_API ACMPawn : public APawn
 {
     GENERATED_BODY()
 

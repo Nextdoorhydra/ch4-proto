@@ -13,8 +13,7 @@ public class Chimera : ModuleRules
 		{
 			"Core",
 			"CoreUObject",
-			"Engine",
-			"Gameplay"
+			"Engine"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[]

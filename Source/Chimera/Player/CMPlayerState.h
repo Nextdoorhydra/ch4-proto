@@ -10,7 +10,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraControlAssignmentsChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraPlayerColorChanged);
 
 UCLASS()
-class GAMEPLAY_API ACMPlayerState : public APlayerState
+class CHIMERA_API ACMPlayerState : public APlayerState
 {
     GENERATED_BODY()
 

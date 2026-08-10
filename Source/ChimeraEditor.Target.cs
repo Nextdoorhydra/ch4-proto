@@ -14,7 +14,6 @@ public class ChimeraEditorTarget : TargetRules
 		{
 			"Chimera",
 			"Shared",
-			"Gameplay",
 			"AI",
 			"UI"
 		});
