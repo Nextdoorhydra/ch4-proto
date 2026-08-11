@@ -17,5 +17,11 @@ public class ChimeraEditorTarget : TargetRules
 			"AI",
 			"UI"
 		});
+		RegisterModulesCreatedByRider();
+	}
+
+	private void RegisterModulesCreatedByRider()
+	{
+		ExtraModuleNames.AddRange(new string[] { "ChimeraEditor" });
 	}
 }
