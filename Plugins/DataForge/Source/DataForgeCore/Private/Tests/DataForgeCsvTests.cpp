@@ -359,4 +359,214 @@ bool FDataForgePrimaryAssetClassValidationTest::RunTest(const FString& Parameter
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeSourceRowExpansionTest,
+	"DataForge.Core.SchemaEvolution.SourceRowExpansion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeSourceRowExpansionTest::RunTest(const FString& Parameters)
+{
+	const FString CsvFilename = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("DataForgeSourceRowExpansion.csv"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CsvFilename), true);
+	if (!FFileHelper::SaveStringToFile(TEXT("Id,DisplayName\nOne,First\n"), *CsvFilename))
+	{
+		AddError(TEXT("Could not create the source row expansion CSV."));
+		return false;
+	}
+
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.File.FilePath = CsvFilename;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Output.RowStruct = FDataForgeTestRow::StaticStruct();
+	RuleSet->Output.AssetPath = TEXT("/Game/DataForgeTests/DT_SourceRowExpansion");
+
+	FDataForgeAssetRule& ManagedRule = RuleSet->AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("Data");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = TEXT("/Game/DataForgeTests/SourceRowExpansion");
+	ManagedRule.AssetNamePattern = TEXT("PDA_{Id}");
+	FDataForgeGeneratedAssetOutputRule& Output = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("data");
+	Output.Type = EDataForgeGeneratedAssetType::PrimaryDataAsset;
+	Output.AssetClass = UDataForgeTestPrimaryAsset::StaticClass();
+	Output.AssetRuleId = ManagedRule.RuleId;
+
+	FCompiledDataForgeRuleSet InitialCompiled;
+	TArray<FDataForgeDiagnostic> InitialDiagnostics;
+	TestTrue(TEXT("Initial one-row source compiles"), FDataForgeCompiler::Compile(*RuleSet, InitialCompiled, InitialDiagnostics));
+	const FDataForgeApplyPlan InitialPlan = FDataForgeCompiler::BuildPlan(InitialCompiled);
+	TestEqual(TEXT("Initial source plans one row"), InitialPlan.Rows.Num(), 1);
+	TestEqual(TEXT("Initial source plans one generated asset"), InitialPlan.ManagedAssets.Num(), 1);
+
+	TestTrue(TEXT("Expanded source is written"), FFileHelper::SaveStringToFile(TEXT("Id,DisplayName\nOne,First\nTwo,Second\n"), *CsvFilename));
+	FCompiledDataForgeRuleSet ExpandedCompiled;
+	TArray<FDataForgeDiagnostic> ExpandedDiagnostics;
+	TestTrue(TEXT("Expanded two-row source recompiles"), FDataForgeCompiler::Compile(*RuleSet, ExpandedCompiled, ExpandedDiagnostics));
+	const FDataForgeApplyPlan ExpandedPlan = FDataForgeCompiler::BuildPlan(ExpandedCompiled);
+	TestEqual(TEXT("Expanded source plans both rows"), ExpandedPlan.Rows.Num(), 2);
+	TestEqual(TEXT("Expanded source plans both generated assets"), ExpandedPlan.ManagedAssets.Num(), 2);
+	TestNotEqual(TEXT("Source revision changes with the added row"), ExpandedPlan.SourceRevision, InitialPlan.SourceRevision);
+	TestTrue(TEXT("New row produces its deterministic generated asset"), ExpandedPlan.ManagedAssets.ContainsByPredicate([](const FDataForgePlannedAsset& Asset)
+	{
+		return Asset.RecordId == TEXT("Two") && Asset.ObjectPath.EndsWith(TEXT("PDA_Two.PDA_Two"));
+	}));
+
+	IFileManager::Get().Delete(*CsvFilename, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeExpandedTargetSchemaTest,
+	"DataForge.Core.SchemaEvolution.ExpandedRowAndGeneratedOutput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeExpandedTargetSchemaTest::RunTest(const FString& Parameters)
+{
+	const FString CsvFilename = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("DataForgeExpandedTargetSchema.csv"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CsvFilename), true);
+	if (!FFileHelper::SaveStringToFile(TEXT("Id,DisplayName,Description\nOne,First,New field\n"), *CsvFilename))
+	{
+		AddError(TEXT("Could not create the expanded target schema CSV."));
+		return false;
+	}
+
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.File.FilePath = CsvFilename;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Output.RowStruct = FDataForgeExpandedTestRow::StaticStruct();
+	RuleSet->Output.AssetPath = TEXT("/Game/DataForgeTests/DT_ExpandedTargetSchema");
+	FDataForgeAssetRule& ManagedRule = RuleSet->AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("Data");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = TEXT("/Game/DataForgeTests/ExpandedTargetSchema");
+	ManagedRule.AssetNamePattern = TEXT("PDA_{Id}");
+	FDataForgeGeneratedAssetOutputRule& Output = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("data");
+	Output.Type = EDataForgeGeneratedAssetType::PrimaryDataAsset;
+	Output.AssetClass = UDataForgeExpandedTestPrimaryAsset::StaticClass();
+	Output.AssetRuleId = ManagedRule.RuleId;
+
+	auto AddBinding = [RuleSet](EDataForgeBindingTarget Target, const TCHAR* TargetProperty)
+	{
+		FDataForgeBindingRule& Binding = RuleSet->Bindings.AddDefaulted_GetRef();
+		Binding.Source = EDataForgeBindingSource::SourceValue;
+		Binding.SourceColumn = TEXT("Description");
+		Binding.Target = Target;
+		Binding.TargetOutput = Target == EDataForgeBindingTarget::GeneratedOutput ? FName(TEXT("data")) : NAME_None;
+		Binding.TargetProperty = TargetProperty;
+	};
+	AddBinding(EDataForgeBindingTarget::DataTableRow, TEXT("Description"));
+	AddBinding(EDataForgeBindingTarget::GeneratedOutput, TEXT("Description"));
+
+	FCompiledDataForgeRuleSet Compiled;
+	TArray<FDataForgeDiagnostic> Diagnostics;
+	TestTrue(TEXT("Expanded row and generated-output schemas compile"), FDataForgeCompiler::Compile(*RuleSet, Compiled, Diagnostics));
+	const FDataForgeApplyPlan Plan = FDataForgeCompiler::BuildPlan(Compiled);
+	TestFalse(TEXT("Expanded target plan has no errors"), Plan.HasErrors());
+	if (Plan.Rows.Num() == 1 && Plan.Rows[0].DesiredData.IsValid())
+	{
+		const FDataForgeExpandedTestRow* Row = reinterpret_cast<const FDataForgeExpandedTestRow*>(Plan.Rows[0].DesiredData->GetStructMemory());
+		TestEqual(TEXT("New Row Struct property receives its source value"), Row->Description, FString(TEXT("New field")));
+	}
+	if (Plan.ManagedAssets.Num() == 1)
+	{
+		TestTrue(TEXT("New generated-output property is included in the plan"), Plan.ManagedAssets[0].PropertyWrites.ContainsByPredicate([](const FDataForgePlannedPropertyWrite& Write)
+		{
+			return Write.PropertyPath == TEXT("Description") && Write.ExportedValue == TEXT("New field");
+		}));
+	}
+
+	IFileManager::Get().Delete(*CsvFilename, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeMissingRowStructSafetyTest,
+	"DataForge.Core.SchemaEvolution.MissingExistingRowStruct",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeMissingRowStructSafetyTest::RunTest(const FString& Parameters)
+{
+	const FString CsvFilename = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("DataForgeMissingExistingRowStruct.csv"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CsvFilename), true);
+	if (!FFileHelper::SaveStringToFile(TEXT("Id,DisplayName\nOne,First\n"), *CsvFilename))
+	{
+		AddError(TEXT("Could not create the missing Row Struct CSV."));
+		return false;
+	}
+
+	const FString AssetName = TEXT("DT_MissingExistingRowStruct_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString TablePackageName = TEXT("/Game/DataForgeTests/") + AssetName;
+	UPackage* TablePackage = CreatePackage(*TablePackageName);
+	UDataTable* ExistingTable = NewObject<UDataTable>(TablePackage, *AssetName, RF_Public | RF_Standalone);
+	TestNull(TEXT("Regression fixture starts with no Row Struct"), ExistingTable->GetRowStruct());
+
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.File.FilePath = CsvFilename;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Output.RowStruct = FDataForgeTestRow::StaticStruct();
+	RuleSet->Output.AssetPath = TablePackageName;
+
+	FCompiledDataForgeRuleSet Compiled;
+	TArray<FDataForgeDiagnostic> Diagnostics;
+	TestTrue(TEXT("RuleSet compiles before inspecting the existing table"), FDataForgeCompiler::Compile(*RuleSet, Compiled, Diagnostics));
+	const FDataForgeApplyPlan Plan = FDataForgeCompiler::BuildPlan(Compiled);
+	TestTrue(TEXT("Missing existing Row Struct becomes an error, not a null dereference"), Plan.HasErrors());
+	TestTrue(TEXT("DF1202 identifies the incompatible existing table"), Plan.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1202") && Diagnostic.Severity == EDataForgeSeverity::Error;
+	}));
+	TestEqual(TEXT("No rows are read from an incompatible table"), Plan.Rows.Num(), 0);
+
+	IFileManager::Get().Delete(*CsvFilename, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeMissingGeneratedOutputClassSafetyTest,
+	"DataForge.Core.SchemaEvolution.MissingGeneratedOutputClass",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeMissingGeneratedOutputClassSafetyTest::RunTest(const FString& Parameters)
+{
+	const FString CsvFilename = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("DataForgeMissingGeneratedOutputClass.csv"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CsvFilename), true);
+	if (!FFileHelper::SaveStringToFile(TEXT("Id\nOne\n"), *CsvFilename))
+	{
+		AddError(TEXT("Could not create the missing generated-output class CSV."));
+		return false;
+	}
+
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.File.FilePath = CsvFilename;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Output.RowStruct = FDataForgeTestRow::StaticStruct();
+	RuleSet->Output.AssetPath = TEXT("/Game/DataForgeTests/DT_MissingGeneratedOutputClass");
+	FDataForgeAssetRule& ManagedRule = RuleSet->AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("Data");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = TEXT("/Game/DataForgeTests/MissingGeneratedOutputClass");
+	ManagedRule.AssetNamePattern = TEXT("PDA_{Id}");
+	FDataForgeGeneratedAssetOutputRule& Output = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("data");
+	Output.Type = EDataForgeGeneratedAssetType::PrimaryDataAsset;
+	Output.AssetClass = nullptr;
+	Output.AssetRuleId = ManagedRule.RuleId;
+
+	FCompiledDataForgeRuleSet Compiled;
+	TArray<FDataForgeDiagnostic> Diagnostics;
+	TestFalse(TEXT("Missing generated-output class is rejected"), FDataForgeCompiler::Compile(*RuleSet, Compiled, Diagnostics));
+	TestTrue(TEXT("DF1116 reports the missing generated-output class"), Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1116") && Diagnostic.Severity == EDataForgeSeverity::Error;
+	}));
+
+	IFileManager::Get().Delete(*CsvFilename, false, true);
+	return true;
+}
+
 #endif

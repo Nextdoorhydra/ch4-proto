@@ -221,12 +221,22 @@ namespace DataForgePipeline
 
 	void* ResolvePropertyAddress(void* RootMemory, const TArray<FProperty*>& Chain)
 	{
+		if (!RootMemory || Chain.IsEmpty())
+		{
+			return nullptr;
+		}
 		void* Container = RootMemory;
 		for (int32 Index = 0; Index + 1 < Chain.Num(); ++Index)
 		{
+			if (!Container || !Chain[Index])
+			{
+				return nullptr;
+			}
 			Container = Chain[Index]->ContainerPtrToValuePtr<void>(Container);
 		}
-		return Chain.Last()->ContainerPtrToValuePtr<void>(Container);
+		return Container && Chain.Last()
+			? Chain.Last()->ContainerPtrToValuePtr<void>(Container)
+			: nullptr;
 	}
 
 	FString ExpandPattern(
@@ -303,6 +313,18 @@ namespace DataForgePipeline
 		TArray<FDataForgeDiagnostic>& Diagnostics)
 	{
 		void* PropertyAddress = ResolvePropertyAddress(RootMemory, Binding.PropertyChain);
+		if (!Binding.TargetProperty || !PropertyAddress)
+		{
+			AddDiagnostic(
+				Diagnostics,
+				EDataForgeSeverity::Error,
+				TEXT("DF3002"),
+				FString::Printf(TEXT("Target property storage is unavailable for '%s'. Recompile the RuleSet after its target schema changes."), *Binding.Rule.TargetProperty),
+				RecordId,
+				Binding.Rule.SourceColumn,
+				SourceRow);
+			return false;
+		}
 		FStringOutputDevice ErrorOutput;
 		const TCHAR* Result = Binding.TargetProperty->ImportText_Direct(
 			*Value,
@@ -336,7 +358,7 @@ namespace DataForgePipeline
 		FString& OutValue)
 	{
 		const void* PropertyAddress = ResolvePropertyAddress(&OwnerObject, Binding.PropertyChain);
-		return Binding.TargetProperty->ExportText_Direct(
+		return Binding.TargetProperty && PropertyAddress && Binding.TargetProperty->ExportText_Direct(
 			OutValue,
 			PropertyAddress,
 			PropertyAddress,
@@ -351,7 +373,8 @@ namespace DataForgePipeline
 	{
 		const void* AddressA = ResolvePropertyAddress(const_cast<UObject*>(&A), Binding.PropertyChain);
 		const void* AddressB = ResolvePropertyAddress(const_cast<UObject*>(&B), Binding.PropertyChain);
-		return Binding.TargetProperty->Identical(AddressA, AddressB, PPF_DeepComparison);
+		return Binding.TargetProperty && AddressA && AddressB
+			&& Binding.TargetProperty->Identical(AddressA, AddressB, PPF_DeepComparison);
 	}
 
 	bool IsOwnedByRuleSet(
@@ -978,7 +1001,7 @@ FDataForgeApplyPlan FDataForgeCompiler::BuildPlan(const FCompiledDataForgeRuleSe
 	const FString ObjectPath = RuleSet->Output.AssetPath + TEXT(".") + AssetName;
 	UDataTable* ExistingTable = LoadObject<UDataTable>(nullptr, *ObjectPath);
 	Plan.ExistingTable = ExistingTable;
-	FString TargetState = ExistingTable ? ExistingTable->GetTableAsJSON() : TEXT("<missing-table>");
+	FString TargetState = TEXT("<missing-table>");
 	if (!ExistingTable && !RuleSet->Output.bCreateIfMissing)
 	{
 		DataForgePipeline::AddDiagnostic(Plan.Diagnostics, EDataForgeSeverity::Error, TEXT("DF1201"), FString::Printf(TEXT("Output DataTable does not exist: %s"), *ObjectPath));
@@ -988,8 +1011,12 @@ FDataForgeApplyPlan FDataForgeCompiler::BuildPlan(const FCompiledDataForgeRuleSe
 	if (ExistingTable && ExistingTable->GetRowStruct() != RowStruct)
 	{
 		DataForgePipeline::AddDiagnostic(Plan.Diagnostics, EDataForgeSeverity::Error, TEXT("DF1202"), TEXT("Existing DataTable row struct does not match the RuleSet output."));
-		Plan.TargetRevision = DataForgePipeline::HashSource(TargetState);
+		Plan.TargetRevision = DataForgePipeline::HashSource(TEXT("<row-struct-mismatch>") + ObjectPath);
 		return Plan;
+	}
+	if (ExistingTable)
+	{
+		TargetState = ExistingTable->GetTableAsJSON();
 	}
 
 	TSet<FName> DesiredRowNames;
@@ -1340,6 +1367,17 @@ bool FDataForgeCompiler::ApplyPlannedProperties(
 
 		FProperty* TargetProperty = PropertyChain.Last();
 		void* PropertyAddress = DataForgePipeline::ResolvePropertyAddress(&Target, PropertyChain);
+		if (!TargetProperty || !PropertyAddress)
+		{
+			DataForgePipeline::AddDiagnostic(
+				OutDiagnostics,
+				EDataForgeSeverity::Error,
+				TEXT("DF3012"),
+				FString::Printf(TEXT("Target property storage is unavailable for '%s'. Rebuild the plan after its asset schema changes."), *PropertyWrite.PropertyPath),
+				PlannedAsset.RecordId,
+				FName(*PropertyWrite.PropertyPath));
+			return false;
+		}
 		FStringOutputDevice ErrorOutput;
 		if (!TargetProperty->ImportText_Direct(*PropertyWrite.ExportedValue, PropertyAddress, &Target, PPF_None, &ErrorOutput))
 		{
