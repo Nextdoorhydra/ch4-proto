@@ -1,17 +1,20 @@
 #pragma once
+
 #include "CoreMinimal.h"
-#include "GoogleSheetParserBase.h"
 #include "Engine/DataAsset.h"
+#include "GoogleSheetParserBase.h"
 #include "GoogleSheetConfig.generated.h"
 
-// 페치 결과 상태
+class UGoogleSheetConfig;
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnGoogleSheetCacheUpdated, UGoogleSheetConfig&);
+
 UENUM()
 enum class EFetchStatus : uint8
 {
-	None      UMETA(DisplayName = "대기중"),
-	Success   UMETA(DisplayName = "성공"),
-	Failed    UMETA(DisplayName = "실패"),
-	Loading   UMETA(DisplayName = "로딩중"),
+	None UMETA(DisplayName = "Idle"),
+	Success UMETA(DisplayName = "Success"),
+	Failed UMETA(DisplayName = "Failed"),
+	Loading UMETA(DisplayName = "Loading")
 };
 
 UCLASS(BlueprintType)
@@ -20,61 +23,58 @@ class GOOGLESHEETLOADER_API UGoogleSheetConfig : public UDataAsset
 	GENERATED_BODY()
 
 public:
-	// ── 시트 설정 ──────────────────────────────
-    
-	// 구글 시트 전체 URL 또는 Spreadsheet ID
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Google Sheet|Config",
-		meta=(DisplayName="Google Sheet URL",
-			ToolTip="사용할 시트 탭을 연 상태에서 Google Sheets URL을 붙여 넣으세요. URL의 gid를 자동으로 사용합니다."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Google Sheet|Config",
+		meta = (DisplayName = "Google Sheet URL", ToolTip = "Public Google Sheets URL or spreadsheet id."))
 	FString SheetURL;
 
-	// 시작 범위의 첫 행은 헤더로 사용합니다. (예: A1)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Google Sheet|Config")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Google Sheet|Config")
 	FString RangeFrom = TEXT("A1");
 
-	// 끝 범위 (예: C100)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Google Sheet|Config")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Google Sheet|Config")
 	FString RangeTo = TEXT("Z100");
 
-	// 데이터 파서 지정
-	UPROPERTY(EditAnywhere, Instanced, Category="Google Sheet|Config")
-	UGoogleSheetParserBase* DataParser;
+	/** Optional legacy materializer. Leave empty and save normalized JSON for DataForge/cache-only use. */
+	UPROPERTY(EditAnywhere, Instanced, Category = "Google Sheet|Config",
+		meta = (ToolTip = "Optional. Leave empty and enable Save Normalized Json to fetch without assigning a DataTable."))
+	TObjectPtr<UGoogleSheetParserBase> DataParser;
 
-	// 파싱 완료 후 생성된 에셋들을 즉시 저장할지 여부
-	UPROPERTY(EditAnywhere, Category="Google Sheet|Config")
+	UPROPERTY(EditAnywhere, Category = "Google Sheet|Config")
 	bool bAutoSaveOnComplete = false;
 
-	// TSV를 변환한 JSON을 Saved/GoogleSheetLoader에 저장합니다.
-	UPROPERTY(EditAnywhere, Category="Google Sheet|Config")
-	bool bSaveNormalizedJson = false;
+	/** Save TSV converted to normalized JSON under Saved/GoogleSheetLoader. */
+	UPROPERTY(EditAnywhere, Category = "Google Sheet|Config")
+	bool bSaveNormalizedJson = true;
 
-	// ── 상태 (에디터 전용, 저장 안 함) ────────────
+	/** Save the normalized cache without invoking DataParser. */
+	UPROPERTY(EditAnywhere, Category = "Google Sheet|Config",
+		meta = (EditCondition = "bSaveNormalizedJson", ToolTip = "Fetch only refreshes the normalized cache for DataForge."))
+	bool bSkipDataParser = false;
+
+	/** Notify DataForge after a successful cache refresh. Enabled by default for immediate RuleSet Preview and Apply. */
+	UPROPERTY(EditAnywhere, Category = "Google Sheet|Automation",
+		meta = (EditCondition = "bSaveNormalizedJson", ToolTip = "Immediately Preview and Apply every DataForge RuleSet that references this config after Fetch succeeds."))
+	bool bAutoApplyDataForge = true;
+
 #if WITH_EDITORONLY_DATA
-	UPROPERTY(VisibleAnywhere, Transient, Category="Google Sheet|Status")
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Google Sheet|Status")
 	EFetchStatus FetchStatus = EFetchStatus::None;
 
-	UPROPERTY(VisibleAnywhere, Transient, Category="Google Sheet|Status")
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Google Sheet|Status")
 	FString LastMessage;
 
-	UPROPERTY(VisibleAnywhere, Transient, Category="Google Sheet|Status")
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Google Sheet|Status")
 	FString LastFetchTime;
 
-	UPROPERTY(VisibleAnywhere, Transient, Category="Google Sheet|Status")
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Google Sheet|Status")
 	FString LastNormalizedJsonPath;
 #endif
 
-public:
 #if WITH_EDITOR
-	// URL에서 Spreadsheet ID 파싱
+	static FOnGoogleSheetCacheUpdated& OnCacheUpdated();
+	UGoogleSheetParserBase* GetActiveParser() const { return DataParser.Get(); }
 	FString GetSpreadsheetID() const;
-
-	// 범위 문자열 조합 반환 (예: A1:Z100)
 	FString GetRangeString() const;
-
-	// URL에서 시트 gid를 찾아 반환
 	FString GetSheetGid() const;
-
-	// 실제 페치 실행
 	void Fetch();
 #endif
 };
