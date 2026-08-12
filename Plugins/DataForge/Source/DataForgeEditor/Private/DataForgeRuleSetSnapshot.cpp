@@ -8,7 +8,7 @@
 
 namespace DataForgeRuleSetSnapshot
 {
-	constexpr int32 SnapshotVersion = 2;
+	constexpr int32 SnapshotVersion = 3;
 
 	struct FParameter
 	{
@@ -55,6 +55,14 @@ namespace DataForgeRuleSetSnapshot
 		bool bRequired = true;
 	};
 
+	struct FProfileRuleOrigin
+	{
+		FString GroupTemplateId;
+		FString RuleTemplateId;
+		FAssetRule Baseline;
+		TArray<FString> OverrideFields;
+	};
+
 	struct FSnapshot
 	{
 		FString RuleSetPath;
@@ -74,6 +82,12 @@ namespace DataForgeRuleSetSnapshot
 		bool bCreateIfMissing = true;
 		bool bRemoveRowsMissingFromSource = false;
 		bool bSaveAfterApply = true;
+		FString ProfilePath;
+		FString ProfileId;
+		int32 MaterializedProfileVersion = 0;
+		FString MaterializedProfileHash;
+		TArray<FParameter> ProfileParameters;
+		TArray<FProfileRuleOrigin> ProfileRules;
 		TArray<FAssetRule> AssetRules;
 		TArray<FGeneratedOutput> GeneratedOutputs;
 		TArray<FBinding> Bindings;
@@ -128,6 +142,46 @@ namespace DataForgeRuleSetSnapshot
 		Snapshot.bCreateIfMissing = RuleSet.Output.bCreateIfMissing;
 		Snapshot.bRemoveRowsMissingFromSource = RuleSet.Output.bRemoveRowsMissingFromSource;
 		Snapshot.bSaveAfterApply = RuleSet.Output.bSaveAfterApply;
+		Snapshot.ProfilePath = RuleSet.ProfileOrigin.Profile.ToSoftObjectPath().ToString();
+		Snapshot.ProfileId = RuleSet.ProfileOrigin.ProfileId.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Snapshot.MaterializedProfileVersion = RuleSet.ProfileOrigin.MaterializedVersion;
+		Snapshot.MaterializedProfileHash = RuleSet.ProfileOrigin.MaterializedHash;
+		for (const TPair<FName, FString>& Pair : RuleSet.ProfileOrigin.ParameterValues)
+		{
+			Snapshot.ProfileParameters.Add({ Pair.Key.ToString(), Pair.Value });
+		}
+		Snapshot.ProfileParameters.Sort([](const FParameter& Left, const FParameter& Right) { return Left.Key < Right.Key; });
+		for (const FDataForgeMaterializedRuleOrigin& Origin : RuleSet.ProfileOrigin.Rules)
+		{
+			FProfileRuleOrigin& SnapshotOrigin = Snapshot.ProfileRules.AddDefaulted_GetRef();
+			SnapshotOrigin.GroupTemplateId = Origin.GroupTemplateId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			SnapshotOrigin.RuleTemplateId = Origin.RuleTemplateId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			SnapshotOrigin.Baseline = {
+				Origin.BaselineRule.RuleId.ToString(),
+				EnumName(StaticEnum<EDataForgeAssetOwnership>(), static_cast<int64>(Origin.BaselineRule.Ownership)),
+				Origin.BaselineRule.BaseFolder,
+				Origin.BaselineRule.SubfolderPattern,
+				Origin.BaselineRule.AssetNamePattern };
+			const FDataForgeAssetRule* Current = RuleSet.AssetRules.FindByPredicate([&Origin](const FDataForgeAssetRule& Rule)
+			{
+				return Rule.RuleId == Origin.BaselineRule.RuleId;
+			});
+			if (!Current)
+			{
+				SnapshotOrigin.OverrideFields.Add(TEXT("Missing"));
+			}
+			else
+			{
+				if (Current->Ownership != Origin.BaselineRule.Ownership) SnapshotOrigin.OverrideFields.Add(TEXT("Ownership"));
+				if (Current->BaseFolder != Origin.BaselineRule.BaseFolder) SnapshotOrigin.OverrideFields.Add(TEXT("BaseFolder"));
+				if (Current->SubfolderPattern != Origin.BaselineRule.SubfolderPattern) SnapshotOrigin.OverrideFields.Add(TEXT("SubfolderPattern"));
+				if (Current->AssetNamePattern != Origin.BaselineRule.AssetNamePattern) SnapshotOrigin.OverrideFields.Add(TEXT("AssetNamePattern"));
+			}
+		}
+		Snapshot.ProfileRules.Sort([](const FProfileRuleOrigin& Left, const FProfileRuleOrigin& Right)
+		{
+			return Left.RuleTemplateId < Right.RuleTemplateId;
+		});
 
 		for (const FDataForgeAssetRule& Rule : RuleSet.AssetRules)
 		{
@@ -314,6 +368,35 @@ FString FDataForgeRuleSetSnapshot::SerializeJson(const UDataForgeRuleSet& RuleSe
 	Writer->WriteValue(TEXT("saveAfterApply"), Snapshot.bSaveAfterApply);
 	Writer->WriteObjectEnd();
 
+	Writer->WriteObjectStart(TEXT("profileOrigin"));
+	Writer->WriteValue(TEXT("profilePath"), Snapshot.ProfilePath);
+	Writer->WriteValue(TEXT("profileId"), Snapshot.ProfileId);
+	Writer->WriteValue(TEXT("materializedVersion"), Snapshot.MaterializedProfileVersion);
+	Writer->WriteValue(TEXT("materializedHash"), Snapshot.MaterializedProfileHash);
+	Writer->WriteObjectStart(TEXT("parameterValues"));
+	for (const FParameter& Parameter : Snapshot.ProfileParameters) Writer->WriteValue(Parameter.Key, Parameter.Value);
+	Writer->WriteObjectEnd();
+	Writer->WriteArrayStart(TEXT("rules"));
+	for (const FProfileRuleOrigin& Origin : Snapshot.ProfileRules)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("groupTemplateId"), Origin.GroupTemplateId);
+		Writer->WriteValue(TEXT("ruleTemplateId"), Origin.RuleTemplateId);
+		Writer->WriteObjectStart(TEXT("baseline"));
+		Writer->WriteValue(TEXT("ruleId"), Origin.Baseline.RuleId);
+		Writer->WriteValue(TEXT("ownership"), Origin.Baseline.Ownership);
+		Writer->WriteValue(TEXT("baseFolder"), Origin.Baseline.BaseFolder);
+		Writer->WriteValue(TEXT("subfolderPattern"), Origin.Baseline.SubfolderPattern);
+		Writer->WriteValue(TEXT("assetNamePattern"), Origin.Baseline.AssetNamePattern);
+		Writer->WriteObjectEnd();
+		Writer->WriteArrayStart(TEXT("overrideFields"));
+		for (const FString& Field : Origin.OverrideFields) Writer->WriteValue(Field);
+		Writer->WriteArrayEnd();
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteObjectEnd();
+
 	Writer->WriteArrayStart(TEXT("assetRules"));
 	for (const FAssetRule& Rule : Snapshot.AssetRules)
 	{
@@ -438,6 +521,52 @@ FString FDataForgeRuleSetSnapshot::SerializeYaml(const UDataForgeRuleSet& RuleSe
 	AddYamlBool(Yaml, 2, TEXT("createIfMissing"), Snapshot.bCreateIfMissing);
 	AddYamlBool(Yaml, 2, TEXT("removeRowsMissingFromSource"), Snapshot.bRemoveRowsMissingFromSource);
 	AddYamlBool(Yaml, 2, TEXT("saveAfterApply"), Snapshot.bSaveAfterApply);
+
+	Yaml += TEXT("profileOrigin:\n");
+	AddYamlString(Yaml, 2, TEXT("profilePath"), Snapshot.ProfilePath);
+	AddYamlString(Yaml, 2, TEXT("profileId"), Snapshot.ProfileId);
+	Yaml += FString::Printf(TEXT("  materializedVersion: %d\n"), Snapshot.MaterializedProfileVersion);
+	AddYamlString(Yaml, 2, TEXT("materializedHash"), Snapshot.MaterializedProfileHash);
+	if (Snapshot.ProfileParameters.IsEmpty())
+	{
+		Yaml += TEXT("  parameterValues: {}\n");
+	}
+	else
+	{
+		Yaml += TEXT("  parameterValues:\n");
+		for (const FParameter& Parameter : Snapshot.ProfileParameters)
+		{
+			Yaml += TEXT("    ") + JsonString(Parameter.Key) + TEXT(": ") + JsonString(Parameter.Value) + TEXT("\n");
+		}
+	}
+	if (Snapshot.ProfileRules.IsEmpty())
+	{
+		Yaml += TEXT("  rules: []\n");
+	}
+	else
+	{
+		Yaml += TEXT("  rules:\n");
+		for (const FProfileRuleOrigin& Origin : Snapshot.ProfileRules)
+		{
+			Yaml += TEXT("    - groupTemplateId: ") + JsonString(Origin.GroupTemplateId) + TEXT("\n");
+			AddYamlString(Yaml, 6, TEXT("ruleTemplateId"), Origin.RuleTemplateId);
+			Yaml += TEXT("      baseline:\n");
+			AddYamlString(Yaml, 8, TEXT("ruleId"), Origin.Baseline.RuleId);
+			AddYamlString(Yaml, 8, TEXT("ownership"), Origin.Baseline.Ownership);
+			AddYamlString(Yaml, 8, TEXT("baseFolder"), Origin.Baseline.BaseFolder);
+			AddYamlString(Yaml, 8, TEXT("subfolderPattern"), Origin.Baseline.SubfolderPattern);
+			AddYamlString(Yaml, 8, TEXT("assetNamePattern"), Origin.Baseline.AssetNamePattern);
+			if (Origin.OverrideFields.IsEmpty())
+			{
+				Yaml += TEXT("      overrideFields: []\n");
+			}
+			else
+			{
+				Yaml += TEXT("      overrideFields:\n");
+				for (const FString& Field : Origin.OverrideFields) Yaml += TEXT("        - ") + JsonString(Field) + TEXT("\n");
+			}
+		}
+	}
 
 	if (Snapshot.AssetRules.IsEmpty())
 	{
