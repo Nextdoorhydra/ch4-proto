@@ -41,3 +41,15 @@ struct FDataForgeEditorAutoMapRow : public FTableRowBase
 	UPROPERTY(Transient)
 	FString TransientValue;
 };
+
+USTRUCT()
+struct FDataForgeEditorGeneratedOutputRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere)
+	FString DisplayName;
+
+	UPROPERTY(EditAnywhere)
+	TSoftObjectPtr<UDataForgeEditorManagedAsset> Data;
+};

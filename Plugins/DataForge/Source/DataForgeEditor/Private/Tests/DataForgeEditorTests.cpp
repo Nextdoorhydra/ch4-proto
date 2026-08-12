@@ -450,14 +450,45 @@ bool FDataForgeRuleCreationWorkflowTest::RunTest(const FString& Parameters)
 	Workflow.NotifyDraftChanged(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Schema));
 	TestTrue(TEXT("Explicit primary key advances to Output"), Workflow.Next(Reason));
 	TestTrue(TEXT("Valid output advances to Bindings"), Workflow.Next(Reason));
-	TestEqual(TEXT("Auto Map adds both matching fields"), Workflow.AutoMapExactNames(), 2);
+	TestEqual(TEXT("Entering Bindings automatically maps both matching fields"), Workflow.GetDraft().Bindings.Num(), 2);
+	TestEqual(TEXT("Repeated Auto Map does not duplicate bindings"), Workflow.AutoMapExactNames(), 0);
 	TestTrue(TEXT("Bindings advance to Preview"), Workflow.Next(Reason));
 	TestTrue(TEXT("Mutation-free Preview succeeds"), Workflow.Preview().bSuccess);
 	TestTrue(TEXT("Finish commits staged draft"), Workflow.Finish(Reason));
 	TestEqual(TEXT("Committed primary key reaches target"), Target->Schema.PrimaryKey, FName(TEXT("DisplayName")));
 	TestEqual(TEXT("Committed bindings reach target"), Target->Bindings.Num(), 2);
+	TestNotNull(TEXT("Finish automatically creates the configured DataTable"),
+		FindObject<UDataTable>(nullptr, TEXT("/Game/DataForgeTests/DT_RuleCreationWorkflow.DT_RuleCreationWorkflow")));
 
 	IFileManager::Get().Delete(*CsvFilename, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeGeneratedOutputAutoMapTest,
+	"DataForge.Editor.Authoring.GeneratedOutputAutoMap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeGeneratedOutputAutoMapTest::RunTest(const FString& Parameters)
+{
+	TStrongObjectPtr<UDataForgeRuleSet> RuleSet(NewObject<UDataForgeRuleSet>(GetTransientPackage()));
+	RuleSet->Output.RowStruct = FDataForgeEditorGeneratedOutputRow::StaticStruct();
+	FDataForgeGeneratedAssetOutputRule& Output = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("Data");
+	Output.AssetClass = UDataForgeEditorManagedAsset::StaticClass();
+
+	TestEqual(TEXT("Source column and same-name Generated Output are both inferred"),
+		FDataForgeEditorService::AutoMapExactNames(*RuleSet, { TEXT("DisplayName") }), 2);
+	TestTrue(TEXT("Generated Output binds to its same-name soft reference field"),
+		RuleSet->Bindings.ContainsByPredicate([](const FDataForgeBindingRule& Binding)
+		{
+			return Binding.Source == EDataForgeBindingSource::GeneratedOutput
+				&& Binding.SourceOutput == TEXT("Data")
+				&& Binding.Target == EDataForgeBindingTarget::DataTableRow
+				&& Binding.TargetProperty.Equals(TEXT("Data"));
+		}));
+	TestEqual(TEXT("Repeated inference remains duplicate-free"),
+		FDataForgeEditorService::AutoMapExactNames(*RuleSet, { TEXT("DisplayName") }), 0);
 	return true;
 }
 

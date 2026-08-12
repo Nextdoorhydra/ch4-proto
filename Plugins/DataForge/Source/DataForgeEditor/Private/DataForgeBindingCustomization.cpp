@@ -38,6 +38,7 @@ void FDataForgeBindingCustomization::CustomizeChildren(
 	IPropertyTypeCustomizationUtils& StructCustomizationUtils)
 {
 	TargetHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, Target));
+	SourceHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, Source));
 	TargetOutputHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, TargetOutput));
 	TargetPropertyHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, TargetProperty));
 
@@ -50,7 +51,32 @@ void FDataForgeBindingCustomization::CustomizeChildren(
 		{
 			continue;
 		}
-		if (Child->GetProperty()->GetFName() != GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, TargetProperty))
+		const FName ChildName = Child->GetProperty()->GetFName();
+		if (ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, SourceOutput)
+			|| ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, TargetOutput))
+		{
+			const TSharedPtr<IPropertyHandle> OutputHandle = Child;
+			StructBuilder.AddCustomRow(LOCTEXT("OutputSearch", "Generated Output Pick"))
+			.Visibility(ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, SourceOutput)
+				? TAttribute<EVisibility>::CreateSP(this, &FDataForgeBindingCustomization::GetSourceOutputVisibility)
+				: TAttribute<EVisibility>::CreateSP(this, &FDataForgeBindingCustomization::GetTargetOutputVisibility))
+			.NameContent()
+			[
+				Child->CreatePropertyNameWidget()
+			]
+			.ValueContent()
+			.MinDesiredWidth(320.0f)
+			[
+				SNew(SComboButton)
+				.ButtonContent()
+				[
+					SNew(STextBlock).Text(this, &FDataForgeBindingCustomization::GetSelectedOutputText, OutputHandle)
+				]
+				.OnGetMenuContent(this, &FDataForgeBindingCustomization::BuildOutputMenu, OutputHandle)
+			];
+			continue;
+		}
+		if (ChildName != GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, TargetProperty))
 		{
 			StructBuilder.AddProperty(Child.ToSharedRef());
 			continue;
@@ -90,6 +116,65 @@ void FDataForgeBindingCustomization::CustomizeChildren(
 			SNew(STextBlock).Text(this, &FDataForgeBindingCustomization::GetConversionSuggestionText).AutoWrapText(true)
 		];
 	}
+}
+
+TSharedRef<SWidget> FDataForgeBindingCustomization::BuildOutputMenu(TSharedPtr<IPropertyHandle> OutputHandle) const
+{
+	FMenuBuilder MenuBuilder(true, nullptr);
+	const UDataForgeRuleSet* RuleSet = FindRuleSet();
+	if (!OutputHandle.IsValid() || !RuleSet || RuleSet->GeneratedOutputs.IsEmpty())
+	{
+		MenuBuilder.AddMenuEntry(LOCTEXT("NoGeneratedOutputs", "No Generated Outputs configured"), FText::GetEmpty(), FSlateIcon(), FUIAction());
+		return MenuBuilder.MakeWidget();
+	}
+
+	for (const FDataForgeGeneratedAssetOutputRule& Output : RuleSet->GeneratedOutputs)
+	{
+		if (Output.OutputName.IsNone())
+		{
+			continue;
+		}
+		const FName OutputName = Output.OutputName;
+		MenuBuilder.AddMenuEntry(
+			FText::FromName(OutputName),
+			FText::Format(LOCTEXT("GeneratedOutputTooltip", "Use Generated Output '{0}'."), FText::FromName(OutputName)),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([OutputHandle, Utilities = PropertyUtilities, OutputName]()
+			{
+				OutputHandle->SetValue(OutputName);
+				if (Utilities.IsValid())
+				{
+					Utilities->ForceRefresh();
+				}
+			})));
+	}
+	return MenuBuilder.MakeWidget();
+}
+
+FText FDataForgeBindingCustomization::GetSelectedOutputText(TSharedPtr<IPropertyHandle> OutputHandle) const
+{
+	FName OutputName;
+	if (!OutputHandle.IsValid() || OutputHandle->GetValue(OutputName) != FPropertyAccess::Success || OutputName.IsNone())
+	{
+		return LOCTEXT("SelectGeneratedOutput", "Select Generated Output");
+	}
+	return FText::FromName(OutputName);
+}
+
+EVisibility FDataForgeBindingCustomization::GetSourceOutputVisibility() const
+{
+	uint8 Value = static_cast<uint8>(EDataForgeBindingSource::SourceValue);
+	return SourceHandle.IsValid() && SourceHandle->GetValue(Value) == FPropertyAccess::Success
+		&& static_cast<EDataForgeBindingSource>(Value) == EDataForgeBindingSource::GeneratedOutput
+		? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility FDataForgeBindingCustomization::GetTargetOutputVisibility() const
+{
+	uint8 Value = static_cast<uint8>(EDataForgeBindingTarget::DataTableRow);
+	return TargetHandle.IsValid() && TargetHandle->GetValue(Value) == FPropertyAccess::Success
+		&& static_cast<EDataForgeBindingTarget>(Value) == EDataForgeBindingTarget::GeneratedOutput
+		? EVisibility::Visible : EVisibility::Collapsed;
 }
 
 TSharedRef<SWidget> FDataForgeBindingCustomization::BuildPropertyMenu() const

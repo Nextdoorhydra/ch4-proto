@@ -913,6 +913,36 @@ int32 FDataForgeEditorService::AutoMapExactNames(UDataForgeRuleSet& RuleSet, con
 	const FScopedTransaction Transaction(LOCTEXT("AutoMapTransaction", "Auto Map DataForge Bindings"));
 	RuleSet.Modify();
 	int32 AddedCount = 0;
+	for (const FDataForgeGeneratedAssetOutputRule& Output : RuleSet.GeneratedOutputs)
+	{
+		if (Output.OutputName.IsNone())
+		{
+			continue;
+		}
+		FProperty* Property = FindFProperty<FProperty>(RuleSet.Output.RowStruct, Output.OutputName);
+		if (!CastField<FSoftObjectProperty>(Property)
+			|| !Property->HasAnyPropertyFlags(CPF_Edit)
+			|| Property->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated))
+		{
+			continue;
+		}
+		const bool bAlreadyMapped = RuleSet.Bindings.ContainsByPredicate([&Output](const FDataForgeBindingRule& Binding)
+		{
+			return Binding.Target == EDataForgeBindingTarget::DataTableRow
+				&& Binding.TargetProperty.Equals(Output.OutputName.ToString(), ESearchCase::IgnoreCase);
+		});
+		if (bAlreadyMapped)
+		{
+			continue;
+		}
+
+		FDataForgeBindingRule& Binding = RuleSet.Bindings.AddDefaulted_GetRef();
+		Binding.Source = EDataForgeBindingSource::GeneratedOutput;
+		Binding.SourceOutput = Output.OutputName;
+		Binding.Target = EDataForgeBindingTarget::DataTableRow;
+		Binding.TargetProperty = Output.OutputName.ToString();
+		++AddedCount;
+	}
 	for (const FName Column : SourceColumns)
 	{
 		FProperty* Property = FindFProperty<FProperty>(RuleSet.Output.RowStruct, Column);
@@ -940,7 +970,7 @@ int32 FDataForgeEditorService::AutoMapExactNames(UDataForgeRuleSet& RuleSet, con
 
 #if WITH_EDITORONLY_DATA
 	RuleSet.LastStatus = TEXT("Draft");
-	RuleSet.LastSummary = FString::Printf(TEXT("Auto Map added %d exact-name row bindings. Review and Preview before Apply."), AddedCount);
+	RuleSet.LastSummary = FString::Printf(TEXT("Auto Map added %d exact-name source/output bindings. Review and Preview before Apply."), AddedCount);
 #endif
 	if (RuleSet.GetPackage() != GetTransientPackage())
 	{

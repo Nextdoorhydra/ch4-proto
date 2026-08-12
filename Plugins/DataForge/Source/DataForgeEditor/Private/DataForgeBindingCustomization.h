@@ -26,12 +26,17 @@ public:
 
 private:
 	TSharedRef<SWidget> BuildPropertyMenu() const;
+	TSharedRef<SWidget> BuildOutputMenu(TSharedPtr<IPropertyHandle> OutputHandle) const;
+	FText GetSelectedOutputText(TSharedPtr<IPropertyHandle> OutputHandle) const;
+	EVisibility GetSourceOutputVisibility() const;
+	EVisibility GetTargetOutputVisibility() const;
 	UDataForgeRuleSet* FindRuleSet() const;
 	const FDataForgeBindingRule* GetBinding() const;
 	FText GetConversionSuggestionText() const;
 	void CollectWritableProperties(UStruct* Struct, const FString& Prefix, int32 Depth, TArray<TPair<FString, FString>>& OutProperties) const;
 
 	TSharedPtr<IPropertyHandle> StructHandle;
+	TSharedPtr<IPropertyHandle> SourceHandle;
 	TSharedPtr<IPropertyHandle> TargetHandle;
 	TSharedPtr<IPropertyHandle> TargetOutputHandle;
 	TSharedPtr<IPropertyHandle> TargetPropertyHandle;
