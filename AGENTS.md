@@ -18,3 +18,18 @@ DataForge.MCP.CreateRuleSetFromGoogleParser Config=/Game/Path/GS_Config
 - After execution, verify that the returned RuleSet and DataTable object paths exist. Report detected column and binding counts from the `[DataForge MCP]` log line.
 
 Detailed command examples and responsibility boundaries are in `Docs/DataForge_MCP_Guide.md`.
+
+### Structured RuleSet requests
+
+When the request includes Managed PDA/DA outputs, external asset lookup rules, or explicit bindings, convert it to the JSON contract in `Docs/DataForge_MCP_Guide.md`. Write the temporary spec under `Saved/DataForge/McpRequests`, then execute:
+
+```text
+DataForge.MCP.CreateRuleSetFromGoogleParser Spec=Saved/DataForge/McpRequests/<request>.json
+```
+
+- Resolve referenced config assets, Row Structs, DataAsset classes, and destination paths before writing the spec. Never guess an Unreal object/class path from a display name.
+- Preserve the user's source column spelling in `{Column}` tokens and bindings; tokens are case-sensitive.
+- Define Asset Rules before Generated Outputs. A Generated Output must select a `Managed` Asset Rule.
+- Use `ResolvedAsset` plus an `External` Asset Rule for textures, meshes, and other project-owned assets.
+- Add explicit bindings only for relationships that exact-name inference cannot produce. The bootstrap automatically adds exact-name source-to-row, source-to-generated-output, and generated-output-to-row bindings.
+- Do not leave the JSON spec as a substitute for verification. After the command, verify the RuleSet, DataTable, and requested generated/external references and report the `[DataForge MCP]` result.

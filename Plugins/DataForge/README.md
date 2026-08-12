@@ -74,7 +74,7 @@ The Source UI shows only the field consumed by the selected adapter: CSV/JSON us
 
 Fetch remains the explicit network trigger. When automatic application is enabled, DataForge still performs a fresh validation Preview internally before it mutates project assets.
 
-As of 1.3, new GoogleSheetConfig assets enable **Save Normalized Json** and **Auto Apply DataForge** by default. A successful Fetch broadcasts the cache update, discovers every direct or Multi Source RuleSet referencing that config, runs a fresh Preview, and immediately Applies when validation succeeds. Preview/foreign-key/schema failures block only the affected RuleSet and are appended to the Google Sheet status. Existing config assets keep their serialized option values, so enable both options once when upgrading an existing asset.
+As of 1.4, new GoogleSheetConfig assets enable **Save Normalized Json** and **Auto Apply DataForge** by default. A successful Fetch broadcasts the cache update, discovers every direct or Multi Source RuleSet referencing that config, runs a fresh Preview, and immediately Applies when validation succeeds. Preview/foreign-key/schema failures block only the affected RuleSet and are appended to the Google Sheet status. Existing config assets keep their serialized option values, so enable both options once when upgrading an existing asset.
 
 For MCP-assisted initial creation, call the project command through the canonical `system_control.console_command` capability:
 
@@ -83,6 +83,14 @@ DataForge.MCP.CreateRuleSetFromGoogleParser Config=/Game/Data/GS_Items
 ```
 
 The command reuses the parser's TargetTable when available, probes the normalized cache, infers schema and bindings, previews, applies, saves, and enables Google auto-apply. It refuses to overwrite an existing RuleSet; subsequent maintenance belongs in the RuleSet Editor. Cache-only parsers must also provide `RowStruct=` and `Output=`. See `Docs/DataForge_MCP_Guide.md` and the project `AGENTS.md` for the MCP contract.
+
+Requests that also define Managed PDA/DA outputs, external texture/mesh lookups, or explicit bindings use a validated JSON spec instead of fragile repeated console arguments:
+
+```text
+DataForge.MCP.CreateRuleSetFromGoogleParser Spec=Saved/DataForge/McpRequests/items.json
+```
+
+The same atomic bootstrap parses the complete spec, probes the source, adds exact-name bindings, runs Preview, and only then creates/applies the RuleSet. The Korean copy-ready prompt template and JSON schema are in `Docs/DataForge_MCP_Guide.md`.
 
 ## Multi Source foreign-key join
 
