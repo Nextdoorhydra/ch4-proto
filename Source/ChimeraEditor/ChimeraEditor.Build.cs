@@ -11,6 +11,8 @@ public class ChimeraEditor : ModuleRules
             {
                 "Core",
                 "Chimera",
+                "DataForgeCore",
+                "DataForgeEditor",
                 "GoogleSheetLoader", 
                 "UnrealEd"
             }
@@ -21,6 +23,7 @@ public class ChimeraEditor : ModuleRules
             {
                 "CoreUObject",
                 "Engine",
+                "AssetRegistry",
                 "Slate",
                 "SlateCore"
             }

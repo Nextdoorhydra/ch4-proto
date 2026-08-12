@@ -150,6 +150,12 @@ FString UGoogleSheetConfig::GetRangeString() const
         *RangeTo.TrimStartAndEnd());
 }
 
+FOnGoogleSheetCacheUpdated& UGoogleSheetConfig::OnCacheUpdated()
+{
+	static FOnGoogleSheetCacheUpdated Delegate;
+	return Delegate;
+}
+
 FString UGoogleSheetConfig::GetSheetGid() const
 {
     const FString GidMarker = TEXT("gid=");
@@ -202,10 +208,17 @@ void UGoogleSheetConfig::Fetch()
         return;
     }
 
-    if (!IsValid(DataParser))
+    if (bSkipDataParser && !bSaveNormalizedJson)
     {
         FetchStatus = EFetchStatus::Failed;
-        LastMessage = TEXT("DataParser is empty.");
+        LastMessage = TEXT("Skip DataParser requires Save Normalized Json.");
+        return;
+    }
+
+    if (!bSkipDataParser && !IsValid(GetActiveParser()) && !bSaveNormalizedJson)
+    {
+        FetchStatus = EFetchStatus::Failed;
+        LastMessage = TEXT("Configure a DataParser or enable Save Normalized Json for cache-only Fetch.");
         return;
     }
 
@@ -244,10 +257,10 @@ void UGoogleSheetConfig::Fetch()
                 return;
             }
 
-            if (!IsValid(DataParser))
+            if (!bSkipDataParser && !IsValid(GetActiveParser()) && !bSaveNormalizedJson)
             {
                 FetchStatus = EFetchStatus::Failed;
-                LastMessage = TEXT("DataParser is empty.");
+                LastMessage = TEXT("Configure a DataParser or enable Save Normalized Json for cache-only Fetch.");
                 return;
             }
 
@@ -279,7 +292,7 @@ void UGoogleSheetConfig::Fetch()
             }
 
             FString ParseMessage;
-            if (!DataParser->Parse(NormalizedJson, ParseMessage))
+            if (!bSkipDataParser && IsValid(GetActiveParser()) && !GetActiveParser()->Parse(NormalizedJson, ParseMessage))
             {
                 FetchStatus = EFetchStatus::Failed;
                 LastMessage = ParseMessage.IsEmpty()
@@ -298,6 +311,11 @@ void UGoogleSheetConfig::Fetch()
                 TEXT("Success - %d rows, %d columns"),
                 TableData.Rows.Num(),
                 TableData.Headers.Num());
+
+			if (bSaveNormalizedJson && bAutoApplyDataForge)
+			{
+				OnCacheUpdated().Broadcast(*this);
+			}
         });
 
     if (!Req->ProcessRequest())

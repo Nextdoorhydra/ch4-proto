@@ -8,4 +8,8 @@ class FChimeraEditorModule : public IModuleInterface
 public:
     virtual void StartupModule() override;
     virtual void ShutdownModule() override;
+
+private:
+	void OnGoogleSheetCacheUpdated(class UGoogleSheetConfig& Config);
+	FDelegateHandle GoogleSheetCacheUpdatedHandle;
 };
