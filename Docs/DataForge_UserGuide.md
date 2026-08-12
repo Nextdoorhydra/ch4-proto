@@ -174,6 +174,9 @@ Project Overview에서 모든 RuleSet의 경로, source/provider, DataTable outp
 ```text
 UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -ValidateOnly
 UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -ValidateOnly -FailOnChanges
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -ValidateOnly -FailOnOutdatedProfiles
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -Profile=/Game/DataForge/Profiles/ALP_Character -Rebase -ValidateOnly
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -Profile=/Game/DataForge/Profiles/ALP_Character -Rebase -Apply
 UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -RuleSet=/Game/Data/RS_Items -Apply
 ```
 

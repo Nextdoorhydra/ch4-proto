@@ -156,6 +156,9 @@ Spec 전체를 파싱·검증한 뒤 Probe, schema 추론, exact-name binding, P
 ## 12. 검증과 운영
 
 - 전체 validation: `UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -ValidateOnly`
+- Profile drift CI: 위 명령에 `-FailOnOutdatedProfiles`
+- Profile batch rebase preview: `-Profile=/Game/.../ALP_Name -Rebase -ValidateOnly`
+- 명시적 Profile batch apply: `-Profile=/Game/.../ALP_Name -Rebase -Apply`
 - 변경 감지 CI: 위 명령에 `-FailOnChanges`
 - 단일 Apply: `-RuleSet=/Game/.../RS_Name -Apply`
 - 전체 자동화 테스트: `Automation RunTests DataForge`
