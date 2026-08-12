@@ -3,6 +3,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DataForgeCore.h"
 #include "DataForge/DataForgeMcpCommands.h"
+#include "DataForgeAutoReconciler.h"
 #include "DataForgeEditorService.h"
 #include "DataForgePipeline.h"
 #include "DataForgeRuleSet.h"
@@ -283,59 +284,77 @@ void FChimeraEditorModule::ShutdownModule()
 
 void FChimeraEditorModule::OnGoogleSheetCacheUpdated(UGoogleSheetConfig& Config)
 {
-	const FSoftObjectPath ConfigPath(&Config);
-	TArray<FAssetData> RuleSetAssets;
-	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get()
-		.GetAssetsByClass(UDataForgeRuleSet::StaticClass()->GetClassPathName(), RuleSetAssets, true);
-	RuleSetAssets.Sort([](const FAssetData& Left, const FAssetData& Right)
+	FDataForgeAutoReconciler& Reconciler = FDataForgeAutoReconciler::Get();
+	const FDataForgeReconcileBatchResult Batch = Reconciler.ReconcileSourceAssetNow(Config, TEXT("Google Sheet cache updated"));
+
+	if (Batch.IsSuccess())
 	{
-		return Left.GetSoftObjectPath().ToString() < Right.GetSoftObjectPath().ToString();
-	});
-
-	int32 AppliedCount = 0;
-	TArray<FString> Failures;
-	for (const FAssetData& AssetData : RuleSetAssets)
-	{
-		UDataForgeRuleSet* RuleSet = Cast<UDataForgeRuleSet>(AssetData.GetAsset());
-		if (!RuleSet) continue;
-
-		if (!ReferencesGoogleSheetConfig(*RuleSet, ConfigPath)) continue;
-
-		const bool bHasDependencies = !RuleSet->Dependencies.IsEmpty();
-		const FDataForgeResult PreviewResult = bHasDependencies
-			? FDataForgeEditorService::PreviewDependencyGraph(*RuleSet)
-			: FDataForgeEditorService::Preview(*RuleSet);
-		if (!PreviewResult.bSuccess)
-		{
-			Failures.Add(FString::Printf(TEXT("%s Preview: %s"), *RuleSet->GetPathName(), *PreviewResult.Summary));
-			continue;
-		}
-
-		const FDataForgeResult ApplyResult = bHasDependencies
-			? FDataForgeEditorService::ApplyDependencyGraph(*RuleSet)
-			: FDataForgeEditorService::Apply(*RuleSet);
-		if (!ApplyResult.bSuccess)
-		{
-			Failures.Add(FString::Printf(TEXT("%s Apply: %s"), *RuleSet->GetPathName(), *ApplyResult.Summary));
-			continue;
-		}
-		++AppliedCount;
-	}
-
-	if (Failures.IsEmpty())
-	{
-		Config.LastMessage += FString::Printf(TEXT(" | DataForge auto-applied %d RuleSet(s)."), AppliedCount);
-		UE_LOG(LogDataForge, Display, TEXT("Google Sheet '%s' auto-applied %d DataForge RuleSet(s)."), *Config.GetPathName(), AppliedCount);
+		Config.LastMessage += FString::Printf(TEXT(" | DataForge auto-applied %d RuleSet(s)."), Batch.AppliedCount);
+		UE_LOG(LogDataForge, Display, TEXT("Google Sheet '%s' auto-applied %d DataForge RuleSet(s)."), *Config.GetPathName(), Batch.AppliedCount);
 	}
 	else
 	{
 		Config.FetchStatus = EFetchStatus::Failed;
-		Config.LastMessage += FString::Printf(TEXT(" | DataForge auto-apply failed after %d success(es): %s"), AppliedCount, *FString::Join(Failures, TEXT("; ")));
-		UE_LOG(LogDataForge, Error, TEXT("Google Sheet '%s' auto-apply failures: %s"), *Config.GetPathName(), *FString::Join(Failures, TEXT("; ")));
+		Config.LastMessage += FString::Printf(TEXT(" | DataForge auto-apply failed after %d success(es): %s"), Batch.AppliedCount, *FString::Join(Batch.Failures, TEXT("; ")));
+		UE_LOG(LogDataForge, Error, TEXT("Google Sheet '%s' auto-apply failures: %s"), *Config.GetPathName(), *FString::Join(Batch.Failures, TEXT("; ")));
 	}
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeMcpSpecParsingTest,
+	"DataForge.Integration.McpStructuredSpecParsing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeMcpSpecParsingTest::RunTest(const FString& Parameters)
+{
+	const FString Json = FString::Printf(TEXT(R"JSON(
+{
+  "config": "/Game/Data/Body/GS_Body",
+  "ruleSet": "/Game/Data/Body/RS_Body",
+  "primaryKey": "ID",
+  "assetRules": [
+    {"id":"BodyData","ownership":"Managed","baseFolder":"/Game/Data/Body","assetNamePattern":"DA_{ID}"},
+    {"id":"Icon","ownership":"External","baseFolder":"/Game/Data/Texture","assetNamePattern":"T_{ID}"}
+  ],
+  "generatedOutputs": [
+    {"name":"BodyData","type":"DataAsset","class":"%s","assetRule":"BodyData"}
+  ],
+  "bindings": [
+    {"source":"ResolvedAsset","column":"ID","assetRule":"Icon","target":"GeneratedOutput","targetOutput":"BodyData","property":"Icon"},
+    {"source":"GeneratedOutput","sourceOutput":"BodyData","target":"DataTableRow","property":"BodyData"}
+  ]
+}
+)JSON"), *UGoogleDataForgeTestDataAsset::StaticClass()->GetPathName());
+
+	FDataForgeGoogleRuleSetRequest Request;
+	FString Error;
+	TestTrue(TEXT("Structured MCP spec parses"), DataForgeMcpCommands::ParseRequestSpec(Json, Request, Error));
+	TestTrue(TEXT("Structured MCP spec has no parse error"), Error.IsEmpty());
+	TestEqual(TEXT("Config path is preserved"), Request.GoogleParserPath, FString(TEXT("/Game/Data/Body/GS_Body")));
+	TestEqual(TEXT("Both Managed and External Asset Rules are parsed"), Request.AssetRules.Num(), 2);
+	TestEqual(TEXT("Generated Output is parsed"), Request.GeneratedOutputs.Num(), 1);
+	TestEqual(TEXT("Explicit asset and output bindings are parsed"), Request.Bindings.Num(), 2);
+	if (Request.GeneratedOutputs.Num() == 1)
+	{
+		TestEqual(TEXT("Generated Output class resolves"), Request.GeneratedOutputs[0].AssetClass.Get(), UGoogleDataForgeTestDataAsset::StaticClass());
+		TestEqual(TEXT("Generated Output selects its Managed rule"), Request.GeneratedOutputs[0].AssetRuleId, FName(TEXT("BodyData")));
+	}
+	if (Request.Bindings.Num() == 2)
+	{
+		TestEqual(TEXT("Resolved asset binding selects Icon rule"), Request.Bindings[0].AssetRuleId, FName(TEXT("Icon")));
+		TestTrue(TEXT("Absent sourceOutput does not inherit another JSON field"), Request.Bindings[0].SourceOutput.IsNone());
+		TestEqual(TEXT("Generated output binding source is preserved"), Request.Bindings[1].SourceOutput, FName(TEXT("BodyData")));
+	}
+
+	FDataForgeGoogleRuleSetRequest InvalidRequest;
+	TestFalse(TEXT("Invalid ownership is rejected"), DataForgeMcpCommands::ParseRequestSpec(
+		TEXT("{\"config\":\"/Game/GS\",\"ruleSet\":\"/Game/RS\",\"assetRules\":[{\"id\":\"Bad\",\"ownership\":\"Shared\",\"baseFolder\":\"/Game/Data\",\"assetNamePattern\":\"A_{ID}\"}]}"),
+		InvalidRequest, Error));
+	TestTrue(TEXT("Invalid ownership reports a useful error"), Error.Contains(TEXT("Managed or External")));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGoogleSheetCacheDataForgeAdapterTest,
 	"DataForge.Integration.GoogleSheetCache",
@@ -495,11 +514,20 @@ bool FDataForgeMcpGoogleRuleSetBootstrapTest::RunTest(const FString& Parameters)
 	Request.GoogleParserPath = Config->GetPathName();
 	Request.RuleSetPath = RuleSetPackageName;
 	Request.bSaveAssets = false;
+	FDataForgeAssetRule& ManagedRule = Request.AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("DataAsset");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = Root / TEXT("Generated");
+	ManagedRule.AssetNamePattern = TEXT("DA_{Id}");
+	FDataForgeGeneratedAssetOutputRule& GeneratedOutput = Request.GeneratedOutputs.AddDefaulted_GetRef();
+	GeneratedOutput.OutputName = TEXT("DataAsset");
+	GeneratedOutput.AssetClass = UGoogleDataForgeTestDataAsset::StaticClass();
+	GeneratedOutput.AssetRuleId = ManagedRule.RuleId;
 	FDataForgeGoogleRuleSetResult Result;
 	TestTrue(TEXT("MCP bootstrap command succeeds"), DataForgeMcpCommands::CreateRuleSetFromGoogleParser(Request, Result));
 	TestTrue(TEXT("MCP bootstrap reports success"), Result.bSuccess);
 	TestEqual(TEXT("MCP bootstrap detects four columns"), Result.DetectedColumnCount, 4);
-	TestEqual(TEXT("MCP bootstrap infers three editable bindings"), Result.BindingCount, 3);
+	TestEqual(TEXT("MCP bootstrap infers row, generated-property, and generated-reference bindings"), Result.BindingCount, 7);
 
 	UDataForgeRuleSet* RuleSet = FindObject<UDataForgeRuleSet>(nullptr, *(RuleSetPackageName + TEXT(".RS_McpBootstrap")));
 	TestNotNull(TEXT("MCP bootstrap creates a maintainable RuleSet asset"), RuleSet);
@@ -511,6 +539,14 @@ bool FDataForgeMcpGoogleRuleSetBootstrapTest::RunTest(const FString& Parameters)
 	}
 	TestNotNull(TEXT("MCP bootstrap applies the first DataTable row"),
 		TargetTable->FindRow<FGoogleDataForgeTestRow>(TEXT("1"), TEXT("MCP bootstrap test")));
+	UGoogleDataForgeTestDataAsset* GeneratedAsset = FindObject<UGoogleDataForgeTestDataAsset>(nullptr,
+		*(Root / TEXT("Generated/DA_1.DA_1")));
+	TestNotNull(TEXT("Structured bootstrap creates the requested Managed DA"), GeneratedAsset);
+	if (GeneratedAsset)
+	{
+		TestEqual(TEXT("Exact-name source field reaches the Managed DA"), GeneratedAsset->DisplayName, FString(TEXT("MCP Sword")));
+		TestEqual(TEXT("Generated DA receives numeric source data"), GeneratedAsset->Price, 900);
+	}
 	TestTrue(TEXT("MCP bootstrap enables normalized JSON"), Config->bSaveNormalizedJson);
 	TestTrue(TEXT("MCP bootstrap enables DataForge auto apply"), Config->bAutoApplyDataForge);
 
@@ -716,6 +752,10 @@ bool FDataForgePersistentCsvExampleTest::RunTest(const FString& Parameters)
 			FAssetRegistryModule::AssetCreated(Texture);
 			bCreated = true;
 		}
+		if (!bCreated)
+		{
+			return Texture;
+		}
 
 		constexpr int32 Size = 8;
 		TArray<uint8> Pixels;
@@ -752,94 +792,127 @@ bool FDataForgePersistentCsvExampleTest::RunTest(const FString& Parameters)
 	{
 		RuleSet = LoadObject<UDataForgeRuleSet>(nullptr, *RuleSetObjectPath);
 	}
+	const bool bRuleSetCreated = !RuleSet;
 	if (!RuleSet)
 	{
 		UPackage* Package = CreatePackage(*RuleSetPackageName);
 		RuleSet = NewObject<UDataForgeRuleSet>(Package, TEXT("RS_CsvItemExample"), RF_Public | RF_Standalone | RF_Transactional);
-		FAssetRegistryModule::AssetCreated(RuleSet);
-	}
-	RuleSet->Modify();
-	if (!RuleSet->RuleSetId.IsValid()) RuleSet->RuleSetId = FGuid::NewGuid();
-	RuleSet->Source = FDataForgeSourceConfig();
-	RuleSet->Source.AdapterId = TEXT("MultiSource");
-	FDataForgeSourceInput& ItemsInput = RuleSet->Source.Inputs.AddDefaulted_GetRef();
-	ItemsInput.AdapterId = TEXT("Csv");
-	ItemsInput.File.FilePath = ItemsFile;
-	ItemsInput.JoinColumn = TEXT("Id");
-	FDataForgeSourceInput& PricesInput = RuleSet->Source.Inputs.AddDefaulted_GetRef();
-	PricesInput.AdapterId = TEXT("Csv");
-	PricesInput.File.FilePath = PricesFile;
-	PricesInput.JoinColumn = TEXT("ItemId");
-	RuleSet->Schema.PrimaryKey = TEXT("Id");
-	RuleSet->Schema.RequiredColumns = { TEXT("Id"), TEXT("DisplayName"), TEXT("TextureId"), TEXT("Category"), TEXT("Price"), TEXT("Rarity") };
-	RuleSet->Schema.bWarnOnUnmappedColumns = false;
-	RuleSet->Output.RowStruct = FGoogleDataForgeTestRow::StaticStruct();
-	RuleSet->Output.AssetPath = TablePackageName;
-	RuleSet->Output.bCreateIfMissing = true;
-	RuleSet->Output.bSaveAfterApply = true;
-	RuleSet->AssetRules.Reset();
-	RuleSet->GeneratedOutputs.Reset();
-	RuleSet->Bindings.Reset();
+                FAssetRegistryModule::AssetCreated(RuleSet);
+        }
+        if (bRuleSetCreated) {
+          RuleSet->Modify();
+          if (!RuleSet->RuleSetId.IsValid())
+            RuleSet->RuleSetId = FGuid::NewGuid();
+          RuleSet->Source = FDataForgeSourceConfig();
+          RuleSet->Source.AdapterId = TEXT("MultiSource");
+          FDataForgeSourceInput &ItemsInput =
+              RuleSet->Source.Inputs.AddDefaulted_GetRef();
+          ItemsInput.AdapterId = TEXT("Csv");
+          ItemsInput.File.FilePath = ItemsFile;
+          ItemsInput.JoinColumn = TEXT("Id");
+          FDataForgeSourceInput &PricesInput =
+              RuleSet->Source.Inputs.AddDefaulted_GetRef();
+          PricesInput.AdapterId = TEXT("Csv");
+          PricesInput.File.FilePath = PricesFile;
+          PricesInput.JoinColumn = TEXT("ItemId");
+          RuleSet->Schema.PrimaryKey = TEXT("Id");
+          RuleSet->Schema.RequiredColumns = {
+              TEXT("Id"),       TEXT("DisplayName"), TEXT("TextureId"),
+              TEXT("Category"), TEXT("Price"),       TEXT("Rarity")};
+          RuleSet->Schema.bWarnOnUnmappedColumns = false;
+          RuleSet->Output.RowStruct = FGoogleDataForgeTestRow::StaticStruct();
+          RuleSet->Output.AssetPath = TablePackageName;
+          RuleSet->Output.bCreateIfMissing = true;
+          RuleSet->Output.bSaveAfterApply = true;
+          RuleSet->AssetRules.Reset();
+          RuleSet->GeneratedOutputs.Reset();
+          RuleSet->Bindings.Reset();
 
-	FDataForgeAssetRule& TextureRule = RuleSet->AssetRules.AddDefaulted_GetRef();
-	TextureRule.RuleId = TEXT("Texture");
-	TextureRule.Ownership = EDataForgeAssetOwnership::External;
-	TextureRule.BaseFolder = Root / TEXT("Textures");
-	TextureRule.SubfolderPattern = TEXT("{Category}");
-	TextureRule.AssetNamePattern = TEXT("T_{TextureId}");
-	FDataForgeAssetRule& DataRule = RuleSet->AssetRules.AddDefaulted_GetRef();
-	DataRule.RuleId = TEXT("DataAsset");
-	DataRule.Ownership = EDataForgeAssetOwnership::Managed;
-	DataRule.BaseFolder = Root / TEXT("Generated");
-	DataRule.SubfolderPattern = TEXT("{Category}");
-	DataRule.AssetNamePattern = TEXT("DA_{Id}");
-	FDataForgeAssetRule& PrimaryRule = RuleSet->AssetRules.AddDefaulted_GetRef();
-	PrimaryRule.RuleId = TEXT("PrimaryAsset");
-	PrimaryRule.Ownership = EDataForgeAssetOwnership::Managed;
-	PrimaryRule.BaseFolder = Root / TEXT("Generated");
-	PrimaryRule.SubfolderPattern = TEXT("{Category}");
-	PrimaryRule.AssetNamePattern = TEXT("PDA_{Id}");
+          FDataForgeAssetRule &TextureRule =
+              RuleSet->AssetRules.AddDefaulted_GetRef();
+          TextureRule.RuleId = TEXT("Texture");
+          TextureRule.Ownership = EDataForgeAssetOwnership::External;
+          TextureRule.BaseFolder = Root / TEXT("Textures");
+          TextureRule.SubfolderPattern = TEXT("{Category}");
+          TextureRule.AssetNamePattern = TEXT("T_{TextureId}");
+          FDataForgeAssetRule &DataRule =
+              RuleSet->AssetRules.AddDefaulted_GetRef();
+          DataRule.RuleId = TEXT("DataAsset");
+          DataRule.Ownership = EDataForgeAssetOwnership::Managed;
+          DataRule.BaseFolder = Root / TEXT("Generated");
+          DataRule.SubfolderPattern = TEXT("{Category}");
+          DataRule.AssetNamePattern = TEXT("DA_{Id}");
+          FDataForgeAssetRule &PrimaryRule =
+              RuleSet->AssetRules.AddDefaulted_GetRef();
+          PrimaryRule.RuleId = TEXT("PrimaryAsset");
+          PrimaryRule.Ownership = EDataForgeAssetOwnership::Managed;
+          PrimaryRule.BaseFolder = Root / TEXT("Generated");
+          PrimaryRule.SubfolderPattern = TEXT("{Category}");
+          PrimaryRule.AssetNamePattern = TEXT("PDA_{Id}");
 
-	FDataForgeGeneratedAssetOutputRule& DataOutput = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
-	DataOutput.OutputName = TEXT("da");
-	DataOutput.Type = EDataForgeGeneratedAssetType::DataAsset;
-	DataOutput.AssetClass = UGoogleDataForgeTestDataAsset::StaticClass();
-	DataOutput.AssetRuleId = DataRule.RuleId;
-	FDataForgeGeneratedAssetOutputRule& PrimaryOutput = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
-	PrimaryOutput.OutputName = TEXT("pda");
-	PrimaryOutput.Type = EDataForgeGeneratedAssetType::PrimaryDataAsset;
-	PrimaryOutput.AssetClass = UGoogleDataForgeTestPrimaryAsset::StaticClass();
-	PrimaryOutput.AssetRuleId = PrimaryRule.RuleId;
+          FDataForgeGeneratedAssetOutputRule &DataOutput =
+              RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+          DataOutput.OutputName = TEXT("da");
+          DataOutput.Type = EDataForgeGeneratedAssetType::DataAsset;
+          DataOutput.AssetClass = UGoogleDataForgeTestDataAsset::StaticClass();
+          DataOutput.AssetRuleId = DataRule.RuleId;
+          FDataForgeGeneratedAssetOutputRule &PrimaryOutput =
+              RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+          PrimaryOutput.OutputName = TEXT("pda");
+          PrimaryOutput.Type = EDataForgeGeneratedAssetType::PrimaryDataAsset;
+          PrimaryOutput.AssetClass =
+              UGoogleDataForgeTestPrimaryAsset::StaticClass();
+          PrimaryOutput.AssetRuleId = PrimaryRule.RuleId;
 
-	const auto AddBinding = [RuleSet](EDataForgeBindingSource Source, FName SourceColumn, FName SourceOutput,
-		EDataForgeBindingTarget Target, FName TargetOutput, const TCHAR* TargetProperty, FName AssetRuleId = NAME_None)
-	{
-		FDataForgeBindingRule& Binding = RuleSet->Bindings.AddDefaulted_GetRef();
-		Binding.Source = Source;
-		Binding.SourceColumn = SourceColumn;
-		Binding.SourceOutput = SourceOutput;
-		Binding.Target = Target;
-		Binding.TargetOutput = TargetOutput;
-		Binding.TargetProperty = TargetProperty;
-		Binding.AssetRuleId = AssetRuleId;
-	};
-	for (const FName Column : { FName(TEXT("DisplayName")), FName(TEXT("Price")), FName(TEXT("Rarity")), FName(TEXT("Category")) })
-	{
-		AddBinding(EDataForgeBindingSource::SourceValue, Column, NAME_None, EDataForgeBindingTarget::DataTableRow, NAME_None, *Column.ToString());
-	}
-	for (const FName Output : { FName(TEXT("da")), FName(TEXT("pda")) })
-	{
-		AddBinding(EDataForgeBindingSource::SourceValue, TEXT("DisplayName"), NAME_None, EDataForgeBindingTarget::GeneratedOutput, Output, TEXT("DisplayName"));
-		AddBinding(EDataForgeBindingSource::SourceValue, TEXT("Price"), NAME_None, EDataForgeBindingTarget::GeneratedOutput, Output, TEXT("Price"));
-		AddBinding(EDataForgeBindingSource::SourceValue, TEXT("Category"), NAME_None, EDataForgeBindingTarget::GeneratedOutput, Output, TEXT("Category"));
-		AddBinding(EDataForgeBindingSource::ResolvedAsset, TEXT("TextureId"), NAME_None, EDataForgeBindingTarget::GeneratedOutput, Output, TEXT("Icon"), TEXT("Texture"));
-	}
-	AddBinding(EDataForgeBindingSource::GeneratedOutput, NAME_None, TEXT("da"), EDataForgeBindingTarget::DataTableRow, NAME_None, TEXT("DataAsset"));
-	AddBinding(EDataForgeBindingSource::GeneratedOutput, NAME_None, TEXT("pda"), EDataForgeBindingTarget::DataTableRow, NAME_None, TEXT("PrimaryAsset"));
-	RuleSet->MarkPackageDirty();
-	SaveAsset(RuleSet, TEXT("CSV example RuleSet"));
+          const auto AddBinding =
+              [RuleSet](EDataForgeBindingSource Source, FName SourceColumn,
+                        FName SourceOutput, EDataForgeBindingTarget Target,
+                        FName TargetOutput, const TCHAR *TargetProperty,
+                        FName AssetRuleId = NAME_None) {
+                FDataForgeBindingRule &Binding =
+                    RuleSet->Bindings.AddDefaulted_GetRef();
+                Binding.Source = Source;
+                Binding.SourceColumn = SourceColumn;
+                Binding.SourceOutput = SourceOutput;
+                Binding.Target = Target;
+                Binding.TargetOutput = TargetOutput;
+                Binding.TargetProperty = TargetProperty;
+                Binding.AssetRuleId = AssetRuleId;
+              };
+          for (const FName Column :
+               {FName(TEXT("DisplayName")), FName(TEXT("Price")),
+                FName(TEXT("Rarity")), FName(TEXT("Category"))}) {
+            AddBinding(EDataForgeBindingSource::SourceValue, Column, NAME_None,
+                       EDataForgeBindingTarget::DataTableRow, NAME_None,
+                       *Column.ToString());
+          }
+          for (const FName Output : {FName(TEXT("da")), FName(TEXT("pda"))}) {
+            AddBinding(EDataForgeBindingSource::SourceValue,
+                       TEXT("DisplayName"), NAME_None,
+                       EDataForgeBindingTarget::GeneratedOutput, Output,
+                       TEXT("DisplayName"));
+            AddBinding(EDataForgeBindingSource::SourceValue, TEXT("Price"),
+                       NAME_None, EDataForgeBindingTarget::GeneratedOutput,
+                       Output, TEXT("Price"));
+            AddBinding(EDataForgeBindingSource::SourceValue, TEXT("Category"),
+                       NAME_None, EDataForgeBindingTarget::GeneratedOutput,
+                       Output, TEXT("Category"));
+            AddBinding(EDataForgeBindingSource::ResolvedAsset,
+                       TEXT("TextureId"), NAME_None,
+                       EDataForgeBindingTarget::GeneratedOutput, Output,
+                       TEXT("Icon"), TEXT("Texture"));
+          }
+          AddBinding(EDataForgeBindingSource::GeneratedOutput, NAME_None,
+                     TEXT("da"), EDataForgeBindingTarget::DataTableRow,
+                     NAME_None, TEXT("DataAsset"));
+          AddBinding(EDataForgeBindingSource::GeneratedOutput, NAME_None,
+                     TEXT("pda"), EDataForgeBindingTarget::DataTableRow,
+                     NAME_None, TEXT("PrimaryAsset"));
+          RuleSet->MarkPackageDirty();
+          SaveAsset(RuleSet, TEXT("CSV example RuleSet"));
+        }
 
-	const FDataForgeResult Preview = FDataForgeEditorService::Preview(*RuleSet);
+        const FDataForgeResult Preview = FDataForgeEditorService::Preview(*RuleSet);
 	TestTrue(TEXT("CSV example previews without errors"), Preview.bSuccess);
 	const FDataForgeResult Apply = FDataForgeEditorService::Apply(*RuleSet);
 	TestTrue(TEXT("CSV example applies and saves generated assets"), Apply.bSuccess);

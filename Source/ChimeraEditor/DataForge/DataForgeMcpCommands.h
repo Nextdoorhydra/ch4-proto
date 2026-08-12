@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataForgeTypes.h"
 
 class IConsoleObject;
 
@@ -11,6 +12,9 @@ struct FDataForgeGoogleRuleSetRequest
 	FString RowStructPath;
 	FString OutputDataTablePath;
 	FName PrimaryKey = NAME_None;
+	TArray<FDataForgeAssetRule> AssetRules;
+	TArray<FDataForgeGeneratedAssetOutputRule> GeneratedOutputs;
+	TArray<FDataForgeBindingRule> Bindings;
 	bool bApply = true;
 	bool bSaveAssets = true;
 };
@@ -27,6 +31,11 @@ struct FDataForgeGoogleRuleSetResult
 
 namespace DataForgeMcpCommands
 {
+	bool ParseRequestSpec(
+		const FString& Json,
+		FDataForgeGoogleRuleSetRequest& OutRequest,
+		FString& OutError);
+
 	bool CreateRuleSetFromGoogleParser(
 		const FDataForgeGoogleRuleSetRequest& Request,
 		FDataForgeGoogleRuleSetResult& OutResult);

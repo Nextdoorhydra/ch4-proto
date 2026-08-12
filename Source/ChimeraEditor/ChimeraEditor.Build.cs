@@ -24,6 +24,7 @@ public class ChimeraEditor : ModuleRules
                 "CoreUObject",
                 "Engine",
                 "AssetRegistry",
+				"Json",
                 "Slate",
                 "SlateCore"
             }
