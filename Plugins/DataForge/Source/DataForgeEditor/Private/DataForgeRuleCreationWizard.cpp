@@ -146,7 +146,7 @@ namespace DataForgeRuleCreationWizard
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
 					[
-						SNew(SButton).Text(LOCTEXT("Finish", "Finish")).OnClicked(this, &SWizard::OnFinish).Visibility(this, &SWizard::GetFinishVisibility)
+						SNew(SButton).Text(LOCTEXT("Finish", "Finish & Apply")).OnClicked(this, &SWizard::OnFinish).Visibility(this, &SWizard::GetFinishVisibility)
 					]
 				]
 			];
@@ -172,8 +172,8 @@ namespace DataForgeRuleCreationWizard
 			case EDataForgeWizardStep::Probe: return LOCTEXT("ProbeHelp", "Read a bounded sample and normalize it into canonical Parsed Data. Probe never mutates project content.");
 			case EDataForgeWizardStep::Schema: return LOCTEXT("SchemaHelp", "Probe inferred required columns and suggested a primary key. Review the suggestion; choose another detected field when needed.");
 			case EDataForgeWizardStep::Output: return LOCTEXT("OutputHelp", "Select the DataTable row struct and choose a Content Browser destination. Creation, deletion, and save behavior are Advanced options.");
-			case EDataForgeWizardStep::Bindings: return LOCTEXT("BindingsHelp", "Use exact-name Auto Map, then review the mappings. In Asset Rules, {ColumnName} is replaced with that row's value; names are case-sensitive and invalid tokens fail Preview.");
-			case EDataForgeWizardStep::Preview: return LOCTEXT("PreviewHelp", "Compile and inspect the mutation-free desired-state plan. Finish commits only the RuleSet draft; it does not Apply content changes.");
+			case EDataForgeWizardStep::Bindings: return LOCTEXT("BindingsHelp", "Exact-name bindings are inferred automatically when this step opens. Generated Outputs also bind to same-name soft reference fields. Review the mappings; {ColumnName} tokens are case-sensitive.");
+			case EDataForgeWizardStep::Preview: return LOCTEXT("PreviewHelp", "Compile and inspect the mutation-free desired-state plan. Finish saves the RuleSet, runs a fresh Preview, and immediately Applies the generated content.");
 			default: return FText::GetEmpty();
 			}
 		}

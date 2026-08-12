@@ -176,6 +176,10 @@ bool FDataForgeRuleCreationWorkflow::Next(FString& OutReason)
 		return false;
 	}
 	Step = static_cast<EDataForgeWizardStep>(static_cast<uint8>(Step) + 1);
+	if (Step == EDataForgeWizardStep::Bindings)
+	{
+		AutoMapExactNames();
+	}
 	return true;
 }
 
@@ -217,8 +221,8 @@ bool FDataForgeRuleCreationWorkflow::Finish(FString& OutReason)
 	TargetRuleSet->Bindings = DraftRuleSet.Bindings;
 	TargetRuleSet->Dependencies = DraftRuleSet.Dependencies;
 #if WITH_EDITORONLY_DATA
-	TargetRuleSet->LastStatus = TEXT("Draft");
-	TargetRuleSet->LastSummary = TEXT("Wizard configuration committed. Run Preview in the RuleSet editor before Apply.");
+	TargetRuleSet->LastStatus = TEXT("Wizard Committed");
+	TargetRuleSet->LastSummary = TEXT("Wizard configuration committed. Preparing automatic Apply.");
 	TargetRuleSet->LastDetectedColumns = ProbedDataSet.Columns;
 	TargetRuleSet->LastDiagnostics.Reset();
 #endif
@@ -226,7 +230,21 @@ bool FDataForgeRuleCreationWorkflow::Finish(FString& OutReason)
 	{
 		TargetRuleSet->MarkPackageDirty();
 	}
-	OutReason.Reset();
+	const FDataForgeResult PreviewResult = FDataForgeEditorService::Preview(*TargetRuleSet);
+	if (!PreviewResult.bSuccess)
+	{
+		OutReason = TEXT("Configuration was saved, but automatic Apply was blocked: ") + PreviewResult.Summary;
+		return false;
+	}
+
+	const FDataForgeResult ApplyResult = FDataForgeEditorService::Apply(*TargetRuleSet);
+	if (!ApplyResult.bSuccess)
+	{
+		OutReason = TEXT("Configuration was saved, but automatic Apply failed: ") + ApplyResult.Summary;
+		return false;
+	}
+
+	OutReason = ApplyResult.Summary;
 	return true;
 }
 

@@ -59,6 +59,8 @@ void FDataForgeSourceCustomization::CustomizeChildren(TSharedRef<IPropertyHandle
 		{
 			const FName ChildName = Child->GetProperty()->GetFName();
 			if (CurrentAdapter == TEXT("MultiSource") && (ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, File) || ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, SourceAsset))) continue;
+			if (CurrentAdapter == TEXT("GoogleSheetCache") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, File)) continue;
+			if (CurrentAdapter != TEXT("GoogleSheetCache") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, SourceAsset)) continue;
 			if (CurrentAdapter != TEXT("MultiSource") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, Inputs)) continue;
 			StructBuilder.AddProperty(Child.ToSharedRef());
 		}
@@ -85,8 +87,9 @@ void FDataForgeSourceInputCustomization::CustomizeHeader(TSharedRef<IPropertyHan
 		.ValueContent()[StructPropertyHandle->CreatePropertyValueWidget()];
 }
 
-void FDataForgeSourceInputCustomization::CustomizeChildren(TSharedRef<IPropertyHandle> StructPropertyHandle, IDetailChildrenBuilder& StructBuilder, IPropertyTypeCustomizationUtils&)
+void FDataForgeSourceInputCustomization::CustomizeChildren(TSharedRef<IPropertyHandle> StructPropertyHandle, IDetailChildrenBuilder& StructBuilder, IPropertyTypeCustomizationUtils& Utils)
 {
+	PropertyUtilities = Utils.GetPropertyUtilities();
 	AdapterHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, AdapterId));
 	for (const FDataForgeSourceDescriptor& Descriptor : FDataForgeSourceAdapterRegistry::Get().DescribeAll())
 	{
@@ -105,18 +108,28 @@ void FDataForgeSourceInputCustomization::CustomizeChildren(TSharedRef<IPropertyH
 		.OnSelectionChanged(this, &FDataForgeSourceInputCustomization::OnAdapterSelected)
 		[SNew(STextBlock).Text(this, &FDataForgeSourceInputCustomization::GetSelectedAdapterText)]
 	];
+	FName CurrentAdapter;
+	AdapterHandle->GetValue(CurrentAdapter);
 	uint32 ChildCount = 0;
 	StructPropertyHandle->GetNumChildren(ChildCount);
 	for (uint32 Index = 0; Index < ChildCount; ++Index)
 	{
 		TSharedPtr<IPropertyHandle> Child = StructPropertyHandle->GetChildHandle(Index);
-		if (Child.IsValid() && Child->GetProperty()->GetFName() != GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, AdapterId)) StructBuilder.AddProperty(Child.ToSharedRef());
+		if (!Child.IsValid() || Child->GetProperty()->GetFName() == GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, AdapterId)) continue;
+		const FName ChildName = Child->GetProperty()->GetFName();
+		if (CurrentAdapter == TEXT("GoogleSheetCache") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, File)) continue;
+		if (CurrentAdapter != TEXT("GoogleSheetCache") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, SourceAsset)) continue;
+		StructBuilder.AddProperty(Child.ToSharedRef());
 	}
 }
 
 void FDataForgeSourceInputCustomization::OnAdapterSelected(TSharedPtr<FDataForgeSourceDescriptor> Item, ESelectInfo::Type)
 {
-	if (Item.IsValid() && AdapterHandle.IsValid()) AdapterHandle->SetValue(Item->AdapterId);
+	if (Item.IsValid() && AdapterHandle.IsValid())
+	{
+		AdapterHandle->SetValue(Item->AdapterId);
+		if (PropertyUtilities.IsValid()) PropertyUtilities->ForceRefresh();
+	}
 }
 
 FText FDataForgeSourceInputCustomization::GetSelectedAdapterText() const

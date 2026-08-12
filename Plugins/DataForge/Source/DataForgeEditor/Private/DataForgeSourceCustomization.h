@@ -35,5 +35,6 @@ private:
 	void OnAdapterSelected(TSharedPtr<FDataForgeSourceDescriptor> Item, ESelectInfo::Type);
 	FText GetSelectedAdapterText() const;
 	TSharedPtr<IPropertyHandle> AdapterHandle;
+	TSharedPtr<IPropertyUtilities> PropertyUtilities;
 	TArray<TSharedPtr<FDataForgeSourceDescriptor>> AdapterOptions;
 };
