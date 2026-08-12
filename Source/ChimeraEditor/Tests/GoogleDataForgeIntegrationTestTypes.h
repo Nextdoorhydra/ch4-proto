@@ -13,6 +13,9 @@ class UGoogleDataForgeTestParser : public UGoogleSheetParserBase
 	GENERATED_BODY()
 
 public:
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<UDataTable> TargetTable;
+
 	bool bCompleted = false;
 	int32 CapturedRowCount = 0;
 	TArray<FString> CapturedHeaders;

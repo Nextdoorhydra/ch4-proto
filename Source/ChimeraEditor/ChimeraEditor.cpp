@@ -2,11 +2,13 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DataForgeCore.h"
+#include "DataForge/DataForgeMcpCommands.h"
 #include "DataForgeEditorService.h"
 #include "DataForgePipeline.h"
 #include "DataForgeRuleSet.h"
 #include "GoogleSheetConfig.h"
 #include "HAL/FileManager.h"
+#include "HAL/IConsoleManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -268,10 +270,12 @@ void FChimeraEditorModule::StartupModule()
 	FDataForgeSourceAdapterRegistry::Get().Register(MakeShared<FGoogleSheetCacheDataForgeAdapter>());
 	FDataForgeSourceAdapterRegistry::Get().Register(MakeShared<FMultiSourceDataForgeAdapter>());
 	GoogleSheetCacheUpdatedHandle = UGoogleSheetConfig::OnCacheUpdated().AddRaw(this, &FChimeraEditorModule::OnGoogleSheetCacheUpdated);
+	DataForgeMcpCommand = DataForgeMcpCommands::Register();
 }
 
 void FChimeraEditorModule::ShutdownModule()
 {
+	DataForgeMcpCommands::Unregister(DataForgeMcpCommand);
 	UGoogleSheetConfig::OnCacheUpdated().Remove(GoogleSheetCacheUpdatedHandle);
 	FDataForgeSourceAdapterRegistry::Get().Unregister(TEXT("GoogleSheetCache"));
 	FDataForgeSourceAdapterRegistry::Get().Unregister(TEXT("MultiSource"));
@@ -453,6 +457,64 @@ bool FGoogleSheetAutoApplyConfigurationTest::RunTest(const FString& Parameters)
 	Input.AdapterId = TEXT("GoogleSheetCache");
 	Input.SourceAsset = Config;
 	TestTrue(TEXT("Multi Source Google input is discovered"), ReferencesGoogleSheetConfig(*MultiRule, ConfigPath));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeMcpGoogleRuleSetBootstrapTest,
+	"DataForge.Integration.McpGoogleRuleSetBootstrap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeMcpGoogleRuleSetBootstrapTest::RunTest(const FString& Parameters)
+{
+	TestNotNull(TEXT("MCP bootstrap console command is registered"),
+		IConsoleManager::Get().FindConsoleObject(TEXT("DataForge.MCP.CreateRuleSetFromGoogleParser")));
+	const FString Root = TEXT("/Game/DataForgeTests/McpBootstrap");
+	const FString ConfigPackageName = Root / TEXT("GS_McpBootstrap");
+	const FString TablePackageName = Root / TEXT("DT_McpBootstrap");
+	const FString RuleSetPackageName = Root / TEXT("RS_McpBootstrap");
+
+	UPackage* TablePackage = CreatePackage(*TablePackageName);
+	UDataTable* TargetTable = NewObject<UDataTable>(TablePackage, TEXT("DT_McpBootstrap"), RF_Public | RF_Standalone);
+	TargetTable->RowStruct = FGoogleDataForgeTestRow::StaticStruct();
+
+	UPackage* ConfigPackage = CreatePackage(*ConfigPackageName);
+	UGoogleSheetConfig* Config = NewObject<UGoogleSheetConfig>(ConfigPackage, TEXT("GS_McpBootstrap"), RF_Public | RF_Standalone);
+	UGoogleDataForgeTestParser* Parser = NewObject<UGoogleDataForgeTestParser>(Config);
+	Parser->TargetTable = TargetTable;
+	Config->DataParser = Parser;
+
+	const FString CacheDirectory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("GoogleSheetLoader"));
+	IFileManager::Get().MakeDirectory(*CacheDirectory, true);
+	const FString CacheFile = FPaths::Combine(CacheDirectory,
+		FPaths::MakeValidFileName(Config->GetPathName(), TEXT('_')) + TEXT(".json"));
+	TestTrue(TEXT("MCP bootstrap cache is created"), FFileHelper::SaveStringToFile(
+		TEXT("{\"headers\":[\"Id\",\"DisplayName\",\"Price\",\"Category\"],\"rows\":[[\"1\",\"MCP Sword\",\"900\",\"Weapon\"]]}"), *CacheFile));
+
+	FDataForgeGoogleRuleSetRequest Request;
+	Request.GoogleParserPath = Config->GetPathName();
+	Request.RuleSetPath = RuleSetPackageName;
+	Request.bSaveAssets = false;
+	FDataForgeGoogleRuleSetResult Result;
+	TestTrue(TEXT("MCP bootstrap command succeeds"), DataForgeMcpCommands::CreateRuleSetFromGoogleParser(Request, Result));
+	TestTrue(TEXT("MCP bootstrap reports success"), Result.bSuccess);
+	TestEqual(TEXT("MCP bootstrap detects four columns"), Result.DetectedColumnCount, 4);
+	TestEqual(TEXT("MCP bootstrap infers three editable bindings"), Result.BindingCount, 3);
+
+	UDataForgeRuleSet* RuleSet = FindObject<UDataForgeRuleSet>(nullptr, *(RuleSetPackageName + TEXT(".RS_McpBootstrap")));
+	TestNotNull(TEXT("MCP bootstrap creates a maintainable RuleSet asset"), RuleSet);
+	if (RuleSet)
+	{
+		TestEqual(TEXT("RuleSet references Google parser config"), RuleSet->Source.SourceAsset.Get(), static_cast<UObject*>(Config));
+		TestEqual(TEXT("RuleSet reuses parser TargetTable path"), RuleSet->Output.AssetPath, TablePackageName);
+		TestEqual(TEXT("RuleSet infers Id primary key"), RuleSet->Schema.PrimaryKey, FName(TEXT("Id")));
+	}
+	TestNotNull(TEXT("MCP bootstrap applies the first DataTable row"),
+		TargetTable->FindRow<FGoogleDataForgeTestRow>(TEXT("1"), TEXT("MCP bootstrap test")));
+	TestTrue(TEXT("MCP bootstrap enables normalized JSON"), Config->bSaveNormalizedJson);
+	TestTrue(TEXT("MCP bootstrap enables DataForge auto apply"), Config->bAutoApplyDataForge);
+
+	IFileManager::Get().Delete(*CacheFile, false, true);
 	return true;
 }
 

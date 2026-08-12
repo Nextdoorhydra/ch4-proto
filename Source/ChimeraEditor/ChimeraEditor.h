@@ -12,4 +12,5 @@ public:
 private:
 	void OnGoogleSheetCacheUpdated(class UGoogleSheetConfig& Config);
 	FDelegateHandle GoogleSheetCacheUpdatedHandle;
+	class IConsoleObject* DataForgeMcpCommand = nullptr;
 };
