@@ -87,7 +87,7 @@ void FDataForgeRuleSetCustomization::CustomizeDetails(IDetailLayoutBuilder& Deta
 	.WholeRowContent()
 	[
 		SNew(STextBlock)
-		.Text(LOCTEXT("WorkflowText", "Workflow: Probe -> configure Primary Key / Output / Bindings -> Lint + Preview -> inspect Message Log -> Apply"))
+		.Text(LOCTEXT("WorkflowText", "Workflow: Probe -> Primary Key / Output -> Asset Rules -> Generated Outputs -> Bindings -> Lint + Preview -> Apply"))
 		.AutoWrapText(true)
 	];
 }

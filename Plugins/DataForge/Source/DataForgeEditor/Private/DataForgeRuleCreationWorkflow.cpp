@@ -113,7 +113,38 @@ void FDataForgeRuleCreationWorkflow::NotifyDraftChanged(FName MemberPropertyName
 		bProbeSucceeded = false;
 		ProbedDataSet = FDataForgeDataSet();
 	}
+	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs))
+	{
+		const int32 RemovedCount = RemoveInvalidGeneratedOutputBindings();
+		const int32 AddedCount = AutoMapExactNames();
+		LastMessage = FString::Printf(TEXT("Generated Outputs synchronized: %d binding(s) added, %d invalid binding(s) removed."), AddedCount, RemovedCount);
+		return;
+	}
 	LastMessage = TEXT("Draft changed. Re-run the current validation step.");
+}
+
+int32 FDataForgeRuleCreationWorkflow::RemoveInvalidGeneratedOutputBindings()
+{
+	UDataForgeRuleSet& RuleSet = GetDraft();
+	const auto FindOutput = [&RuleSet](FName OutputName)
+	{
+		return RuleSet.GeneratedOutputs.FindByPredicate([OutputName](const FDataForgeGeneratedAssetOutputRule& Output)
+		{
+			return !OutputName.IsNone() && Output.OutputName == OutputName;
+		});
+	};
+	return RuleSet.Bindings.RemoveAll([&FindOutput](const FDataForgeBindingRule& Binding)
+	{
+		if (Binding.Source == EDataForgeBindingSource::GeneratedOutput && !FindOutput(Binding.SourceOutput))
+		{
+			return true;
+		}
+		if (Binding.Target != EDataForgeBindingTarget::GeneratedOutput)
+		{
+			return false;
+		}
+		return !FindOutput(Binding.TargetOutput);
+	});
 }
 
 bool FDataForgeRuleCreationWorkflow::CanAdvance(FString& OutReason) const
@@ -155,6 +186,48 @@ bool FDataForgeRuleCreationWorkflow::CanAdvance(FString& OutReason) const
 			return false;
 		}
 		return true;
+	case EDataForgeWizardStep::AssetRules:
+	{
+		TSet<FName> RuleIds;
+		for (const FDataForgeAssetRule& AssetRule : RuleSet.AssetRules)
+		{
+			if (AssetRule.RuleId.IsNone() || RuleIds.Contains(AssetRule.RuleId))
+			{
+				OutReason = TEXT("Every Asset Rule needs a unique Rule Id.");
+				return false;
+			}
+			RuleIds.Add(AssetRule.RuleId);
+			if (!FPackageName::IsValidLongPackageName(AssetRule.BaseFolder) || AssetRule.AssetNamePattern.IsEmpty())
+			{
+				OutReason = FString::Printf(TEXT("Asset Rule '%s' needs a valid /Game folder and asset name pattern."), *AssetRule.RuleId.ToString());
+				return false;
+			}
+		}
+		return true;
+	}
+	case EDataForgeWizardStep::GeneratedOutputs:
+	{
+		TSet<FName> OutputNames;
+		for (const FDataForgeGeneratedAssetOutputRule& Output : RuleSet.GeneratedOutputs)
+		{
+			if (Output.OutputName.IsNone() || OutputNames.Contains(Output.OutputName) || !Output.AssetClass.Get())
+			{
+				OutReason = TEXT("Every Generated Output needs a unique Output Name and an Asset Class.");
+				return false;
+			}
+			OutputNames.Add(Output.OutputName);
+			const FDataForgeAssetRule* AssetRule = RuleSet.AssetRules.FindByPredicate([&Output](const FDataForgeAssetRule& Candidate)
+			{
+				return Candidate.RuleId == Output.AssetRuleId;
+			});
+			if (!AssetRule || AssetRule->Ownership != EDataForgeAssetOwnership::Managed)
+			{
+				OutReason = FString::Printf(TEXT("Generated Output '%s' must select a Managed Asset Rule."), *Output.OutputName.ToString());
+				return false;
+			}
+		}
+		return true;
+	}
 	case EDataForgeWizardStep::Bindings:
 		return true;
 	case EDataForgeWizardStep::Preview:

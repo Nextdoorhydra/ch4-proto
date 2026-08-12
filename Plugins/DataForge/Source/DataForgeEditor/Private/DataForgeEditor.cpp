@@ -3,6 +3,7 @@
 #include "AssetToolsModule.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Containers/Ticker.h"
+#include "DataForgeAutoReconciler.h"
 #include "DataForgeAssetTypeActions.h"
 #include "DataForgeBindingCustomization.h"
 #include "DataForgeContentPathCustomization.h"
@@ -36,6 +37,9 @@ void FDataForgeEditorModule::StartupModule()
 		TEXT("DataForgeBindingRule"),
 		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FDataForgeBindingCustomization::MakeInstance));
 	PropertyEditor.RegisterCustomPropertyTypeLayout(
+		TEXT("DataForgeGeneratedAssetOutputRule"),
+		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FDataForgeGeneratedOutputCustomization::MakeInstance));
+	PropertyEditor.RegisterCustomPropertyTypeLayout(
 		TEXT("DataForgeSourceConfig"),
 		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FDataForgeSourceCustomization::MakeInstance));
 	PropertyEditor.RegisterCustomPropertyTypeLayout(
@@ -54,10 +58,12 @@ void FDataForgeEditorModule::StartupModule()
 
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 	AssetDeletedHandle = AssetRegistry.OnInMemoryAssetDeleted().AddRaw(this, &FDataForgeEditorModule::HandleInMemoryAssetDeleted);
+	FDataForgeAutoReconciler::Get().Startup();
 }
 
 void FDataForgeEditorModule::ShutdownModule()
 {
+	FDataForgeAutoReconciler::Get().Shutdown();
 	if (DeletionWizardTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(DeletionWizardTickerHandle);
@@ -77,6 +83,7 @@ void FDataForgeEditorModule::ShutdownModule()
 		FPropertyEditorModule& PropertyEditor = FModuleManager::GetModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 		PropertyEditor.UnregisterCustomClassLayout(UDataForgeRuleSet::StaticClass()->GetFName());
 		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeBindingRule"));
+		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeGeneratedAssetOutputRule"));
 		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeSourceConfig"));
 		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeSourceInput"));
 		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeDataTableOutputRule"));

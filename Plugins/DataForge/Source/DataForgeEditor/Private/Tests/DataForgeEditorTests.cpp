@@ -1,4 +1,5 @@
 #include "DataForgeEditorService.h"
+#include "DataForgeAutoReconciler.h"
 #include "DataForgeBindingGraph.h"
 #include "DataForgeRuleCreationWorkflow.h"
 #include "DataForgeRuleSetSnapshot.h"
@@ -449,7 +450,11 @@ bool FDataForgeRuleCreationWorkflowTest::RunTest(const FString& Parameters)
 	Workflow.GetDraft().Schema.PrimaryKey = TEXT("DisplayName");
 	Workflow.NotifyDraftChanged(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Schema));
 	TestTrue(TEXT("Explicit primary key advances to Output"), Workflow.Next(Reason));
-	TestTrue(TEXT("Valid output advances to Bindings"), Workflow.Next(Reason));
+	TestTrue(TEXT("Valid output advances to Asset Rules"), Workflow.Next(Reason));
+	TestEqual(TEXT("Asset Rules step follows Output"), Workflow.GetStep(), EDataForgeWizardStep::AssetRules);
+	TestTrue(TEXT("Empty optional Asset Rules advance to Generated Outputs"), Workflow.Next(Reason));
+	TestEqual(TEXT("Generated Outputs step follows Asset Rules"), Workflow.GetStep(), EDataForgeWizardStep::GeneratedOutputs);
+	TestTrue(TEXT("Empty optional Generated Outputs advance to Bindings"), Workflow.Next(Reason));
 	TestEqual(TEXT("Entering Bindings automatically maps both matching fields"), Workflow.GetDraft().Bindings.Num(), 2);
 	TestEqual(TEXT("Repeated Auto Map does not duplicate bindings"), Workflow.AutoMapExactNames(), 0);
 	TestTrue(TEXT("Bindings advance to Preview"), Workflow.Next(Reason));
@@ -477,8 +482,8 @@ bool FDataForgeGeneratedOutputAutoMapTest::RunTest(const FString& Parameters)
 	Output.OutputName = TEXT("Data");
 	Output.AssetClass = UDataForgeEditorManagedAsset::StaticClass();
 
-	TestEqual(TEXT("Source column and same-name Generated Output are both inferred"),
-		FDataForgeEditorService::AutoMapExactNames(*RuleSet, { TEXT("DisplayName") }), 2);
+	TestEqual(TEXT("Row field, Generated Output property, and same-name output reference are inferred"),
+		FDataForgeEditorService::AutoMapExactNames(*RuleSet, { TEXT("DisplayName") }), 3);
 	TestTrue(TEXT("Generated Output binds to its same-name soft reference field"),
 		RuleSet->Bindings.ContainsByPredicate([](const FDataForgeBindingRule& Binding)
 		{
@@ -487,8 +492,126 @@ bool FDataForgeGeneratedOutputAutoMapTest::RunTest(const FString& Parameters)
 				&& Binding.Target == EDataForgeBindingTarget::DataTableRow
 				&& Binding.TargetProperty.Equals(TEXT("Data"));
 		}));
+	TestTrue(TEXT("Source column binds to the matching Generated Output property"),
+		RuleSet->Bindings.ContainsByPredicate([](const FDataForgeBindingRule& Binding)
+		{
+			return Binding.Source == EDataForgeBindingSource::SourceValue
+				&& Binding.SourceColumn == TEXT("DisplayName")
+				&& Binding.Target == EDataForgeBindingTarget::GeneratedOutput
+				&& Binding.TargetOutput == TEXT("Data")
+				&& Binding.TargetProperty.Equals(TEXT("DisplayName"));
+		}));
 	TestEqual(TEXT("Repeated inference remains duplicate-free"),
 		FDataForgeEditorService::AutoMapExactNames(*RuleSet, { TEXT("DisplayName") }), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeGeneratedOutputWorkflowSyncTest,
+	"DataForge.Editor.Authoring.GeneratedOutputWorkflowSync",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeGeneratedOutputWorkflowSyncTest::RunTest(const FString& Parameters)
+{
+	const FString CsvFilename = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("DataForgeGeneratedOutputSync.csv"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CsvFilename), true);
+	if (!FFileHelper::SaveStringToFile(TEXT("DisplayName\nSword\n"), *CsvFilename))
+	{
+		AddError(TEXT("Could not create the Generated Output sync test CSV."));
+		return false;
+	}
+	TStrongObjectPtr<UDataForgeRuleSet> Target(NewObject<UDataForgeRuleSet>(GetTransientPackage()));
+	Target->Source.AdapterId = TEXT("Csv");
+	Target->Source.File.FilePath = CsvFilename;
+	Target->Output.RowStruct = FDataForgeEditorGeneratedOutputRow::StaticStruct();
+	FDataForgeRuleCreationWorkflow Workflow(*Target);
+	TestTrue(TEXT("Generated Output sync source probe succeeds"), Workflow.Probe().bSuccess);
+	UDataForgeRuleSet& Draft = Workflow.GetDraft();
+
+	FDataForgeGeneratedAssetOutputRule& Output = Draft.GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("Data");
+	Output.AssetClass = UDataForgeEditorManagedAsset::StaticClass();
+	Workflow.NotifyDraftChanged(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs));
+	TestTrue(TEXT("Generated Output edit immediately adds its DataTable reference binding"),
+		Draft.Bindings.ContainsByPredicate([](const FDataForgeBindingRule& Binding)
+		{
+			return Binding.Source == EDataForgeBindingSource::GeneratedOutput && Binding.SourceOutput == TEXT("Data");
+		}));
+	TestTrue(TEXT("Generated Output edit immediately binds matching source fields into the PDA/DA"),
+		Draft.Bindings.ContainsByPredicate([](const FDataForgeBindingRule& Binding)
+		{
+			return Binding.Source == EDataForgeBindingSource::SourceValue
+				&& Binding.SourceColumn == TEXT("DisplayName")
+				&& Binding.Target == EDataForgeBindingTarget::GeneratedOutput
+				&& Binding.TargetOutput == TEXT("Data")
+				&& Binding.TargetProperty.Equals(TEXT("DisplayName"));
+		}));
+
+	Draft.GeneratedOutputs.Reset();
+	Workflow.NotifyDraftChanged(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs));
+	TestFalse(TEXT("Removing a Generated Output removes bindings that reference it"),
+		Draft.Bindings.ContainsByPredicate([](const FDataForgeBindingRule& Binding)
+		{
+			return Binding.Source == EDataForgeBindingSource::GeneratedOutput || Binding.Target == EDataForgeBindingTarget::GeneratedOutput;
+		}));
+	IFileManager::Get().Delete(*CsvFilename, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeSourceReconcileTest,
+	"DataForge.Editor.Automation.SourceReconcile",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeSourceReconcileTest::RunTest(const FString& Parameters)
+{
+	const FString Unique = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString CsvFilename = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("DataForgeReconcile_") + Unique + TEXT(".csv"));
+	const FString TablePackageName = TEXT("/Game/DataForgeTests/Automation/DT_Reconcile_") + Unique;
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CsvFilename), true);
+	if (!FFileHelper::SaveStringToFile(TEXT("DisplayName,Price\nSword,1200\n"), *CsvFilename))
+	{
+		AddError(TEXT("Could not create the reconciler test CSV."));
+		return false;
+	}
+
+	TStrongObjectPtr<UDataForgeRuleSet> RuleSet(NewObject<UDataForgeRuleSet>(
+		GetTransientPackage(), *FString(TEXT("RS_Reconcile_") + Unique)));
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.AdapterId = TEXT("Csv");
+	RuleSet->Source.File.FilePath = CsvFilename;
+	RuleSet->Schema.PrimaryKey = TEXT("DisplayName");
+	RuleSet->Schema.RequiredColumns = { TEXT("DisplayName"), TEXT("Price") };
+	RuleSet->Output.RowStruct = FDataForgeEditorAutoMapRow::StaticStruct();
+	RuleSet->Output.AssetPath = TablePackageName;
+	RuleSet->Output.bSaveAfterApply = false;
+	FDataForgeEditorService::AutoMapExactNames(*RuleSet, RuleSet->Schema.RequiredColumns);
+
+	FDataForgeAutoReconciler& Reconciler = FDataForgeAutoReconciler::Get();
+	Reconciler.Request(*RuleSet, TEXT("initial source"), 0.0);
+	const FDataForgeReconcileBatchResult Initial = Reconciler.FlushPending(true);
+	TestEqual(TEXT("Initial reconcile processes one RuleSet"), Initial.ProcessedCount, 1);
+	TestEqual(TEXT("Initial reconcile applies one RuleSet"), Initial.AppliedCount, 1);
+
+	UDataTable* Table = FindObject<UDataTable>(nullptr, *(TablePackageName + TEXT(".") + FPackageName::GetLongPackageAssetName(TablePackageName)));
+	TestNotNull(TEXT("Initial reconcile creates the DataTable"), Table);
+	if (Table) TestEqual(TEXT("Initial source creates one row"), Table->GetRowMap().Num(), 1);
+
+	TestTrue(TEXT("Expanded source CSV is written"),
+		FFileHelper::SaveStringToFile(TEXT("DisplayName,Price\nSword,1200\nShield,800\n"), *CsvFilename));
+	Reconciler.Request(*RuleSet, TEXT("source file changed"), 0.0);
+	Reconciler.Request(*RuleSet, TEXT("duplicate source event"), 0.0);
+	const FDataForgeReconcileBatchResult Expanded = Reconciler.FlushPending(true);
+	TestEqual(TEXT("Duplicate events are coalesced into one reconcile"), Expanded.ProcessedCount, 1);
+	TestEqual(TEXT("Expanded source applies successfully"), Expanded.AppliedCount, 1);
+	if (Table)
+	{
+		TestEqual(TEXT("Existing DataTable receives the new source row"), Table->GetRowMap().Num(), 2);
+		TestNotNull(TEXT("New source row is materialized"),
+			Table->FindRow<FDataForgeEditorAutoMapRow>(TEXT("Shield"), TEXT("source reconcile test")));
+	}
+
+	IFileManager::Get().Delete(*CsvFilename, false, true);
 	return true;
 }
 

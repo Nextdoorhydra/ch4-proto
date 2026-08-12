@@ -11,6 +11,8 @@ enum class EDataForgeWizardStep : uint8
 	Probe,
 	Schema,
 	Output,
+	AssetRules,
+	GeneratedOutputs,
 	Bindings,
 	Preview
 };
@@ -46,4 +48,5 @@ private:
 	FString LastMessage;
 	bool bProbeSucceeded = false;
 	bool bPreviewSucceeded = false;
+	int32 RemoveInvalidGeneratedOutputBindings();
 };

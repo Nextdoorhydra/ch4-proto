@@ -160,8 +160,8 @@ namespace DataForgeRuleCreationWizard
 
 		FText GetStepTitle() const
 		{
-			static const TCHAR* Names[] = { TEXT("Source"), TEXT("Probe"), TEXT("Schema"), TEXT("Output"), TEXT("Bindings"), TEXT("Preview") };
-			return FText::FromString(FString::Printf(TEXT("Step %d of 6 — %s"), StepNumber(Workflow->GetStep()), Names[static_cast<int32>(Workflow->GetStep())]));
+			static const TCHAR* Names[] = { TEXT("Source"), TEXT("Probe"), TEXT("Schema"), TEXT("Output"), TEXT("Asset Rules"), TEXT("Generated Outputs"), TEXT("Bindings"), TEXT("Preview") };
+			return FText::FromString(FString::Printf(TEXT("Step %d of 8 - %s"), StepNumber(Workflow->GetStep()), Names[static_cast<int32>(Workflow->GetStep())]));
 		}
 
 		FText GetGuidanceText() const
@@ -172,7 +172,9 @@ namespace DataForgeRuleCreationWizard
 			case EDataForgeWizardStep::Probe: return LOCTEXT("ProbeHelp", "Read a bounded sample and normalize it into canonical Parsed Data. Probe never mutates project content.");
 			case EDataForgeWizardStep::Schema: return LOCTEXT("SchemaHelp", "Probe inferred required columns and suggested a primary key. Review the suggestion; choose another detected field when needed.");
 			case EDataForgeWizardStep::Output: return LOCTEXT("OutputHelp", "Select the DataTable row struct and choose a Content Browser destination. Creation, deletion, and save behavior are Advanced options.");
-			case EDataForgeWizardStep::Bindings: return LOCTEXT("BindingsHelp", "Exact-name bindings are inferred automatically when this step opens. Generated Outputs also bind to same-name soft reference fields. Review the mappings; {ColumnName} tokens are case-sensitive.");
+			case EDataForgeWizardStep::AssetRules: return LOCTEXT("AssetRulesHelp", "Define external lookup rules and Managed asset destinations first. Rule Ids are selected from dropdowns in later steps; {ColumnName} tokens are case-sensitive.");
+			case EDataForgeWizardStep::GeneratedOutputs: return LOCTEXT("GeneratedOutputsHelp", "Define PDA/DA outputs and select a previously configured Managed Asset Rule. Matching source fields are synchronized into Bindings automatically.");
+			case EDataForgeWizardStep::Bindings: return LOCTEXT("BindingsHelp", "Review inferred source-to-row, source-to-PDA/DA, and generated-object-to-row mappings. Add only exceptional mappings manually.");
 			case EDataForgeWizardStep::Preview: return LOCTEXT("PreviewHelp", "Compile and inspect the mutation-free desired-state plan. Finish saves the RuleSet, runs a fresh Preview, and immediately Applies the generated content.");
 			default: return FText::GetEmpty();
 			}
@@ -285,10 +287,12 @@ namespace DataForgeRuleCreationWizard
 					&& PropertyAndParent.Property.GetFName() != GET_MEMBER_NAME_CHECKED(FDataForgeSchemaRule, PrimaryKey);
 			case EDataForgeWizardStep::Output:
 				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Output));
+			case EDataForgeWizardStep::AssetRules:
+				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, AssetRules));
+			case EDataForgeWizardStep::GeneratedOutputs:
+				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs));
 			case EDataForgeWizardStep::Bindings:
-				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Bindings))
-					|| IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, AssetRules))
-					|| IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs));
+				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Bindings));
 			default:
 				return false;
 			}
