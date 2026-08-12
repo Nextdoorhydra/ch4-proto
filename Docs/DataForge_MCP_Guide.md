@@ -172,3 +172,65 @@ Binding:
 - cache missing: Google Config에서 `Save Normalized Json`을 활성화하고 Fetch 후 재시도한다.
 - Preview 실패: DataForge diagnostic의 column, property, Asset Rule ID 및 토큰 대소문자를 수정한다.
 - RuleSet already exists: 기존 RuleSet을 Editor에서 유지보수하거나 새로운 RuleSet 경로를 사용한다.
+
+## AssetLayoutProfile 기반 요청
+
+프로젝트의 중앙 경로 및 naming convention을 재사용할 때는 개별 `assetRules`를 반복해서 작성하지 않고 다음 형식을 사용한다.
+
+```json
+{
+  "config": "/Game/Data/Body/GS_Body",
+  "ruleSet": "/Game/Data/Body/RS_Body",
+  "rowStruct": "/Script/Chimera.CMBodyTableRow",
+  "output": "/Game/Data/Body/DT_Body",
+  "primaryKey": "ID",
+  "assetLayoutProfile": {
+    "path": "/Game/DataForge/Profiles/ALP_Body",
+    "parameters": {
+      "FeatureRoot": "Body"
+    }
+  },
+  "generatedOutputs": [],
+  "bindings": [],
+  "apply": true,
+  "saveAssets": true
+}
+```
+
+Profile 경로를 모르는 경우 `path` 대신 discovery key를 지정할 수 있다.
+
+```json
+"assetLayoutProfile": {
+  "purpose": "Character",
+  "parameters": {
+    "FeatureRoot": "Combat"
+  }
+}
+```
+
+- `path`와 `purpose`는 동시에 지정하지 않는다.
+- `purpose`는 Profile의 `Purpose` 또는 `Tags`와 정확히 일치한다.
+- 후보가 하나일 때만 자동 선택한다. 후보가 여러 개이면 명령은 후보 경로를 모두 반환하고 실패한다.
+- 후보가 없으면 임의의 Content 경로를 추론하지 않는다. 정확한 Profile을 지정하거나 수동 `assetRules`를 제공한다.
+- `parameters`의 값은 문자열이며 Profile에 선언된 이름을 그대로 사용한다.
+- `${Parameter}`는 bootstrap materialization에서 완전히 해소된다. `{Column}`은 Probe 결과와 대소문자까지 일치해야 한다.
+- Profile과 `assetRules`를 함께 지정하면 Profile 규칙을 먼저 materialize하고 수동 규칙은 Custom 규칙으로 보존한다. Rule Id 충돌은 Preview 이전에 실패한다.
+- 생성된 RuleSet은 concrete Asset Rules와 provenance를 저장한다. 이후 compiler가 Profile을 실시간 참조하지는 않는다.
+
+사용자가 MCP에 전달할 수 있는 정형 프롬프트 예시:
+
+```text
+[DataForge RuleSet 생성]
+Google Config: /Game/Data/Body/GS_Body
+Asset Layout Profile: /Game/DataForge/Profiles/ALP_Body
+Profile Parameters:
+- FeatureRoot: Body
+Row Struct: /Script/Chimera.CMBodyTableRow
+DataTable Output: /Game/Data/Body/DT_Body
+RuleSet Output: /Game/Data/Body/RS_Body
+Primary Key: ID
+Generated Outputs: 없음
+Additional Manual Asset Rules: 없음
+Apply: true
+Save Assets: true
+```

@@ -3,6 +3,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DataForgeCore.h"
 #include "DataForge/DataForgeMcpCommands.h"
+#include "DataForgeAssetLayoutProfile.h"
 #include "DataForgeAutoReconciler.h"
 #include "DataForgeEditorService.h"
 #include "DataForgePipeline.h"
@@ -313,6 +314,10 @@ bool FDataForgeMcpSpecParsingTest::RunTest(const FString& Parameters)
   "config": "/Game/Data/Body/GS_Body",
   "ruleSet": "/Game/Data/Body/RS_Body",
   "primaryKey": "ID",
+  "assetLayoutProfile": {
+    "path": "/Game/DataForge/Profiles/ALP_Body",
+    "parameters": {"Feature": "Body"}
+  },
   "assetRules": [
     {"id":"BodyData","ownership":"Managed","baseFolder":"/Game/Data/Body","assetNamePattern":"DA_{ID}"},
     {"id":"Icon","ownership":"External","baseFolder":"/Game/Data/Texture","assetNamePattern":"T_{ID}"}
@@ -332,6 +337,8 @@ bool FDataForgeMcpSpecParsingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Structured MCP spec parses"), DataForgeMcpCommands::ParseRequestSpec(Json, Request, Error));
 	TestTrue(TEXT("Structured MCP spec has no parse error"), Error.IsEmpty());
 	TestEqual(TEXT("Config path is preserved"), Request.GoogleParserPath, FString(TEXT("/Game/Data/Body/GS_Body")));
+	TestEqual(TEXT("Asset Layout Profile path is parsed"), Request.AssetLayoutProfilePath, FString(TEXT("/Game/DataForge/Profiles/ALP_Body")));
+	TestEqual(TEXT("Asset Layout Profile parameter is parsed"), Request.AssetLayoutParameters.FindRef(TEXT("Feature")), FString(TEXT("Body")));
 	TestEqual(TEXT("Both Managed and External Asset Rules are parsed"), Request.AssetRules.Num(), 2);
 	TestEqual(TEXT("Generated Output is parsed"), Request.GeneratedOutputs.Num(), 1);
 	TestEqual(TEXT("Explicit asset and output bindings are parsed"), Request.Bindings.Num(), 2);
@@ -352,6 +359,49 @@ bool FDataForgeMcpSpecParsingTest::RunTest(const FString& Parameters)
 		TEXT("{\"config\":\"/Game/GS\",\"ruleSet\":\"/Game/RS\",\"assetRules\":[{\"id\":\"Bad\",\"ownership\":\"Shared\",\"baseFolder\":\"/Game/Data\",\"assetNamePattern\":\"A_{ID}\"}]}"),
 		InvalidRequest, Error));
 	TestTrue(TEXT("Invalid ownership reports a useful error"), Error.Contains(TEXT("Managed or External")));
+	TestFalse(TEXT("Profile path and purpose cannot be combined"), DataForgeMcpCommands::ParseRequestSpec(
+		TEXT("{\"config\":\"/Game/GS\",\"ruleSet\":\"/Game/RS\",\"assetLayoutProfile\":{\"path\":\"/Game/ALP\",\"purpose\":\"Character\"}}"),
+		InvalidRequest, Error));
+	TestTrue(TEXT("Ambiguous Profile selector reports a useful error"), Error.Contains(TEXT("either 'path' or 'purpose'")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeMcpProfileDiscoveryTest,
+	"DataForge.Integration.McpAssetLayoutProfileDiscovery",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeMcpProfileDiscoveryTest::RunTest(const FString& Parameters)
+{
+	const FName Purpose(TEXT("AutomationMcpAmbiguousLayout"));
+	auto CreateProfile = [Purpose](const TCHAR* PackageName, const TCHAR* AssetName, bool bUseTag)
+	{
+		UPackage* Package = CreatePackage(PackageName);
+		UDataForgeAssetLayoutProfile* Profile = NewObject<UDataForgeAssetLayoutProfile>(Package, AssetName, RF_Public | RF_Standalone);
+		Profile->ProfileId = FGuid::NewGuid();
+		if (bUseTag) Profile->Tags.Add(Purpose);
+		else Profile->Purpose = Purpose;
+		FAssetRegistryModule::AssetCreated(Profile);
+		return Profile;
+	};
+	UDataForgeAssetLayoutProfile* ProfileA = CreateProfile(TEXT("/Game/DataForgeTests/McpDiscovery/ALP_A"), TEXT("ALP_A"), false);
+	UDataForgeAssetLayoutProfile* ProfileB = CreateProfile(TEXT("/Game/DataForgeTests/McpDiscovery/ALP_B"), TEXT("ALP_B"), true);
+
+	FDataForgeGoogleRuleSetRequest Request;
+	Request.AssetLayoutPurpose = Purpose;
+	UDataForgeAssetLayoutProfile* Resolved = nullptr;
+	TArray<FString> Candidates;
+	FString Error;
+	TestFalse(TEXT("Purpose discovery refuses multiple candidates"), DataForgeMcpCommands::ResolveAssetLayoutProfile(Request, Resolved, Candidates, Error));
+	TestEqual(TEXT("Purpose and tag matches are both returned"), Candidates.Num(), 2);
+	TestTrue(TEXT("Ambiguous discovery lists candidates"), Error.Contains(TEXT("ambiguous")) && Error.Contains(ProfileA->GetPathName()) && Error.Contains(ProfileB->GetPathName()));
+
+	Request.AssetLayoutPurpose = NAME_None;
+	Request.AssetLayoutProfilePath = ProfileA->GetPathName();
+	TestTrue(TEXT("Exact Profile path resolves deterministically"), DataForgeMcpCommands::ResolveAssetLayoutProfile(Request, Resolved, Candidates, Error));
+	TestTrue(TEXT("Exact Profile object is returned"), Resolved == ProfileA);
+	FAssetRegistryModule::AssetDeleted(ProfileA);
+	FAssetRegistryModule::AssetDeleted(ProfileB);
 	return true;
 }
 
@@ -492,6 +542,7 @@ bool FDataForgeMcpGoogleRuleSetBootstrapTest::RunTest(const FString& Parameters)
 	const FString ConfigPackageName = Root / TEXT("GS_McpBootstrap");
 	const FString TablePackageName = Root / TEXT("DT_McpBootstrap");
 	const FString RuleSetPackageName = Root / TEXT("RS_McpBootstrap");
+	const FString ProfilePackageName = Root / TEXT("ALP_McpBootstrap");
 
 	UPackage* TablePackage = CreatePackage(*TablePackageName);
 	UDataTable* TargetTable = NewObject<UDataTable>(TablePackage, TEXT("DT_McpBootstrap"), RF_Public | RF_Standalone);
@@ -502,6 +553,27 @@ bool FDataForgeMcpGoogleRuleSetBootstrapTest::RunTest(const FString& Parameters)
 	UGoogleDataForgeTestParser* Parser = NewObject<UGoogleDataForgeTestParser>(Config);
 	Parser->TargetTable = TargetTable;
 	Config->DataParser = Parser;
+	UPackage* ProfilePackage = CreatePackage(*ProfilePackageName);
+	UDataForgeAssetLayoutProfile* Profile = NewObject<UDataForgeAssetLayoutProfile>(ProfilePackage, TEXT("ALP_McpBootstrap"), RF_Public | RF_Standalone);
+	Profile->ProfileId = FGuid::NewGuid();
+	Profile->Purpose = TEXT("AutomationMcpBootstrap");
+	FDataForgeProfileParameter& LayoutParameter = Profile->Parameters.AddDefaulted_GetRef();
+	LayoutParameter.Name = TEXT("GeneratedRoot");
+	LayoutParameter.Type = EDataForgeProfileParameterType::ContentPath;
+	LayoutParameter.bRequired = true;
+	FDataForgeLayoutRoot& LayoutRoot = Profile->Roots.AddDefaulted_GetRef();
+	LayoutRoot.RootId = TEXT("GeneratedRoot");
+	LayoutRoot.PathPattern = TEXT("${GeneratedRoot}");
+	FDataForgeAssetRuleGroupTemplate& LayoutGroup = Profile->Groups.AddDefaulted_GetRef();
+	LayoutGroup.TemplateId = FGuid::NewGuid();
+	LayoutGroup.GroupId = TEXT("GeneratedAssets");
+	LayoutGroup.RootId = LayoutRoot.RootId;
+	FDataForgeAssetRuleTemplate& LayoutRule = LayoutGroup.Rules.AddDefaulted_GetRef();
+	LayoutRule.TemplateId = FGuid::NewGuid();
+	LayoutRule.RuleId = TEXT("DataAsset");
+	LayoutRule.Ownership = EDataForgeAssetOwnership::Managed;
+	LayoutRule.AssetNamePattern = TEXT("DA_{Id}");
+	FAssetRegistryModule::AssetCreated(Profile);
 
 	const FString CacheDirectory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("GoogleSheetLoader"));
 	IFileManager::Get().MakeDirectory(*CacheDirectory, true);
@@ -514,20 +586,18 @@ bool FDataForgeMcpGoogleRuleSetBootstrapTest::RunTest(const FString& Parameters)
 	Request.GoogleParserPath = Config->GetPathName();
 	Request.RuleSetPath = RuleSetPackageName;
 	Request.bSaveAssets = false;
-	FDataForgeAssetRule& ManagedRule = Request.AssetRules.AddDefaulted_GetRef();
-	ManagedRule.RuleId = TEXT("DataAsset");
-	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
-	ManagedRule.BaseFolder = Root / TEXT("Generated");
-	ManagedRule.AssetNamePattern = TEXT("DA_{Id}");
+	Request.AssetLayoutProfilePath = Profile->GetPathName();
+	Request.AssetLayoutParameters.Add(TEXT("GeneratedRoot"), Root / TEXT("Generated"));
 	FDataForgeGeneratedAssetOutputRule& GeneratedOutput = Request.GeneratedOutputs.AddDefaulted_GetRef();
 	GeneratedOutput.OutputName = TEXT("DataAsset");
 	GeneratedOutput.AssetClass = UGoogleDataForgeTestDataAsset::StaticClass();
-	GeneratedOutput.AssetRuleId = ManagedRule.RuleId;
+	GeneratedOutput.AssetRuleId = TEXT("DataAsset");
 	FDataForgeGoogleRuleSetResult Result;
 	TestTrue(TEXT("MCP bootstrap command succeeds"), DataForgeMcpCommands::CreateRuleSetFromGoogleParser(Request, Result));
 	TestTrue(TEXT("MCP bootstrap reports success"), Result.bSuccess);
 	TestEqual(TEXT("MCP bootstrap detects four columns"), Result.DetectedColumnCount, 4);
 	TestEqual(TEXT("MCP bootstrap infers row, generated-property, and generated-reference bindings"), Result.BindingCount, 7);
+	TestEqual(TEXT("MCP bootstrap reports the exact Profile"), Result.AssetLayoutProfileObjectPath, Profile->GetPathName());
 
 	UDataForgeRuleSet* RuleSet = FindObject<UDataForgeRuleSet>(nullptr, *(RuleSetPackageName + TEXT(".RS_McpBootstrap")));
 	TestNotNull(TEXT("MCP bootstrap creates a maintainable RuleSet asset"), RuleSet);
@@ -536,6 +606,8 @@ bool FDataForgeMcpGoogleRuleSetBootstrapTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("RuleSet references Google parser config"), RuleSet->Source.SourceAsset.Get(), static_cast<UObject*>(Config));
 		TestEqual(TEXT("RuleSet reuses parser TargetTable path"), RuleSet->Output.AssetPath, TablePackageName);
 		TestEqual(TEXT("RuleSet infers Id primary key"), RuleSet->Schema.PrimaryKey, FName(TEXT("Id")));
+		TestEqual(TEXT("RuleSet records Profile provenance"), RuleSet->ProfileOrigin.ProfileId, Profile->ProfileId);
+		TestEqual(TEXT("RuleSet stores materialized Profile parameters"), RuleSet->ProfileOrigin.ParameterValues.FindRef(TEXT("GeneratedRoot")), Root / TEXT("Generated"));
 	}
 	TestNotNull(TEXT("MCP bootstrap applies the first DataTable row"),
 		TargetTable->FindRow<FGoogleDataForgeTestRow>(TEXT("1"), TEXT("MCP bootstrap test")));
