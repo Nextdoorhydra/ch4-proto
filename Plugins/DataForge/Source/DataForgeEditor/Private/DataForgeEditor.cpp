@@ -28,6 +28,8 @@ void FDataForgeEditorModule::StartupModule()
 	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
 	RuleSetAssetActions = MakeShared<FDataForgeAssetTypeActions>();
 	AssetTools.RegisterAssetTypeActions(RuleSetAssetActions.ToSharedRef());
+	LayoutProfileAssetActions = MakeShared<FDataForgeAssetLayoutProfileActions>();
+	AssetTools.RegisterAssetTypeActions(LayoutProfileAssetActions.ToSharedRef());
 
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 	PropertyEditor.RegisterCustomClassLayout(
@@ -94,7 +96,12 @@ void FDataForgeEditorModule::ShutdownModule()
 	{
 		FModuleManager::GetModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get().UnregisterAssetTypeActions(RuleSetAssetActions.ToSharedRef());
 	}
+	if (LayoutProfileAssetActions.IsValid() && FModuleManager::Get().IsModuleLoaded(TEXT("AssetTools")))
+	{
+		FModuleManager::GetModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get().UnregisterAssetTypeActions(LayoutProfileAssetActions.ToSharedRef());
+	}
 	RuleSetAssetActions.Reset();
+	LayoutProfileAssetActions.Reset();
 }
 
 void FDataForgeEditorModule::HandleInMemoryAssetDeleted(UObject* DeletedAsset)

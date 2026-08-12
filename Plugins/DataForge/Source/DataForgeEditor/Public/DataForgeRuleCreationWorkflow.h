@@ -5,12 +5,15 @@
 #include "DataForgeTypes.h"
 #include "UObject/StrongObjectPtr.h"
 
+class UDataForgeAssetLayoutProfile;
+
 enum class EDataForgeWizardStep : uint8
 {
 	Source,
 	Probe,
 	Schema,
 	Output,
+	AssetLayout,
 	AssetRules,
 	GeneratedOutputs,
 	Bindings,
@@ -28,8 +31,14 @@ public:
 	const FDataForgeDataSet& GetProbedDataSet() const;
 	const FDataForgeApplyPlan& GetPreviewPlan() const;
 	const FString& GetLastMessage() const;
+	UDataForgeAssetLayoutProfile* GetSelectedAssetLayoutProfile() const;
+	const TMap<FName, FString>& GetAssetLayoutParameterValues() const;
+	bool IsManualAssetLayout() const;
 
 	FDataForgeResult Probe();
+	void SelectAssetLayoutProfile(UDataForgeAssetLayoutProfile* Profile);
+	void SetAssetLayoutParameter(FName Name, const FString& Value);
+	FDataForgeResult MaterializeAssetLayout();
 	int32 AutoMapExactNames();
 	FDataForgeResult Preview();
 	void NotifyDraftChanged(FName MemberPropertyName);
@@ -47,6 +56,10 @@ private:
 	FDataForgeApplyPlan PreviewPlan;
 	FString LastMessage;
 	bool bProbeSucceeded = false;
+	bool bAssetLayoutReady = true;
+	bool bManualAssetLayout = true;
 	bool bPreviewSucceeded = false;
+	TWeakObjectPtr<UDataForgeAssetLayoutProfile> SelectedAssetLayoutProfile;
+	TMap<FName, FString> AssetLayoutParameterValues;
 	int32 RemoveInvalidGeneratedOutputBindings();
 };
