@@ -39,6 +39,8 @@
 2. File 오른쪽의 `...` 버튼으로 CSV를 선택한다.
 3. `Parameters`는 비워 둔다. 기본 CSV 어댑터는 사용하지 않는다.
 
+선택한 Adapter에 필요한 입력만 표시된다. CSV/JSON은 `File`만, Google Sheet Cache는 `Source Asset`만 표시하며 Multi Source는 `Inputs`만 표시한다.
+
 프로젝트 상대 경로와 절대 경로를 모두 지원한다. 팀 공유에는 다음과 같은 프로젝트 상대 경로를 권장한다.
 
 ```text
@@ -73,13 +75,17 @@ SourceValue DisplayName → DataTableRow.DisplayName
 SourceValue Price       → DataTableRow.Price
 ```
 
-이름이 같은 단순 property는 Auto Map을 사용할 수 있다. 복잡한 대상은 Pick 또는 Binding Graph를 사용한다.
+Bindings 단계에 진입하면 source column과 이름이 같은 editable RowStruct property가 자동으로 추가된다. 기존 수동 바인딩은 유지하고 누락된 대상만 추가하므로 Back/Next 또는 Auto Map을 반복해도 중복되지 않는다.
+
+Generated Output이 설정되어 있고 그 Output Name과 같은 이름의 DataTable soft-object property가 있으면 해당 참조 바인딩도 자동으로 추가된다. Binding의 `Source Output`과 `Target Output`은 현재 `Generated Outputs` 목록에서 드롭다운으로 선택할 수 있다. 복잡한 대상은 Pick 또는 Binding Graph를 사용한다.
 
 ### Preview와 Finish
 
 1. Wizard의 Preview 단계에서 오류와 변경 수를 확인한다.
-2. Finish로 RuleSet 설정을 저장한다.
-3. Finish는 결과 에셋을 만들지 않으므로 에디터 toolbar에서 Apply를 실행한다.
+2. `Finish & Apply`로 RuleSet 설정을 저장한다.
+3. Wizard가 새 Preview를 실행하고 성공하면 즉시 Apply하여 DataTable과 Generated Output을 생성하거나 갱신한다.
+
+Preview 또는 Apply가 실패하면 Wizard가 열린 상태로 오류를 표시한다. DataTable 또는 DataForge가 소유한 PDA/DA를 Content Browser에서 삭제하면 해당 RuleSet의 Creation Wizard가 다시 열리므로 출력 경로와 규칙을 확인한 뒤 `Finish & Apply`로 재생성할 수 있다.
 
 ## 3. 여러 소스 외래키 병합
 

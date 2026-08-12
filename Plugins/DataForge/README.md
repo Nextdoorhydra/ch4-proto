@@ -23,6 +23,9 @@ DataForge is an editor-only Unreal Engine plugin that turns canonical parsed row
 - Staged six-step Rule Creation Wizard: Source, Probe, Schema, Output, Bindings, Preview
 - Reflection Property Picker for DataTable and generated-output targets
 - Exact-name Auto Map for editable DataTable row properties
+- Automatic exact-name inference when the Wizard enters Bindings, including same-name Generated Output soft references
+- Generated Output dropdowns for binding source/target selection
+- Output deletion detection that reopens the owning RuleSet's Creation Wizard
 - Probe-driven conversion suggestions for text, integer, number, bool, enum, array, and object-reference targets
 - Drag-and-drop Binding Graph with safe connection gating
 - Semantic RuleSet Diff keyed by RuleId, OutputName, and binding target
@@ -47,17 +50,20 @@ Managed asset identity is `(RuleSetId, RecordId, Role)`. When that identity stil
 3. Select **Creation Wizard**. The wizard edits a transient draft, not the RuleSet asset.
 4. Choose `CSV`, `JSON`, or `Google Sheet Cache` from the adapter dropdown. Use the file browser or Source Asset picker; do not type an Adapter ID.
 5. Complete Source → Probe → Schema → Output → Bindings → Preview. Each step shows only its own settings. Probe infers required columns and suggests a primary key for review.
-6. Select **Finish** to commit only the staged rules. Finish never applies generated content.
-7. Use the **Pick** menu beside `TargetProperty` to choose writable properties through reflection instead of typing paths.
-8. Review the adjacent **Conversion** result. `Risky` and `Unsupported` results require an explicit rule correction.
-9. Open **Binding Graph**, run **Probe + Refresh**, then drag source fields/outputs onto target properties. The graph creates only `Direct` or `Convertible` bindings.
-10. For existing project assets, add an External Asset Rule and use a `ResolvedAsset` binding. For DA/PDA generation, add a Managed Asset Rule and Generated Output.
-11. Open **Semantic Diff** to review structured changes from its captured baseline. Reordering keyed rule arrays alone does not produce noise.
-12. Add prerequisite RuleSets to `Dependencies`, then open **Project Overview** to review dependency-first execution order and every project RuleSet's source/output/dependent files. Empty, missing, or cyclic dependencies fail compilation.
-13. Select **Preview Dependency Graph** and then **Apply Dependency Graph**. Each RuleSet is re-previewed immediately before its dependency-ordered Apply; source, rule, dependency, DataTable, or managed-asset drift blocks that RuleSet.
-14. If Preview reports managed orphans, review them and use **Cleanup Root Orphans** as a separate destructive action. Apply does not remove them.
+6. Enter **Bindings** to infer missing exact-name source and Generated Output bindings, then review the result.
+7. Select **Finish & Apply**. The Wizard commits the staged rules, runs a fresh Preview, and immediately Applies when validation succeeds.
+8. Use the **Pick** menu beside `TargetProperty` to choose writable properties through reflection instead of typing paths. Choose `Source Output` and `Target Output` from the Generated Outputs dropdown.
+9. Review the adjacent **Conversion** result. `Risky` and `Unsupported` results require an explicit rule correction.
+10. Open **Binding Graph**, run **Probe + Refresh**, then drag source fields/outputs onto target properties. The graph creates only `Direct` or `Convertible` bindings.
+11. For existing project assets, add an External Asset Rule and use a `ResolvedAsset` binding. For DA/PDA generation, add a Managed Asset Rule and Generated Output.
+12. Open **Semantic Diff** to review structured changes from its captured baseline. Reordering keyed rule arrays alone does not produce noise.
+13. Add prerequisite RuleSets to `Dependencies`, then open **Project Overview** to review dependency-first execution order and every project RuleSet's source/output/dependent files. Empty, missing, or cyclic dependencies fail compilation.
+14. Select **Preview Dependency Graph** and then **Apply Dependency Graph**. Each RuleSet is re-previewed immediately before its dependency-ordered Apply; source, rule, dependency, DataTable, or managed-asset drift blocks that RuleSet.
+15. If Preview reports managed orphans, review them and use **Cleanup Root Orphans** as a separate destructive action. Apply does not remove them.
 
-Auto Map only proposes exact-name bindings for editable row properties. It never selects the primary key, maps generated assets, or overwrites an existing target binding.
+Auto Map adds only missing exact-name targets. It maps source columns to editable row properties and defined Generated Outputs to same-name soft-object row properties; it never overwrites an existing target binding.
+
+The Source UI shows only the field consumed by the selected adapter: CSV/JSON use `File`, Google Sheet Cache uses `Source Asset`, and Multi Source uses `Inputs`. Deleting a generated DataTable or DataForge-owned DA/PDA in the Content Browser reopens the owning RuleSet's Creation Wizard on the next editor tick so the output can be reviewed and recreated.
 
 ## Google Sheet cache workflow
 
@@ -69,6 +75,14 @@ Auto Map only proposes exact-name bindings for editable row properties. It never
 Fetch remains the explicit network trigger. When automatic application is enabled, DataForge still performs a fresh validation Preview internally before it mutates project assets.
 
 As of 1.3, new GoogleSheetConfig assets enable **Save Normalized Json** and **Auto Apply DataForge** by default. A successful Fetch broadcasts the cache update, discovers every direct or Multi Source RuleSet referencing that config, runs a fresh Preview, and immediately Applies when validation succeeds. Preview/foreign-key/schema failures block only the affected RuleSet and are appended to the Google Sheet status. Existing config assets keep their serialized option values, so enable both options once when upgrading an existing asset.
+
+For MCP-assisted initial creation, call the project command through the canonical `system_control.console_command` capability:
+
+```text
+DataForge.MCP.CreateRuleSetFromGoogleParser Config=/Game/Data/GS_Items
+```
+
+The command reuses the parser's TargetTable when available, probes the normalized cache, infers schema and bindings, previews, applies, saves, and enables Google auto-apply. It refuses to overwrite an existing RuleSet; subsequent maintenance belongs in the RuleSet Editor. Cache-only parsers must also provide `RowStruct=` and `Output=`. See `Docs/DataForge_MCP_Guide.md` and the project `AGENTS.md` for the MCP contract.
 
 ## Multi Source foreign-key join
 

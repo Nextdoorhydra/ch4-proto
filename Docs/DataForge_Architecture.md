@@ -1,6 +1,6 @@
 # DataForge 플러그인 설계 문서
 
-문서 버전: 1.0
+문서 버전: 1.1
 
 대상 구현: DataForge 1.3
 
@@ -70,6 +70,7 @@ Apply 전에 반드시 성공한 Preview가 있어야 한다. Preview 이후 소
 - Recovery Manifest
 - Snapshot JSON/YAML
 - DataForge commandlet
+- DataTable/managed output 삭제 감지와 Creation Wizard 재개
 
 ### ChimeraEditor 통합
 
@@ -77,6 +78,7 @@ Apply 전에 반드시 성공한 Preview가 있어야 한다. Preview 이후 소
 - `MultiSource` 외래키 조인 어댑터
 - Google Sheet 캐시 갱신 이벤트 처리
 - 프로젝트 통합 및 E2E 자동화 테스트
+- Google parser 기반 MCP RuleSet bootstrap 명령
 
 Google Sheet 및 MultiSource는 현재 프로젝트 통합 계층에 등록된다. DataForgeCore는 특정 Google Sheet 플러그인에 의존하지 않는다.
 
@@ -113,6 +115,8 @@ Binding source는 세 종류다.
 - `GeneratedOutput`: 같은 행에서 생성할 DA/PDA 참조
 
 Binding target은 DataTable row 또는 Generated Output이다.
+
+Creation Wizard가 Bindings 단계에 진입할 때 exact-name 추론을 자동 실행한다. source column은 같은 이름의 editable row property에 연결하고, 정의된 Generated Output은 같은 이름의 soft-object row property에 연결한다. 기존 target binding은 우선하며 자동 추론은 누락된 target만 추가한다.
 
 ## 5. Source Adapter 계약
 
@@ -244,6 +248,18 @@ Apply는 프로젝트 전체의 원자적 트랜잭션이 아니다. dependency 
 Fetch 성공 시 normalized cache를 저장하고 cache update event를 방송한다. ChimeraEditor는 해당 config를 직접 또는 MultiSource input으로 참조하는 모든 RuleSet을 찾아 각각 새 Preview와 Apply를 실행한다. 한 RuleSet의 실패는 다른 RuleSet을 막지 않는다.
 
 `DataParser`와 DataTable 할당은 선택 사항이다. cache-only 용도에서는 parser 없이도 Fetch할 수 있다.
+
+### MCP 최초 생성
+
+프로젝트 MCP는 `system_control.console_command`를 통해 `DataForge.MCP.CreateRuleSetFromGoogleParser` 고수준 명령을 실행한다. 이 명령은 기존 `GoogleSheetConfig`의 parser TargetTable을 우선 재사용하고, 없으면 요청에서 Row Struct와 DataTable 경로를 받는다. normalized cache Probe, schema/primary-key 추론, exact-name binding, Preview, Apply, RuleSet 저장을 하나의 검증된 흐름으로 수행한다.
+
+이 경로는 최초 생성 전용이다. 동일 경로의 RuleSet은 덮어쓰지 않으며 생성 이후의 RuleSet 변경 책임은 전용 에디터와 사용자에게 넘어간다. 범용 MCP 에셋 명령을 여러 번 조합해 RuleSet 내부 구조를 작성하지 않는 이유는 중간 실패로 불완전한 RuleSet이 남는 것을 막기 위해서다.
+
+Parser TargetTable이 없는 cache-only 구성에서는 `RowStruct`와 `Output`을 명시해야 한다. cache가 없으면 mutation 전에 실패하며 Google config에서 Fetch한 뒤 재시도한다. 상세 계약은 `Docs/DataForge_MCP_Guide.md`에 정의한다.
+
+### 출력 삭제 복구
+
+Asset Registry의 in-memory delete event에서 DataTable 출력 경로 또는 `DataForge.Managed` metadata가 RuleSet과 일치하는 DA/PDA 삭제를 감지한다. 삭제 처리가 끝난 다음 tick에 해당 RuleSet의 Creation Wizard를 열어 재생성 경로를 제공한다. commandlet과 unattended 실행에서는 UI를 열지 않는다.
 
 ### CSV와 JSON
 
