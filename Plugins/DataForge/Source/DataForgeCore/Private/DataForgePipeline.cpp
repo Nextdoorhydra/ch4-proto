@@ -106,8 +106,13 @@ namespace DataForgePipeline
 		FPaths::NormalizeFilename(Filename);
 		if (FPaths::IsRelative(Filename))
 		{
-			Filename = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), Filename);
+			const FString FullProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+			const FString UnrealRelative = FPaths::ConvertRelativePathToFull(Filename);
+			Filename = FPaths::IsUnderDirectory(UnrealRelative, FullProjectDir)
+				? UnrealRelative
+				: FPaths::ConvertRelativePathToFull(FullProjectDir, Filename);
 		}
+		FPaths::NormalizeFilename(Filename);
 		return Filename;
 	}
 
@@ -497,7 +502,7 @@ bool FDataForgeCsvSourceAdapter::Read(
 	}
 
 	FString CsvText;
-	if (!FFileHelper::LoadFileToString(CsvText, *Filename))
+	if (!FFileHelper::LoadFileToString(CsvText, *Filename, FFileHelper::EHashOptions::None, FILEREAD_AllowWrite))
 	{
 		DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1002"), FString::Printf(TEXT("Could not read CSV source: %s"), *Filename));
 		return false;
@@ -598,7 +603,7 @@ bool FDataForgeJsonSourceAdapter::Read(
 	}
 
 	FString JsonText;
-	if (!FFileHelper::LoadFileToString(JsonText, *Filename))
+	if (!FFileHelper::LoadFileToString(JsonText, *Filename, FFileHelper::EHashOptions::None, FILEREAD_AllowWrite))
 	{
 		DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1011"), FString::Printf(TEXT("Could not read JSON source: %s"), *Filename));
 		return false;

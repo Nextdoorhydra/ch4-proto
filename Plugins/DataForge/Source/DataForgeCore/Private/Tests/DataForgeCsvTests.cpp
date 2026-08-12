@@ -114,6 +114,37 @@ bool FDataForgeCsvQuotedCellTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeCsvFilePickerPathTest,
+	"DataForge.Core.Csv.FilePickerProjectPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeCsvFilePickerPathTest::RunTest(const FString& Parameters)
+{
+	FDataForgeSourceConfig Source;
+	Source.File.FilePath = FPaths::ProjectDir() / TEXT("Content/DataForgeExamples/Source/Items.csv");
+	const FString PickerResolved = FPaths::ConvertRelativePathToFull(Source.File.FilePath);
+	TestTrue(FString::Printf(TEXT("File-picker path resolves from the Unreal base directory: %s"), *PickerResolved),
+		FPaths::FileExists(PickerResolved));
+
+	FDataForgeDataSet DataSet;
+	TArray<FDataForgeDiagnostic> Diagnostics;
+	FDataForgeCsvSourceAdapter Adapter;
+	const bool bFetched = Adapter.Fetch(Source, DataSet, Diagnostics);
+	const FString DiagnosticText = FString::JoinBy(Diagnostics, TEXT(" | "), [](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code + TEXT(": ") + Diagnostic.Message;
+	});
+	TestTrue(FString::Printf(TEXT("CSV adapter reads file-picker path. configured='%s' direct='%s' diagnostics='%s'"),
+		*Source.File.FilePath, *PickerResolved, *DiagnosticText), bFetched);
+	TestEqual(TEXT("Example CSV rows are loaded"), DataSet.Rows.Num(), 2);
+	TestFalse(TEXT("DF1002 is not emitted"), Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1002");
+	}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FDataForgeCsvDuplicateHeaderTest,
 	"DataForge.Core.Csv.DuplicateHeader",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
