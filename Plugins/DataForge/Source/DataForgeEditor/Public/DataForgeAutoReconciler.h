@@ -27,6 +27,7 @@ public:
 	void Shutdown();
 
 	void Request(UDataForgeRuleSet& RuleSet, FString Reason, double DelaySeconds = 0.35);
+	void Cancel(UDataForgeRuleSet& RuleSet);
 	int32 RequestForSourceAsset(UObject& SourceAsset, FString Reason, double DelaySeconds = 0.0);
 	FDataForgeReconcileBatchResult ReconcileSourceAssetNow(UObject& SourceAsset, FString Reason);
 	FDataForgeReconcileBatchResult FlushPending(bool bForceAll = true);

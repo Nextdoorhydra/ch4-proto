@@ -1,6 +1,8 @@
 #include "DataForgeAutoReconciler.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "DataForgeAssetLayoutAuthoring.h"
+#include "DataForgeAssetLayoutProfile.h"
 #include "DataForgeEditorService.h"
 #include "DataForgeRuleSet.h"
 #include "DirectoryWatcherModule.h"
@@ -143,6 +145,11 @@ void FDataForgeAutoReconciler::Request(UDataForgeRuleSet& RuleSet, FString Reaso
 	Pending.RuleSet = &RuleSet;
 	Pending.Reason = MoveTemp(Reason);
 	Pending.DueTime = FPlatformTime::Seconds() + FMath::Max(0.0, DelaySeconds);
+}
+
+void FDataForgeAutoReconciler::Cancel(UDataForgeRuleSet& RuleSet)
+{
+	PendingRequests.Remove(FSoftObjectPath(&RuleSet));
 }
 
 int32 FDataForgeAutoReconciler::RequestForSourceAsset(UObject& SourceAsset, FString Reason, double DelaySeconds)
@@ -325,6 +332,11 @@ void FDataForgeAutoReconciler::HandleDirectoryChanged(const TArray<FFileChangeDa
 void FDataForgeAutoReconciler::HandleObjectPropertyChanged(UObject* Object, FPropertyChangedEvent&)
 {
 	if (!Object || bApplying) return;
+	if (UDataForgeAssetLayoutProfile* Profile = Cast<UDataForgeAssetLayoutProfile>(Object))
+	{
+		FDataForgeAssetLayoutAuthoring::RefreshDependentStatuses(Profile);
+		return;
+	}
 	if (UDataForgeRuleSet* RuleSet = Cast<UDataForgeRuleSet>(Object))
 	{
 		Request(*RuleSet, TEXT("RuleSet edited"));
@@ -368,6 +380,11 @@ void FDataForgeAutoReconciler::HandleAssetRenamed(const FAssetData& AssetData, c
 void FDataForgeAutoReconciler::HandleAssetChange(const FAssetData& AssetData, const FString& Reason)
 {
 	if (bApplying || IsPackageSuppressed(AssetData.PackageName.ToString())) return;
+	if (AssetData.AssetClassPath == UDataForgeAssetLayoutProfile::StaticClass()->GetClassPathName())
+	{
+		FDataForgeAssetLayoutAuthoring::RefreshDependentStatuses(Cast<UDataForgeAssetLayoutProfile>(AssetData.GetAsset()));
+		return;
+	}
 	if (AssetData.AssetClassPath == UDataForgeRuleSet::StaticClass()->GetClassPathName()) RefreshFileWatches();
 	RequestAffectedByPackage(AssetData.PackageName.ToString(), Reason);
 }
