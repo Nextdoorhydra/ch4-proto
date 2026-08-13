@@ -59,8 +59,8 @@ void FDataForgeSourceCustomization::CustomizeChildren(TSharedRef<IPropertyHandle
 		{
 			const FName ChildName = Child->GetProperty()->GetFName();
 			if (CurrentAdapter == TEXT("MultiSource") && (ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, File) || ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, SourceAsset))) continue;
-			if (CurrentAdapter == TEXT("GoogleSheetCache") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, File)) continue;
-			if (CurrentAdapter != TEXT("GoogleSheetCache") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, SourceAsset)) continue;
+			if ((CurrentAdapter == TEXT("GoogleSheetCache") || CurrentAdapter == TEXT("AssetRegistryFolder")) && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, File)) continue;
+			if (CurrentAdapter != TEXT("GoogleSheetCache") && CurrentAdapter != TEXT("AssetRegistryFolder") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, SourceAsset)) continue;
 			if (CurrentAdapter != TEXT("MultiSource") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceConfig, Inputs)) continue;
 			StructBuilder.AddProperty(Child.ToSharedRef());
 		}
@@ -117,8 +117,8 @@ void FDataForgeSourceInputCustomization::CustomizeChildren(TSharedRef<IPropertyH
 		TSharedPtr<IPropertyHandle> Child = StructPropertyHandle->GetChildHandle(Index);
 		if (!Child.IsValid() || Child->GetProperty()->GetFName() == GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, AdapterId)) continue;
 		const FName ChildName = Child->GetProperty()->GetFName();
-		if (CurrentAdapter == TEXT("GoogleSheetCache") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, File)) continue;
-		if (CurrentAdapter != TEXT("GoogleSheetCache") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, SourceAsset)) continue;
+		if ((CurrentAdapter == TEXT("GoogleSheetCache") || CurrentAdapter == TEXT("AssetRegistryFolder")) && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, File)) continue;
+		if (CurrentAdapter != TEXT("GoogleSheetCache") && CurrentAdapter != TEXT("AssetRegistryFolder") && ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeSourceInput, SourceAsset)) continue;
 		StructBuilder.AddProperty(Child.ToSharedRef());
 	}
 }

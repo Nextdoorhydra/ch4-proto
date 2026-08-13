@@ -1,20 +1,31 @@
 #include "DataForgeEditorService.h"
 #include "DataForgeAutoReconciler.h"
 #include "DataForgeBindingGraph.h"
+#include "DataForgeBindingPresetAuthoring.h"
+#include "DataForgeBindingPresetFactory.h"
 #include "DataForgeRuleCreationWorkflow.h"
+#include "DataForgeRenameImpact.h"
+#include "DataForgeRenameAdvisor.h"
+#include "DataForgeRenameRecovery.h"
 #include "DataForgeRuleSetSnapshot.h"
 #include "DataForgeRuleSetSemanticDiff.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "DataForgeBindingPreset.h"
+#include "DataForgeFolderSource.h"
+#include "DataForgeNamingPolicy.h"
 #include "DataForgeRuleSet.h"
 #include "Engine/DataAsset.h"
+#include "Dom/JsonObject.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "Tests/DataForgeEditorTestTypes.h"
 #include "UObject/MetaData.h"
 #include "UObject/Package.h"
@@ -35,6 +46,505 @@ bool FDataForgeAutoMapExactNamesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Two bindings were created"), RuleSet->Bindings.Num(), 2);
 	TestEqual(TEXT("Repeated auto-map does not create duplicates"), FDataForgeEditorService::AutoMapExactNames(*RuleSet, Columns), 0);
 	TestEqual(TEXT("Binding count remains stable"), RuleSet->Bindings.Num(), 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeBindingPresetMaterializationTest,
+	"DataForge.Editor.Authoring.BindingPreset.Materialization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeBindingPresetMaterializationTest::RunTest(const FString& Parameters)
+{
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Output.RowStruct = FDataForgeEditorPresetRow::StaticStruct();
+
+	UDataForgeBindingPreset* Preset = NewObject<UDataForgeBindingPreset>(GetTransientPackage());
+	Preset->OutputName = TEXT("Data");
+	Preset->TargetClass = UDataForgeEditorPresetAsset::StaticClass();
+	Preset->AssetNamePrefix = TEXT("DA");
+	FDataForgeBindingPresetSlot& Slot = Preset->Slots.AddDefaulted_GetRef();
+	Slot.SlotId = TEXT("Icon");
+	Slot.AssetKind = TEXT("Texture");
+	Slot.ExpectedAssetClass = UTexture::StaticClass();
+
+	const FDataForgeBindingPresetMaterialization First = FDataForgeBindingPresetAuthoring::Materialize(
+		*RuleSet, *Preset, TEXT("/Game/DataForgeTests/Preset"));
+	TestTrue(TEXT("Compatible slot and row reference materialize"), First.bSuccess);
+	TestEqual(TEXT("One relationship slot is resolved"), First.ResolvedSlotCount, 1);
+	TestEqual(TEXT("No slot is ambiguous"), First.AmbiguousSlotCount, 0);
+	TestEqual(TEXT("One Managed rule is generated"), RuleSet->AssetRules.Num(), 1);
+	TestEqual(TEXT("Managed rule id is deterministic"), RuleSet->AssetRules[0].RuleId, FName(TEXT("Data_Managed")));
+	TestEqual(TEXT("Managed output name follows primary key"), RuleSet->AssetRules[0].AssetNamePattern, FString(TEXT("DA_{Id}")));
+	TestEqual(TEXT("One generated output is configured"), RuleSet->GeneratedOutputs.Num(), 1);
+	TestEqual(TEXT("Generated output targets preset class"), RuleSet->GeneratedOutputs[0].AssetClass.Get(), UDataForgeEditorPresetAsset::StaticClass());
+	TestEqual(TEXT("Generated output uses managed rule"), RuleSet->GeneratedOutputs[0].AssetRuleId, FName(TEXT("Data_Managed")));
+	TestEqual(TEXT("One generated-object row binding is inferred"), RuleSet->Bindings.Num(), 1);
+	TestEqual(TEXT("Row binding targets the matching Data property"), RuleSet->Bindings[0].TargetProperty, FString(TEXT("Data")));
+	TestEqual(TEXT("RuleSet tracks preset provenance"), RuleSet->BindingPreset.Get(), Preset);
+
+	const FDataForgeBindingPresetMaterialization Second = FDataForgeBindingPresetAuthoring::Materialize(
+		*RuleSet, *Preset, TEXT("/Game/DataForgeTests/Preset"));
+	TestTrue(TEXT("Repeated materialization succeeds"), Second.bSuccess);
+	TestEqual(TEXT("Repeated materialization keeps one rule"), RuleSet->AssetRules.Num(), 1);
+	TestEqual(TEXT("Repeated materialization keeps one output"), RuleSet->GeneratedOutputs.Num(), 1);
+	TestEqual(TEXT("Repeated materialization keeps one row binding"), RuleSet->Bindings.Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeBindingPresetAmbiguityTest,
+	"DataForge.Editor.Authoring.BindingPreset.AmbiguityAndCardinality",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeBindingPresetAmbiguityTest::RunTest(const FString& Parameters)
+{
+	UDataForgeBindingPreset* Ambiguous = NewObject<UDataForgeBindingPreset>(GetTransientPackage());
+	Ambiguous->TargetClass = UDataForgeEditorAmbiguousPresetAsset::StaticClass();
+	FDataForgeBindingPresetSlot& AmbiguousSlot = Ambiguous->Slots.AddDefaulted_GetRef();
+	AmbiguousSlot.SlotId = TEXT("Texture");
+	AmbiguousSlot.ExpectedAssetClass = UTexture::StaticClass();
+	const FDataForgeBindingPresetMaterialization AmbiguousResult = FDataForgeBindingPresetAuthoring::Validate(*Ambiguous);
+	TestTrue(TEXT("Ambiguity is non-destructive and requires an explicit property"), AmbiguousResult.bSuccess);
+	TestEqual(TEXT("Ambiguous slot is counted"), AmbiguousResult.AmbiguousSlotCount, 1);
+	TestEqual(TEXT("Ambiguous slot is not arbitrarily resolved"), AmbiguousResult.ResolvedSlotCount, 0);
+	TestTrue(TEXT("Ambiguity has a stable diagnostic"), AmbiguousResult.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1908") && Diagnostic.Severity == EDataForgeSeverity::Warning;
+	}));
+
+	UDataForgeBindingPreset* InvalidMany = NewObject<UDataForgeBindingPreset>(GetTransientPackage());
+	InvalidMany->TargetClass = UDataForgeEditorManyPresetAsset::StaticClass();
+	FDataForgeBindingPresetSlot& ManySlot = InvalidMany->Slots.AddDefaulted_GetRef();
+	ManySlot.SlotId = TEXT("Textures");
+	ManySlot.TargetProperty = TEXT("Textures");
+	ManySlot.ExpectedAssetClass = UTexture::StaticClass();
+	ManySlot.Cardinality = EDataForgeBindingCardinality::Many;
+	ManySlot.Reconcile = EDataForgeBindingReconcileMode::Assign;
+	const FDataForgeBindingPresetMaterialization InvalidManyResult = FDataForgeBindingPresetAuthoring::Validate(*InvalidMany);
+	TestFalse(TEXT("Many cannot use scalar Assign semantics"), InvalidManyResult.bSuccess);
+	TestTrue(TEXT("Invalid cardinality has a stable diagnostic"), InvalidManyResult.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1909") && Diagnostic.Severity == EDataForgeSeverity::Error;
+	}));
+
+	UDataForgeRuleSet* InvalidRowRuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	InvalidRowRuleSet->Schema.PrimaryKey = TEXT("Id");
+	InvalidRowRuleSet->Output.RowStruct = FDataForgeEditorPresetRow::StaticStruct();
+	UDataForgeBindingPreset* InvalidRowPreset = NewObject<UDataForgeBindingPreset>(GetTransientPackage());
+	InvalidRowPreset->TargetClass = UDataForgeEditorPresetAsset::StaticClass();
+	InvalidRowPreset->RowReferenceProperty = TEXT("MissingProperty");
+	const FDataForgeBindingPresetMaterialization InvalidRowResult = FDataForgeBindingPresetAuthoring::Materialize(
+		*InvalidRowRuleSet, *InvalidRowPreset, TEXT("/Game/DataForgeTests/Preset"));
+	TestFalse(TEXT("Invalid explicit row reference fails"), InvalidRowResult.bSuccess);
+	TestEqual(TEXT("Failed materialization does not leave an Asset Rule"), InvalidRowRuleSet->AssetRules.Num(), 0);
+	TestEqual(TEXT("Failed materialization does not leave a Generated Output"), InvalidRowRuleSet->GeneratedOutputs.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeBindingPresetFactoryTest,
+	"DataForge.Editor.Authoring.BindingPreset.Factory",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeBindingPresetFactoryTest::RunTest(const FString& Parameters)
+{
+	UDataForgeBindingPresetFactory* Factory = NewObject<UDataForgeBindingPresetFactory>();
+	UDataForgeBindingPreset* Preset = Cast<UDataForgeBindingPreset>(Factory->FactoryCreateNew(
+		UDataForgeBindingPreset::StaticClass(), GetTransientPackage(), TEXT("BindingPresetFactoryTest"), RF_Transient, nullptr, GWarn));
+	TestNotNull(TEXT("Factory creates a Binding Preset"), Preset);
+	if (Preset)
+	{
+		TestTrue(TEXT("Factory assigns stable provenance id"), Preset->PresetId.IsValid());
+		TestTrue(TEXT("Factory creates a transactional asset"), Preset->HasAnyFlags(RF_Transactional));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeRenameImpactTest,
+	"DataForge.Editor.Automation.RenameImpact",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeRenameImpactTest::RunTest(const FString& Parameters)
+{
+	const FString TestId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString TestRoot = TEXT("/Game/DataForgeTests/Rename_") + TestId;
+	const FString SourceFile = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("RenameSource_") + TestId + TEXT(".csv"));
+	const FString AssociationFile = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("RenameAssociation_") + TestId + TEXT(".csv"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(SourceFile), true);
+	FFileHelper::SaveStringToFile(TEXT("Id\nHero\n"), *SourceFile);
+
+	auto CreateAsset = [](const FString& PackageName, UClass* AssetClass) -> UDataAsset*
+	{
+		UPackage* Package = CreatePackage(*PackageName);
+		UDataAsset* Asset = NewObject<UDataAsset>(Package, AssetClass, *FPackageName::GetLongPackageAssetName(PackageName), RF_Public | RF_Standalone | RF_Transient);
+		FAssetRegistryModule::AssetCreated(Asset);
+		return Asset;
+	};
+	UDataForgeEditorManagedAsset* OldCandidate = CastChecked<UDataForgeEditorManagedAsset>(CreateAsset(TestRoot + TEXT("/OldCandidate"), UDataForgeEditorManagedAsset::StaticClass()));
+	UDataForgeEditorManagedAsset* NewCandidate = CastChecked<UDataForgeEditorManagedAsset>(CreateAsset(TestRoot + TEXT("/NewCandidate"), UDataForgeEditorManagedAsset::StaticClass()));
+	UDataForgeEditorManagedAsset* ExtraCandidate = CastChecked<UDataForgeEditorManagedAsset>(CreateAsset(TestRoot + TEXT("/ExtraCandidate"), UDataForgeEditorManagedAsset::StaticClass()));
+	FFileHelper::SaveStringToFile(FString::Printf(TEXT("Subject,ObjectPath,AssetKind,Role\nHero,%s,Test,Visual\n"), *NewCandidate->GetPathName()), *AssociationFile);
+
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.AdapterId = TEXT("Csv");
+	RuleSet->Source.File.FilePath = SourceFile;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Schema.bWarnOnUnmappedColumns = false;
+	RuleSet->Output.RowStruct = FDataForgeEditorAutoMapRow::StaticStruct();
+	RuleSet->Output.AssetPath = TestRoot + TEXT("/DT_Rename");
+	RuleSet->Output.bSaveAfterApply = false;
+	FDataForgeAssetRule& ManagedRule = RuleSet->AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("Data_Managed");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = TestRoot + TEXT("/Generated");
+	ManagedRule.AssetNamePattern = TEXT("DA_{Id}");
+	FDataForgeGeneratedAssetOutputRule& Output = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("Data");
+	Output.AssetClass = UDataForgeEditorRenameTargetAsset::StaticClass();
+	Output.AssetRuleId = ManagedRule.RuleId;
+	FDataForgeAssociationSourceRule& Association = RuleSet->AssociationSources.AddDefaulted_GetRef();
+	Association.SourceId = TEXT("Inventory");
+	Association.Source.AdapterId = TEXT("Csv");
+	Association.Source.File.FilePath = AssociationFile;
+
+	UDataForgeBindingPreset* Preset = NewObject<UDataForgeBindingPreset>(GetTransientPackage());
+	Preset->OutputName = Output.OutputName;
+	Preset->TargetClass = UDataForgeEditorRenameTargetAsset::StaticClass();
+	FDataForgeBindingPresetSlot& Slot = Preset->Slots.AddDefaulted_GetRef();
+	Slot.SlotId = TEXT("Visual");
+	Slot.AssetKind = TEXT("Test");
+	Slot.Role = TEXT("Visual");
+	Slot.TargetProperty = TEXT("Asset");
+	Slot.ExpectedAssetClass = UDataForgeEditorManagedAsset::StaticClass();
+	RuleSet->BindingPreset = Preset;
+
+	UDataForgeEditorRenameTargetAsset* Existing = CastChecked<UDataForgeEditorRenameTargetAsset>(CreateAsset(ManagedRule.BaseFolder + TEXT("/DA_Hero"), UDataForgeEditorRenameTargetAsset::StaticClass()));
+	Existing->Asset = OldCandidate;
+	FMetaData& MetaData = Existing->GetPackage()->GetMetaData();
+	MetaData.SetValue(Existing, TEXT("DataForge.Managed"), TEXT("true"));
+	MetaData.SetValue(Existing, TEXT("DataForge.RuleSetId"), *RuleSet->RuleSetId.ToString(EGuidFormats::Digits));
+	MetaData.SetValue(Existing, TEXT("DataForge.RecordId"), TEXT("Hero"));
+	MetaData.SetValue(Existing, TEXT("DataForge.Role"), TEXT("Data"));
+	MetaData.SetValue(Existing, TEXT("DataForge.RuleVersion"), TEXT("1"));
+	MetaData.SetValue(Existing, TEXT("DataForge.Association.Asset"), *OldCandidate->GetPathName());
+	MetaData.SetValue(Existing, TEXT("DataForge.Association.Keys"), TEXT("Asset"));
+
+	const FDataForgeRenameImpactEntry Ready = FDataForgeRenameImpactAnalyzer::AnalyzeRuleSet(*RuleSet, FSoftObjectPath(OldCandidate), FSoftObjectPath(NewCandidate));
+	TestTrue(TEXT("Convention-compatible rename impact is safe"), Ready.bSuccess);
+	TestEqual(TEXT("Rename impact identifies one PDA/DA rebind"), Ready.Rebinds.Num(), 1);
+	if (!Ready.Rebinds.IsEmpty()) TestEqual(TEXT("Rename impact identifies the target property"), Ready.Rebinds[0].PropertyPath, FString(TEXT("Asset")));
+	TestEqual(TEXT("Impact analysis is mutation-free"), Existing->Asset.Get(), OldCandidate);
+
+	FFileHelper::SaveStringToFile(FString::Printf(TEXT("Subject,ObjectPath,AssetKind,Role\nHero,%s,Test,Visual\nHero,%s,Test,Visual\n"), *NewCandidate->GetPathName(), *ExtraCandidate->GetPathName()), *AssociationFile);
+	const FDataForgeRenameImpactEntry Blocked = FDataForgeRenameImpactAnalyzer::AnalyzeRuleSet(*RuleSet, FSoftObjectPath(OldCandidate), FSoftObjectPath(NewCandidate));
+	TestFalse(TEXT("Ambiguous One rename impact is blocked"), Blocked.bSuccess);
+	TestTrue(TEXT("Blocked rename exposes cardinality diagnostic"), Blocked.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic) { return Diagnostic.Code == TEXT("DF1923"); }));
+	TestEqual(TEXT("Blocked analysis preserves the existing binding"), Existing->Asset.Get(), OldCandidate);
+
+	FAssetRegistryModule::AssetDeleted(Existing);
+	FAssetRegistryModule::AssetDeleted(ExtraCandidate);
+	FAssetRegistryModule::AssetDeleted(NewCandidate);
+	FAssetRegistryModule::AssetDeleted(OldCandidate);
+	IFileManager::Get().Delete(*AssociationFile, false, true);
+	IFileManager::Get().Delete(*SourceFile, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeRenameAdvisorTest,
+	"DataForge.Editor.Automation.RenameAdvisor",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeRenameAdvisorTest::RunTest(const FString& Parameters)
+{
+	const FString TestId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString TestRoot = TEXT("/Game/DataForgeTests/Advisor_") + TestId;
+	const FString SourceFile = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("RenameAdvisor_") + TestId + TEXT(".csv"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(SourceFile), true);
+	FFileHelper::SaveStringToFile(TEXT("Id\nHero\nVillain\n"), *SourceFile);
+
+	auto CreateManagedAsset = [](const FString& PackageName) -> UDataForgeEditorManagedAsset*
+	{
+		UPackage* Package = CreatePackage(*PackageName);
+		UDataForgeEditorManagedAsset* Asset = NewObject<UDataForgeEditorManagedAsset>(
+			Package, *FPackageName::GetLongPackageAssetName(PackageName), RF_Public | RF_Standalone | RF_Transient);
+		FAssetRegistryModule::AssetCreated(Asset);
+		return Asset;
+	};
+	UDataForgeEditorManagedAsset* Selected = CreateManagedAsset(TestRoot + TEXT("/Hero/DataAsset/LegacyName"));
+
+	UDataForgeNamingPolicy* Policy = NewObject<UDataForgeNamingPolicy>(GetTransientPackage());
+	Policy->ProjectPrefix = TEXT("CM");
+	FDataForgeAssetKindNamingRule& Kind = Policy->AssetKinds.AddDefaulted_GetRef();
+	Kind.AssetKind = TEXT("DataAsset");
+	Kind.TypePrefix = TEXT("DA");
+	Kind.FolderName = TEXT("DataAsset");
+	Kind.ExpectedAssetClass = UDataForgeEditorManagedAsset::StaticClass();
+
+	UDataForgeAssetLayoutRecipe* Recipe = NewObject<UDataForgeAssetLayoutRecipe>(GetTransientPackage());
+	Recipe->NamingPolicy = Policy;
+	Recipe->SubjectSource = EDataForgeLayoutSubjectSource::FolderSegment;
+	Recipe->SubjectFolderIndex = 0;
+	Recipe->KindFolderIndex = 1;
+
+	UDataForgeFolderSourceConfig* FolderConfig = NewObject<UDataForgeFolderSourceConfig>(GetTransientPackage());
+	FolderConfig->RootFolder = TestRoot;
+	FolderConfig->LayoutRecipe = Recipe;
+
+	UDataForgeBindingPreset* Preset = NewObject<UDataForgeBindingPreset>(GetTransientPackage());
+	FDataForgeBindingPresetSlot& Slot = Preset->Slots.AddDefaulted_GetRef();
+	Slot.SlotId = TEXT("IconData");
+	Slot.AssetKind = Kind.AssetKind;
+	Slot.Role = TEXT("Icon");
+	Slot.AssociationSourceId = TEXT("Inventory");
+	Slot.TargetProperty = TEXT("Asset");
+	Slot.ExpectedAssetClass = UDataForgeEditorManagedAsset::StaticClass();
+
+	UPackage* RuleSetPackage = CreatePackage(*(TestRoot + TEXT("/RS_Advisor")));
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(
+		RuleSetPackage, TEXT("RS_Advisor"), RF_Public | RF_Standalone);
+	FAssetRegistryModule::AssetCreated(RuleSet);
+	RuleSet->Source.AdapterId = TEXT("Csv");
+	RuleSet->Source.File.FilePath = SourceFile;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->BindingPreset = Preset;
+	FDataForgeAssetRule& ManagedRule = RuleSet->AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("Data_Managed");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = TestRoot + TEXT("/Generated");
+	ManagedRule.AssetNamePattern = TEXT("DA_{Id}");
+	FDataForgeGeneratedAssetOutputRule& GeneratedOutput = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	GeneratedOutput.OutputName = TEXT("Data");
+	GeneratedOutput.AssetClass = UDataForgeEditorRenameTargetAsset::StaticClass();
+	GeneratedOutput.AssetRuleId = ManagedRule.RuleId;
+	FDataForgeAssociationSourceRule& Association = RuleSet->AssociationSources.AddDefaulted_GetRef();
+	Association.SourceId = Slot.AssociationSourceId;
+	Association.Source.AdapterId = TEXT("AssetRegistryFolder");
+	Association.Source.SourceAsset = FolderConfig;
+
+	const TArray<FDataForgeRenameCandidate> Candidates =
+		FDataForgeRenameAdvisor::BuildCandidatesForRuleSet(FAssetData(Selected), *RuleSet);
+	TestEqual(TEXT("One source record produces one semantic rename candidate"), Candidates.Num(), 1);
+	if (Candidates.Num() != 1)
+	{
+		FAssetRegistryModule::AssetDeleted(Selected);
+		IFileManager::Get().Delete(*SourceFile, false, true);
+		return false;
+	}
+	const FDataForgeRenameCandidate& Candidate = Candidates[0];
+	const FString ExpectedPath = TestRoot + TEXT("/Hero/DataAsset/DA_CMHeroIcon.DA_CMHeroIcon");
+	TestEqual(TEXT("Naming Policy and folder recipe produce the destination"), Candidate.GetSuggestedObjectPath(), ExpectedPath);
+	TestEqual(TEXT("Folder evidence selects Hero instead of producing a row cross-product"), Candidate.RecordId, FName(TEXT("Hero")));
+	TestTrue(TEXT("A unique evidence-backed candidate is recommended"), Candidate.bRecommended);
+	TestTrue(TEXT("A fresh unoccupied proposal passes apply validation"), FDataForgeRenameAdvisor::ValidateForApply(Candidate).bSuccess);
+
+	UDataForgeEditorManagedAsset* SecondSelected = CreateManagedAsset(TestRoot + TEXT("/Hero/DataAsset/AnotherLegacyName"));
+	const TArray<FDataForgeRenameCandidate> SecondCandidates =
+		FDataForgeRenameAdvisor::BuildCandidatesForRuleSet(FAssetData(SecondSelected), *RuleSet);
+	TestEqual(TEXT("The second compatible asset receives the same semantic proposal"), SecondCandidates.Num(), 1);
+	if (SecondCandidates.Num() == 1)
+	{
+		const FDataForgeResult DuplicateDestination = FDataForgeRenameAdvisor::ValidateBatchForApply({ Candidate, SecondCandidates[0] });
+		TestFalse(TEXT("A batch cannot send two assets to one destination"), DuplicateDestination.bSuccess);
+		TestTrue(TEXT("Duplicate batch destination has a stable diagnostic"), DuplicateDestination.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Code == TEXT("DF1950");
+		}));
+	}
+	const TArray<FDataForgeRenameCandidate> AuditCandidates =
+		FDataForgeRenameAdvisor::BuildCandidates({ FAssetData(Selected), FAssetData(SecondSelected) });
+	TestTrue(TEXT("Folder audit marks cross-asset destination claims"), AuditCandidates.ContainsByPredicate([](const FDataForgeRenameCandidate& AuditCandidate)
+	{
+		return AuditCandidate.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Code == TEXT("DF1947");
+		});
+	}));
+	FDataForgeRenameCandidate AlternateForSameAsset = Candidate;
+	AlternateForSameAsset.SuggestedPackageName = TestRoot + TEXT("/Hero/DataAsset/DA_CMHeroAlternate");
+	AlternateForSameAsset.SuggestedAssetName = TEXT("DA_CMHeroAlternate");
+	const FDataForgeResult DuplicateSource = FDataForgeRenameAdvisor::ValidateBatchForApply({ Candidate, AlternateForSameAsset });
+	TestFalse(TEXT("A batch cannot select two proposals for one asset"), DuplicateSource.bSuccess);
+	TestTrue(TEXT("Duplicate batch source has a stable diagnostic"), DuplicateSource.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1949");
+	}));
+
+	UDataForgeEditorManagedAsset* ManifestSelected = CreateManagedAsset(TestRoot + TEXT("/Villain/DataAsset/LegacyManifestName"));
+	UPackage* ManagedPackage = CreatePackage(*(ManagedRule.BaseFolder + TEXT("/DA_Hero")));
+	UDataForgeEditorRenameTargetAsset* ManagedOutput = NewObject<UDataForgeEditorRenameTargetAsset>(
+		ManagedPackage, TEXT("DA_Hero"), RF_Public | RF_Standalone);
+	FAssetRegistryModule::AssetCreated(ManagedOutput);
+	FMetaData& ManagedMetaData = ManagedPackage->GetMetaData();
+	ManagedMetaData.SetValue(ManagedOutput, TEXT("DataForge.Managed"), TEXT("true"));
+	ManagedMetaData.SetValue(ManagedOutput, TEXT("DataForge.RuleSetId"), *RuleSet->RuleSetId.ToString(EGuidFormats::Digits));
+	ManagedMetaData.SetValue(ManagedOutput, TEXT("DataForge.RecordId"), TEXT("Hero"));
+	ManagedMetaData.SetValue(ManagedOutput, TEXT("DataForge.Association.Asset"), *ManifestSelected->GetPathName());
+	ManagedMetaData.SetValue(ManagedOutput, TEXT("DataForge.Association.Keys"), TEXT("Asset"));
+	const TArray<FDataForgeRenameCandidate> ManifestCandidates =
+		FDataForgeRenameAdvisor::BuildCandidatesForRuleSet(FAssetData(ManifestSelected), *RuleSet);
+	TestEqual(TEXT("Association Manifest resolves one candidate despite a conflicting folder subject"), ManifestCandidates.Num(), 1);
+	if (ManifestCandidates.Num() == 1)
+	{
+		TestEqual(TEXT("Association Manifest has priority over folder evidence"), ManifestCandidates[0].RecordId, FName(TEXT("Hero")));
+		TestTrue(TEXT("Manifest-backed candidate is recommended"), ManifestCandidates[0].bRecommended);
+		TestTrue(TEXT("Manifest evidence is exposed"), ManifestCandidates[0].MatchEvidence.Contains(TEXT("Existing Association Manifest")));
+	}
+
+	FFileHelper::SaveStringToFile(TEXT("Id\nHero\nHero\n"), *SourceFile);
+	const TArray<FDataForgeRenameCandidate> AmbiguousCandidates =
+		FDataForgeRenameAdvisor::BuildCandidatesForRuleSet(FAssetData(Selected), *RuleSet);
+	TestEqual(TEXT("Only tied highest-score candidates are retained"), AmbiguousCandidates.Num(), 2);
+	TestTrue(TEXT("A tied highest score is blocked instead of guessed"), AmbiguousCandidates.ContainsByPredicate([](const FDataForgeRenameCandidate& Ambiguous)
+	{
+		return Ambiguous.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Code == TEXT("DF1955");
+		});
+	}));
+	FFileHelper::SaveStringToFile(TEXT("Id\nHero\nVillain\n"), *SourceFile);
+	FString LargeSource = TEXT("Id\n");
+	for (int32 Index = 0; Index < 1000; ++Index)
+	{
+		LargeSource += FString::Printf(TEXT("Other%04d\n"), Index);
+	}
+	LargeSource += TEXT("Hero\n");
+	FFileHelper::SaveStringToFile(LargeSource, *SourceFile);
+	const double LargeStart = FPlatformTime::Seconds();
+	const TArray<FDataForgeRenameCandidate> LargeCandidates =
+		FDataForgeRenameAdvisor::BuildCandidatesForRuleSet(FAssetData(Selected), *RuleSet);
+	const double LargeElapsed = FPlatformTime::Seconds() - LargeStart;
+	TestEqual(TEXT("One thousand unrelated rows collapse to one evidence-backed candidate"), LargeCandidates.Num(), 1);
+	if (LargeCandidates.Num() == 1)
+	{
+		TestEqual(TEXT("Large-source matching keeps the folder subject"), LargeCandidates[0].RecordId, FName(TEXT("Hero")));
+	}
+	TestTrue(TEXT("Large-source candidate ranking remains interactive"), LargeElapsed < 2.0);
+	FFileHelper::SaveStringToFile(TEXT("Id\nHero\nVillain\n"), *SourceFile);
+
+	UDataForgeEditorManagedAsset* Collision = CreateManagedAsset(TestRoot + TEXT("/Hero/DataAsset/DA_CMHeroIcon"));
+	const FDataForgeResult CollisionResult = FDataForgeRenameAdvisor::ValidateForApply(Candidate);
+	TestFalse(TEXT("A destination occupied after discovery blocks apply"), CollisionResult.bSuccess);
+	TestTrue(TEXT("Late collision has a stable diagnostic"), CollisionResult.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1943");
+	}));
+	FAssetRegistryModule::AssetDeleted(Collision);
+
+	FFileHelper::SaveStringToFile(TEXT("Id\nOther\n"), *SourceFile);
+	const FDataForgeResult ChangedSourceResult = FDataForgeRenameAdvisor::ValidateForApply(Candidate);
+	TestFalse(TEXT("A source-of-truth change invalidates an existing proposal"), ChangedSourceResult.bSuccess);
+	TestTrue(TEXT("Changed semantics have a stable diagnostic"), ChangedSourceResult.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1946");
+	}));
+
+	FDataForgeRenameCandidate Stale = Candidate;
+	Stale.AssetPath = FSoftObjectPath(TestRoot + TEXT("/Missing.Missing"));
+	const FDataForgeResult StaleResult = FDataForgeRenameAdvisor::ValidateForApply(Stale);
+	TestFalse(TEXT("A stale source path blocks apply"), StaleResult.bSuccess);
+	TestTrue(TEXT("Stale candidate has a stable diagnostic"), StaleResult.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1941");
+	}));
+
+	FAssetRegistryModule::AssetDeleted(Selected);
+	FAssetRegistryModule::AssetDeleted(SecondSelected);
+	FAssetRegistryModule::AssetDeleted(ManifestSelected);
+	FAssetRegistryModule::AssetDeleted(ManagedOutput);
+	FAssetRegistryModule::AssetDeleted(RuleSet);
+	IFileManager::Get().Delete(*SourceFile, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeRenameRecoveryTest,
+	"DataForge.Editor.Automation.RenameRecoveryManifest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeRenameRecoveryTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = TEXT("/Game/DataForgeTests/Recovery_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	FDataForgeRenameCandidate Candidate;
+	Candidate.AssetPath = FSoftObjectPath(TestRoot + TEXT("/Legacy.Legacy"));
+	Candidate.RuleSetPath = FSoftObjectPath(TestRoot + TEXT("/RS_Test.RS_Test"));
+	Candidate.RecordId = TEXT("Hero");
+	Candidate.SlotId = TEXT("Icon");
+	Candidate.SuggestedPackageName = TestRoot + TEXT("/T_CMHeroIcon");
+	Candidate.SuggestedAssetName = TEXT("T_CMHeroIcon");
+
+	FDataForgeRenameRecoveryRecord Record;
+	FString Error;
+	TestTrue(TEXT("Recovery manifest is persisted before mutation"), FDataForgeRenameRecovery::Begin({ Candidate }, Record, Error));
+	TestTrue(TEXT("Recovery manifest file exists"), FPaths::FileExists(Record.Filename));
+
+	auto ReadState = [this, &Record, &Candidate](const FString& ExpectedState) -> bool
+	{
+		FString Json;
+		TSharedPtr<FJsonObject> Root;
+		const bool bRead = FFileHelper::LoadFileToString(Json, *Record.Filename)
+			&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root)
+			&& Root.IsValid();
+		TestTrue(TEXT("Recovery manifest remains valid JSON"), bRead);
+		if (!bRead) return false;
+		TestEqual(TEXT("Recovery state is updated in place"), Root->GetStringField(TEXT("state")), ExpectedState);
+		const TArray<TSharedPtr<FJsonValue>>& Entries = Root->GetArrayField(TEXT("entries"));
+		TestEqual(TEXT("Recovery manifest records every rename"), Entries.Num(), 1);
+		if (Entries.Num() == 1)
+		{
+			TestEqual(TEXT("Recovery manifest preserves the source path"),
+				Entries[0]->AsObject()->GetStringField(TEXT("sourceObjectPath")),
+				Candidate.AssetPath.ToString());
+		}
+		return true;
+	};
+	ReadState(TEXT("Planned"));
+	TestTrue(TEXT("Recovery manifest records completion"), FDataForgeRenameRecovery::Update(
+		Record, TEXT("Succeeded"), false, false, TEXT("Renamed 1 asset(s)."), Error));
+	ReadState(TEXT("Succeeded"));
+
+	TArray<FDataForgeDiagnostic> LoadDiagnostics;
+	const TArray<FDataForgeRenameRecoveryManifest> Loaded = FDataForgeRenameRecovery::LoadRecent(100, LoadDiagnostics);
+	const FDataForgeRenameRecoveryManifest* LoadedManifest = Loaded.FindByPredicate([&Record](const FDataForgeRenameRecoveryManifest& Manifest)
+	{
+		return Manifest.Filename == Record.Filename;
+	});
+	TestNotNull(TEXT("Recovery Center discovers the recorded rename"), LoadedManifest);
+	if (LoadedManifest)
+	{
+		TestEqual(TEXT("Recovery Center preserves manifest state"), LoadedManifest->State, FString(TEXT("Succeeded")));
+		TestEqual(TEXT("Recovery Center preserves manifest entries"), LoadedManifest->Candidates.Num(), 1);
+	}
+
+	UPackage* DestinationPackage = CreatePackage(*Candidate.SuggestedPackageName);
+	UDataForgeEditorManagedAsset* Destination = NewObject<UDataForgeEditorManagedAsset>(
+		DestinationPackage, *Candidate.SuggestedAssetName, RF_Public | RF_Standalone | RF_Transient);
+	FAssetRegistryModule::AssetCreated(Destination);
+	FDataForgeRenameRecoveryManifest RestoreManifest;
+	RestoreManifest.Filename = Record.Filename;
+	RestoreManifest.State = TEXT("Succeeded");
+	RestoreManifest.CreatedUtc = Record.CreatedUtc;
+	RestoreManifest.Candidates = { Candidate };
+	TestTrue(TEXT("A destination-only recorded asset is restorable"), FDataForgeRenameRecovery::ValidateRestore(RestoreManifest).bSuccess);
+
+	UPackage* SourcePackage = CreatePackage(*Candidate.AssetPath.GetLongPackageName());
+	UDataForgeEditorManagedAsset* Collision = NewObject<UDataForgeEditorManagedAsset>(
+		SourcePackage, *FPackageName::ObjectPathToObjectName(Candidate.AssetPath.ToString()), RF_Public | RF_Standalone | RF_Transient);
+	FAssetRegistryModule::AssetCreated(Collision);
+	const FDataForgeResult CollisionValidation = FDataForgeRenameRecovery::ValidateRestore(RestoreManifest);
+	TestFalse(TEXT("Recovery blocks an occupied original path"), CollisionValidation.bSuccess);
+	TestTrue(TEXT("Recovery collision has a stable diagnostic"), CollisionValidation.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1959");
+	}));
+	FAssetRegistryModule::AssetDeleted(Collision);
+	FAssetRegistryModule::AssetDeleted(Destination);
+	IFileManager::Get().Delete(*Record.Filename, false, true);
 	return true;
 }
 
@@ -161,6 +671,10 @@ bool FDataForgeSemanticDiffTest::RunTest(const FString& Parameters)
 	FDataForgeBindingRule& Binding = After->Bindings.AddDefaulted_GetRef();
 	Binding.SourceColumn = TEXT("Price");
 	Binding.TargetProperty = TEXT("Price");
+	FDataForgeAssociationSourceRule& Association = After->AssociationSources.AddDefaulted_GetRef();
+	Association.SourceId = TEXT("Inventory");
+	Association.Source.AdapterId = TEXT("Json");
+	Association.Source.File.FilePath = TEXT("Inventory.json");
 	UDataForgeRuleSet* Dependency = NewObject<UDataForgeRuleSet>(GetTransientPackage());
 	After->Dependencies.AddDefaulted_GetRef().RuleSet = Dependency;
 
@@ -168,6 +682,7 @@ bool FDataForgeSemanticDiffTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Source file change has a stable semantic path"), Entries.ContainsByPredicate([](const FDataForgeSemanticDiffEntry& Entry) { return Entry.Path == TEXT("Source.File"); }));
 	TestTrue(TEXT("Asset rule field change is keyed by RuleId"), Entries.ContainsByPredicate([](const FDataForgeSemanticDiffEntry& Entry) { return Entry.Path == TEXT("AssetRules[B].BaseFolder"); }));
 	TestTrue(TEXT("Binding addition is keyed by target"), Entries.ContainsByPredicate([](const FDataForgeSemanticDiffEntry& Entry) { return Entry.Path == TEXT("Bindings[row.Price]") && Entry.Kind == EDataForgeSemanticDiffKind::Added; }));
+	TestTrue(TEXT("Association source changes have a stable semantic path"), Entries.ContainsByPredicate([](const FDataForgeSemanticDiffEntry& Entry) { return Entry.Path == TEXT("AssociationSources"); }));
 	TestTrue(TEXT("Dependency addition is keyed by RuleSet path"), Entries.ContainsByPredicate([Dependency](const FDataForgeSemanticDiffEntry& Entry)
 	{
 		return Entry.Path == FString::Printf(TEXT("Dependencies[%s]"), *Dependency->GetPathName())
@@ -278,6 +793,12 @@ bool FDataForgeManagedAssetMoveTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Apply performs the managed Move"), FDataForgeEditorService::Apply(*RuleSet).bSuccess);
 	TestEqual(TEXT("Asset now has the desired object path"), ExistingAsset->GetPathName(), FString(TEXT("/Game/DataForgeTests/ManagedMove/New/DA_Sword.DA_Sword")));
 
+	FDataForgeApplyPlan SettledPlan;
+	TestTrue(TEXT("Preview after Move succeeds"), FDataForgeEditorService::Preview(*RuleSet, &SettledPlan).bSuccess);
+	TestEqual(TEXT("Settled Preview plans no additional Move"), SettledPlan.AssetMoveCount, 0);
+	TestEqual(TEXT("Settled Preview plans no generated asset update"), SettledPlan.AssetUpdateCount, 0);
+	TestEqual(TEXT("Settled Preview recognizes the managed asset as unchanged"), SettledPlan.AssetUnchangedCount, 1);
+
 	const FString MovedAssetFilename = FPackageName::LongPackageNameToFilename(
 		TEXT("/Game/DataForgeTests/ManagedMove/New/DA_Sword"),
 		FPackageName::GetAssetPackageExtension());
@@ -324,6 +845,11 @@ bool FDataForgeRuleSetSnapshotTest::RunTest(const FString& Parameters)
 	ProfileRule.RuleTemplateId = FGuid(121, 122, 123, 124);
 	ProfileRule.BaselineRule = RuleA;
 	RuleA.SubfolderPattern = TEXT("LocalOverride");
+	FDataForgeAssociationSourceRule& SnapshotAssociation = RuleSet->AssociationSources.AddDefaulted_GetRef();
+	SnapshotAssociation.SourceId = TEXT("Inventory");
+	SnapshotAssociation.Source.AdapterId = TEXT("Json");
+	SnapshotAssociation.Source.File.FilePath = TEXT("Inventory.json");
+	SnapshotAssociation.Source.Parameters.Add(TEXT("Root"), TEXT("/Game/Art"));
 
 	const FString JsonBeforeReorder = FDataForgeRuleSetSnapshot::SerializeJson(*RuleSet);
 	const FString YamlBeforeReorder = FDataForgeRuleSetSnapshot::SerializeYaml(*RuleSet);
@@ -338,6 +864,8 @@ bool FDataForgeRuleSetSnapshotTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("YAML snapshot contains Profile provenance"), YamlBeforeReorder.Contains(TEXT("profileOrigin:"))
 		&& YamlBeforeReorder.Contains(TEXT("materializedHash: \"profile-revision-hash\""))
 		&& YamlBeforeReorder.Contains(TEXT("- \"SubfolderPattern\"")));
+	TestTrue(TEXT("JSON snapshot contains Association Sources"), JsonBeforeReorder.Contains(TEXT("\"associationSources\"")) && JsonBeforeReorder.Contains(TEXT("Inventory.json")));
+	TestTrue(TEXT("YAML snapshot contains Association Sources"), YamlBeforeReorder.Contains(TEXT("associationSources:")) && YamlBeforeReorder.Contains(TEXT("sourceId: \"Inventory\"")));
 	TestTrue(TEXT("YAML snapshot is clearly generated"), YamlBeforeReorder.StartsWith(TEXT("# Generated by DataForge")));
 
 	const FString SnapshotDirectory = FPaths::Combine(
@@ -602,7 +1130,17 @@ bool FDataForgeSourceReconcileTest::RunTest(const FString& Parameters)
 	RuleSet->Schema.RequiredColumns = { TEXT("DisplayName"), TEXT("Price") };
 	RuleSet->Output.RowStruct = FDataForgeEditorAutoMapRow::StaticStruct();
 	RuleSet->Output.AssetPath = TablePackageName;
+	RuleSet->Output.bRemoveRowsMissingFromSource = true;
 	RuleSet->Output.bSaveAfterApply = false;
+	FDataForgeAssetRule& ManagedRule = RuleSet->AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("Data");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = TEXT("/Game/DataForgeTests/Automation/Generated/") + Unique;
+	ManagedRule.AssetNamePattern = TEXT("DA_{DisplayName}");
+	FDataForgeGeneratedAssetOutputRule& Output = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("data");
+	Output.AssetClass = UDataForgeEditorManagedAsset::StaticClass();
+	Output.AssetRuleId = ManagedRule.RuleId;
 	FDataForgeEditorService::AutoMapExactNames(*RuleSet, RuleSet->Schema.RequiredColumns);
 
 	FDataForgeAutoReconciler& Reconciler = FDataForgeAutoReconciler::Get();
@@ -627,6 +1165,45 @@ bool FDataForgeSourceReconcileTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Existing DataTable receives the new source row"), Table->GetRowMap().Num(), 2);
 		TestNotNull(TEXT("New source row is materialized"),
 			Table->FindRow<FDataForgeEditorAutoMapRow>(TEXT("Shield"), TEXT("source reconcile test")));
+	}
+
+	FDataForgeApplyPlan SettledPlan;
+	TestTrue(TEXT("Preview after expanded Apply succeeds"), FDataForgeEditorService::Preview(*RuleSet, &SettledPlan).bSuccess);
+	TestEqual(TEXT("Repeated Preview plans no row creation"), SettledPlan.CreateCount, 0);
+	TestEqual(TEXT("Repeated Preview plans no row update"), SettledPlan.UpdateCount, 0);
+	TestEqual(TEXT("Repeated Preview recognizes both rows as unchanged"), SettledPlan.UnchangedCount, 2);
+	TestEqual(TEXT("Repeated Preview plans no generated asset creation"), SettledPlan.AssetCreateCount, 0);
+	TestEqual(TEXT("Repeated Preview plans no generated asset update"), SettledPlan.AssetUpdateCount, 0);
+	TestEqual(TEXT("Repeated Preview recognizes both generated assets as unchanged"), SettledPlan.AssetUnchangedCount, 2);
+
+	TestTrue(TEXT("Contracted source CSV is written"),
+		FFileHelper::SaveStringToFile(TEXT("DisplayName,Price\nShield,800\n"), *CsvFilename));
+	FDataForgeApplyPlan ContractedPlan;
+	TestTrue(TEXT("Contracted source Preview succeeds"), FDataForgeEditorService::Preview(*RuleSet, &ContractedPlan).bSuccess);
+	TestEqual(TEXT("Removed source row is planned as one row orphan"), ContractedPlan.OrphanCount, 1);
+	TestEqual(TEXT("Remaining source row stays unchanged"), ContractedPlan.UnchangedCount, 1);
+	TestEqual(TEXT("Removed source record is planned as one generated asset orphan"), ContractedPlan.AssetOrphanCount, 1);
+	TestEqual(TEXT("Remaining generated asset stays unchanged"), ContractedPlan.AssetUnchangedCount, 1);
+	TestTrue(TEXT("Row orphan identifies the removed Sword record"), ContractedPlan.Rows.ContainsByPredicate([](const FDataForgePlannedRow& Row)
+	{
+		return Row.RowName == TEXT("Sword") && Row.Change == EDataForgeRowChange::Orphan;
+	}));
+	TestTrue(TEXT("Generated asset orphan identifies the removed Sword record"), ContractedPlan.ManagedAssets.ContainsByPredicate([](const FDataForgePlannedAsset& Asset)
+	{
+		return Asset.RecordId == TEXT("Sword") && Asset.Change == EDataForgeManagedAssetChange::Orphan;
+	}));
+
+	Reconciler.Request(*RuleSet, TEXT("source row removed"), 0.0);
+	const FDataForgeReconcileBatchResult Contracted = Reconciler.FlushPending(true);
+	TestEqual(TEXT("Contracted source processes one RuleSet"), Contracted.ProcessedCount, 1);
+	TestEqual(TEXT("Contracted source applies successfully"), Contracted.AppliedCount, 1);
+	if (Table)
+	{
+		TestEqual(TEXT("DataTable removes the missing source row"), Table->GetRowMap().Num(), 1);
+		TestNull(TEXT("Removed source row no longer exists"),
+			Table->FindRow<FDataForgeEditorAutoMapRow>(TEXT("Sword"), TEXT("source reconcile contraction test")));
+		TestNotNull(TEXT("Remaining source row is preserved"),
+			Table->FindRow<FDataForgeEditorAutoMapRow>(TEXT("Shield"), TEXT("source reconcile contraction test")));
 	}
 
 	IFileManager::Get().Delete(*CsvFilename, false, true);

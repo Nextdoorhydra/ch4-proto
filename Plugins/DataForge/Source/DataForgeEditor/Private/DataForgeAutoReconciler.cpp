@@ -3,6 +3,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DataForgeAssetLayoutAuthoring.h"
 #include "DataForgeAssetLayoutProfile.h"
+#include "DataForgeFolderSource.h"
 #include "DataForgeEditorService.h"
 #include "DataForgeRuleSet.h"
 #include "DirectoryWatcherModule.h"
@@ -57,10 +58,16 @@ namespace
 	bool ReferencesSourceAsset(const UDataForgeRuleSet& RuleSet, const FSoftObjectPath& SourcePath)
 	{
 		if (RuleSet.Source.SourceAsset.ToSoftObjectPath() == SourcePath) return true;
-		return RuleSet.Source.Inputs.ContainsByPredicate([&SourcePath](const FDataForgeSourceInput& Input)
+		if (RuleSet.Source.Inputs.ContainsByPredicate([&SourcePath](const FDataForgeSourceInput& Input)
 		{
 			return Input.SourceAsset.ToSoftObjectPath() == SourcePath;
-		});
+		})) return true;
+		for (const FDataForgeAssociationSourceRule& Association : RuleSet.AssociationSources)
+		{
+			if (Association.Source.SourceAsset.ToSoftObjectPath() == SourcePath
+				|| Association.Source.Inputs.ContainsByPredicate([&SourcePath](const FDataForgeSourceInput& Input) { return Input.SourceAsset.ToSoftObjectPath() == SourcePath; })) return true;
+		}
+		return false;
 	}
 
 	bool PackageMayAffectRuleSet(const UDataForgeRuleSet& RuleSet, const FString& PackageName)
@@ -71,6 +78,37 @@ namespace
 			if (!Rule.BaseFolder.IsEmpty() && (PackageName == Rule.BaseFolder || PackageName.StartsWith(Rule.BaseFolder + TEXT("/"))))
 			{
 				return true;
+			}
+		}
+		auto FolderSourceContains = [&PackageName](FName AdapterId, const TSoftObjectPtr<UObject>& SourceAsset)
+		{
+			if (AdapterId != TEXT("AssetRegistryFolder")) return false;
+			const UDataForgeFolderSourceConfig* Config = Cast<UDataForgeFolderSourceConfig>(SourceAsset.LoadSynchronous());
+			if (!Config) return false;
+			FString Root = Config->RootFolder;
+			Root.ReplaceInline(TEXT("\\"), TEXT("/"));
+			while (Root.EndsWith(TEXT("/"))) Root.LeftChopInline(1);
+			const bool bInsideRoot = PackageName == Root || (Config->bRecursive && PackageName.StartsWith(Root + TEXT("/")));
+			if (!bInsideRoot) return false;
+			for (FString Excluded : Config->ExcludedFolders)
+			{
+				Excluded.ReplaceInline(TEXT("\\"), TEXT("/"));
+				while (Excluded.EndsWith(TEXT("/"))) Excluded.LeftChopInline(1);
+				if (!Excluded.IsEmpty() && (PackageName == Excluded || PackageName.StartsWith(Excluded + TEXT("/")))) return false;
+			}
+			return true;
+		};
+		if (FolderSourceContains(RuleSet.Source.AdapterId, RuleSet.Source.SourceAsset)) return true;
+		for (const FDataForgeSourceInput& Input : RuleSet.Source.Inputs)
+		{
+			if (FolderSourceContains(Input.AdapterId, Input.SourceAsset)) return true;
+		}
+		for (const FDataForgeAssociationSourceRule& Association : RuleSet.AssociationSources)
+		{
+			if (FolderSourceContains(Association.Source.AdapterId, Association.Source.SourceAsset)) return true;
+			for (const FDataForgeSourceInput& Input : Association.Source.Inputs)
+			{
+				if (FolderSourceContains(Input.AdapterId, Input.SourceAsset)) return true;
 			}
 		}
 		return false;
@@ -293,6 +331,14 @@ void FDataForgeAutoReconciler::RefreshFileWatches()
 		{
 			if (!Input.File.FilePath.IsEmpty()) Files.Add(Input.File.FilePath);
 		}
+		for (const FDataForgeAssociationSourceRule& Association : RuleSet->AssociationSources)
+		{
+			if (!Association.Source.File.FilePath.IsEmpty()) Files.Add(Association.Source.File.FilePath);
+			for (const FDataForgeSourceInput& Input : Association.Source.Inputs)
+			{
+				if (!Input.File.FilePath.IsEmpty()) Files.Add(Input.File.FilePath);
+			}
+		}
 		for (const FString& ConfiguredFile : Files)
 		{
 			const FString Filename = NormalizeSourceFilename(ConfiguredFile);
@@ -373,8 +419,14 @@ void FDataForgeAutoReconciler::HandleAssetRemoved(const FAssetData& AssetData)
 
 void FDataForgeAutoReconciler::HandleAssetRenamed(const FAssetData& AssetData, const FString& OldObjectPath)
 {
-	HandleAssetChange(AssetData, TEXT("asset renamed"));
-	RequestAffectedByPackage(FPackageName::ObjectPathToPackageName(OldObjectPath), TEXT("asset renamed"));
+	if (bApplying || IsPackageSuppressed(AssetData.PackageName.ToString())) return;
+	if (AssetData.AssetClassPath == UDataForgeAssetLayoutProfile::StaticClass()->GetClassPathName())
+	{
+		FDataForgeAssetLayoutAuthoring::RefreshDependentStatuses(Cast<UDataForgeAssetLayoutProfile>(AssetData.GetAsset()));
+	}
+	if (AssetData.AssetClassPath == UDataForgeRuleSet::StaticClass()->GetClassPathName()) RefreshFileWatches();
+	RequestAffectedByPackage(AssetData.PackageName.ToString(), TEXT("asset renamed"), 0.0);
+	RequestAffectedByPackage(FPackageName::ObjectPathToPackageName(OldObjectPath), TEXT("asset renamed"), 0.0);
 }
 
 void FDataForgeAutoReconciler::HandleAssetChange(const FAssetData& AssetData, const FString& Reason)
@@ -389,18 +441,21 @@ void FDataForgeAutoReconciler::HandleAssetChange(const FAssetData& AssetData, co
 	RequestAffectedByPackage(AssetData.PackageName.ToString(), Reason);
 }
 
-void FDataForgeAutoReconciler::RequestAffectedByPackage(const FString& PackageName, const FString& Reason)
+int32 FDataForgeAutoReconciler::RequestAffectedByPackage(const FString& PackageName, const FString& Reason, double DelaySeconds)
 {
-	if (PackageName.IsEmpty() || IsPackageSuppressed(PackageName)) return;
+	if (PackageName.IsEmpty() || IsPackageSuppressed(PackageName)) return 0;
 	TArray<FAssetData> Assets;
 	GetRuleSetAssets(Assets);
+	int32 Count = 0;
 	for (const FAssetData& Asset : Assets)
 	{
 		if (UDataForgeRuleSet* RuleSet = Cast<UDataForgeRuleSet>(Asset.GetAsset()); RuleSet && PackageMayAffectRuleSet(*RuleSet, PackageName))
 		{
-			Request(*RuleSet, Reason);
+			Request(*RuleSet, Reason, DelaySeconds);
+			++Count;
 		}
 	}
+	return Count;
 }
 
 void FDataForgeAutoReconciler::RequestAll(const FString& Reason)

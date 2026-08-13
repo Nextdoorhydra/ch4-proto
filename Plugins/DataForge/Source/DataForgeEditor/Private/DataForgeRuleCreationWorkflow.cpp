@@ -2,6 +2,8 @@
 
 #include "DataForgeAssetLayoutAuthoring.h"
 #include "DataForgeAssetLayoutProfile.h"
+#include "DataForgeBindingPreset.h"
+#include "DataForgeBindingPresetAuthoring.h"
 #include "DataForgeEditorService.h"
 #include "DataForgePipeline.h"
 #include "Engine/DataTable.h"
@@ -18,6 +20,15 @@ FDataForgeRuleCreationWorkflow::FDataForgeRuleCreationWorkflow(UDataForgeRuleSet
 	bManualAssetLayout = !GetDraft().ProfileOrigin.IsSet();
 	SelectedAssetLayoutProfile = GetDraft().ProfileOrigin.Profile.LoadSynchronous();
 	AssetLayoutParameterValues = GetDraft().ProfileOrigin.ParameterValues;
+	SelectedBindingPreset = GetDraft().BindingPreset.LoadSynchronous();
+	if (const UDataForgeBindingPreset* Preset = SelectedBindingPreset.Get())
+	{
+		const FName RuleId(*(Preset->OutputName.ToString() + TEXT("_Managed")));
+		if (const FDataForgeAssetRule* Rule = GetDraft().AssetRules.FindByPredicate([RuleId](const FDataForgeAssetRule& Candidate) { return Candidate.RuleId == RuleId; }))
+		{
+			BindingPresetOutputFolder = Rule->BaseFolder;
+		}
+	}
 	bAssetLayoutReady = bManualAssetLayout;
 }
 
@@ -50,6 +61,16 @@ const FString& FDataForgeRuleCreationWorkflow::GetLastMessage() const
 UDataForgeAssetLayoutProfile* FDataForgeRuleCreationWorkflow::GetSelectedAssetLayoutProfile() const
 {
 	return SelectedAssetLayoutProfile.Get();
+}
+
+UDataForgeBindingPreset* FDataForgeRuleCreationWorkflow::GetSelectedBindingPreset() const
+{
+	return SelectedBindingPreset.Get();
+}
+
+const FString& FDataForgeRuleCreationWorkflow::GetBindingPresetOutputFolder() const
+{
+	return BindingPresetOutputFolder;
 }
 
 const TMap<FName, FString>& FDataForgeRuleCreationWorkflow::GetAssetLayoutParameterValues() const
@@ -174,6 +195,67 @@ FDataForgeResult FDataForgeRuleCreationWorkflow::MaterializeAssetLayout()
 		AssetLayoutParameterValues,
 		ProbedDataSet.Columns);
 	bAssetLayoutReady = Result.bSuccess;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	LastMessage = Result.Summary;
+	return Result;
+}
+
+void FDataForgeRuleCreationWorkflow::SelectBindingPreset(UDataForgeBindingPreset* Preset)
+{
+	SelectedBindingPreset = Preset;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	LastMessage = Preset
+		? TEXT("Binding Preset selected. Choose the generated output folder, then Apply Preset.")
+		: TEXT("Binding Preset cleared. Existing concrete output rules remain unchanged.");
+}
+
+void FDataForgeRuleCreationWorkflow::SetBindingPresetOutputFolder(const FString& OutputFolder)
+{
+	BindingPresetOutputFolder = OutputFolder;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	LastMessage = TEXT("Binding Preset output folder changed. Apply Preset again before continuing.");
+}
+
+FDataForgeResult FDataForgeRuleCreationWorkflow::MaterializeBindingPreset()
+{
+	FDataForgeResult Result;
+	UDataForgeBindingPreset* Preset = SelectedBindingPreset.Get();
+	if (!Preset)
+	{
+		FDataForgeDiagnostic& Diagnostic = Result.Diagnostics.AddDefaulted_GetRef();
+		Diagnostic.Severity = EDataForgeSeverity::Error;
+		Diagnostic.Code = TEXT("DF1915");
+		Diagnostic.Message = TEXT("Select a Binding Preset before applying it.");
+		Result.Summary = Diagnostic.Message;
+		LastMessage = Result.Summary;
+		return Result;
+	}
+	if (!bProbeSucceeded)
+	{
+		FDataForgeDiagnostic& Diagnostic = Result.Diagnostics.AddDefaulted_GetRef();
+		Diagnostic.Severity = EDataForgeSeverity::Error;
+		Diagnostic.Code = TEXT("DF1913");
+		Diagnostic.Message = TEXT("Run Probe and confirm the Primary Key before applying a Binding Preset.");
+		Result.Summary = Diagnostic.Message;
+		LastMessage = Result.Summary;
+		return Result;
+	}
+
+	const FDataForgeBindingPresetMaterialization Materialized = FDataForgeBindingPresetAuthoring::Materialize(GetDraft(), *Preset, BindingPresetOutputFolder);
+	Result.bSuccess = Materialized.bSuccess;
+	Result.Diagnostics = Materialized.Diagnostics;
+	if (Result.bSuccess)
+	{
+		const int32 AddedBindings = FDataForgeEditorService::AutoMapExactNames(GetDraft(), ProbedDataSet.Columns);
+		Result.Summary = Materialized.MakeSummary() + FString::Printf(TEXT(" %d exact-name binding(s) added."), AddedBindings);
+	}
+	else
+	{
+		Result.Summary = Materialized.MakeSummary();
+	}
 	bPreviewSucceeded = false;
 	PreviewPlan = FDataForgeApplyPlan();
 	LastMessage = Result.Summary;
@@ -399,6 +481,8 @@ bool FDataForgeRuleCreationWorkflow::Finish(FString& OutReason)
 	TargetRuleSet->Output = DraftRuleSet.Output;
 	TargetRuleSet->AssetRules = DraftRuleSet.AssetRules;
 	TargetRuleSet->ProfileOrigin = DraftRuleSet.ProfileOrigin;
+	TargetRuleSet->BindingPreset = DraftRuleSet.BindingPreset;
+	TargetRuleSet->AssociationSources = DraftRuleSet.AssociationSources;
 	TargetRuleSet->GeneratedOutputs = DraftRuleSet.GeneratedOutputs;
 	TargetRuleSet->Bindings = DraftRuleSet.Bindings;
 	TargetRuleSet->Dependencies = DraftRuleSet.Dependencies;

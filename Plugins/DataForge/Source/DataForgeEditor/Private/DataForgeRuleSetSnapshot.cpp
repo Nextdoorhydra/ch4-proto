@@ -8,7 +8,7 @@
 
 namespace DataForgeRuleSetSnapshot
 {
-	constexpr int32 SnapshotVersion = 3;
+	constexpr int32 SnapshotVersion = 4;
 
 	struct FParameter
 	{
@@ -33,6 +33,21 @@ namespace DataForgeRuleSetSnapshot
 		FString BaseFolder;
 		FString SubfolderPattern;
 		FString AssetNamePattern;
+	};
+
+	struct FAssociationSource
+	{
+		FString SourceId;
+		FString AdapterId;
+		FString File;
+		FString Asset;
+		FString MatchColumn;
+		FString AssetPathColumn;
+		FString AssetKindColumn;
+		FString RoleColumn;
+		int32 ProbeRowLimit = 20;
+		TArray<FParameter> Parameters;
+		TArray<FSourceInput> Inputs;
 	};
 
 	struct FGeneratedOutput
@@ -88,6 +103,8 @@ namespace DataForgeRuleSetSnapshot
 		FString MaterializedProfileHash;
 		TArray<FParameter> ProfileParameters;
 		TArray<FProfileRuleOrigin> ProfileRules;
+		FString BindingPreset;
+		TArray<FAssociationSource> AssociationSources;
 		TArray<FAssetRule> AssetRules;
 		TArray<FGeneratedOutput> GeneratedOutputs;
 		TArray<FBinding> Bindings;
@@ -178,6 +195,34 @@ namespace DataForgeRuleSetSnapshot
 				if (Current->AssetNamePattern != Origin.BaselineRule.AssetNamePattern) SnapshotOrigin.OverrideFields.Add(TEXT("AssetNamePattern"));
 			}
 		}
+		Snapshot.BindingPreset = RuleSet.BindingPreset.ToSoftObjectPath().ToString();
+		for (const FDataForgeAssociationSourceRule& Source : RuleSet.AssociationSources)
+		{
+			FAssociationSource& SnapshotSource = Snapshot.AssociationSources.AddDefaulted_GetRef();
+			SnapshotSource.SourceId = Source.SourceId.ToString();
+			SnapshotSource.AdapterId = Source.Source.AdapterId.ToString();
+			SnapshotSource.File = Source.Source.File.FilePath;
+			SnapshotSource.Asset = Source.Source.SourceAsset.ToSoftObjectPath().ToString();
+			SnapshotSource.MatchColumn = Source.MatchColumn.ToString();
+			SnapshotSource.AssetPathColumn = Source.AssetPathColumn.ToString();
+			SnapshotSource.AssetKindColumn = Source.AssetKindColumn.ToString();
+			SnapshotSource.RoleColumn = Source.RoleColumn.ToString();
+			SnapshotSource.ProbeRowLimit = Source.Source.ProbeRowLimit;
+			for (const TPair<FName, FString>& Parameter : Source.Source.Parameters) SnapshotSource.Parameters.Add({ Parameter.Key.ToString(), Parameter.Value });
+			SnapshotSource.Parameters.Sort([](const FParameter& Left, const FParameter& Right) { return Left.Key < Right.Key; });
+			for (const FDataForgeSourceInput& Input : Source.Source.Inputs)
+			{
+				FSourceInput& SnapshotInput = SnapshotSource.Inputs.AddDefaulted_GetRef();
+				SnapshotInput.AdapterId = Input.AdapterId.ToString();
+				SnapshotInput.File = Input.File.FilePath;
+				SnapshotInput.Asset = Input.SourceAsset.ToSoftObjectPath().ToString();
+				SnapshotInput.JoinColumn = Input.JoinColumn.ToString();
+				SnapshotInput.ColumnPrefix = Input.ColumnPrefix;
+				for (const TPair<FName, FString>& Parameter : Input.Parameters) SnapshotInput.Parameters.Add({ Parameter.Key.ToString(), Parameter.Value });
+				SnapshotInput.Parameters.Sort([](const FParameter& Left, const FParameter& Right) { return Left.Key < Right.Key; });
+			}
+		}
+		Snapshot.AssociationSources.Sort([](const FAssociationSource& Left, const FAssociationSource& Right) { return Left.SourceId < Right.SourceId; });
 		Snapshot.ProfileRules.Sort([](const FProfileRuleOrigin& Left, const FProfileRuleOrigin& Right)
 		{
 			return Left.RuleTemplateId < Right.RuleTemplateId;
@@ -396,6 +441,41 @@ FString FDataForgeRuleSetSnapshot::SerializeJson(const UDataForgeRuleSet& RuleSe
 	}
 	Writer->WriteArrayEnd();
 	Writer->WriteObjectEnd();
+	Writer->WriteValue(TEXT("bindingPreset"), Snapshot.BindingPreset);
+	Writer->WriteArrayStart(TEXT("associationSources"));
+	for (const FAssociationSource& Source : Snapshot.AssociationSources)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("sourceId"), Source.SourceId);
+		Writer->WriteValue(TEXT("adapterId"), Source.AdapterId);
+		Writer->WriteValue(TEXT("file"), Source.File);
+		Writer->WriteValue(TEXT("asset"), Source.Asset);
+		Writer->WriteValue(TEXT("matchColumn"), Source.MatchColumn);
+		Writer->WriteValue(TEXT("assetPathColumn"), Source.AssetPathColumn);
+		Writer->WriteValue(TEXT("assetKindColumn"), Source.AssetKindColumn);
+		Writer->WriteValue(TEXT("roleColumn"), Source.RoleColumn);
+		Writer->WriteValue(TEXT("probeRowLimit"), Source.ProbeRowLimit);
+		Writer->WriteObjectStart(TEXT("parameters"));
+		for (const FParameter& Parameter : Source.Parameters) Writer->WriteValue(Parameter.Key, Parameter.Value);
+		Writer->WriteObjectEnd();
+		Writer->WriteArrayStart(TEXT("inputs"));
+		for (const FSourceInput& Input : Source.Inputs)
+		{
+			Writer->WriteObjectStart();
+			Writer->WriteValue(TEXT("adapterId"), Input.AdapterId);
+			Writer->WriteValue(TEXT("file"), Input.File);
+			Writer->WriteValue(TEXT("asset"), Input.Asset);
+			Writer->WriteValue(TEXT("joinColumn"), Input.JoinColumn);
+			Writer->WriteValue(TEXT("columnPrefix"), Input.ColumnPrefix);
+			Writer->WriteObjectStart(TEXT("parameters"));
+			for (const FParameter& Parameter : Input.Parameters) Writer->WriteValue(Parameter.Key, Parameter.Value);
+			Writer->WriteObjectEnd();
+			Writer->WriteObjectEnd();
+		}
+		Writer->WriteArrayEnd();
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
 
 	Writer->WriteArrayStart(TEXT("assetRules"));
 	for (const FAssetRule& Rule : Snapshot.AssetRules)
@@ -564,6 +644,52 @@ FString FDataForgeRuleSetSnapshot::SerializeYaml(const UDataForgeRuleSet& RuleSe
 			{
 				Yaml += TEXT("      overrideFields:\n");
 				for (const FString& Field : Origin.OverrideFields) Yaml += TEXT("        - ") + JsonString(Field) + TEXT("\n");
+			}
+		}
+	}
+	AddYamlString(Yaml, 0, TEXT("bindingPreset"), Snapshot.BindingPreset);
+	if (Snapshot.AssociationSources.IsEmpty())
+	{
+		Yaml += TEXT("associationSources: []\n");
+	}
+	else
+	{
+		Yaml += TEXT("associationSources:\n");
+		for (const FAssociationSource& Source : Snapshot.AssociationSources)
+		{
+			Yaml += TEXT("  - sourceId: ") + JsonString(Source.SourceId) + TEXT("\n");
+			AddYamlString(Yaml, 4, TEXT("adapterId"), Source.AdapterId);
+			AddYamlString(Yaml, 4, TEXT("file"), Source.File);
+			AddYamlString(Yaml, 4, TEXT("asset"), Source.Asset);
+			AddYamlString(Yaml, 4, TEXT("matchColumn"), Source.MatchColumn);
+			AddYamlString(Yaml, 4, TEXT("assetPathColumn"), Source.AssetPathColumn);
+			AddYamlString(Yaml, 4, TEXT("assetKindColumn"), Source.AssetKindColumn);
+			AddYamlString(Yaml, 4, TEXT("roleColumn"), Source.RoleColumn);
+			Yaml += FString::Printf(TEXT("    probeRowLimit: %d\n"), Source.ProbeRowLimit);
+			if (Source.Parameters.IsEmpty()) Yaml += TEXT("    parameters: {}\n");
+			else
+			{
+				Yaml += TEXT("    parameters:\n");
+				for (const FParameter& Parameter : Source.Parameters) AddYamlString(Yaml, 6, *Parameter.Key, Parameter.Value);
+			}
+			if (Source.Inputs.IsEmpty()) Yaml += TEXT("    inputs: []\n");
+			else
+			{
+				Yaml += TEXT("    inputs:\n");
+				for (const FSourceInput& Input : Source.Inputs)
+				{
+					Yaml += TEXT("      - adapterId: ") + JsonString(Input.AdapterId) + TEXT("\n");
+					AddYamlString(Yaml, 8, TEXT("file"), Input.File);
+					AddYamlString(Yaml, 8, TEXT("asset"), Input.Asset);
+					AddYamlString(Yaml, 8, TEXT("joinColumn"), Input.JoinColumn);
+					AddYamlString(Yaml, 8, TEXT("columnPrefix"), Input.ColumnPrefix);
+					if (Input.Parameters.IsEmpty()) Yaml += TEXT("        parameters: {}\n");
+					else
+					{
+						Yaml += TEXT("        parameters:\n");
+						for (const FParameter& Parameter : Input.Parameters) AddYamlString(Yaml, 10, *Parameter.Key, Parameter.Value);
+					}
+				}
 			}
 		}
 	}

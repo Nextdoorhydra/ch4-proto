@@ -6,6 +6,7 @@
 #include "UObject/StrongObjectPtr.h"
 
 class UDataForgeAssetLayoutProfile;
+class UDataForgeBindingPreset;
 
 enum class EDataForgeWizardStep : uint8
 {
@@ -32,6 +33,8 @@ public:
 	const FDataForgeApplyPlan& GetPreviewPlan() const;
 	const FString& GetLastMessage() const;
 	UDataForgeAssetLayoutProfile* GetSelectedAssetLayoutProfile() const;
+	UDataForgeBindingPreset* GetSelectedBindingPreset() const;
+	const FString& GetBindingPresetOutputFolder() const;
 	const TMap<FName, FString>& GetAssetLayoutParameterValues() const;
 	bool IsManualAssetLayout() const;
 
@@ -39,6 +42,9 @@ public:
 	void SelectAssetLayoutProfile(UDataForgeAssetLayoutProfile* Profile);
 	void SetAssetLayoutParameter(FName Name, const FString& Value);
 	FDataForgeResult MaterializeAssetLayout();
+	void SelectBindingPreset(UDataForgeBindingPreset* Preset);
+	void SetBindingPresetOutputFolder(const FString& OutputFolder);
+	FDataForgeResult MaterializeBindingPreset();
 	int32 AutoMapExactNames();
 	FDataForgeResult Preview();
 	void NotifyDraftChanged(FName MemberPropertyName);
@@ -60,6 +66,8 @@ private:
 	bool bManualAssetLayout = true;
 	bool bPreviewSucceeded = false;
 	TWeakObjectPtr<UDataForgeAssetLayoutProfile> SelectedAssetLayoutProfile;
+	TWeakObjectPtr<UDataForgeBindingPreset> SelectedBindingPreset;
+	FString BindingPresetOutputFolder = TEXT("/Game/DataForgeGenerated");
 	TMap<FName, FString> AssetLayoutParameterValues;
 	int32 RemoveInvalidGeneratedOutputBindings();
 };
