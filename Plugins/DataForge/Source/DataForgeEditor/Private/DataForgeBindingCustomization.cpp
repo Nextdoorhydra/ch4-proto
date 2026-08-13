@@ -41,6 +41,7 @@ void FDataForgeBindingCustomization::CustomizeChildren(
 	SourceHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, Source));
 	TargetOutputHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, TargetOutput));
 	TargetPropertyHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, TargetProperty));
+	AssetRuleIdHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, AssetRuleId));
 
 	uint32 ChildCount = 0;
 	StructPropertyHandle->GetNumChildren(ChildCount);
@@ -73,6 +74,19 @@ void FDataForgeBindingCustomization::CustomizeChildren(
 					SNew(STextBlock).Text(this, &FDataForgeBindingCustomization::GetSelectedOutputText, OutputHandle)
 				]
 				.OnGetMenuContent(this, &FDataForgeBindingCustomization::BuildOutputMenu, OutputHandle)
+			];
+			continue;
+		}
+		if (ChildName == GET_MEMBER_NAME_CHECKED(FDataForgeBindingRule, AssetRuleId))
+		{
+			StructBuilder.AddCustomRow(LOCTEXT("AssetRuleSearch", "Asset Rule Pick"))
+			.Visibility(TAttribute<EVisibility>::CreateSP(this, &FDataForgeBindingCustomization::GetAssetRuleVisibility))
+			.NameContent()[Child->CreatePropertyNameWidget()]
+			.ValueContent().MinDesiredWidth(320.0f)
+			[
+				SNew(SComboButton)
+				.ButtonContent()[SNew(STextBlock).Text(this, &FDataForgeBindingCustomization::GetSelectedAssetRuleText, Child)]
+				.OnGetMenuContent(this, &FDataForgeBindingCustomization::BuildAssetRuleMenu, Child)
 			];
 			continue;
 		}
@@ -116,6 +130,39 @@ void FDataForgeBindingCustomization::CustomizeChildren(
 			SNew(STextBlock).Text(this, &FDataForgeBindingCustomization::GetConversionSuggestionText).AutoWrapText(true)
 		];
 	}
+}
+
+TSharedRef<SWidget> FDataForgeBindingCustomization::BuildAssetRuleMenu(TSharedPtr<IPropertyHandle> AssetRuleHandle) const
+{
+	FMenuBuilder MenuBuilder(true, nullptr);
+	const UDataForgeRuleSet* RuleSet = FindRuleSet();
+	if (!AssetRuleHandle.IsValid() || !RuleSet || RuleSet->AssetRules.IsEmpty())
+	{
+		MenuBuilder.AddMenuEntry(LOCTEXT("NoAssetRules", "No Asset Rules configured"), FText::GetEmpty(), FSlateIcon(), FUIAction());
+		return MenuBuilder.MakeWidget();
+	}
+	for (const FDataForgeAssetRule& Rule : RuleSet->AssetRules)
+	{
+		if (Rule.RuleId.IsNone()) continue;
+		const FName RuleId = Rule.RuleId;
+		MenuBuilder.AddMenuEntry(FText::FromName(RuleId), FText::FromString(Rule.BaseFolder), FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([AssetRuleHandle, Utilities = PropertyUtilities, RuleId]()
+			{
+				AssetRuleHandle->SetValue(RuleId);
+				if (Utilities.IsValid()) Utilities->ForceRefresh();
+			})));
+	}
+	return MenuBuilder.MakeWidget();
+}
+
+FText FDataForgeBindingCustomization::GetSelectedAssetRuleText(TSharedPtr<IPropertyHandle> AssetRuleHandle) const
+{
+	FName RuleId;
+	if (!AssetRuleHandle.IsValid() || AssetRuleHandle->GetValue(RuleId) != FPropertyAccess::Success || RuleId.IsNone())
+	{
+		return LOCTEXT("SelectAssetRule", "Select Asset Rule");
+	}
+	return FText::FromName(RuleId);
 }
 
 TSharedRef<SWidget> FDataForgeBindingCustomization::BuildOutputMenu(TSharedPtr<IPropertyHandle> OutputHandle) const
@@ -175,6 +222,107 @@ EVisibility FDataForgeBindingCustomization::GetTargetOutputVisibility() const
 	return TargetHandle.IsValid() && TargetHandle->GetValue(Value) == FPropertyAccess::Success
 		&& static_cast<EDataForgeBindingTarget>(Value) == EDataForgeBindingTarget::GeneratedOutput
 		? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility FDataForgeBindingCustomization::GetAssetRuleVisibility() const
+{
+	uint8 Value = static_cast<uint8>(EDataForgeBindingSource::SourceValue);
+	return SourceHandle.IsValid() && SourceHandle->GetValue(Value) == FPropertyAccess::Success
+		&& static_cast<EDataForgeBindingSource>(Value) == EDataForgeBindingSource::ResolvedAsset
+		? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+TSharedRef<IPropertyTypeCustomization> FDataForgeGeneratedOutputCustomization::MakeInstance()
+{
+	return MakeShared<FDataForgeGeneratedOutputCustomization>();
+}
+
+void FDataForgeGeneratedOutputCustomization::CustomizeHeader(
+	TSharedRef<IPropertyHandle> StructPropertyHandle,
+	FDetailWidgetRow& HeaderRow,
+	IPropertyTypeCustomizationUtils& StructCustomizationUtils)
+{
+	StructHandle = StructPropertyHandle;
+	PropertyUtilities = StructCustomizationUtils.GetPropertyUtilities();
+	HeaderRow.NameContent()[StructPropertyHandle->CreatePropertyNameWidget()]
+		.ValueContent()[StructPropertyHandle->CreatePropertyValueWidget()];
+}
+
+void FDataForgeGeneratedOutputCustomization::CustomizeChildren(
+	TSharedRef<IPropertyHandle> StructPropertyHandle,
+	IDetailChildrenBuilder& StructBuilder,
+	IPropertyTypeCustomizationUtils&)
+{
+	AssetRuleIdHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FDataForgeGeneratedAssetOutputRule, AssetRuleId));
+	uint32 ChildCount = 0;
+	StructPropertyHandle->GetNumChildren(ChildCount);
+	for (uint32 ChildIndex = 0; ChildIndex < ChildCount; ++ChildIndex)
+	{
+		TSharedPtr<IPropertyHandle> Child = StructPropertyHandle->GetChildHandle(ChildIndex);
+		if (!Child.IsValid()) continue;
+		if (Child->GetProperty()->GetFName() != GET_MEMBER_NAME_CHECKED(FDataForgeGeneratedAssetOutputRule, AssetRuleId))
+		{
+			StructBuilder.AddProperty(Child.ToSharedRef());
+			continue;
+		}
+		StructBuilder.AddCustomRow(LOCTEXT("ManagedAssetRuleSearch", "Managed Asset Rule Pick"))
+		.NameContent()[Child->CreatePropertyNameWidget()]
+		.ValueContent().MinDesiredWidth(320.0f)
+		[
+			SNew(SComboButton)
+			.ButtonContent()[SNew(STextBlock).Text(this, &FDataForgeGeneratedOutputCustomization::GetSelectedAssetRuleText)]
+			.OnGetMenuContent(this, &FDataForgeGeneratedOutputCustomization::BuildManagedAssetRuleMenu)
+		];
+	}
+}
+
+TSharedRef<SWidget> FDataForgeGeneratedOutputCustomization::BuildManagedAssetRuleMenu() const
+{
+	FMenuBuilder MenuBuilder(true, nullptr);
+	const UDataForgeRuleSet* RuleSet = FindRuleSet();
+	bool bAdded = false;
+	if (RuleSet && AssetRuleIdHandle.IsValid())
+	{
+		for (const FDataForgeAssetRule& Rule : RuleSet->AssetRules)
+		{
+			if (Rule.RuleId.IsNone() || Rule.Ownership != EDataForgeAssetOwnership::Managed) continue;
+			bAdded = true;
+			const FName RuleId = Rule.RuleId;
+			MenuBuilder.AddMenuEntry(FText::FromName(RuleId), FText::FromString(Rule.BaseFolder), FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([Handle = AssetRuleIdHandle, Utilities = PropertyUtilities, RuleId]()
+				{
+					Handle->SetValue(RuleId);
+					if (Utilities.IsValid()) Utilities->ForceRefresh();
+				})));
+		}
+	}
+	if (!bAdded)
+	{
+		MenuBuilder.AddMenuEntry(LOCTEXT("NoManagedAssetRules", "No Managed Asset Rules configured"), FText::GetEmpty(), FSlateIcon(), FUIAction());
+	}
+	return MenuBuilder.MakeWidget();
+}
+
+FText FDataForgeGeneratedOutputCustomization::GetSelectedAssetRuleText() const
+{
+	FName RuleId;
+	if (!AssetRuleIdHandle.IsValid() || AssetRuleIdHandle->GetValue(RuleId) != FPropertyAccess::Success || RuleId.IsNone())
+	{
+		return LOCTEXT("SelectManagedAssetRule", "Select Managed Asset Rule");
+	}
+	return FText::FromName(RuleId);
+}
+
+UDataForgeRuleSet* FDataForgeGeneratedOutputCustomization::FindRuleSet() const
+{
+	if (!StructHandle.IsValid()) return nullptr;
+	TArray<UObject*> OuterObjects;
+	StructHandle->GetOuterObjects(OuterObjects);
+	for (UObject* Object : OuterObjects)
+	{
+		if (UDataForgeRuleSet* RuleSet = Cast<UDataForgeRuleSet>(Object)) return RuleSet;
+	}
+	return nullptr;
 }
 
 TSharedRef<SWidget> FDataForgeBindingCustomization::BuildPropertyMenu() const

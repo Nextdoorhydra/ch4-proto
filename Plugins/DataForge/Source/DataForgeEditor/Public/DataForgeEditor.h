@@ -17,6 +17,7 @@ private:
 	bool OpenPendingDeletionWizards(float DeltaTime);
 
 	TSharedPtr<IAssetTypeActions> RuleSetAssetActions;
+	TSharedPtr<IAssetTypeActions> LayoutProfileAssetActions;
 	TSet<FSoftObjectPath> PendingDeletionRuleSets;
 	FDelegateHandle AssetDeletedHandle;
 	FTSTicker::FDelegateHandle DeletionWizardTickerHandle;

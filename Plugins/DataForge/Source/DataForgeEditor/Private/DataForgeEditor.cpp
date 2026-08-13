@@ -3,6 +3,7 @@
 #include "AssetToolsModule.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Containers/Ticker.h"
+#include "DataForgeAutoReconciler.h"
 #include "DataForgeAssetTypeActions.h"
 #include "DataForgeBindingCustomization.h"
 #include "DataForgeContentPathCustomization.h"
@@ -27,6 +28,8 @@ void FDataForgeEditorModule::StartupModule()
 	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
 	RuleSetAssetActions = MakeShared<FDataForgeAssetTypeActions>();
 	AssetTools.RegisterAssetTypeActions(RuleSetAssetActions.ToSharedRef());
+	LayoutProfileAssetActions = MakeShared<FDataForgeAssetLayoutProfileActions>();
+	AssetTools.RegisterAssetTypeActions(LayoutProfileAssetActions.ToSharedRef());
 
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 	PropertyEditor.RegisterCustomClassLayout(
@@ -35,6 +38,9 @@ void FDataForgeEditorModule::StartupModule()
 	PropertyEditor.RegisterCustomPropertyTypeLayout(
 		TEXT("DataForgeBindingRule"),
 		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FDataForgeBindingCustomization::MakeInstance));
+	PropertyEditor.RegisterCustomPropertyTypeLayout(
+		TEXT("DataForgeGeneratedAssetOutputRule"),
+		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FDataForgeGeneratedOutputCustomization::MakeInstance));
 	PropertyEditor.RegisterCustomPropertyTypeLayout(
 		TEXT("DataForgeSourceConfig"),
 		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FDataForgeSourceCustomization::MakeInstance));
@@ -54,10 +60,12 @@ void FDataForgeEditorModule::StartupModule()
 
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 	AssetDeletedHandle = AssetRegistry.OnInMemoryAssetDeleted().AddRaw(this, &FDataForgeEditorModule::HandleInMemoryAssetDeleted);
+	FDataForgeAutoReconciler::Get().Startup();
 }
 
 void FDataForgeEditorModule::ShutdownModule()
 {
+	FDataForgeAutoReconciler::Get().Shutdown();
 	if (DeletionWizardTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(DeletionWizardTickerHandle);
@@ -77,6 +85,7 @@ void FDataForgeEditorModule::ShutdownModule()
 		FPropertyEditorModule& PropertyEditor = FModuleManager::GetModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 		PropertyEditor.UnregisterCustomClassLayout(UDataForgeRuleSet::StaticClass()->GetFName());
 		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeBindingRule"));
+		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeGeneratedAssetOutputRule"));
 		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeSourceConfig"));
 		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeSourceInput"));
 		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("DataForgeDataTableOutputRule"));
@@ -87,7 +96,12 @@ void FDataForgeEditorModule::ShutdownModule()
 	{
 		FModuleManager::GetModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get().UnregisterAssetTypeActions(RuleSetAssetActions.ToSharedRef());
 	}
+	if (LayoutProfileAssetActions.IsValid() && FModuleManager::Get().IsModuleLoaded(TEXT("AssetTools")))
+	{
+		FModuleManager::GetModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get().UnregisterAssetTypeActions(LayoutProfileAssetActions.ToSharedRef());
+	}
 	RuleSetAssetActions.Reset();
+	LayoutProfileAssetActions.Reset();
 }
 
 void FDataForgeEditorModule::HandleInMemoryAssetDeleted(UObject* DeletedAsset)

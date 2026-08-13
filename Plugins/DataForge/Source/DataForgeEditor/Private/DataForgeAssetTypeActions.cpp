@@ -1,9 +1,11 @@
 #include "DataForgeAssetTypeActions.h"
 
 #include "DataForgeEditorService.h"
+#include "DataForgeAssetLayoutProfile.h"
 #include "DataForgeRuleSet.h"
 #include "DataForgeRuleSetEditorToolkit.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Toolkits/SimpleAssetEditor.h"
 
 #define LOCTEXT_NAMESPACE "DataForgeAssetTypeActions"
 
@@ -87,6 +89,40 @@ void FDataForgeAssetTypeActions::GetActions(const TArray<UObject*>& InObjects, F
 				}
 			}
 		})));
+}
+
+FText FDataForgeAssetLayoutProfileActions::GetName() const
+{
+	return LOCTEXT("LayoutProfileAssetName", "DataForge Asset Layout Profile");
+}
+
+FColor FDataForgeAssetLayoutProfileActions::GetTypeColor() const
+{
+	return FColor(155, 105, 235);
+}
+
+UClass* FDataForgeAssetLayoutProfileActions::GetSupportedClass() const
+{
+	return UDataForgeAssetLayoutProfile::StaticClass();
+}
+
+uint32 FDataForgeAssetLayoutProfileActions::GetCategories()
+{
+	return EAssetTypeCategories::Misc;
+}
+
+void FDataForgeAssetLayoutProfileActions::OpenAssetEditor(
+	const TArray<UObject*>& InObjects,
+	TSharedPtr<IToolkitHost> EditWithinLevelEditor)
+{
+	const EToolkitMode::Type Mode = EditWithinLevelEditor.IsValid() ? EToolkitMode::WorldCentric : EToolkitMode::Standalone;
+	for (UObject* Object : InObjects)
+	{
+		if (UDataForgeAssetLayoutProfile* Profile = Cast<UDataForgeAssetLayoutProfile>(Object))
+		{
+			FSimpleAssetEditor::CreateEditor(Mode, EditWithinLevelEditor, Profile);
+		}
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

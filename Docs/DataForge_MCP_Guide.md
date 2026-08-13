@@ -1,62 +1,236 @@
-# DataForge MCP 최초 생성 지침
+# DataForge MCP RuleSet 생성 가이드
 
-## 목적과 책임 경계
+## 목적
 
-MCP는 기존 `GoogleSheetConfig`와 그 안의 Google parser를 기준으로 DataForge RuleSet을 **최초 한 번 생성**한다. 생성 이후의 바인딩, Asset Rule, Generated Output, dependency 변경은 개발자가 DataForge RuleSet Editor에서 직접 관리한다.
+개발자는 Unreal 내부 구조를 모두 알 필요 없이 Google parser 또는 `GoogleSheetConfig`를 Source of Truth로 지정하고, 원하는 출력과 에셋 규칙을 설명한다. Codex는 이를 검증된 DataForge 고수준 명령으로 변환한다.
 
-MCP는 일반 `create_data_table`, `set_property` 명령을 여러 번 조합하지 않는다. 다음 프로젝트 고수준 명령 하나를 `system_control.console_command` capability로 실행한다.
+MCP는 여러 개의 범용 에셋 수정 명령을 조합하지 않는다. 생성 도중 실패해 불완전한 RuleSet이 남지 않도록 `DataForge.MCP.CreateRuleSetFromGoogleParser` 한 경로만 사용한다.
+
+## 사용자 프롬프트 템플릿
+
+아래 템플릿에서 불필요한 선택 항목은 삭제해도 된다. 에셋 경로나 클래스명을 모르면 `자동 탐색`이라고 적는다.
 
 ```text
-DataForge.MCP.CreateRuleSetFromGoogleParser Config=/Game/Data/GS_Body
+[DataForge RuleSet 생성 요청]
+
+Source
+- Google Parser 또는 Config: /Game/Data/Body/DA_BodyDataParser (모르면 `자동 탐색`)
+- Source 검색 폴더: /Game/Data/Body (자동 탐색일 때)
+- Primary Key: ID
+
+DataTable Output
+- Row Struct: FCMBodyTableRow
+- 저장 경로: /Game/Data/Body/DT_Body
+- RuleSet 저장 경로: /Game/Data/Body/RS_Body
+
+Generated Assets (선택)
+- Output Name: BodyData
+- 종류: DA
+- 클래스: CMBodyDataAsset
+- 저장 폴더: /Game/Data/Body
+- 이름 규칙: DA_{ID}
+- DataTable 대상 속성: BodyData
+
+External Assets (선택)
+- Rule Id: Icon
+- 종류: Texture
+- 저장 폴더: /Game/Data/Texture
+- 이름 규칙: T_{ID}
+- Source Column: ID
+- Generated Output: BodyData
+- 대상 속성: Icon
+
+Options
+- 즉시 Apply: true
+- 에셋 저장: true
 ```
 
-## MCP 호출 형태
+Codex는 표시 이름을 Unreal 경로로 추측하지 않고 프로젝트에서 실제 Config, Row Struct 및 클래스를 조회한다. 후보가 여러 개면 생성 전에 사용자에게 선택을 요청한다.
 
-```json
-{
-  "operation": "execute",
-  "capability": "system_control.console_command",
-  "params": {
-    "action": "console_command",
-    "command": "DataForge.MCP.CreateRuleSetFromGoogleParser Config=/Game/Data/GS_Body"
-  }
-}
-```
+## 단순 요청
 
-Parser에 `TargetTable`이 설정되어 있다면 해당 DataTable의 Row Struct와 패키지 경로를 자동으로 재사용한다. 생성 RuleSet의 기본 경로는 `/Game/DataForge/Rules/RS_<GoogleSheetConfig 이름>`이다.
-
-Parser에 DataTable이 없는 cache-only 구성은 Row Struct와 출력 경로를 명시한다.
+PDA/DA 또는 외부 에셋 규칙이 없는 Google→DataTable 요청은 한 줄 명령을 사용한다.
 
 ```text
 DataForge.MCP.CreateRuleSetFromGoogleParser Config=/Game/Data/GS_Items RowStruct=/Script/Chimera.CMItemTableRow Output=/Game/Data/DT_Items RuleSet=/Game/Data/Rules/RS_Items PrimaryKey=Id
 ```
 
-선택 인자:
+Parser에 호환되는 `TargetTable`이 있으면 `RowStruct`와 `Output`은 생략할 수 있다. 기본 RuleSet 경로는 `/Game/DataForge/Rules/RS_<ConfigName>`이며 `Apply` 기본값은 `true`다.
 
-- `RuleSet`: 생성할 RuleSet 패키지 경로
-- `RowStruct`: parser TargetTable이 없을 때 사용할 native 또는 asset Row Struct 경로
-- `Output`: parser TargetTable이 없을 때 사용할 DataTable 패키지 경로
-- `PrimaryKey`: 자동 추론 대신 사용할 source column
-- `Apply=false`: RuleSet만 생성하고 DataTable 반영은 보류
+## PDA/DA 및 외부 에셋이 포함된 요청
 
-## 명령 동작
+복합 요청은 Codex가 임시 JSON Spec으로 변환한다. Spec은 보통 `Saved/DataForge/McpRequests`에 두며 프로젝트 에셋이 아니다.
 
-1. GoogleSheetConfig와 parser TargetTable을 확인한다.
-2. normalized JSON cache를 Probe한다.
-3. 전체 source column을 Required Columns로 기록하고 `RowName`, `Id`, `*Id`, 첫 컬럼 순서로 Primary Key를 추론한다.
-4. 동일 이름의 editable Row Struct property를 자동 바인딩한다.
-5. mutation-free Preview를 통과해야 RuleSet을 생성한다.
-6. 기본값으로 즉시 Apply하고 RuleSet 및 GoogleSheetConfig를 저장한다.
-7. Google config의 `Save Normalized Json`과 `Auto Apply DataForge`를 활성화한다.
+```json
+{
+  "config": "/Game/Data/Body/DA_BodyDataParser",
+  "ruleSet": "/Game/Data/Body/RS_Body",
+  "rowStruct": "/Script/Chimera.CMBodyTableRow",
+  "output": "/Game/Data/Body/DT_Body",
+  "primaryKey": "ID",
+  "apply": true,
+  "saveAssets": true,
+  "assetRules": [
+    {
+      "id": "BodyData",
+      "ownership": "Managed",
+      "baseFolder": "/Game/Data/Body",
+      "assetNamePattern": "DA_{ID}"
+    },
+    {
+      "id": "Icon",
+      "ownership": "External",
+      "baseFolder": "/Game/Data/Texture",
+      "assetNamePattern": "T_{ID}"
+    }
+  ],
+  "generatedOutputs": [
+    {
+      "name": "BodyData",
+      "type": "DataAsset",
+      "class": "/Script/Chimera.CMBodyDataAsset",
+      "assetRule": "BodyData"
+    }
+  ],
+  "bindings": [
+    {
+      "source": "ResolvedAsset",
+      "column": "ID",
+      "assetRule": "Icon",
+      "target": "GeneratedOutput",
+      "targetOutput": "BodyData",
+      "property": "Icon"
+    },
+    {
+      "source": "GeneratedOutput",
+      "sourceOutput": "BodyData",
+      "target": "DataTableRow",
+      "property": "BodyData"
+    }
+  ]
+}
+```
 
-## 실패 처리
+실행 명령:
 
-- cache가 없으면 Google config에서 Fetch를 먼저 실행한다.
-- TargetTable이 없으면 `RowStruct`와 `Output`을 모두 제공한다.
-- Primary Key가 source column에 없으면 정확한 컬럼명으로 다시 요청한다.
-- 같은 경로의 RuleSet이 이미 존재하면 덮어쓰지 않는다. Creation Wizard 또는 RuleSet Editor에서 기존 에셋을 유지보수한다.
-- Preview/Apply가 실패하면 로그의 DataForge diagnostic을 해결한 후 재시도한다.
+```text
+DataForge.MCP.CreateRuleSetFromGoogleParser Spec=Saved/DataForge/McpRequests/body.json
+```
 
-## 완료 확인
+## JSON 필드 계약
 
-MCP는 실행 후 `[DataForge MCP]` 로그에서 RuleSet 경로, DataTable 경로, detected columns, bindings, apply 상태를 보고하고 두 에셋의 존재를 확인한다. 이 결과가 최초 생성의 인계점이며, 이후 RuleSet은 사용자가 에디터에서 관리한다.
+루트 필드:
+
+- `config`, `ruleSet`: 필수
+- `rowStruct`, `output`: Parser TargetTable이 없을 때 필수
+- `primaryKey`: 생략하면 `RowName`, `Id`, `*Id`, 첫 번째 열 순서로 추론
+- `apply`, `saveAssets`: 기본값 `true`
+- `assetRules`, `generatedOutputs`, `bindings`: 선택 배열
+
+Asset Rule:
+
+- `id`: 다른 항목에서 선택할 안정적인 ID
+- `ownership`: `Managed` 또는 `External`
+- `baseFolder`: `/Game` Content 경로
+- `subfolderPattern`: 선택
+- `assetNamePattern`: 필수, `{ColumnName}` 토큰은 대소문자를 구분
+
+Generated Output:
+
+- `name`: 바인딩에서 사용하는 Output Name
+- `type`: `DataAsset` 또는 `PrimaryDataAsset`
+- `class`: 실제 Unreal `UDataAsset` 클래스 경로
+- `assetRule`: `Managed` Asset Rule ID
+
+Binding:
+
+- `source`: `SourceValue`, `ResolvedAsset`, `GeneratedOutput`
+- `column`, `sourceOutput`, `assetRule`: Source 종류에 필요한 항목만 지정
+- `target`: `DataTableRow` 또는 `GeneratedOutput`
+- `targetOutput`: Generated Output 대상일 때 지정
+- `property`: 대상 속성 경로
+- `required`: 선택, 기본값 `true`
+
+정확히 이름이 같은 열과 속성은 자동으로 바인딩된다. JSON의 `bindings`에는 Texture 경로 해석이나 이름이 다른 속성처럼 추론할 수 없는 관계만 작성한다.
+
+## 실행 및 완료 확인
+
+1. Config와 클래스 경로가 실제로 존재하는지 확인한다.
+2. Google normalized cache가 없으면 Config에서 Fetch를 한 번 실행한다.
+3. 고수준 명령을 실행한다.
+4. `[DataForge MCP]` 로그에서 RuleSet, DataTable, column 수, binding 수 및 Apply 결과를 확인한다.
+5. 생성된 RuleSet과 DataTable이 존재하는지 확인한다.
+6. 요청한 PDA/DA와 외부 에셋 참조가 Preview/Apply 결과에 포함되었는지 확인한다.
+
+동일 경로에 RuleSet이 이미 존재하면 명령은 덮어쓰지 않는다. 이후 변경은 DataForge RuleSet Editor와 Creation Wizard에서 관리한다.
+
+## 대표 실패 처리
+
+- `Could not read DataForge MCP spec`: Spec 파일 경로를 프로젝트 기준 또는 절대 경로로 다시 확인한다.
+- `Spec field ... is required`: 필수 JSON 필드를 추가한다.
+- `class is not a UDataAsset class`: Blueprint generated class 또는 native 클래스의 실제 경로를 다시 조회한다.
+- cache missing: Google Config에서 `Save Normalized Json`을 활성화하고 Fetch 후 재시도한다.
+- Preview 실패: DataForge diagnostic의 column, property, Asset Rule ID 및 토큰 대소문자를 수정한다.
+- RuleSet already exists: 기존 RuleSet을 Editor에서 유지보수하거나 새로운 RuleSet 경로를 사용한다.
+
+## AssetLayoutProfile 기반 요청
+
+프로젝트의 중앙 경로 및 naming convention을 재사용할 때는 개별 `assetRules`를 반복해서 작성하지 않고 다음 형식을 사용한다.
+
+```json
+{
+  "config": "/Game/Data/Body/GS_Body",
+  "ruleSet": "/Game/Data/Body/RS_Body",
+  "rowStruct": "/Script/Chimera.CMBodyTableRow",
+  "output": "/Game/Data/Body/DT_Body",
+  "primaryKey": "ID",
+  "assetLayoutProfile": {
+    "path": "/Game/DataForge/Profiles/ALP_Body",
+    "parameters": {
+      "FeatureRoot": "Body"
+    }
+  },
+  "generatedOutputs": [],
+  "bindings": [],
+  "apply": true,
+  "saveAssets": true
+}
+```
+
+Profile 경로를 모르는 경우 `path` 대신 discovery key를 지정할 수 있다.
+
+```json
+"assetLayoutProfile": {
+  "purpose": "Character",
+  "parameters": {
+    "FeatureRoot": "Combat"
+  }
+}
+```
+
+- `path`와 `purpose`는 동시에 지정하지 않는다.
+- `purpose`는 Profile의 `Purpose` 또는 `Tags`와 정확히 일치한다.
+- 후보가 하나일 때만 자동 선택한다. 후보가 여러 개이면 명령은 후보 경로를 모두 반환하고 실패한다.
+- 후보가 없으면 임의의 Content 경로를 추론하지 않는다. 정확한 Profile을 지정하거나 수동 `assetRules`를 제공한다.
+- `parameters`의 값은 문자열이며 Profile에 선언된 이름을 그대로 사용한다.
+- `${Parameter}`는 bootstrap materialization에서 완전히 해소된다. `{Column}`은 Probe 결과와 대소문자까지 일치해야 한다.
+- Profile과 `assetRules`를 함께 지정하면 Profile 규칙을 먼저 materialize하고 수동 규칙은 Custom 규칙으로 보존한다. Rule Id 충돌은 Preview 이전에 실패한다.
+- 생성된 RuleSet은 concrete Asset Rules와 provenance를 저장한다. 이후 compiler가 Profile을 실시간 참조하지는 않는다.
+
+사용자가 MCP에 전달할 수 있는 정형 프롬프트 예시:
+
+```text
+[DataForge RuleSet 생성]
+Google Config: /Game/Data/Body/GS_Body
+Asset Layout Profile: /Game/DataForge/Profiles/ALP_Body
+Profile Parameters:
+- FeatureRoot: Body
+Row Struct: /Script/Chimera.CMBodyTableRow
+DataTable Output: /Game/Data/Body/DT_Body
+RuleSet Output: /Game/Data/Body/RS_Body
+Primary Key: ID
+Generated Outputs: 없음
+Additional Manual Asset Rules: 없음
+Apply: true
+Save Assets: true
+```

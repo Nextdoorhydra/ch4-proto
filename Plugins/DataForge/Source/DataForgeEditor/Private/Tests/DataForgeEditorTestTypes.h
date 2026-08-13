@@ -16,6 +16,10 @@ UCLASS()
 class UDataForgeEditorManagedAsset : public UDataAsset
 {
 	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere)
+	FString DisplayName;
 };
 
 USTRUCT()

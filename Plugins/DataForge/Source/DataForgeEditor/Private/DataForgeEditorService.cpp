@@ -919,29 +919,53 @@ int32 FDataForgeEditorService::AutoMapExactNames(UDataForgeRuleSet& RuleSet, con
 		{
 			continue;
 		}
-		FProperty* Property = FindFProperty<FProperty>(RuleSet.Output.RowStruct, Output.OutputName);
-		if (!CastField<FSoftObjectProperty>(Property)
-			|| !Property->HasAnyPropertyFlags(CPF_Edit)
-			|| Property->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated))
+		UClass* OutputClass = Output.AssetClass.Get();
+		if (OutputClass)
 		{
-			continue;
+			for (const FName Column : SourceColumns)
+			{
+				FProperty* OutputProperty = FindFProperty<FProperty>(OutputClass, Column);
+				if (!OutputProperty || !OutputProperty->HasAnyPropertyFlags(CPF_Edit)
+					|| OutputProperty->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated))
+				{
+					continue;
+				}
+				const bool bOutputPropertyAlreadyMapped = RuleSet.Bindings.ContainsByPredicate([&Output, Column](const FDataForgeBindingRule& Candidate)
+				{
+					return Candidate.Target == EDataForgeBindingTarget::GeneratedOutput
+						&& Candidate.TargetOutput == Output.OutputName
+						&& Candidate.TargetProperty.Equals(Column.ToString(), ESearchCase::IgnoreCase);
+				});
+				if (bOutputPropertyAlreadyMapped) continue;
+
+				FDataForgeBindingRule& OutputBinding = RuleSet.Bindings.AddDefaulted_GetRef();
+				OutputBinding.Source = EDataForgeBindingSource::SourceValue;
+				OutputBinding.SourceColumn = Column;
+				OutputBinding.Target = EDataForgeBindingTarget::GeneratedOutput;
+				OutputBinding.TargetOutput = Output.OutputName;
+				OutputBinding.TargetProperty = Column.ToString();
+				++AddedCount;
+			}
 		}
-		const bool bAlreadyMapped = RuleSet.Bindings.ContainsByPredicate([&Output](const FDataForgeBindingRule& Binding)
+
+		FProperty* RowProperty = FindFProperty<FProperty>(RuleSet.Output.RowStruct, Output.OutputName);
+		const bool bCanReferenceOutput = CastField<FSoftObjectProperty>(RowProperty)
+			&& RowProperty->HasAnyPropertyFlags(CPF_Edit)
+			&& !RowProperty->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated);
+		const bool bOutputReferenceMapped = RuleSet.Bindings.ContainsByPredicate([&Output](const FDataForgeBindingRule& Binding)
 		{
 			return Binding.Target == EDataForgeBindingTarget::DataTableRow
 				&& Binding.TargetProperty.Equals(Output.OutputName.ToString(), ESearchCase::IgnoreCase);
 		});
-		if (bAlreadyMapped)
+		if (bCanReferenceOutput && !bOutputReferenceMapped)
 		{
-			continue;
+			FDataForgeBindingRule& Binding = RuleSet.Bindings.AddDefaulted_GetRef();
+			Binding.Source = EDataForgeBindingSource::GeneratedOutput;
+			Binding.SourceOutput = Output.OutputName;
+			Binding.Target = EDataForgeBindingTarget::DataTableRow;
+			Binding.TargetProperty = Output.OutputName.ToString();
+			++AddedCount;
 		}
-
-		FDataForgeBindingRule& Binding = RuleSet.Bindings.AddDefaulted_GetRef();
-		Binding.Source = EDataForgeBindingSource::GeneratedOutput;
-		Binding.SourceOutput = Output.OutputName;
-		Binding.Target = EDataForgeBindingTarget::DataTableRow;
-		Binding.TargetProperty = Output.OutputName.ToString();
-		++AddedCount;
 	}
 	for (const FName Column : SourceColumns)
 	{

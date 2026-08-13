@@ -1,5 +1,8 @@
 #include "DataForgeRuleCreationWizard.h"
 
+#include "AssetRegistry/AssetData.h"
+#include "DataForgeAssetLayoutAuthoring.h"
+#include "DataForgeAssetLayoutProfile.h"
 #include "DataForgePipeline.h"
 #include "DataForgeEditorService.h"
 #include "DataForgeRuleCreationWorkflow.h"
@@ -9,9 +12,11 @@
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
 #include "PropertyEditorDelegates.h"
+#include "PropertyCustomizationHelpers.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/SBoxPanel.h"
@@ -104,6 +109,43 @@ namespace DataForgeRuleCreationWizard
 						]
 					]
 				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f, 12.0f, 8.0f)
+				[
+					SNew(SBorder)
+					.Visibility(this, &SWizard::GetAssetLayoutVisibility)
+					.Padding(10.0f)
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("LayoutModeHint", "Select a Profile to generate reusable rules. Leave it empty to continue with Manual Asset Rules."))
+							.AutoWrapText(true)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 6.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 0.0f, 6.0f, 0.0f)
+							[
+								SNew(SObjectPropertyEntryBox)
+								.AllowedClass(UDataForgeAssetLayoutProfile::StaticClass())
+								.ObjectPath(this, &SWizard::GetSelectedProfilePath)
+								.OnObjectChanged(this, &SWizard::OnProfileSelected)
+							]
+							+ SHorizontalBox::Slot().AutoWidth()
+							[
+								SNew(SButton)
+								.Text(LOCTEXT("UseManualLayout", "Use Manual"))
+								.ToolTipText(LOCTEXT("UseManualLayoutTooltip", "Detach Profile provenance in the transient draft and preserve all concrete rules for manual editing."))
+								.OnClicked(this, &SWizard::OnUseManualLayout)
+							]
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SAssignNew(LayoutParameterRows, SVerticalBox)
+						]
+					]
+				]
 				+ SVerticalBox::Slot().FillHeight(1.0f).Padding(8.0f)
 				[
 					SNew(SSplitter)
@@ -150,6 +192,7 @@ namespace DataForgeRuleCreationWizard
 					]
 				]
 			];
+			RebuildLayoutParameterRows();
 		}
 
 	private:
@@ -160,8 +203,8 @@ namespace DataForgeRuleCreationWizard
 
 		FText GetStepTitle() const
 		{
-			static const TCHAR* Names[] = { TEXT("Source"), TEXT("Probe"), TEXT("Schema"), TEXT("Output"), TEXT("Bindings"), TEXT("Preview") };
-			return FText::FromString(FString::Printf(TEXT("Step %d of 6 — %s"), StepNumber(Workflow->GetStep()), Names[static_cast<int32>(Workflow->GetStep())]));
+			static const TCHAR* Names[] = { TEXT("Source"), TEXT("Probe"), TEXT("Schema"), TEXT("Output"), TEXT("Asset Layout"), TEXT("Asset Rules"), TEXT("Generated Outputs"), TEXT("Bindings"), TEXT("Preview") };
+			return FText::FromString(FString::Printf(TEXT("Step %d of 9 - %s"), StepNumber(Workflow->GetStep()), Names[static_cast<int32>(Workflow->GetStep())]));
 		}
 
 		FText GetGuidanceText() const
@@ -172,7 +215,10 @@ namespace DataForgeRuleCreationWizard
 			case EDataForgeWizardStep::Probe: return LOCTEXT("ProbeHelp", "Read a bounded sample and normalize it into canonical Parsed Data. Probe never mutates project content.");
 			case EDataForgeWizardStep::Schema: return LOCTEXT("SchemaHelp", "Probe inferred required columns and suggested a primary key. Review the suggestion; choose another detected field when needed.");
 			case EDataForgeWizardStep::Output: return LOCTEXT("OutputHelp", "Select the DataTable row struct and choose a Content Browser destination. Creation, deletion, and save behavior are Advanced options.");
-			case EDataForgeWizardStep::Bindings: return LOCTEXT("BindingsHelp", "Exact-name bindings are inferred automatically when this step opens. Generated Outputs also bind to same-name soft reference fields. Review the mappings; {ColumnName} tokens are case-sensitive.");
+			case EDataForgeWizardStep::AssetLayout: return LOCTEXT("AssetLayoutHelp", "Choose a central AssetLayoutProfile or continue manually. Profile parameters use ${Name}; source columns use {ColumnName}. Materialization changes only this transient draft until Finish & Apply.");
+			case EDataForgeWizardStep::AssetRules: return LOCTEXT("AssetRulesHelp", "Define external lookup rules and Managed asset destinations first. Rule Ids are selected from dropdowns in later steps; {ColumnName} tokens are case-sensitive.");
+			case EDataForgeWizardStep::GeneratedOutputs: return LOCTEXT("GeneratedOutputsHelp", "Define PDA/DA outputs and select a previously configured Managed Asset Rule. Matching source fields are synchronized into Bindings automatically.");
+			case EDataForgeWizardStep::Bindings: return LOCTEXT("BindingsHelp", "Review inferred source-to-row, source-to-PDA/DA, and generated-object-to-row mappings. Add only exceptional mappings manually.");
 			case EDataForgeWizardStep::Preview: return LOCTEXT("PreviewHelp", "Compile and inspect the mutation-free desired-state plan. Finish saves the RuleSet, runs a fresh Preview, and immediately Applies the generated content.");
 			default: return FText::GetEmpty();
 			}
@@ -192,6 +238,23 @@ namespace DataForgeRuleCreationWizard
 				}
 			}
 			const FDataForgeApplyPlan& Plan = Workflow->GetPreviewPlan();
+			if (Workflow->GetStep() == EDataForgeWizardStep::AssetLayout)
+			{
+				Text += TEXT("\n\nAsset Layout\n");
+				if (Workflow->IsManualAssetLayout())
+				{
+					Text += TEXT("Mode: Manual\nConcrete rules remain directly editable.");
+				}
+				else if (const UDataForgeAssetLayoutProfile* Profile = Workflow->GetSelectedAssetLayoutProfile())
+				{
+					Text += FString::Printf(TEXT("Profile: %s\nVersion: %d\n"), *Profile->GetName(), Profile->ProfileVersion);
+					for (const TPair<FName, FString>& Parameter : Workflow->GetAssetLayoutParameterValues())
+					{
+						Text += FString::Printf(TEXT("%s = %s\n"), *Parameter.Key.ToString(), *Parameter.Value);
+					}
+					Text += TEXT("\nDraft Status: ") + FDataForgeAssetLayoutAuthoring::Analyze(Workflow->GetDraft()).MakeSummary();
+				}
+			}
 			if (!Plan.Rows.IsEmpty() || !Plan.ManagedAssets.IsEmpty())
 			{
 				Text += TEXT("\nPreview\n") + Plan.MakeSummary();
@@ -243,6 +306,7 @@ namespace DataForgeRuleCreationWizard
 			switch (Workflow->GetStep())
 			{
 			case EDataForgeWizardStep::Probe: return LOCTEXT("RunProbe", "Run Probe");
+			case EDataForgeWizardStep::AssetLayout: return LOCTEXT("MaterializeProfile", "Materialize Profile");
 			case EDataForgeWizardStep::Bindings: return LOCTEXT("AutoMap", "Auto Map Exact Names");
 			case EDataForgeWizardStep::Preview: return LOCTEXT("RunPreview", "Run Preview");
 			default: return FText::GetEmpty();
@@ -251,10 +315,13 @@ namespace DataForgeRuleCreationWizard
 
 		EVisibility GetSourceVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Source ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetSchemaVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Schema ? EVisibility::Visible : EVisibility::Collapsed; }
+		EVisibility GetAssetLayoutVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::AssetLayout ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetActionVisibility() const
 		{
 			const EDataForgeWizardStep Step = Workflow->GetStep();
-			return Step == EDataForgeWizardStep::Probe || Step == EDataForgeWizardStep::Bindings || Step == EDataForgeWizardStep::Preview
+			return Step == EDataForgeWizardStep::Probe
+				|| (Step == EDataForgeWizardStep::AssetLayout && !Workflow->IsManualAssetLayout())
+				|| Step == EDataForgeWizardStep::Bindings || Step == EDataForgeWizardStep::Preview
 				? EVisibility::Visible : EVisibility::Collapsed;
 		}
 		EVisibility GetNextVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Preview ? EVisibility::Collapsed : EVisibility::Visible; }
@@ -285,10 +352,14 @@ namespace DataForgeRuleCreationWizard
 					&& PropertyAndParent.Property.GetFName() != GET_MEMBER_NAME_CHECKED(FDataForgeSchemaRule, PrimaryKey);
 			case EDataForgeWizardStep::Output:
 				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Output));
+			case EDataForgeWizardStep::AssetLayout:
+				return false;
+			case EDataForgeWizardStep::AssetRules:
+				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, AssetRules));
+			case EDataForgeWizardStep::GeneratedOutputs:
+				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs));
 			case EDataForgeWizardStep::Bindings:
-				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Bindings))
-					|| IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, AssetRules))
-					|| IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs));
+				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Bindings));
 			default:
 				return false;
 			}
@@ -316,6 +387,69 @@ namespace DataForgeRuleCreationWizard
 			}
 		}
 
+		FString GetSelectedProfilePath() const
+		{
+			const UDataForgeAssetLayoutProfile* Profile = Workflow->GetSelectedAssetLayoutProfile();
+			return Profile ? Profile->GetPathName() : FString();
+		}
+
+		void OnProfileSelected(const FAssetData& AssetData)
+		{
+			Workflow->SelectAssetLayoutProfile(Cast<UDataForgeAssetLayoutProfile>(AssetData.GetAsset()));
+			StatusMessage.Reset();
+			RebuildLayoutParameterRows();
+		}
+
+		FReply OnUseManualLayout()
+		{
+			Workflow->SelectAssetLayoutProfile(nullptr);
+			StatusMessage.Reset();
+			RebuildLayoutParameterRows();
+			return FReply::Handled();
+		}
+
+		void RebuildLayoutParameterRows()
+		{
+			if (!LayoutParameterRows.IsValid()) return;
+			LayoutParameterRows->ClearChildren();
+			const UDataForgeAssetLayoutProfile* Profile = Workflow->GetSelectedAssetLayoutProfile();
+			if (!Profile)
+			{
+				LayoutParameterRows->AddSlot().AutoHeight().Padding(2.0f)
+				[
+					SNew(STextBlock).Text(LOCTEXT("ManualLayout", "Manual mode: configure concrete rules in the next step."))
+				];
+				return;
+			}
+			for (const FDataForgeProfileParameter& Parameter : Profile->Parameters)
+			{
+				const FString Value = Workflow->GetAssetLayoutParameterValues().FindRef(Parameter.Name);
+				LayoutParameterRows->AddSlot().AutoHeight().Padding(2.0f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(0.35f).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(Parameter.Name.ToString() + (Parameter.bRequired ? TEXT(" *") : TEXT(""))))
+						.ToolTipText(FText::FromString(Parameter.Description))
+					]
+					+ SHorizontalBox::Slot().FillWidth(0.65f)
+					[
+						SNew(SEditableTextBox)
+						.Text(FText::FromString(Value))
+						.HintText(FText::FromString(Parameter.DefaultValue))
+						.OnTextCommitted_Lambda([WeakWorkflow = TWeakPtr<FDataForgeRuleCreationWorkflow>(Workflow), Name = Parameter.Name](const FText& Text, ETextCommit::Type)
+						{
+							if (const TSharedPtr<FDataForgeRuleCreationWorkflow> Pinned = WeakWorkflow.Pin())
+							{
+								Pinned->SetAssetLayoutParameter(Name, Text.ToString());
+							}
+						})
+					]
+				];
+			}
+		}
+
 		void OnDraftPropertyChanged(const FPropertyChangedEvent& Event)
 		{
 			Workflow->NotifyDraftChanged(Event.MemberProperty ? Event.MemberProperty->GetFName() : NAME_None);
@@ -335,6 +469,10 @@ namespace DataForgeRuleCreationWizard
 					PrimaryKeyOptions.Add(MakeShared<FName>(Column));
 				}
 				PrimaryKeyCombo->RefreshOptions();
+				break;
+			case EDataForgeWizardStep::AssetLayout:
+				Workflow->MaterializeAssetLayout();
+				DetailsView->ForceRefresh();
 				break;
 			case EDataForgeWizardStep::Bindings:
 				Workflow->AutoMapExactNames();
@@ -395,6 +533,7 @@ namespace DataForgeRuleCreationWizard
 		TArray<TSharedPtr<FDataForgeSourceDescriptor>> AdapterOptions;
 		TArray<TSharedPtr<FName>> PrimaryKeyOptions;
 		TSharedPtr<SComboBox<TSharedPtr<FName>>> PrimaryKeyCombo;
+		TSharedPtr<SVerticalBox> LayoutParameterRows;
 		FString StatusMessage;
 	};
 }

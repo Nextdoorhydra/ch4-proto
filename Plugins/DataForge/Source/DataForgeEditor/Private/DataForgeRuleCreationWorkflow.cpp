@@ -1,5 +1,7 @@
 #include "DataForgeRuleCreationWorkflow.h"
 
+#include "DataForgeAssetLayoutAuthoring.h"
+#include "DataForgeAssetLayoutProfile.h"
 #include "DataForgeEditorService.h"
 #include "DataForgePipeline.h"
 #include "Engine/DataTable.h"
@@ -13,6 +15,10 @@ FDataForgeRuleCreationWorkflow::FDataForgeRuleCreationWorkflow(UDataForgeRuleSet
 {
 	const FName DraftName = MakeUniqueObjectName(GetTransientPackage(), UDataForgeRuleSet::StaticClass(), TEXT("DataForgeRuleWizardDraft"));
 	Draft.Reset(DuplicateObject<UDataForgeRuleSet>(&InTarget, GetTransientPackage(), DraftName));
+	bManualAssetLayout = !GetDraft().ProfileOrigin.IsSet();
+	SelectedAssetLayoutProfile = GetDraft().ProfileOrigin.Profile.LoadSynchronous();
+	AssetLayoutParameterValues = GetDraft().ProfileOrigin.ParameterValues;
+	bAssetLayoutReady = bManualAssetLayout;
 }
 
 UDataForgeRuleSet& FDataForgeRuleCreationWorkflow::GetDraft() const
@@ -41,10 +47,26 @@ const FString& FDataForgeRuleCreationWorkflow::GetLastMessage() const
 	return LastMessage;
 }
 
+UDataForgeAssetLayoutProfile* FDataForgeRuleCreationWorkflow::GetSelectedAssetLayoutProfile() const
+{
+	return SelectedAssetLayoutProfile.Get();
+}
+
+const TMap<FName, FString>& FDataForgeRuleCreationWorkflow::GetAssetLayoutParameterValues() const
+{
+	return AssetLayoutParameterValues;
+}
+
+bool FDataForgeRuleCreationWorkflow::IsManualAssetLayout() const
+{
+	return bManualAssetLayout;
+}
+
 FDataForgeResult FDataForgeRuleCreationWorkflow::Probe()
 {
 	FDataForgeResult Result = FDataForgeEditorService::Probe(GetDraft(), &ProbedDataSet);
 	bProbeSucceeded = Result.bSuccess;
+	bAssetLayoutReady = bManualAssetLayout;
 	if (bProbeSucceeded)
 	{
 		FDataForgeSchemaRule& Schema = GetDraft().Schema;
@@ -86,6 +108,78 @@ FDataForgeResult FDataForgeRuleCreationWorkflow::Probe()
 	return Result;
 }
 
+void FDataForgeRuleCreationWorkflow::SelectAssetLayoutProfile(UDataForgeAssetLayoutProfile* Profile)
+{
+	SelectedAssetLayoutProfile = Profile;
+	AssetLayoutParameterValues.Reset();
+	bManualAssetLayout = Profile == nullptr;
+	bAssetLayoutReady = bManualAssetLayout;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+
+	if (!Profile)
+	{
+		FDataForgeAssetLayoutAuthoring::Detach(GetDraft());
+		LastMessage = TEXT("Manual Asset Layout selected. Existing concrete rules remain editable in the next step.");
+		return;
+	}
+
+	const bool bSameProfile = GetDraft().ProfileOrigin.ProfileId == Profile->ProfileId;
+	for (const FDataForgeProfileParameter& Parameter : Profile->Parameters)
+	{
+		const FString* Existing = bSameProfile ? GetDraft().ProfileOrigin.ParameterValues.Find(Parameter.Name) : nullptr;
+		AssetLayoutParameterValues.Add(Parameter.Name, Existing ? *Existing : Parameter.DefaultValue);
+	}
+	LastMessage = TEXT("Profile selected. Configure parameters, then Materialize Profile before continuing.");
+}
+
+void FDataForgeRuleCreationWorkflow::SetAssetLayoutParameter(FName Name, const FString& Value)
+{
+	if (!SelectedAssetLayoutProfile.IsValid()) return;
+	AssetLayoutParameterValues.Add(Name, Value);
+	bAssetLayoutReady = false;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	LastMessage = TEXT("Profile parameter changed. Materialize Profile again before continuing.");
+}
+
+FDataForgeResult FDataForgeRuleCreationWorkflow::MaterializeAssetLayout()
+{
+	UDataForgeAssetLayoutProfile* Profile = SelectedAssetLayoutProfile.Get();
+	if (!Profile)
+	{
+		FDataForgeResult Result;
+		Result.bSuccess = bManualAssetLayout;
+		Result.Summary = bManualAssetLayout
+			? TEXT("Manual Asset Layout is ready.")
+			: TEXT("Select an available Asset Layout Profile or choose Manual.");
+		LastMessage = Result.Summary;
+		return Result;
+	}
+	if (!bProbeSucceeded)
+	{
+		FDataForgeResult Result;
+		FDataForgeDiagnostic& Diagnostic = Result.Diagnostics.AddDefaulted_GetRef();
+		Diagnostic.Severity = EDataForgeSeverity::Error;
+		Diagnostic.Code = TEXT("DF1622");
+		Diagnostic.Message = TEXT("Run a successful source Probe before materializing an Asset Layout Profile.");
+		Result.Summary = Diagnostic.Message;
+		LastMessage = Result.Summary;
+		return Result;
+	}
+
+	FDataForgeResult Result = FDataForgeAssetLayoutAuthoring::Materialize(
+		GetDraft(),
+		*Profile,
+		AssetLayoutParameterValues,
+		ProbedDataSet.Columns);
+	bAssetLayoutReady = Result.bSuccess;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	LastMessage = Result.Summary;
+	return Result;
+}
+
 int32 FDataForgeRuleCreationWorkflow::AutoMapExactNames()
 {
 	const int32 AddedCount = bProbeSucceeded
@@ -111,9 +205,41 @@ void FDataForgeRuleCreationWorkflow::NotifyDraftChanged(FName MemberPropertyName
 	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Source))
 	{
 		bProbeSucceeded = false;
+		bAssetLayoutReady = bManualAssetLayout;
 		ProbedDataSet = FDataForgeDataSet();
 	}
+	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs))
+	{
+		const int32 RemovedCount = RemoveInvalidGeneratedOutputBindings();
+		const int32 AddedCount = AutoMapExactNames();
+		LastMessage = FString::Printf(TEXT("Generated Outputs synchronized: %d binding(s) added, %d invalid binding(s) removed."), AddedCount, RemovedCount);
+		return;
+	}
 	LastMessage = TEXT("Draft changed. Re-run the current validation step.");
+}
+
+int32 FDataForgeRuleCreationWorkflow::RemoveInvalidGeneratedOutputBindings()
+{
+	UDataForgeRuleSet& RuleSet = GetDraft();
+	const auto FindOutput = [&RuleSet](FName OutputName)
+	{
+		return RuleSet.GeneratedOutputs.FindByPredicate([OutputName](const FDataForgeGeneratedAssetOutputRule& Output)
+		{
+			return !OutputName.IsNone() && Output.OutputName == OutputName;
+		});
+	};
+	return RuleSet.Bindings.RemoveAll([&FindOutput](const FDataForgeBindingRule& Binding)
+	{
+		if (Binding.Source == EDataForgeBindingSource::GeneratedOutput && !FindOutput(Binding.SourceOutput))
+		{
+			return true;
+		}
+		if (Binding.Target != EDataForgeBindingTarget::GeneratedOutput)
+		{
+			return false;
+		}
+		return !FindOutput(Binding.TargetOutput);
+	});
 }
 
 bool FDataForgeRuleCreationWorkflow::CanAdvance(FString& OutReason) const
@@ -155,6 +281,61 @@ bool FDataForgeRuleCreationWorkflow::CanAdvance(FString& OutReason) const
 			return false;
 		}
 		return true;
+	case EDataForgeWizardStep::AssetLayout:
+		if (bManualAssetLayout) return true;
+		if (!SelectedAssetLayoutProfile.IsValid())
+		{
+			OutReason = TEXT("The selected Asset Layout Profile is unavailable. Select another Profile or choose Manual.");
+			return false;
+		}
+		if (!bAssetLayoutReady)
+		{
+			OutReason = TEXT("Materialize the selected Profile with the current parameters before continuing.");
+			return false;
+		}
+		return true;
+	case EDataForgeWizardStep::AssetRules:
+	{
+		TSet<FName> RuleIds;
+		for (const FDataForgeAssetRule& AssetRule : RuleSet.AssetRules)
+		{
+			if (AssetRule.RuleId.IsNone() || RuleIds.Contains(AssetRule.RuleId))
+			{
+				OutReason = TEXT("Every Asset Rule needs a unique Rule Id.");
+				return false;
+			}
+			RuleIds.Add(AssetRule.RuleId);
+			if (!FPackageName::IsValidLongPackageName(AssetRule.BaseFolder) || AssetRule.AssetNamePattern.IsEmpty())
+			{
+				OutReason = FString::Printf(TEXT("Asset Rule '%s' needs a valid /Game folder and asset name pattern."), *AssetRule.RuleId.ToString());
+				return false;
+			}
+		}
+		return true;
+	}
+	case EDataForgeWizardStep::GeneratedOutputs:
+	{
+		TSet<FName> OutputNames;
+		for (const FDataForgeGeneratedAssetOutputRule& Output : RuleSet.GeneratedOutputs)
+		{
+			if (Output.OutputName.IsNone() || OutputNames.Contains(Output.OutputName) || !Output.AssetClass.Get())
+			{
+				OutReason = TEXT("Every Generated Output needs a unique Output Name and an Asset Class.");
+				return false;
+			}
+			OutputNames.Add(Output.OutputName);
+			const FDataForgeAssetRule* AssetRule = RuleSet.AssetRules.FindByPredicate([&Output](const FDataForgeAssetRule& Candidate)
+			{
+				return Candidate.RuleId == Output.AssetRuleId;
+			});
+			if (!AssetRule || AssetRule->Ownership != EDataForgeAssetOwnership::Managed)
+			{
+				OutReason = FString::Printf(TEXT("Generated Output '%s' must select a Managed Asset Rule."), *Output.OutputName.ToString());
+				return false;
+			}
+		}
+		return true;
+	}
 	case EDataForgeWizardStep::Bindings:
 		return true;
 	case EDataForgeWizardStep::Preview:
@@ -217,6 +398,7 @@ bool FDataForgeRuleCreationWorkflow::Finish(FString& OutReason)
 	TargetRuleSet->Schema = DraftRuleSet.Schema;
 	TargetRuleSet->Output = DraftRuleSet.Output;
 	TargetRuleSet->AssetRules = DraftRuleSet.AssetRules;
+	TargetRuleSet->ProfileOrigin = DraftRuleSet.ProfileOrigin;
 	TargetRuleSet->GeneratedOutputs = DraftRuleSet.GeneratedOutputs;
 	TargetRuleSet->Bindings = DraftRuleSet.Bindings;
 	TargetRuleSet->Dependencies = DraftRuleSet.Dependencies;

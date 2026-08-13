@@ -74,7 +74,7 @@ The Source UI shows only the field consumed by the selected adapter: CSV/JSON us
 
 Fetch remains the explicit network trigger. When automatic application is enabled, DataForge still performs a fresh validation Preview internally before it mutates project assets.
 
-As of 1.3, new GoogleSheetConfig assets enable **Save Normalized Json** and **Auto Apply DataForge** by default. A successful Fetch broadcasts the cache update, discovers every direct or Multi Source RuleSet referencing that config, runs a fresh Preview, and immediately Applies when validation succeeds. Preview/foreign-key/schema failures block only the affected RuleSet and are appended to the Google Sheet status. Existing config assets keep their serialized option values, so enable both options once when upgrading an existing asset.
+As of 1.4, new GoogleSheetConfig assets enable **Save Normalized Json** and **Auto Apply DataForge** by default. A successful Fetch broadcasts the cache update, discovers every direct or Multi Source RuleSet referencing that config, runs a fresh Preview, and immediately Applies when validation succeeds. Preview/foreign-key/schema failures block only the affected RuleSet and are appended to the Google Sheet status. Existing config assets keep their serialized option values, so enable both options once when upgrading an existing asset.
 
 For MCP-assisted initial creation, call the project command through the canonical `system_control.console_command` capability:
 
@@ -83,6 +83,16 @@ DataForge.MCP.CreateRuleSetFromGoogleParser Config=/Game/Data/GS_Items
 ```
 
 The command reuses the parser's TargetTable when available, probes the normalized cache, infers schema and bindings, previews, applies, saves, and enables Google auto-apply. It refuses to overwrite an existing RuleSet; subsequent maintenance belongs in the RuleSet Editor. Cache-only parsers must also provide `RowStruct=` and `Output=`. See `Docs/DataForge_MCP_Guide.md` and the project `AGENTS.md` for the MCP contract.
+
+Requests that also define Managed PDA/DA outputs, external texture/mesh lookups, or explicit bindings use a validated JSON spec instead of fragile repeated console arguments:
+
+```text
+DataForge.MCP.CreateRuleSetFromGoogleParser Spec=Saved/DataForge/McpRequests/items.json
+```
+
+The same atomic bootstrap parses the complete spec, probes the source, adds exact-name bindings, runs Preview, and only then creates/applies the RuleSet. The Korean copy-ready prompt template and JSON schema are in `Docs/DataForge_MCP_Guide.md`.
+
+Structured specs may select an Asset Layout Profile by exact asset path or by an exact `Purpose`/`Tags` discovery key. Discovery succeeds only for one candidate; ambiguous results are reported instead of guessed. Profile `${Parameter}` values materialize into concrete RuleSet Asset Rules after Probe validates every remaining `{Column}` token. Existing `assetRules` remain compatible and become Custom rules when combined with a Profile.
 
 ## Multi Source foreign-key join
 
@@ -209,6 +219,28 @@ Fail CI when validation succeeds but the desired state differs from current cont
 UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -ValidateOnly -FailOnChanges
 ```
 
+Validate every Asset Layout Profile and fail CI when any Profile-backed RuleSet is outdated:
+
+```text
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -ValidateOnly -FailOnOutdatedProfiles
+```
+
+Profile definition errors, duplicate Profile IDs, and missing/mismatched provenance always fail validation. Profile drift is reported as `DF1643` but only becomes a CI failure when `-FailOnOutdatedProfiles` is specified.
+
+Preview a dependency-ordered rebase for every RuleSet using one Profile, without mutation:
+
+```text
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -Profile=/Game/DataForge/Profiles/ALP_Character -Rebase -ValidateOnly
+```
+
+Explicitly persist the rebased concrete rules and apply their content:
+
+```text
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -Profile=/Game/DataForge/Profiles/ALP_Character -Rebase -Apply
+```
+
+Profile Rebase uses the same batch stale checks, global path-collision validation, and dependency ordering as Project Overview. It cannot be combined with `-RuleSet`, `-All`, snapshot, cleanup, or CI failure modes.
+
 Controlled apply (internally previews first):
 
 ```text
@@ -233,7 +265,7 @@ Fail CI when either snapshot is missing or stale:
 UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -VerifySnapshots
 ```
 
-`-RuleSet` includes its transitive prerequisites; `-All` discovers every RuleSet asset. Dependencies and independent roots are ordered deterministically by asset path. `-Apply`, `-CleanupOrphans`, `-ExportSnapshots`, and `-VerifySnapshots` are mutually exclusive, and none can be combined with `-FailOnChanges`. `-FailOnChanges` returns exit code `3`, validation/action errors return `1`, and invalid arguments return `2`.
+`-RuleSet` includes its transitive prerequisites; `-All` discovers every RuleSet asset. Dependencies and independent roots are ordered deterministically by asset path. `-Apply`, `-CleanupOrphans`, `-ExportSnapshots`, and `-VerifySnapshots` are mutually exclusive, and none can be combined with `-FailOnChanges` or `-FailOnOutdatedProfiles`. `-FailOnChanges` returns exit code `3`, `-FailOnOutdatedProfiles` returns `4`, validation/action errors return `1`, and invalid arguments return `2`.
 
 Graph Apply is dependency ordered but is not a project-wide atomic transaction. Each RuleSet is previewed and applied independently, so a later failure does not roll back an earlier successful prerequisite.
 
@@ -248,7 +280,7 @@ Config/DataForge/Snapshots/<RuleSet package path>.json
 Config/DataForge/Snapshots/<RuleSet package path>.yaml
 ```
 
-Both formats include every persistent RuleSet field and exclude transient editor status. Parameters, required columns, Asset Rules, generated outputs, bindings, and dependencies are sorted by stable semantic keys, so array reorder noise does not affect review. Commit these files alongside the RuleSet assets and run `-VerifySnapshots` in CI. Edit the UAsset through the RuleSet Editor and export again; snapshots are deliberately not imported as a competing source of truth.
+Both formats include every persistent RuleSet field and exclude transient editor status. Snapshot version 3 includes the Profile asset path, stable Profile ID, materialized version/hash, parameter values, rule-template baselines, and local override fields. Parameters, required columns, Profile origins, Asset Rules, generated outputs, bindings, and dependencies are sorted by stable semantic keys, so array reorder noise does not affect review. Commit these files alongside the RuleSet assets and run `-VerifySnapshots` in CI. Edit the UAsset through the RuleSet Editor and export again; snapshots are deliberately not imported as a competing source of truth.
 
 ## Authoring review tools
 
