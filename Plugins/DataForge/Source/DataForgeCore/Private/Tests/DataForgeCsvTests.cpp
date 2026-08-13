@@ -1,4 +1,5 @@
 #include "DataForgeDependencyGraph.h"
+#include "DataForgeBindingPreset.h"
 #include "DataForgePipeline.h"
 #include "DataForgeRuleSet.h"
 #include "Tests/DataForgeTestTypes.h"
@@ -6,9 +7,12 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "UObject/StructOnScope.h"
+#include "UObject/MetaData.h"
+#include "UObject/Package.h"
 
 namespace DataForgeTests
 {
@@ -25,7 +29,7 @@ namespace DataForgeTests
 			FDataForgeDataSet& OutDataSet,
 			TArray<FDataForgeDiagnostic>& OutDiagnostics) const override
 		{
-			return Supply(OutDataSet);
+			return Supply(Source, OutDataSet);
 		}
 
 		virtual bool Fetch(
@@ -33,13 +37,30 @@ namespace DataForgeTests
 			FDataForgeDataSet& OutDataSet,
 			TArray<FDataForgeDiagnostic>& OutDiagnostics) const override
 		{
-			return Supply(OutDataSet);
+			return Supply(Source, OutDataSet);
 		}
 
 	private:
-		static bool Supply(FDataForgeDataSet& OutDataSet)
+		static bool Supply(const FDataForgeSourceConfig& Source, FDataForgeDataSet& OutDataSet)
 		{
 			OutDataSet = FDataForgeDataSet();
+			if (Source.Parameters.FindRef(TEXT("Mode")) == TEXT("Association"))
+			{
+				OutDataSet.Columns = { TEXT("Subject"), TEXT("ObjectPath"), TEXT("AssetKind"), TEXT("Role") };
+				for (int32 Index = 1; Index <= 3; ++Index)
+				{
+					const FString Path = Source.Parameters.FindRef(FName(*FString::Printf(TEXT("Path%d"), Index)));
+					if (Path.IsEmpty()) continue;
+					FDataForgeRow& Row = OutDataSet.Rows.AddDefaulted_GetRef();
+					Row.SourceRow = Index;
+					Row.Values.Add(TEXT("Subject"), TEXT("ExternalOne"));
+					Row.Values.Add(TEXT("ObjectPath"), Path);
+					Row.Values.Add(TEXT("AssetKind"), TEXT("TestAsset"));
+					Row.Values.Add(TEXT("Role"), TEXT("Visual"));
+				}
+				OutDataSet.SourceRevision = Source.Parameters.FindRef(TEXT("Revision"));
+				return true;
+			}
 			OutDataSet.Columns = { TEXT("Id"), TEXT("DisplayName") };
 			FDataForgeRow& Row = OutDataSet.Rows.AddDefaulted_GetRef();
 			Row.SourceRow = 7;
@@ -234,6 +255,131 @@ bool FDataForgeRegisteredParsedDataAdapterTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("External parser row reaches compiler"), Compiled.DataSet.Rows.Num(), 1);
 	TestEqual(TEXT("External parser revision is preserved"), Compiled.DataSet.SourceRevision, FString(TEXT("parsed-data-revision")));
 
+	Registry.Unregister(TEXT("AutomationParsedData"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeAssociationManifestMergeTest,
+	"DataForge.Core.AssociationManifest.MergeByKeyConvergence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeAssociationManifestMergeTest::RunTest(const FString& Parameters)
+{
+	FDataForgeSourceAdapterRegistry& Registry = FDataForgeSourceAdapterRegistry::Get();
+	Registry.Unregister(TEXT("AutomationParsedData"));
+	Registry.Register(MakeShared<DataForgeTests::FParsedDataAdapter>());
+	const FString TestRoot = TEXT("/Game/DataForgeTests/Association_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	auto CreateAsset = [this](const FString& PackageName, UClass* Class) -> UDataAsset*
+	{
+		UPackage* Package = CreatePackage(*PackageName);
+		UDataAsset* Asset = NewObject<UDataAsset>(Package, Class, *FPackageName::GetLongPackageAssetName(PackageName), RF_Public | RF_Standalone | RF_Transient);
+		FAssetRegistryModule::AssetCreated(Asset);
+		return Asset;
+	};
+
+	UDataForgeTestAsset* OldManaged = CastChecked<UDataForgeTestAsset>(CreateAsset(TestRoot + TEXT("/A_OldManaged"), UDataForgeTestAsset::StaticClass()));
+	UDataForgeTestAsset* NewManaged = CastChecked<UDataForgeTestAsset>(CreateAsset(TestRoot + TEXT("/A_NewManaged"), UDataForgeTestAsset::StaticClass()));
+	UDataForgeTestAsset* Manual = CastChecked<UDataForgeTestAsset>(CreateAsset(TestRoot + TEXT("/A_Manual"), UDataForgeTestAsset::StaticClass()));
+
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.AdapterId = TEXT("AutomationParsedData");
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Output.RowStruct = FDataForgeTestRow::StaticStruct();
+	RuleSet->Output.AssetPath = TestRoot + TEXT("/DT_Association");
+	RuleSet->Output.bSaveAfterApply = false;
+
+	FDataForgeAssetRule& ManagedRule = RuleSet->AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("Data_Managed");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = TestRoot + TEXT("/Generated");
+	ManagedRule.AssetNamePattern = TEXT("DA_{Id}");
+	FDataForgeGeneratedAssetOutputRule& Output = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("Data");
+	Output.AssetClass = UDataForgeAssociationTestAsset::StaticClass();
+	Output.AssetRuleId = ManagedRule.RuleId;
+
+	FDataForgeAssociationSourceRule& AssociationSource = RuleSet->AssociationSources.AddDefaulted_GetRef();
+	AssociationSource.SourceId = TEXT("Inventory");
+	AssociationSource.Source.AdapterId = TEXT("AutomationParsedData");
+	AssociationSource.Source.Parameters.Add(TEXT("Mode"), TEXT("Association"));
+	AssociationSource.Source.Parameters.Add(TEXT("Path1"), NewManaged->GetPathName());
+	AssociationSource.Source.Parameters.Add(TEXT("Revision"), TEXT("association-revision-2"));
+
+	UDataForgeBindingPreset* Preset = NewObject<UDataForgeBindingPreset>(GetTransientPackage());
+	Preset->OutputName = Output.OutputName;
+	Preset->TargetClass = UDataForgeAssociationTestAsset::StaticClass();
+	FDataForgeBindingPresetSlot& Slot = Preset->Slots.AddDefaulted_GetRef();
+	Slot.SlotId = TEXT("Visuals");
+	Slot.AssetKind = TEXT("TestAsset");
+	Slot.Role = TEXT("Visual");
+	Slot.TargetProperty = TEXT("Assets");
+	Slot.ExpectedAssetClass = UDataForgeTestAsset::StaticClass();
+	Slot.Cardinality = EDataForgeBindingCardinality::Many;
+	Slot.Reconcile = EDataForgeBindingReconcileMode::MergeByKey;
+	RuleSet->BindingPreset = Preset;
+
+	const FString ExistingPackageName = ManagedRule.BaseFolder + TEXT("/DA_ExternalOne");
+	UDataForgeAssociationTestAsset* Existing = Cast<UDataForgeAssociationTestAsset>(CreateAsset(ExistingPackageName, UDataForgeAssociationTestAsset::StaticClass()));
+	Existing->Assets = { OldManaged, Manual };
+	FMetaData& MetaData = Existing->GetPackage()->GetMetaData();
+	MetaData.SetValue(Existing, TEXT("DataForge.Managed"), TEXT("true"));
+	MetaData.SetValue(Existing, TEXT("DataForge.RuleSetId"), *RuleSet->RuleSetId.ToString(EGuidFormats::Digits));
+	MetaData.SetValue(Existing, TEXT("DataForge.RecordId"), TEXT("ExternalOne"));
+	MetaData.SetValue(Existing, TEXT("DataForge.Role"), TEXT("Data"));
+	MetaData.SetValue(Existing, TEXT("DataForge.RuleVersion"), TEXT("1"));
+	MetaData.SetValue(Existing, TEXT("DataForge.Association.Assets"), *OldManaged->GetPathName());
+	MetaData.SetValue(Existing, TEXT("DataForge.Association.Keys"), TEXT("Assets"));
+
+	FCompiledDataForgeRuleSet Compiled;
+	TArray<FDataForgeDiagnostic> Diagnostics;
+	TestTrue(TEXT("RuleSet with a generic Parsed Data association source compiles"), FDataForgeCompiler::Compile(*RuleSet, Compiled, Diagnostics));
+	if (!Compiled.AssociationSlots.IsEmpty()) TestEqual(TEXT("A single Association Source is selected without typing its id"), Compiled.AssociationSlots[0].AssociationSourceId, FName(TEXT("Inventory")));
+	TestNotEqual(TEXT("Association revision contributes to Source of Truth revision"), Compiled.DataSet.SourceRevision, FString(TEXT("parsed-data-revision")));
+	const FDataForgeApplyPlan Plan = FDataForgeCompiler::BuildPlan(Compiled);
+	TestFalse(TEXT("Association plan has no errors"), Plan.HasErrors());
+	TestEqual(TEXT("Existing generated asset is updated"), Plan.AssetUpdateCount, 1);
+	if (Plan.ManagedAssets.Num() == 1)
+	{
+		UDataForgeAssociationTestAsset* Materialized = NewObject<UDataForgeAssociationTestAsset>(GetTransientPackage());
+		TArray<FDataForgeDiagnostic> ApplyDiagnostics;
+		TestTrue(TEXT("Association property write materializes"), FDataForgeCompiler::ApplyPlannedProperties(*Materialized, Plan.ManagedAssets[0], ApplyDiagnostics));
+		TArray<FString> Paths;
+		for (const TSoftObjectPtr<UDataForgeTestAsset>& Asset : Materialized->Assets) Paths.Add(Asset.ToSoftObjectPath().ToString());
+		TestTrue(TEXT("MergeByKey preserves a manual association"), Paths.Contains(Manual->GetPathName()));
+		TestTrue(TEXT("MergeByKey adds the current managed association"), Paths.Contains(NewManaged->GetPathName()));
+		TestFalse(TEXT("MergeByKey removes the previous managed association"), Paths.Contains(OldManaged->GetPathName()));
+		TestEqual(TEXT("Manifest records only current managed paths"), Plan.ManagedAssets[0].ManagedAssociations.FindChecked(TEXT("Assets")), TArray<FString>({ NewManaged->GetPathName() }));
+	}
+	const FDataForgeBindingPresetSlot SavedSlot = Slot;
+	Preset->Slots.Reset();
+	FCompiledDataForgeRuleSet RemovedSlotCompiled;
+	Diagnostics.Reset();
+	TestTrue(TEXT("Removing an association slot still compiles"), FDataForgeCompiler::Compile(*RuleSet, RemovedSlotCompiled, Diagnostics));
+	const FDataForgeApplyPlan RemovedSlotPlan = FDataForgeCompiler::BuildPlan(RemovedSlotCompiled);
+	TestEqual(TEXT("Removed slot schedules stale ownership metadata cleanup"), RemovedSlotPlan.ManagedAssets[0].RemovedAssociationKeys, TArray<FString>({ TEXT("Assets") }));
+	TestEqual(TEXT("Removed slot promotes existing values to manual instead of deleting them"), RemovedSlotPlan.ManagedAssets[0].PropertyWrites.Num(), 0);
+	Preset->Slots.Add(SavedSlot);
+	FDataForgeBindingPresetSlot& RestoredSlot = Preset->Slots[0];
+	AssociationSource.Source.Parameters.Add(TEXT("Path2"), OldManaged->GetPathName());
+	AssociationSource.Source.Parameters.Add(TEXT("Revision"), TEXT("association-revision-3"));
+	RestoredSlot.TargetProperty = TEXT("PrimaryAsset");
+	RestoredSlot.Cardinality = EDataForgeBindingCardinality::One;
+	RestoredSlot.Reconcile = EDataForgeBindingReconcileMode::Assign;
+	FCompiledDataForgeRuleSet AmbiguousCompiled;
+	Diagnostics.Reset();
+	TestTrue(TEXT("One-cardinality configuration compiles before row resolution"), FDataForgeCompiler::Compile(*RuleSet, AmbiguousCompiled, Diagnostics));
+	const FDataForgeApplyPlan AmbiguousPlan = FDataForgeCompiler::BuildPlan(AmbiguousCompiled);
+	TestTrue(TEXT("One cardinality rejects multiple matching assets"), AmbiguousPlan.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1923") && Diagnostic.Severity == EDataForgeSeverity::Error;
+	}));
+
+	FAssetRegistryModule::AssetDeleted(Existing);
+	FAssetRegistryModule::AssetDeleted(Manual);
+	FAssetRegistryModule::AssetDeleted(NewManaged);
+	FAssetRegistryModule::AssetDeleted(OldManaged);
 	Registry.Unregister(TEXT("AutomationParsedData"));
 	return true;
 }

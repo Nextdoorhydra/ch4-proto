@@ -89,6 +89,29 @@ private:
 		TArray<FDataForgeDiagnostic>& OutDiagnostics);
 };
 
+class DATAFORGECORE_API FDataForgeAssetRegistryFolderSourceAdapter final : public IDataForgeSourceAdapter
+{
+public:
+	virtual FDataForgeSourceDescriptor Describe() const override;
+
+	virtual bool Probe(
+		const FDataForgeSourceConfig& Source,
+		FDataForgeDataSet& OutDataSet,
+		TArray<FDataForgeDiagnostic>& OutDiagnostics) const override;
+
+	virtual bool Fetch(
+		const FDataForgeSourceConfig& Source,
+		FDataForgeDataSet& OutDataSet,
+		TArray<FDataForgeDiagnostic>& OutDiagnostics) const override;
+
+private:
+	static bool Read(
+		const FDataForgeSourceConfig& Source,
+		int32 RowLimit,
+		FDataForgeDataSet& OutDataSet,
+		TArray<FDataForgeDiagnostic>& OutDiagnostics);
+};
+
 /** Process-wide extension point. Adapters normalize any parser/provider output into FDataForgeDataSet. */
 class DATAFORGECORE_API FDataForgeSourceAdapterRegistry
 {

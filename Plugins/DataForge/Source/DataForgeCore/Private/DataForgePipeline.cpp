@@ -2,6 +2,7 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DataForgeCore.h"
+#include "DataForgeBindingPreset.h"
 #include "DataForgeDependencyGraph.h"
 #include "DataForgeRuleSet.h"
 #include "Dom/JsonObject.h"
@@ -441,6 +442,136 @@ namespace DataForgePipeline
 		}
 		return true;
 	}
+
+	FProperty* AssociationReferenceProperty(FProperty* Property, EDataForgeBindingCardinality Cardinality)
+	{
+		if (Cardinality == EDataForgeBindingCardinality::Many)
+		{
+			const FArrayProperty* Array = CastField<FArrayProperty>(Property);
+			return Array ? Array->Inner : nullptr;
+		}
+		return CastField<FArrayProperty>(Property) ? nullptr : Property;
+	}
+
+	bool IsAssociationPropertyCompatible(FProperty* Property, EDataForgeBindingCardinality Cardinality, UClass* ExpectedClass)
+	{
+		const FSoftObjectProperty* SoftObject = CastField<FSoftObjectProperty>(AssociationReferenceProperty(Property, Cardinality));
+		return SoftObject && (!ExpectedClass || ExpectedClass->IsChildOf(SoftObject->PropertyClass));
+	}
+
+	FString ResolveAssociationPropertyPath(UClass* TargetClass, const FDataForgeBindingPresetSlot& Slot, TArray<FDataForgeDiagnostic>& Diagnostics)
+	{
+		if (!Slot.TargetProperty.IsEmpty()) return Slot.TargetProperty;
+		TArray<FProperty*> Candidates;
+		UClass* ExpectedClass = Slot.ExpectedAssetClass.LoadSynchronous();
+		for (TFieldIterator<FProperty> It(TargetClass, EFieldIterationFlags::IncludeSuper); It; ++It)
+		{
+			FProperty* Property = *It;
+			if (Property->HasAnyPropertyFlags(CPF_Edit)
+				&& !Property->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated)
+				&& IsAssociationPropertyCompatible(Property, Slot.Cardinality, ExpectedClass))
+			{
+				Candidates.Add(Property);
+			}
+		}
+		if (Candidates.Num() == 1) return Candidates[0]->GetName();
+		AddDiagnostic(Diagnostics, EDataForgeSeverity::Error, TEXT("DF1920"), FString::Printf(
+			TEXT("Association slot '%s' requires an explicit Target Property because %d compatible properties were found."),
+			*Slot.SlotId.ToString(), Candidates.Num()), NAME_None, Slot.SlotId);
+		return FString();
+	}
+
+	TArray<FString> ReadSoftObjectPaths(const TArray<FProperty*>& PropertyChain, const UObject& Object)
+	{
+		TArray<FString> Paths;
+		const void* Address = ResolvePropertyAddress(const_cast<UObject*>(&Object), PropertyChain);
+		FProperty* Property = PropertyChain.IsEmpty() ? nullptr : PropertyChain.Last();
+		if (!Address || !Property) return Paths;
+		if (const FSoftObjectProperty* Soft = CastField<FSoftObjectProperty>(Property))
+		{
+			const FString Path = Soft->GetPropertyValue(Address).ToSoftObjectPath().ToString();
+			if (!Path.IsEmpty()) Paths.Add(Path);
+		}
+		else if (const FArrayProperty* Array = CastField<FArrayProperty>(Property))
+		{
+			const FSoftObjectProperty* Inner = CastField<FSoftObjectProperty>(Array->Inner);
+			if (!Inner) return Paths;
+			FScriptArrayHelper Helper(Array, Address);
+			for (int32 Index = 0; Index < Helper.Num(); ++Index)
+			{
+				const FString Path = Inner->GetPropertyValue(Helper.GetRawPtr(Index)).ToSoftObjectPath().ToString();
+				if (!Path.IsEmpty()) Paths.AddUnique(Path);
+			}
+		}
+		return Paths;
+	}
+
+	bool WriteSoftObjectPaths(const FDataForgeCompiledAssociationSlot& Slot, const TArray<FString>& Paths, UObject& Target)
+	{
+		void* Address = ResolvePropertyAddress(&Target, Slot.PropertyChain);
+		if (!Address || !Slot.TargetProperty) return false;
+		if (FSoftObjectProperty* Soft = CastField<FSoftObjectProperty>(Slot.TargetProperty))
+		{
+			Soft->SetPropertyValue(Address, FSoftObjectPtr(Paths.IsEmpty() ? FSoftObjectPath() : FSoftObjectPath(Paths[0])));
+			return true;
+		}
+		FArrayProperty* Array = CastField<FArrayProperty>(Slot.TargetProperty);
+		FSoftObjectProperty* Inner = Array ? CastField<FSoftObjectProperty>(Array->Inner) : nullptr;
+		if (!Array || !Inner) return false;
+		FScriptArrayHelper Helper(Array, Address);
+		Helper.EmptyValues();
+		for (const FString& Path : Paths)
+		{
+			const int32 Index = Helper.AddValue();
+			Inner->SetPropertyValue(Helper.GetRawPtr(Index), FSoftObjectPtr(FSoftObjectPath(Path)));
+		}
+		return true;
+	}
+
+	bool ResolveAssociationMatches(
+		const FCompiledDataForgeRuleSet& Compiled,
+		const FDataForgeCompiledAssociationSlot& Slot,
+		const FDataForgeRow& SourceRow,
+		FName RecordId,
+		TArray<FString>& OutPaths,
+		TArray<FDataForgeDiagnostic>& Diagnostics)
+	{
+		const FDataForgeAssociationSourceRule* SourceRule = Compiled.AssociationSourceRules.Find(Slot.AssociationSourceId);
+		const FDataForgeDataSet* DataSet = Compiled.AssociationDataSets.Find(Slot.AssociationSourceId);
+		const FString* MatchValue = SourceRow.Values.Find(Slot.SourceKeyColumn);
+		if (!SourceRule || !DataSet || !MatchValue || MatchValue->IsEmpty())
+		{
+			AddDiagnostic(Diagnostics, EDataForgeSeverity::Error, TEXT("DF1921"), TEXT("Association source or source match value is unavailable."), RecordId, Slot.SlotId, SourceRow.SourceRow);
+			return false;
+		}
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		for (const FDataForgeRow& Candidate : DataSet->Rows)
+		{
+			if (Candidate.Values.FindRef(SourceRule->MatchColumn) != *MatchValue) continue;
+			if (!Slot.AssetKind.IsNone() && Candidate.Values.FindRef(SourceRule->AssetKindColumn) != Slot.AssetKind.ToString()) continue;
+			if (!Slot.Role.IsNone() && Candidate.Values.FindRef(SourceRule->RoleColumn) != Slot.Role.ToString()) continue;
+			const FString Path = Candidate.Values.FindRef(SourceRule->AssetPathColumn);
+			const FAssetData AssetData = Registry.GetAssetByObjectPath(FSoftObjectPath(Path));
+			FProperty* Reference = AssociationReferenceProperty(Slot.TargetProperty, Slot.Cardinality);
+			const FSoftObjectProperty* Soft = CastField<FSoftObjectProperty>(Reference);
+			UClass* AssetClass = AssetData.IsValid() ? AssetData.GetClass(EResolveClass::Yes) : nullptr;
+			if (!AssetData.IsValid() || !Soft || !AssetClass || !AssetClass->IsChildOf(Soft->PropertyClass))
+			{
+				AddDiagnostic(Diagnostics, EDataForgeSeverity::Error, TEXT("DF1922"), FString::Printf(TEXT("Association candidate '%s' is missing or incompatible with slot '%s'."), *Path, *Slot.SlotId.ToString()), RecordId, Slot.SlotId, Candidate.SourceRow);
+				continue;
+			}
+			OutPaths.AddUnique(AssetData.GetSoftObjectPath().ToString());
+		}
+		OutPaths.Sort();
+		const bool bTooMany = Slot.Cardinality != EDataForgeBindingCardinality::Many && OutPaths.Num() > 1;
+		const bool bMissingRequired = Slot.bRequired && OutPaths.IsEmpty();
+		if (bTooMany || bMissingRequired)
+		{
+			AddDiagnostic(Diagnostics, EDataForgeSeverity::Error, TEXT("DF1923"), FString::Printf(TEXT("Association slot '%s' resolved %d candidates; its cardinality is not satisfied."), *Slot.SlotId.ToString(), OutPaths.Num()), RecordId, Slot.SlotId, SourceRow.SourceRow);
+			return false;
+		}
+		return !HasErrors(Diagnostics);
+	}
 }
 
 FDataForgeSourceAdapterRegistry& FDataForgeSourceAdapterRegistry::Get()
@@ -833,6 +964,34 @@ bool FDataForgeCompiler::Compile(
 		}
 	}
 
+	for (const FDataForgeAssociationSourceRule& AssociationSource : RuleSet.AssociationSources)
+	{
+		if (AssociationSource.SourceId.IsNone() || OutCompiled.AssociationSourceRules.Contains(AssociationSource.SourceId))
+		{
+			DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1916"), TEXT("Association Source Ids must be non-empty and unique."));
+			continue;
+		}
+		const TSharedPtr<const IDataForgeSourceAdapter> Adapter = FDataForgeSourceAdapterRegistry::Get().Find(AssociationSource.Source.AdapterId);
+		FDataForgeDataSet AssociationData;
+		if (!Adapter || !Adapter->Fetch(AssociationSource.Source, AssociationData, OutDiagnostics))
+		{
+			DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1917"), FString::Printf(TEXT("Association Source '%s' could not be fetched."), *AssociationSource.SourceId.ToString()));
+			continue;
+		}
+		const TSet<FName> AssociationColumns(AssociationData.Columns);
+		const TArray<FName> RequiredAssociationColumns = {
+			AssociationSource.MatchColumn, AssociationSource.AssetPathColumn,
+			AssociationSource.AssetKindColumn, AssociationSource.RoleColumn };
+		if (RequiredAssociationColumns.Contains(NAME_None)
+			|| RequiredAssociationColumns.ContainsByPredicate([&AssociationColumns](FName Column) { return !AssociationColumns.Contains(Column); }))
+		{
+			DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1918"), FString::Printf(TEXT("Association Source '%s' is missing one or more configured columns."), *AssociationSource.SourceId.ToString()));
+			continue;
+		}
+		OutCompiled.AssociationSourceRules.Add(AssociationSource.SourceId, AssociationSource);
+		OutCompiled.AssociationDataSets.Add(AssociationSource.SourceId, MoveTemp(AssociationData));
+	}
+
 	for (const FDataForgeAssetRule& AssetRule : RuleSet.AssetRules)
 	{
 		if (AssetRule.RuleId.IsNone())
@@ -969,6 +1128,88 @@ bool FDataForgeCompiler::Compile(
 		}
 	}
 
+	if (UDataForgeBindingPreset* Preset = RuleSet.BindingPreset.LoadSynchronous())
+	{
+		const FDataForgeCompiledOutput* PresetOutput = OutCompiled.GeneratedOutputs.Find(Preset->OutputName);
+		UClass* TargetClass = Preset->TargetClass.Get();
+		if (!PresetOutput || !TargetClass || PresetOutput->AssetClass.Get() != TargetClass)
+		{
+			DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1919"), TEXT("Binding Preset output is missing or its generated class no longer matches."));
+		}
+		else
+		{
+			TSet<FName> AssociationSlotIds;
+			for (const FDataForgeBindingPresetSlot& Slot : Preset->Slots)
+			{
+				if (Slot.SlotId.IsNone() || AssociationSlotIds.Contains(Slot.SlotId))
+				{
+					DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1905"), TEXT("Binding Preset Slot Ids must be non-empty and unique."), NAME_None, Slot.SlotId);
+					continue;
+				}
+				AssociationSlotIds.Add(Slot.SlotId);
+				if ((Slot.Cardinality == EDataForgeBindingCardinality::Many && Slot.Reconcile == EDataForgeBindingReconcileMode::Assign)
+					|| (Slot.Cardinality != EDataForgeBindingCardinality::Many
+						&& Slot.Reconcile != EDataForgeBindingReconcileMode::Assign
+						&& Slot.Reconcile != EDataForgeBindingReconcileMode::Manual))
+				{
+					DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1909"), FString::Printf(TEXT("Association slot '%s' has incompatible cardinality and reconciliation modes."), *Slot.SlotId.ToString()), NAME_None, Slot.SlotId);
+					continue;
+				}
+				if (Slot.Reconcile == EDataForgeBindingReconcileMode::Manual) continue;
+				FName AssociationSourceId = Slot.AssociationSourceId;
+				if (AssociationSourceId.IsNone())
+				{
+					if (OutCompiled.AssociationSourceRules.IsEmpty()) continue;
+					if (OutCompiled.AssociationSourceRules.Num() == 1) AssociationSourceId = OutCompiled.AssociationSourceRules.CreateConstIterator().Key();
+					else
+					{
+						DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1925"), FString::Printf(TEXT("Association slot '%s' must select a source because the RuleSet has multiple Association Sources."), *Slot.SlotId.ToString()), NAME_None, Slot.SlotId);
+						continue;
+					}
+				}
+				const FDataForgeAssociationSourceRule* SourceRule = OutCompiled.AssociationSourceRules.Find(AssociationSourceId);
+				const FName SourceKeyColumn = Slot.SourceKeyColumn.IsNone() ? RuleSet.Schema.PrimaryKey : Slot.SourceKeyColumn;
+				if (!SourceRule || !SourceColumns.Contains(SourceKeyColumn))
+				{
+					DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1921"), FString::Printf(TEXT("Association slot '%s' references an unavailable source or key column."), *Slot.SlotId.ToString()), NAME_None, Slot.SlotId);
+					continue;
+				}
+				FDataForgeCompiledAssociationSlot CompiledSlot;
+				CompiledSlot.OutputName = Preset->OutputName;
+				CompiledSlot.SlotId = Slot.SlotId;
+				CompiledSlot.AssociationSourceId = AssociationSourceId;
+				CompiledSlot.SourceKeyColumn = SourceKeyColumn;
+				CompiledSlot.AssetKind = Slot.AssetKind;
+				CompiledSlot.Role = Slot.Role;
+				CompiledSlot.Cardinality = Slot.Cardinality;
+				CompiledSlot.Reconcile = Slot.Reconcile;
+				CompiledSlot.bRequired = Slot.bRequired;
+				CompiledSlot.TargetPropertyPath = DataForgePipeline::ResolveAssociationPropertyPath(TargetClass, Slot, OutDiagnostics);
+				FString PropertyError;
+				if (CompiledSlot.TargetPropertyPath.IsEmpty()
+					|| !DataForgePipeline::ResolvePropertyChain(TargetClass, CompiledSlot.TargetPropertyPath, CompiledSlot.PropertyChain, PropertyError))
+				{
+					if (!CompiledSlot.TargetPropertyPath.IsEmpty()) DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1906"), PropertyError, NAME_None, Slot.SlotId);
+					continue;
+				}
+				CompiledSlot.TargetProperty = CompiledSlot.PropertyChain.Last();
+				if (!DataForgePipeline::IsAssociationPropertyCompatible(CompiledSlot.TargetProperty, Slot.Cardinality, Slot.ExpectedAssetClass.LoadSynchronous()))
+				{
+					DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1906"), FString::Printf(TEXT("Association slot '%s' target property is incompatible."), *Slot.SlotId.ToString()), NAME_None, Slot.SlotId);
+					continue;
+				}
+				const FString TargetKey = FString::Printf(TEXT("%d:%s:%s"), static_cast<int32>(EDataForgeBindingTarget::GeneratedOutput), *Preset->OutputName.ToString(), *CompiledSlot.TargetPropertyPath);
+				if (BoundTargets.Contains(TargetKey))
+				{
+					DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Error, TEXT("DF1122"), FString::Printf(TEXT("Association target property '%s' is bound more than once."), *CompiledSlot.TargetPropertyPath));
+					continue;
+				}
+				BoundTargets.Add(TargetKey);
+				OutCompiled.AssociationSlots.Add(MoveTemp(CompiledSlot));
+			}
+		}
+	}
+
 	if (RuleSet.Schema.bWarnOnUnmappedColumns)
 	{
 		for (const FName Column : OutCompiled.DataSet.Columns)
@@ -978,6 +1219,18 @@ bool FDataForgeCompiler::Compile(
 				DataForgePipeline::AddDiagnostic(OutDiagnostics, EDataForgeSeverity::Warning, TEXT("DF1113"), FString::Printf(TEXT("Source column '%s' is not mapped."), *Column.ToString()), NAME_None, Column);
 			}
 		}
+	}
+	if (!OutCompiled.AssociationDataSets.IsEmpty())
+	{
+		TArray<FName> SourceIds;
+		OutCompiled.AssociationDataSets.GetKeys(SourceIds);
+		SourceIds.Sort(FNameLexicalLess());
+		FString CombinedRevision = OutCompiled.DataSet.SourceRevision;
+		for (const FName SourceId : SourceIds)
+		{
+			CombinedRevision += TEXT("|") + SourceId.ToString() + TEXT(":") + OutCompiled.AssociationDataSets.FindChecked(SourceId).SourceRevision;
+		}
+		OutCompiled.DataSet.SourceRevision = DataForgePipeline::HashSource(CombinedRevision);
 	}
 
 	return !DataForgePipeline::HasErrors(OutDiagnostics);
@@ -1199,6 +1452,64 @@ FDataForgeApplyPlan FDataForgeCompiler::BuildPlan(const FCompiledDataForgeRuleSe
 					DataForgePipeline::ExportBindingValue(Binding, *ExistingAsset, PropertyWrite.PreviousValue);
 					TargetState += FString::Printf(TEXT("|%s:%s=%s"), *GeneratedObjectPath, *Binding.Rule.TargetProperty, *PropertyWrite.PreviousValue);
 				}
+			}
+
+			for (const FDataForgeCompiledAssociationSlot& Slot : Compiled.AssociationSlots)
+			{
+				if (Slot.OutputName != OutputName) continue;
+				TArray<FString> MatchedPaths;
+				if (!DataForgePipeline::ResolveAssociationMatches(Compiled, Slot, SourceRow, RowName, MatchedPaths, Plan.Diagnostics)) continue;
+
+				TArray<FString> DesiredPaths = MatchedPaths;
+				const FString ManifestKey = TEXT("DataForge.Association.") + Slot.TargetPropertyPath;
+				if (Slot.Cardinality == EDataForgeBindingCardinality::Many
+					&& Slot.Reconcile == EDataForgeBindingReconcileMode::MergeByKey
+					&& ExistingAsset)
+				{
+					DesiredPaths = DataForgePipeline::ReadSoftObjectPaths(Slot.PropertyChain, *ExistingAsset);
+					TArray<FString> PreviouslyManaged;
+					ExistingAsset->GetPackage()->GetMetaData().GetValue(ExistingAsset, *ManifestKey).ParseIntoArrayLines(PreviouslyManaged, true);
+					DesiredPaths.RemoveAll([&PreviouslyManaged](const FString& Path) { return PreviouslyManaged.Contains(Path); });
+					for (const FString& Path : MatchedPaths) DesiredPaths.AddUnique(Path);
+					DesiredPaths.Sort();
+				}
+
+				if (!DataForgePipeline::WriteSoftObjectPaths(Slot, DesiredPaths, *DesiredAsset))
+				{
+					DataForgePipeline::AddDiagnostic(Plan.Diagnostics, EDataForgeSeverity::Error, TEXT("DF1924"), FString::Printf(TEXT("Association slot '%s' could not write property '%s'."), *Slot.SlotId.ToString(), *Slot.TargetPropertyPath), RowName, Slot.SlotId, SourceRow.SourceRow);
+					continue;
+				}
+				PlannedAsset.ManagedAssociations.Add(Slot.TargetPropertyPath, MatchedPaths);
+				FDataForgePlannedPropertyWrite& PropertyWrite = PlannedAsset.PropertyWrites.AddDefaulted_GetRef();
+				PropertyWrite.PropertyPath = Slot.TargetPropertyPath;
+				void* DesiredAddress = DataForgePipeline::ResolvePropertyAddress(DesiredAsset, Slot.PropertyChain);
+				if (!DesiredAddress || !Slot.TargetProperty->ExportText_Direct(PropertyWrite.ExportedValue, DesiredAddress, DesiredAddress, DesiredAsset, PPF_None))
+				{
+					DataForgePipeline::AddDiagnostic(Plan.Diagnostics, EDataForgeSeverity::Error, TEXT("DF1924"), FString::Printf(TEXT("Association slot '%s' could not export its desired value."), *Slot.SlotId.ToString()), RowName, Slot.SlotId, SourceRow.SourceRow);
+					continue;
+				}
+				if (ExistingAsset)
+				{
+					TArray<FString> CurrentManaged;
+					ExistingAsset->GetPackage()->GetMetaData().GetValue(ExistingAsset, *ManifestKey).ParseIntoArrayLines(CurrentManaged, true);
+					CurrentManaged.Sort();
+					bPropertiesIdentical &= CurrentManaged == MatchedPaths;
+					void* ExistingAddress = DataForgePipeline::ResolvePropertyAddress(ExistingAsset, Slot.PropertyChain);
+					bPropertiesIdentical &= ExistingAddress && Slot.TargetProperty->Identical(ExistingAddress, DesiredAddress, PPF_DeepComparison);
+					if (ExistingAddress) Slot.TargetProperty->ExportText_Direct(PropertyWrite.PreviousValue, ExistingAddress, ExistingAddress, ExistingAsset, PPF_None);
+					TargetState += FString::Printf(TEXT("|%s:%s=%s|%s=%s"), *GeneratedObjectPath, *Slot.TargetPropertyPath, *PropertyWrite.PreviousValue, *ManifestKey, *ExistingAsset->GetPackage()->GetMetaData().GetValue(ExistingAsset, *ManifestKey));
+				}
+			}
+			if (ExistingAsset)
+			{
+				TArray<FString> PreviousKeys;
+				ExistingAsset->GetPackage()->GetMetaData().GetValue(ExistingAsset, TEXT("DataForge.Association.Keys")).ParseIntoArrayLines(PreviousKeys, true);
+				for (const FString& PreviousKey : PreviousKeys)
+				{
+					if (!PlannedAsset.ManagedAssociations.Contains(PreviousKey)) PlannedAsset.RemovedAssociationKeys.AddUnique(PreviousKey);
+				}
+				PlannedAsset.RemovedAssociationKeys.Sort();
+				bPropertiesIdentical &= PlannedAsset.RemovedAssociationKeys.IsEmpty();
 			}
 
 			if (!ExistingAsset)
