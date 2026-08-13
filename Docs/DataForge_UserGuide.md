@@ -1,6 +1,6 @@
 # DataForge 에디터 사용법
 
-대상 버전: DataForge 1.4
+대상 버전: DataForge 1.5
 
 ## 1. 가장 빠른 사용 절차
 
@@ -181,3 +181,37 @@ UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -RuleSet=/Game/Data/RS_Item
 ```
 
 Source, RuleSet, snapshot과 생성 결과는 같은 변경 단위로 검토하고 source control로 복구한다.
+
+## 11. Rename Audit와 Recovery Center
+
+에셋 이름 또는 폴더가 Naming Policy와 맞지 않을 때 다음 절차를 사용한다.
+
+1. Content Browser에서 에셋을 하나 이상 선택하고 `DataForge Rename Audit...`를 실행한다.
+2. 폴더 전체를 검사하려면 폴더를 우클릭하고 `DataForge Audit Folder...`를 실행한다.
+3. `[Recommended]` 후보의 점수와 Evidence를 확인한다.
+4. 적용할 후보만 체크하고 `Rename / Move Checked`를 누른다.
+5. 확인 대화상자에서 경로를 검토한 뒤 승인한다.
+
+추천은 기존 Association Manifest, 현재 이름의 정확한 일치, Subject 폴더, Naming Policy 파싱 결과를 사용한다. 최고 점수가 하나일 때만 추천하며 동점은 `DF1955`로 차단한다. DataForge는 증거가 없는 Source Row를 임의로 선택하지 않는다.
+
+리네임 전에 `Saved/DataForge/Recovery/Rename_*.json`이 기록된다. 되돌리려면 `Tools > DataForge Recovery Center...`를 열고 다음을 확인한다.
+
+- 상태가 `Succeeded` 또는 `FailedRollbackIncomplete`인지
+- 원래 경로가 비어 있는지
+- 변경된 경로에 기록된 에셋이 존재하는지
+- 복원할 전체 경로가 충돌 없이 검증되는지
+
+`Restore Selected Batch`를 승인하면 별도의 `Restore_*.json`을 먼저 만든 뒤 역방향 배치를 실행한다. 복원 실패 시 DataForge는 이미 이동된 에셋을 복원 직전 경로로 되돌리며 결과를 매니페스트에 기록한다. Recovery Center는 경로 복원 도구이며 source control이나 삭제된 `.uasset`의 바이너리 백업을 대체하지 않는다.
+
+## 12. Rename 진단 코드
+
+| 코드 | 의미 |
+|---|---|
+| DF1936-DF1939 | Naming Policy/폴더 추론 또는 목적지 경로·충돌 오류 |
+| DF1940-DF1946 | 변경 없음, 오래된 에셋/RuleSet/Source of Truth 후보 |
+| DF1947-DF1951 | 일괄 감사의 중복 목적지·중복 원본·AssetTools 실패 |
+| DF1952-DF1953 | 리네임 복구 매니페스트 생성/갱신 실패 |
+| DF1955 | 최고 점수 후보 동률로 자동 선택 차단 |
+| DF1956 | 유일한 추천 후보의 점수와 근거 |
+| DF1957-DF1961 | Recovery Center 읽기·상태·경로·충돌 검증 |
+| DF1962-DF1965 | 복원 매니페스트·AssetTools·상태 갱신 오류 |

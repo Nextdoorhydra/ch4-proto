@@ -1,6 +1,6 @@
 # DataForge 플러그인 설계 문서
 
-대상 버전: DataForge 1.4
+대상 버전: DataForge 1.5
 
 ## 1. 목적
 
@@ -164,3 +164,34 @@ Spec 전체를 파싱·검증한 뒤 Probe, schema 추론, exact-name binding, P
 - 전체 자동화 테스트: `Automation RunTests DataForge`
 
 Project Overview에서 RuleSet, source/provider, output, dependency 및 실행 순서를 확인한다. Source file, RuleSet, snapshot과 생성 결과는 같은 변경 단위로 검토한다.
+
+## 13. 폴더 기반 연관과 리네임 안전성
+
+폴더 자동화는 `Naming Policy -> Asset Layout Recipe -> Folder Source Config -> Binding Preset` 계층으로 구성된다. Folder Adapter는 Asset Registry 결과를 `FDataForgeDataSet`으로 정규화하므로 primary CSV/JSON/Google source와 association source가 같은 compiler 계약을 유지한다.
+
+Binding Preset slot은 `AssetKind`, `Role`, `ExpectedAssetClass`, cardinality와 reconcile mode를 선언한다. `One`과 `OptionalOne`은 단일 참조를, `Many`는 배열 참조를 처리하며 `ReplaceManaged`와 `MergeByKey`는 Association Manifest가 소유하는 경로만 변경한다.
+
+Rename Audit는 후보를 다음 증거로 평가한다.
+
+```text
+Existing Association Manifest   1000
+Exact current conventional name  300
+Subject folder = source key       250
+Naming Policy parse success       200
+```
+
+점수는 선택을 설명하기 위한 결정적 우선순위이며 확률이 아니다. slot별 유일 최고점만 Recommended가 되고, 동점과 무근거 후보는 mutation 대상이 되지 않는다. 일괄 적용 직전에는 source asset, RuleSet, source row, destination과 batch 내부 충돌을 다시 검사한다.
+
+## 14. 리네임 복구 상태 기계
+
+리네임과 복원은 AssetTools 호출 전에 원자적 JSON 매니페스트를 기록한다.
+
+```text
+Planned -> Succeeded -> Restored
+       \-> FailedRolledBack
+       \-> FailedRollbackIncomplete -> Recovery Center restore
+```
+
+원본 리네임 매니페스트는 `Rename_*.json`, 역방향 복원 작업은 `Restore_*.json`이다. 배치 실패 시 UObject의 실제 현재 경로를 검사해 이미 이동된 항목만 역연산한다. 복구는 모든 경로가 명확할 때만 실행되며 부분 실패 역시 원래 복원 전 경로로 rollback을 시도한다.
+
+매니페스트는 에셋의 바이너리 사본이 아니라 경로 연산과 감사 기록이다. 따라서 삭제 복구와 이력 보존의 최종 책임은 source control에 있다.
