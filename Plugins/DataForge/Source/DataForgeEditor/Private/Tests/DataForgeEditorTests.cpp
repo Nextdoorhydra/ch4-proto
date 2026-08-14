@@ -1018,6 +1018,74 @@ bool FDataForgeRuleCreationWorkflowTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgePreviewContractTest,
+	"DataForge.Editor.Authoring.PreviewContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgePreviewContractTest::RunTest(const FString& Parameters)
+{
+	const FString Unique = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString CsvFilename = FPaths::Combine(
+		FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("DataForgePreviewContract_") + Unique + TEXT(".csv"));
+	const FString RuleSetPackageName = TEXT("/Game/DataForgeTests/Automation/RS_PreviewContract_") + Unique;
+	const FString OutputPackageName = TEXT("/Game/DataForgeTests/Automation/DT_PreviewContract_") + Unique;
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CsvFilename), true);
+	if (!FFileHelper::SaveStringToFile(TEXT("Id,DisplayName,Price\nB,Shield,700\nA,Sword,1200\n"), *CsvFilename))
+	{
+		AddError(TEXT("Could not create the Preview contract test CSV."));
+		return false;
+	}
+
+	UPackage* RuleSetPackage = CreatePackage(*RuleSetPackageName);
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(
+		RuleSetPackage, *FPackageName::GetLongPackageAssetName(RuleSetPackageName), RF_Public | RF_Standalone);
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.AdapterId = TEXT("Csv");
+	RuleSet->Source.File.FilePath = CsvFilename;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Schema.RequiredColumns = { TEXT("Id"), TEXT("DisplayName"), TEXT("Price") };
+	RuleSet->Output.RowStruct = FDataForgeEditorAutoMapRow::StaticStruct();
+	RuleSet->Output.AssetPath = OutputPackageName;
+	RuleSet->Output.bSaveAfterApply = false;
+
+	for (const FName Column : { FName(TEXT("DisplayName")), FName(TEXT("Price")) })
+	{
+		FDataForgeBindingRule& Binding = RuleSet->Bindings.AddDefaulted_GetRef();
+		Binding.SourceColumn = Column;
+		Binding.TargetProperty = Column.ToString();
+	}
+	RuleSetPackage->SetDirtyFlag(false);
+
+	FDataForgeApplyPlan FirstPlan;
+	TestTrue(TEXT("First Preview succeeds"), FDataForgeEditorService::Preview(*RuleSet, &FirstPlan).bSuccess);
+	TestFalse(TEXT("Preview does not dirty the RuleSet package"), RuleSetPackage->IsDirty());
+	TestFalse(TEXT("Preview does not create the output DataTable package"), FPackageName::DoesPackageExist(OutputPackageName));
+	TestNull(TEXT("Preview does not materialize the output DataTable"),
+		FindObject<UDataTable>(nullptr, *(OutputPackageName + TEXT(".") + FPackageName::GetLongPackageAssetName(OutputPackageName))));
+
+	FDataForgeApplyPlan SecondPlan;
+	TestTrue(TEXT("Repeated Preview succeeds"), FDataForgeEditorService::Preview(*RuleSet, &SecondPlan).bSuccess);
+	TestFalse(TEXT("Repeated Preview keeps the RuleSet package clean"), RuleSetPackage->IsDirty());
+	TestEqual(TEXT("Repeated Preview keeps the same source revision"), SecondPlan.SourceRevision, FirstPlan.SourceRevision);
+	TestEqual(TEXT("Repeated Preview keeps the same target revision"), SecondPlan.TargetRevision, FirstPlan.TargetRevision);
+	TestEqual(TEXT("Repeated Preview keeps the same summary"), SecondPlan.MakeSummary(), FirstPlan.MakeSummary());
+	TestEqual(TEXT("Repeated Preview keeps the same row count"), SecondPlan.Rows.Num(), FirstPlan.Rows.Num());
+	if (FirstPlan.Rows.Num() == SecondPlan.Rows.Num())
+	{
+		for (int32 Index = 0; Index < FirstPlan.Rows.Num(); ++Index)
+		{
+			TestEqual(FString::Printf(TEXT("Row %d name is deterministic"), Index),
+				SecondPlan.Rows[Index].RowName, FirstPlan.Rows[Index].RowName);
+			TestEqual(FString::Printf(TEXT("Row %d change is deterministic"), Index),
+				SecondPlan.Rows[Index].Change, FirstPlan.Rows[Index].Change);
+		}
+	}
+
+	IFileManager::Get().Delete(*CsvFilename, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FDataForgeGeneratedOutputAutoMapTest,
 	"DataForge.Editor.Authoring.GeneratedOutputAutoMap",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
