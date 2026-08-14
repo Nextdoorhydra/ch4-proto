@@ -1,12 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataForgeAuthoringMaterializer.h"
 #include "DataForgeRuleSet.h"
 #include "DataForgeTypes.h"
 #include "UObject/StrongObjectPtr.h"
 
 class UDataForgeAssetLayoutProfile;
 class UDataForgeBindingPreset;
+class UDataForgeNamingPolicy;
+
+struct DATAFORGEEDITOR_API FDataForgeAutomaticSetupDefaults
+{
+	FString AssetSearchRoot = TEXT("/Game");
+	FString GeneratedOutputFolder;
+	FString DefinitionFolder;
+	TWeakObjectPtr<UDataForgeNamingPolicy> NamingPolicy;
+	TWeakObjectPtr<UClass> GeneratedOutputClass;
+};
 
 enum class EDataForgeWizardStep : uint8
 {
@@ -37,6 +48,12 @@ public:
 	const FString& GetBindingPresetOutputFolder() const;
 	const TMap<FName, FString>& GetAssetLayoutParameterValues() const;
 	bool IsManualAssetLayout() const;
+	bool HasAutomaticSetup() const;
+	bool HasSuccessfulPreview() const;
+	bool IsAutomaticReviewApproved() const;
+	void SetAutomaticReviewApproved(bool bApproved);
+	FDataForgeAutomaticSetupDefaults GetAutomaticSetupDefaults() const;
+	FString GetAutomaticSetupInspection() const;
 
 	FDataForgeResult Probe();
 	void SelectAssetLayoutProfile(UDataForgeAssetLayoutProfile* Profile);
@@ -47,6 +64,12 @@ public:
 	FDataForgeResult MaterializeBindingPreset();
 	int32 AutoMapExactNames();
 	FDataForgeResult Preview();
+	FDataForgeResult ConfigureAutomatically(
+		const FString& AssetSearchRoot,
+		UDataForgeNamingPolicy* NamingPolicy,
+		UClass* GeneratedOutputClass,
+		const FString& GeneratedOutputFolder,
+		const FString& DefinitionFolder);
 	void NotifyDraftChanged(FName MemberPropertyName);
 
 	bool CanAdvance(FString& OutReason) const;
@@ -65,9 +88,13 @@ private:
 	bool bAssetLayoutReady = true;
 	bool bManualAssetLayout = true;
 	bool bPreviewSucceeded = false;
+	bool bAutomaticReviewApproved = false;
 	TWeakObjectPtr<UDataForgeAssetLayoutProfile> SelectedAssetLayoutProfile;
 	TWeakObjectPtr<UDataForgeBindingPreset> SelectedBindingPreset;
 	FString BindingPresetOutputFolder = TEXT("/Game/DataForgeGenerated");
 	TMap<FName, FString> AssetLayoutParameterValues;
+	TUniquePtr<FDataForgeAuthoringDraft> AutomaticDraft;
+	TUniquePtr<FDataForgeAuthoringPlannerResult> AutomaticPlan;
+	FString AutomaticDefinitionFolder;
 	int32 RemoveInvalidGeneratedOutputBindings();
 };

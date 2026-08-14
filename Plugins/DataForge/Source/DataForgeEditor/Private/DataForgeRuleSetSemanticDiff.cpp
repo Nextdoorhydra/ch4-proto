@@ -189,6 +189,7 @@ TArray<FDataForgeSemanticDiffEntry> FDataForgeRuleSetSemanticDiff::Compare(
 		AddValue(Entries, Prefix + TEXT(".Type"), FString::FromInt(static_cast<int32>((*BeforeOutput)->Type)), FString::FromInt(static_cast<int32>((*AfterOutput)->Type)));
 		AddValue(Entries, Prefix + TEXT(".AssetClass"), (*BeforeOutput)->AssetClass ? (*BeforeOutput)->AssetClass->GetPathName() : TEXT("None"), (*AfterOutput)->AssetClass ? (*AfterOutput)->AssetClass->GetPathName() : TEXT("None"));
 		AddValue(Entries, Prefix + TEXT(".AssetRuleId"), (*BeforeOutput)->AssetRuleId.ToString(), (*AfterOutput)->AssetRuleId.ToString());
+		AddValue(Entries, Prefix + TEXT(".AdoptCompatibleUnownedAsset"), (*BeforeOutput)->bAdoptCompatibleUnownedAsset ? TEXT("true") : TEXT("false"), (*AfterOutput)->bAdoptCompatibleUnownedAsset ? TEXT("true") : TEXT("false"));
 	}
 
 	TMap<FString, const FDataForgeBindingRule*> BeforeBindings;

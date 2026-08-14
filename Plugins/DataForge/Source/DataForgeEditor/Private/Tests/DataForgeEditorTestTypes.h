@@ -113,3 +113,24 @@ struct FDataForgeEditorPresetRow : public FTableRowBase
 	UPROPERTY(EditAnywhere)
 	TSoftObjectPtr<UDataForgeEditorPresetAsset> Data;
 };
+
+USTRUCT()
+struct FDataForgeEditorManyPresetRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere)
+	TSoftObjectPtr<UDataForgeEditorManyPresetAsset> Data;
+};
+
+USTRUCT()
+struct FDataForgeEditorAmbiguousManyPresetRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere)
+	TSoftObjectPtr<UDataForgeEditorManyPresetAsset> Primary;
+
+	UPROPERTY(EditAnywhere)
+	TSoftObjectPtr<UDataForgeEditorManyPresetAsset> Secondary;
+};

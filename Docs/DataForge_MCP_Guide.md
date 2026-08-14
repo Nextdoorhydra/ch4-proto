@@ -234,3 +234,37 @@ Additional Manual Asset Rules: 없음
 Apply: true
 Save Assets: true
 ```
+
+## 에디터 Automatic Setup과 MCP의 책임 경계
+
+MCP는 Google parser/config를 기준으로 최초 RuleSet을 만드는 경우 이 문서의 고수준 bootstrap 명령을 사용한다. 범용 UObject property 편집 명령을 여러 번 조합하거나 LR index, Association column, Slot cardinality를 추측해서는 안 된다.
+
+CSV/JSON 또는 폴더 중심의 일반적인 프로젝트 컨벤션은 Creation Wizard의 **Automatic Setup**만으로 구성할 수 있다. 사용자는 Source, Asset Search Root, Row Struct, PDA/DA class와 저장 폴더를 지정하고, DataForge가 다음을 자동 분석한다.
+
+- 기존 Folder Source Config → Asset Layout Recipe → Naming Policy 체인 발견 및 재사용
+- Primary Key와 folder subject/kind index
+- reflection 기반 target property와 cardinality
+- Association 및 exact-name binding
+- 생성/재사용 파일과 Apply effect Preview
+
+MCP 요청으로 이 흐름을 보조할 때도 사용자의 최소 의도를 그대로 보존한다.
+
+```text
+[DataForge 자동 구성 요청]
+원본: /Game/Data/Body/GS_Body
+Primary Key: ID
+검색 Root: /Game/Chimera/Character/Body
+Row Struct: /Script/Chimera.CMBodyTableRow
+Generated Class: /Script/Chimera.CMBodyDataAsset
+DataTable 저장: /Game/Data/Body/DT_Body
+PDA/DA 저장 폴더: /Game/Data/Body
+RuleSet 저장: /Game/Data/Body/RS_Body
+할당 의도:
+- Texture → Textures
+- Material → Materials
+- Mesh → Meshes
+- Niagara → NiagaraSystems
+Apply: true
+```
+
+Codex/MCP는 실제 class/object path를 조회한 후에만 spec을 작성한다. 기존 정의 후보가 여러 개이면 하나를 고르지 말고 후보를 사용자에게 반환한다. 생성 후에는 `[DataForge MCP]` 결과와 실제 RuleSet/DataTable 경로를 검증한다. 이후 유지보수는 RuleSet Editor에서 수행하며, Automatic Setup으로 다시 분석한 경우 상세 Preview와 명시적 승인을 거친다.

@@ -308,11 +308,12 @@ namespace DataForgeEditorService
 		for (const FDataForgeGeneratedAssetOutputRule& Output : RuleSet.GeneratedOutputs)
 		{
 			Signature += FString::Printf(
-				TEXT("|GO:%s:%d:%s:%s"),
+				TEXT("|GO:%s:%d:%s:%s:%d"),
 				*Output.OutputName.ToString(),
 				static_cast<int32>(Output.Type),
 				Output.AssetClass ? *Output.AssetClass->GetPathName() : TEXT("None"),
-				*Output.AssetRuleId.ToString());
+				*Output.AssetRuleId.ToString(),
+				Output.bAdoptCompatibleUnownedAsset);
 		}
 		for (const FDataForgeBindingRule& Binding : RuleSet.Bindings)
 		{
@@ -1172,6 +1173,9 @@ void FDataForgeEditorService::InvalidateProbeCache(UDataForgeRuleSet& RuleSet)
 
 void FDataForgeEditorService::LogResult(const UDataForgeRuleSet& RuleSet, const FDataForgeResult& Result, bool bOpenMessageLog)
 {
+	// Keep diagnostics available in the DataForge listing without stealing focus from
+	// the level editor. Callers surface their result in the active tool/status UI.
+	(void)bOpenMessageLog;
 	FMessageLog MessageLog(TEXT("DataForge"));
 	MessageLog.NewPage(FText::FromString(RuleSet.GetName()));
 	for (const FDataForgeDiagnostic& Diagnostic : Result.Diagnostics)
@@ -1197,11 +1201,6 @@ void FDataForgeEditorService::LogResult(const UDataForgeRuleSet& RuleSet, const 
 		}
 	}
 	MessageLog.Info(FText::FromString(Result.Summary));
-	if (bOpenMessageLog)
-	{
-		MessageLog.Open(Result.bSuccess ? EMessageSeverity::Warning : EMessageSeverity::Error, true);
-	}
-
 	UE_LOG(LogDataForge, Display, TEXT("%s: %s"), *RuleSet.GetPathName(), *Result.Summary);
 }
 

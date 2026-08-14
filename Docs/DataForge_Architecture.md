@@ -102,13 +102,17 @@ Wizard는 실제 RuleSet이 아닌 transient draft를 편집한다.
 
 ```text
 Source → Probe → Schema → Output
-       → Asset Rules → Generated Outputs → Bindings → Preview
+       → Asset Layout → Asset Rules → Generated Outputs → Bindings → Preview
 ```
 
 - 각 단계에는 해당 설정만 표시한다.
 - Asset Rule을 먼저 정의한 뒤 Generated Output에서 Managed Rule을 드롭다운으로 선택한다.
 - Generated Output 변경은 바인딩을 즉시 동기화한다.
-- `Finish & Apply`에서만 draft를 RuleSet에 복사하고 새 Preview 후 Apply한다.
+- Automatic Setup은 Primary Key, folder layout, PDA/DA reflection slot, cardinality, association 및 exact-name binding을 mutation 없이 계획한다.
+- Asset Search Root와 정확히 일치하는 기존 `Folder Source Config → Asset Layout Recipe → Naming Policy` 체인은 재사용한다. 동률 후보는 임의 선택하지 않는다.
+- Preview review는 추론 근거, 생성/재사용 파일, 할당 관계, diagnostic 및 실제 row/asset effect를 표시한다.
+- Automatic Setup은 성공한 Preview 뒤 개발자의 명시적 승인이 있어야 `Finish & Apply`할 수 있다. Draft 변경 또는 Preview 재실행은 승인을 무효화한다.
+- `Finish & Apply`에서만 transient definition을 승격하고 draft를 RuleSet에 복사한 뒤 새 Preview와 Apply를 수행한다.
 
 ## 8. Source of Truth 재조정
 
@@ -347,3 +351,11 @@ sequenceDiagram
 ```
 
 리네임은 PDA association과 별도의 명시적 mutation이다. Rename Audit 승인 후 Asset Registry 변경이 새 Preview/Apply를 유발하며, 적용 직전 source row와 목적지 충돌을 다시 검사한다. 따라서 불규칙 이름의 최초 정리와 정상화된 에셋의 지속적 자동 바인딩을 분리한다.
+
+## 16. 편집기 상태 복원과 안전한 기존 에셋 갱신
+
+Creation Wizard를 다시 열 때는 committed RuleSet에서 Generated Output의 class/folder, Binding Preset 또는 Folder Source의 definition folder, Folder Source의 search root와 Naming Policy를 복원한다. Automatic Setup 재분석은 이 값을 초기값으로 사용하므로 반복 설정이 필요하지 않다.
+
+진단은 `DataForge` Message Log listing과 현재 도구의 status/review에 기록하지만 Message Log 창을 자동으로 열거나 포커스하지 않는다. 레벨 편집 작업은 진단 창 때문에 가려지지 않는다.
+
+Generated Output 경로에 호환되는 기존 PDA/DA가 있고 DataForge ownership metadata가 전혀 없다면 기본적으로 migration 대상으로 채택한다. Preview는 `DF1219`를 표시하고 Apply는 선언된 binding property만 갱신한 뒤 ownership metadata를 기록한다. 다른 RuleSet ID가 있는 에셋은 계속 `DF1213`으로 차단한다. 엄격한 create-only 정책이 필요한 Output은 Advanced의 `Adopt Compatible Unowned Asset`을 끈다.

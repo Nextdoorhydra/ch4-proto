@@ -25,7 +25,7 @@ bool FDataForgeChimeraNamingRoundTripTest::RunTest(const FString& Parameters)
 {
 	UDataForgeNamingPolicy* Policy = DataForgeNamingPolicyTests::MakeChimeraPolicy();
 	TestTrue(TEXT("Chimera Naming Policy is valid"), FDataForgeNamingPolicyResolver::ValidatePolicy(*Policy).bSuccess);
-	TestEqual(TEXT("Built-in Chimera Policy exposes every supported prefix"), Policy->AssetKinds.Num(), 9);
+	TestTrue(TEXT("Built-in Chimera Policy exposes the common Unreal prefixes"), Policy->AssetKinds.Num() >= 30);
 
 	struct FCase
 	{

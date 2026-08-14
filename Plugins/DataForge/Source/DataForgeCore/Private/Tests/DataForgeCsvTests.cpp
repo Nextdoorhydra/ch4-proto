@@ -715,4 +715,76 @@ bool FDataForgeMissingGeneratedOutputClassSafetyTest::RunTest(const FString& Par
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgeCompatibleUnownedAssetAdoptionTest,
+	"DataForge.Core.GeneratedAsset.CompatibleUnownedAdoption",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgeCompatibleUnownedAssetAdoptionTest::RunTest(const FString& Parameters)
+{
+	const FString Unique = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString CsvFilename = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("DataForgeAdoption_") + Unique + TEXT(".csv"));
+	const FString Root = TEXT("/Game/DataForgeTests/Adoption_") + Unique;
+	const FString AssetPackageName = Root + TEXT("/DA_One");
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CsvFilename), true);
+	if (!FFileHelper::SaveStringToFile(TEXT("Id\nOne\n"), *CsvFilename))
+	{
+		AddError(TEXT("Could not create the adoption test CSV."));
+		return false;
+	}
+
+	UPackage* LegacyPackage = CreatePackage(*AssetPackageName);
+	UDataForgeTestAsset* LegacyAsset = NewObject<UDataForgeTestAsset>(
+		LegacyPackage, TEXT("DA_One"), RF_Public | RF_Standalone | RF_Transient);
+	FAssetRegistryModule::AssetCreated(LegacyAsset);
+
+	UDataForgeRuleSet* RuleSet = NewObject<UDataForgeRuleSet>(GetTransientPackage());
+	RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source.File.FilePath = CsvFilename;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Output.RowStruct = FDataForgeTestRow::StaticStruct();
+	RuleSet->Output.AssetPath = Root + TEXT("/DT_Adoption");
+	FDataForgeAssetRule& ManagedRule = RuleSet->AssetRules.AddDefaulted_GetRef();
+	ManagedRule.RuleId = TEXT("Data");
+	ManagedRule.Ownership = EDataForgeAssetOwnership::Managed;
+	ManagedRule.BaseFolder = Root;
+	ManagedRule.AssetNamePattern = TEXT("DA_{Id}");
+	FDataForgeGeneratedAssetOutputRule& Output = RuleSet->GeneratedOutputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("data");
+	Output.AssetClass = UDataForgeTestAsset::StaticClass();
+	Output.AssetRuleId = ManagedRule.RuleId;
+	TestTrue(TEXT("Compatible unowned asset adoption is the migration-friendly default"), Output.bAdoptCompatibleUnownedAsset);
+	Output.bAdoptCompatibleUnownedAsset = false;
+
+	FCompiledDataForgeRuleSet Compiled;
+	TArray<FDataForgeDiagnostic> Diagnostics;
+	TestTrue(TEXT("Compatible legacy fixture compiles"), FDataForgeCompiler::Compile(*RuleSet, Compiled, Diagnostics));
+	const FDataForgeApplyPlan Refused = FDataForgeCompiler::BuildPlan(Compiled);
+	TestTrue(TEXT("Strict ownership mode can still reject adoption"), Refused.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1213");
+	}));
+
+	Output.bAdoptCompatibleUnownedAsset = true;
+	Diagnostics.Reset();
+	TestTrue(TEXT("Adoption-enabled fixture recompiles"), FDataForgeCompiler::Compile(*RuleSet, Compiled, Diagnostics));
+	const FDataForgeApplyPlan Adopted = FDataForgeCompiler::BuildPlan(Compiled);
+	TestFalse(TEXT("Compatible unowned asset no longer blocks Preview"), Adopted.HasErrors());
+	TestTrue(TEXT("Adoption is reported for review"), Adopted.Diagnostics.ContainsByPredicate([](const FDataForgeDiagnostic& Diagnostic)
+	{
+		return Diagnostic.Code == TEXT("DF1219") && Diagnostic.Severity == EDataForgeSeverity::Warning;
+	}));
+	TestTrue(TEXT("Existing asset is updated instead of recreated"), Adopted.ManagedAssets.ContainsByPredicate([LegacyAsset](const FDataForgePlannedAsset& Asset)
+	{
+		return Asset.ExistingAsset.Get() == LegacyAsset && Asset.Change == EDataForgeManagedAssetChange::Update;
+	}));
+
+	FAssetRegistryModule::AssetDeleted(LegacyAsset);
+	LegacyAsset->ClearFlags(RF_Public | RF_Standalone);
+	LegacyAsset->MarkAsGarbage();
+	LegacyPackage->MarkAsGarbage();
+	IFileManager::Get().Delete(*CsvFilename, false, true);
+	return true;
+}
+
 #endif

@@ -5,6 +5,7 @@
 #include "DataForgeAssetLayoutAuthoring.h"
 #include "DataForgeAssetLayoutProfile.h"
 #include "DataForgeBindingPreset.h"
+#include "DataForgeNamingPolicy.h"
 #include "DataForgePipeline.h"
 #include "DataForgeEditorService.h"
 #include "DataForgeRuleCreationWorkflow.h"
@@ -19,15 +20,19 @@
 #include "PropertyCustomizationHelpers.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Engine/DataAsset.h"
+#include "Engine/DataTable.h"
 
 #define LOCTEXT_NAMESPACE "DataForgeRuleCreationWizard"
 
@@ -46,6 +51,12 @@ namespace DataForgeRuleCreationWizard
 			OwnerWindow = Args._OwnerWindow;
 			Workflow = MakeShared<FDataForgeRuleCreationWorkflow>(*Args._RuleSet);
 			BindingPresetOutputFolder = Workflow->GetBindingPresetOutputFolder();
+			const FDataForgeAutomaticSetupDefaults AutomaticDefaults = Workflow->GetAutomaticSetupDefaults();
+			AutomaticAssetRoot = AutomaticDefaults.AssetSearchRoot;
+			AutomaticGeneratedFolder = AutomaticDefaults.GeneratedOutputFolder;
+			AutomaticDefinitionFolder = AutomaticDefaults.DefinitionFolder;
+			AutomaticNamingPolicy = AutomaticDefaults.NamingPolicy;
+			AutomaticOutputClass = AutomaticDefaults.GeneratedOutputClass;
 
 			for (const FDataForgeSourceDescriptor& Descriptor : FDataForgeSourceAdapterRegistry::Get().DescribeAll())
 			{
@@ -96,23 +107,125 @@ namespace DataForgeRuleCreationWizard
 							SNew(STextBlock).Text(this, &SWizard::GetSelectedAdapterText)
 						]
 					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(12.0f, 0.0f, 8.0f, 0.0f)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f, 12.0f, 8.0f)
+				[
+					SNew(SBorder)
+					.Visibility(this, &SWizard::GetPrimaryKeyVisibility)
+					.Padding(10.0f)
 					[
-						SNew(STextBlock).Text(LOCTEXT("PrimaryKey", "Primary Key"))
-						.Visibility(this, &SWizard::GetSchemaVisibility)
-					]
-					+ SHorizontalBox::Slot().FillWidth(1.0f)
-					[
-						SAssignNew(PrimaryKeyCombo, SComboBox<TSharedPtr<FName>>)
-						.OptionsSource(&PrimaryKeyOptions)
-						.OnGenerateWidget_Lambda([](TSharedPtr<FName> Item)
-						{
-							return SNew(STextBlock).Text(Item.IsValid() ? FText::FromName(*Item) : FText::GetEmpty());
-						})
-						.OnSelectionChanged(this, &SWizard::OnPrimaryKeySelected)
-						.Visibility(this, &SWizard::GetSchemaVisibility)
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
 						[
-							SNew(STextBlock).Text(this, &SWizard::GetSelectedPrimaryKeyText)
+							SNew(STextBlock)
+							.Text(LOCTEXT("PrimaryKey", "Primary Key"))
+							.Font(FAppStyle::GetFontStyle(TEXT("HeadingSmall")))
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 6.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("PrimaryKeyHelp", "Choose the probed source column whose value uniquely identifies each row. This value is also the default subject key used by folder and naming association rules."))
+							.AutoWrapText(true)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SAssignNew(PrimaryKeyCombo, SComboBox<TSharedPtr<FName>>)
+							.OptionsSource(&PrimaryKeyOptions)
+							.OnGenerateWidget_Lambda([](TSharedPtr<FName> Item)
+							{
+								return SNew(STextBlock).Text(Item.IsValid() ? FText::FromName(*Item) : FText::GetEmpty());
+							})
+							.OnSelectionChanged(this, &SWizard::OnPrimaryKeySelected)
+							[
+								SNew(STextBlock).Text(this, &SWizard::GetSelectedPrimaryKeyText)
+							]
+						]
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f, 12.0f, 8.0f)
+				[
+					SNew(SBorder)
+					.Visibility(this, &SWizard::GetSourceVisibility)
+					.Padding(10.0f)
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("AutomaticSetupTitle", "Automatic Setup (Recommended)"))
+							.Font(FAppStyle::GetFontStyle(TEXT("HeadingSmall")))
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 2.0f, 2.0f, 6.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("AutomaticSetupHelp", "Configure the source above, then select the asset root and outputs below. Analyze infers the Primary Key, folder layout, slots, cardinality, associations, and exact-name bindings. Advanced steps remain available for review."))
+							.AutoWrapText(true)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							MakeAutomaticPathRow(LOCTEXT("AutomaticAssetRoot", "Asset Search Root"), EAutomaticPathField::AssetRoot)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("AutomaticRowStruct", "DataTable Row Struct"))]
+								+ SVerticalBox::Slot().AutoHeight()
+								[
+									SNew(SStructPropertyEntryBox)
+									.MetaStruct(FTableRowBase::StaticStruct())
+									.AllowNone(false)
+									.SelectedStruct(this, &SWizard::GetAutomaticRowStruct)
+									.OnSetStruct(this, &SWizard::OnAutomaticRowStructSet)
+								]
+							]
+							+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(4.0f, 0.0f, 0.0f, 0.0f)
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("AutomaticOutputClass", "Generated PDA/DA Class"))]
+								+ SVerticalBox::Slot().AutoHeight()
+								[
+									SNew(SClassPropertyEntryBox)
+									.MetaClass(UDataAsset::StaticClass())
+									.AllowAbstract(false)
+									.AllowNone(false)
+									.SelectedClass(this, &SWizard::GetAutomaticOutputClass)
+									.OnSetClass(this, &SWizard::OnAutomaticOutputClassSet)
+								]
+							]
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("AutomaticNamingPolicy", "Naming Policy Override (Optional)"))]
+							+ SVerticalBox::Slot().AutoHeight()
+							[
+								SNew(SObjectPropertyEntryBox)
+								.AllowedClass(UDataForgeNamingPolicy::StaticClass())
+								.ObjectPath(this, &SWizard::GetAutomaticNamingPolicyPath)
+								.OnObjectChanged(this, &SWizard::OnAutomaticNamingPolicySelected)
+							]
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							MakeAutomaticPathRow(LOCTEXT("AutomaticDataTable", "Output DataTable Path"), EAutomaticPathField::DataTable)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							MakeAutomaticPathRow(LOCTEXT("AutomaticGeneratedFolder", "Generated PDA/DA Folder"), EAutomaticPathField::GeneratedOutput)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							MakeAutomaticPathRow(LOCTEXT("AutomaticDefinitionFolder", "Rule Definition Folder"), EAutomaticPathField::Definitions)
+						]
+						+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(2.0f, 8.0f, 2.0f, 2.0f)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("AnalyzeAutomaticSetup", "Analyze & Build Draft"))
+							.ToolTipText(LOCTEXT("AnalyzeAutomaticSetupTooltip", "Probe the source, scan the selected asset root, infer a safe configuration, and update only the transient Wizard draft."))
+							.OnClicked(this, &SWizard::OnAnalyzeAutomaticSetup)
 						]
 					]
 				]
@@ -210,13 +323,30 @@ namespace DataForgeRuleCreationWizard
 						SNew(SBorder)
 						.Padding(10.0f)
 						[
-							SNew(STextBlock).Text(this, &SWizard::GetInspectionText).AutoWrapText(true)
+							SNew(SScrollBox)
+							+ SScrollBox::Slot()
+							[
+								SNew(STextBlock).Text(this, &SWizard::GetInspectionText).AutoWrapText(true)
+							]
 						]
 					]
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 4.0f)
 				[
 					SNew(STextBlock).Text(this, &SWizard::GetStatusText).AutoWrapText(true)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 4.0f)
+				[
+					SNew(SCheckBox)
+					.Visibility(this, &SWizard::GetAutomaticReviewVisibility)
+					.IsEnabled_Lambda([this]() { return Workflow->HasSuccessfulPreview(); })
+					.IsChecked(this, &SWizard::GetAutomaticReviewCheckState)
+					.OnCheckStateChanged(this, &SWizard::OnAutomaticReviewCheckStateChanged)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("ApproveAutomaticReview", "I reviewed the inferred files, assignments, diagnostics, and Preview effects."))
+						.AutoWrapText(true)
+					]
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f, 12.0f, 12.0f)
 				[
@@ -248,6 +378,14 @@ namespace DataForgeRuleCreationWizard
 		}
 
 	private:
+		enum class EAutomaticPathField : uint8
+		{
+			AssetRoot,
+			DataTable,
+			GeneratedOutput,
+			Definitions
+		};
+
 		static int32 StepNumber(EDataForgeWizardStep Step)
 		{
 			return static_cast<int32>(Step) + 1;
@@ -331,7 +469,122 @@ namespace DataForgeRuleCreationWizard
 						*FDataForgeEditorService::AnalyzeBinding(Workflow->GetDraft(), Binding, DataSet).ToDisplayString());
 				}
 			}
+			if (Workflow->HasAutomaticSetup())
+			{
+				Text += TEXT("\n\n") + Workflow->GetAutomaticSetupInspection();
+			}
 			return FText::FromString(Text);
+		}
+
+		TSharedRef<SWidget> MakeAutomaticPathRow(const FText& Label, EAutomaticPathField Field)
+		{
+			return SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(0.32f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock).Text(Label)
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.58f).Padding(4.0f, 0.0f)
+				[
+					SNew(SEditableTextBox)
+					.Text_Lambda([this, Field]() { return FText::FromString(GetAutomaticPath(Field)); })
+					.OnTextCommitted_Lambda([this, Field](const FText& Text, ETextCommit::Type) { SetAutomaticPath(Field, Text.ToString()); })
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.1f)
+				[
+					SNew(SComboButton)
+					.OnGetMenuContent_Lambda([this, Field]() { return MakeAutomaticPathPicker(Field); })
+					.ButtonContent()[SNew(STextBlock).Text(LOCTEXT("BrowseAutomaticPath", "Browse"))]
+				];
+		}
+
+		FString GetAutomaticPath(EAutomaticPathField Field) const
+		{
+			switch (Field)
+			{
+			case EAutomaticPathField::AssetRoot: return AutomaticAssetRoot;
+			case EAutomaticPathField::DataTable: return Workflow->GetDraft().Output.AssetPath;
+			case EAutomaticPathField::GeneratedOutput: return AutomaticGeneratedFolder;
+			case EAutomaticPathField::Definitions: return AutomaticDefinitionFolder;
+			default: return FString();
+			}
+		}
+
+		void SetAutomaticPath(EAutomaticPathField Field, const FString& Path)
+		{
+			switch (Field)
+			{
+			case EAutomaticPathField::AssetRoot: AutomaticAssetRoot = Path; break;
+			case EAutomaticPathField::DataTable:
+				Workflow->GetDraft().Output.AssetPath = Path;
+				Workflow->NotifyDraftChanged(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Output));
+				break;
+			case EAutomaticPathField::GeneratedOutput: AutomaticGeneratedFolder = Path; break;
+			case EAutomaticPathField::Definitions: AutomaticDefinitionFolder = Path; break;
+			}
+			StatusMessage.Reset();
+		}
+
+		TSharedRef<SWidget> MakeAutomaticPathPicker(EAutomaticPathField Field)
+		{
+			FString DefaultPath = GetAutomaticPath(Field);
+			if (Field == EAutomaticPathField::DataTable && FPackageName::IsValidLongPackageName(DefaultPath))
+			{
+				DefaultPath = FPackageName::GetLongPackagePath(DefaultPath);
+			}
+			if (!FPackageName::IsValidLongPackageName(DefaultPath)) DefaultPath = TEXT("/Game");
+			FPathPickerConfig Config;
+			Config.DefaultPath = DefaultPath;
+			Config.bAllowClassesFolder = false;
+			Config.bAddDefaultPath = false;
+			Config.bAllowContextMenu = false;
+			Config.OnPathSelected = FOnPathSelected::CreateLambda([this, Field](const FString& Folder)
+			{
+				if (Field == EAutomaticPathField::DataTable)
+				{
+					const FString Current = GetAutomaticPath(Field);
+					const FString AssetName = FPackageName::IsValidLongPackageName(Current)
+						? FPackageName::GetLongPackageAssetName(Current) : TEXT("DT_DataForge");
+					SetAutomaticPath(Field, Folder / AssetName);
+				}
+				else SetAutomaticPath(Field, Folder);
+			});
+			return SNew(SBox).WidthOverride(360.0f).HeightOverride(480.0f)
+			[
+				FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser")).Get().CreatePathPicker(Config)
+			];
+		}
+
+		const UScriptStruct* GetAutomaticRowStruct() const { return Workflow->GetDraft().Output.RowStruct; }
+		void OnAutomaticRowStructSet(const UScriptStruct* Struct)
+		{
+			Workflow->GetDraft().Output.RowStruct = const_cast<UScriptStruct*>(Struct);
+			Workflow->NotifyDraftChanged(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Output));
+			StatusMessage.Reset();
+		}
+		const UClass* GetAutomaticOutputClass() const { return AutomaticOutputClass.Get(); }
+		void OnAutomaticOutputClassSet(const UClass* Class) { AutomaticOutputClass = const_cast<UClass*>(Class); StatusMessage.Reset(); }
+		FString GetAutomaticNamingPolicyPath() const { return AutomaticNamingPolicy.IsValid() ? AutomaticNamingPolicy->GetPathName() : FString(); }
+		void OnAutomaticNamingPolicySelected(const FAssetData& AssetData)
+		{
+			AutomaticNamingPolicy = Cast<UDataForgeNamingPolicy>(AssetData.GetAsset());
+			StatusMessage.Reset();
+		}
+
+		FReply OnAnalyzeAutomaticSetup()
+		{
+			const FDataForgeResult Result = Workflow->ConfigureAutomatically(
+				AutomaticAssetRoot, AutomaticNamingPolicy.Get(), AutomaticOutputClass.Get(),
+				AutomaticGeneratedFolder, AutomaticDefinitionFolder);
+			StatusMessage = Result.Summary;
+			if (Result.bSuccess)
+			{
+				PrimaryKeyOptions.Reset();
+				for (const FName Column : Workflow->GetProbedDataSet().Columns) PrimaryKeyOptions.Add(MakeShared<FName>(Column));
+				PrimaryKeyCombo->RefreshOptions();
+				BindingPresetOutputFolder = AutomaticGeneratedFolder;
+				DetailsView->ForceRefresh();
+			}
+			return FReply::Handled();
 		}
 
 		FText GetStatusText() const
@@ -371,7 +624,15 @@ namespace DataForgeRuleCreationWizard
 		}
 
 		EVisibility GetSourceVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Source ? EVisibility::Visible : EVisibility::Collapsed; }
-		EVisibility GetSchemaVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Schema ? EVisibility::Visible : EVisibility::Collapsed; }
+		EVisibility GetPrimaryKeyVisibility() const
+		{
+			const EDataForgeWizardStep Step = Workflow->GetStep();
+			const bool bRelevantStep = Step == EDataForgeWizardStep::Source
+				|| Step == EDataForgeWizardStep::Probe
+				|| Step == EDataForgeWizardStep::Schema;
+			return bRelevantStep && !Workflow->GetProbedDataSet().Columns.IsEmpty()
+				? EVisibility::Visible : EVisibility::Collapsed;
+		}
 		EVisibility GetAssetLayoutVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::AssetLayout ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetBindingPresetVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::AssetRules ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetActionVisibility() const
@@ -384,6 +645,20 @@ namespace DataForgeRuleCreationWizard
 		}
 		EVisibility GetNextVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Preview ? EVisibility::Collapsed : EVisibility::Visible; }
 		EVisibility GetFinishVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Preview ? EVisibility::Visible : EVisibility::Collapsed; }
+		EVisibility GetAutomaticReviewVisibility() const
+		{
+			return Workflow->GetStep() == EDataForgeWizardStep::Preview && Workflow->HasAutomaticSetup()
+				? EVisibility::Visible : EVisibility::Collapsed;
+		}
+		ECheckBoxState GetAutomaticReviewCheckState() const
+		{
+			return Workflow->IsAutomaticReviewApproved() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		}
+		void OnAutomaticReviewCheckStateChanged(ECheckBoxState State)
+		{
+			Workflow->SetAutomaticReviewApproved(State == ECheckBoxState::Checked);
+			StatusMessage.Reset();
+		}
 		bool CanGoBack() const { return Workflow->GetStep() != EDataForgeWizardStep::Source; }
 
 		bool IsPropertyVisible(const FPropertyAndParent& PropertyAndParent) const
@@ -649,6 +924,11 @@ namespace DataForgeRuleCreationWizard
 		TSharedPtr<SVerticalBox> LayoutParameterRows;
 		TSharedPtr<SComboButton> BindingPresetPathButton;
 		FString BindingPresetOutputFolder;
+		FString AutomaticAssetRoot = TEXT("/Game");
+		FString AutomaticGeneratedFolder;
+		FString AutomaticDefinitionFolder;
+		TWeakObjectPtr<UDataForgeNamingPolicy> AutomaticNamingPolicy;
+		TWeakObjectPtr<UClass> AutomaticOutputClass;
 		FString StatusMessage;
 	};
 }
