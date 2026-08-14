@@ -229,6 +229,10 @@ struct DATAFORGECORE_API FDataForgeGeneratedAssetOutputRule
 	/** Must reference an Asset Rule whose ownership is Managed. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generated Output")
 	FName AssetRuleId = NAME_None;
+
+	/** Adopt a compatible asset at the generated path only when it has no DataForge ownership metadata. Disable for strict create-only ownership. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generated Output", AdvancedDisplay)
+	bool bAdoptCompatibleUnownedAsset = true;
 };
 
 USTRUCT(BlueprintType)

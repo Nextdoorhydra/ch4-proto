@@ -1435,8 +1435,15 @@ FDataForgeApplyPlan FDataForgeCompiler::BuildPlan(const FCompiledDataForgeRuleSe
 			}
 			if (ExistingAsset && !DataForgePipeline::IsOwnedByRuleSet(*ExistingAsset, *RuleSet, OutputName, RowName))
 			{
-				DataForgePipeline::AddDiagnostic(Plan.Diagnostics, EDataForgeSeverity::Error, TEXT("DF1213"), FString::Printf(TEXT("Refusing to overwrite asset without matching DataForge ownership: %s"), *GeneratedObjectPath), RowName, OutputName, SourceRow.SourceRow);
-				continue;
+				FMetaData& ExistingMetaData = ExistingAsset->GetPackage()->GetMetaData();
+				const bool bHasDataForgeOwnership = ExistingMetaData.GetValue(ExistingAsset, TEXT("DataForge.Managed")) == TEXT("true")
+					|| !ExistingMetaData.GetValue(ExistingAsset, TEXT("DataForge.RuleSetId")).IsEmpty();
+				if (!Output.Rule.bAdoptCompatibleUnownedAsset || bHasDataForgeOwnership)
+				{
+					DataForgePipeline::AddDiagnostic(Plan.Diagnostics, EDataForgeSeverity::Error, TEXT("DF1213"), FString::Printf(TEXT("Refusing to overwrite asset without matching DataForge ownership: %s"), *GeneratedObjectPath), RowName, OutputName, SourceRow.SourceRow);
+					continue;
+				}
+				DataForgePipeline::AddDiagnostic(Plan.Diagnostics, EDataForgeSeverity::Warning, TEXT("DF1219"), FString::Printf(TEXT("Preview will adopt the compatible unowned asset and manage only declared properties: %s"), *GeneratedObjectPath), RowName, OutputName, SourceRow.SourceRow);
 			}
 			const FString Identity = OutputName.ToString() + TEXT("|") + RowName.ToString();
 			if (!ExistingAsset && !DuplicateOwnedIdentities.Contains(Identity))

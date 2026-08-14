@@ -326,6 +326,13 @@ FDataForgeAuthoringDraft FDataForgeAuthoringMaterializer::BuildDraft(
 		});
 		const FDataForgeBindingPresetMaterialization Materialized = FDataForgeBindingPresetAuthoring::Materialize(
 			RuleSet, *Preset, Requested ? Requested->OutputFolder : FString());
+		if (FDataForgeGeneratedAssetOutputRule* Generated = RuleSet.GeneratedOutputs.FindByPredicate([&Output](const FDataForgeGeneratedAssetOutputRule& Candidate)
+		{
+			return Candidate.OutputName == Output.OutputName;
+		}))
+		{
+			Generated->bAdoptCompatibleUnownedAsset = true;
+		}
 		Result.Diagnostics.Append(Materialized.Diagnostics);
 		if (!Materialized.bSuccess) break;
 	}

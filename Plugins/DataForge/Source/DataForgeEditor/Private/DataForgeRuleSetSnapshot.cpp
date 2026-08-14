@@ -8,7 +8,7 @@
 
 namespace DataForgeRuleSetSnapshot
 {
-	constexpr int32 SnapshotVersion = 4;
+	constexpr int32 SnapshotVersion = 5;
 
 	struct FParameter
 	{
@@ -56,6 +56,7 @@ namespace DataForgeRuleSetSnapshot
 		FString Type;
 		FString AssetClass;
 		FString AssetRuleId;
+		bool bAdoptCompatibleUnownedAsset = false;
 	};
 
 	struct FBinding
@@ -249,7 +250,8 @@ namespace DataForgeRuleSetSnapshot
 				Output.OutputName.ToString(),
 				EnumName(StaticEnum<EDataForgeGeneratedAssetType>(), static_cast<int64>(Output.Type)),
 				Output.AssetClass ? Output.AssetClass->GetPathName() : TEXT("None"),
-				Output.AssetRuleId.ToString() });
+				Output.AssetRuleId.ToString(),
+				Output.bAdoptCompatibleUnownedAsset });
 		}
 		Snapshot.GeneratedOutputs.Sort([](const FGeneratedOutput& Left, const FGeneratedOutput& Right)
 		{
@@ -498,6 +500,7 @@ FString FDataForgeRuleSetSnapshot::SerializeJson(const UDataForgeRuleSet& RuleSe
 		Writer->WriteValue(TEXT("type"), Output.Type);
 		Writer->WriteValue(TEXT("assetClass"), Output.AssetClass);
 		Writer->WriteValue(TEXT("assetRuleId"), Output.AssetRuleId);
+		Writer->WriteValue(TEXT("adoptCompatibleUnownedAsset"), Output.bAdoptCompatibleUnownedAsset);
 		Writer->WriteObjectEnd();
 	}
 	Writer->WriteArrayEnd();
@@ -724,6 +727,7 @@ FString FDataForgeRuleSetSnapshot::SerializeYaml(const UDataForgeRuleSet& RuleSe
 			AddYamlString(Yaml, 4, TEXT("type"), Output.Type);
 			AddYamlString(Yaml, 4, TEXT("assetClass"), Output.AssetClass);
 			AddYamlString(Yaml, 4, TEXT("assetRuleId"), Output.AssetRuleId);
+			Yaml += FString::Printf(TEXT("    adoptCompatibleUnownedAsset: %s\n"), Output.bAdoptCompatibleUnownedAsset ? TEXT("true") : TEXT("false"));
 		}
 	}
 
