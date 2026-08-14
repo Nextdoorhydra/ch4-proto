@@ -1280,8 +1280,8 @@ bool FDataForgePersistentMultiAssetReferenceExampleTest::RunTest(const FString& 
 			TestNotNull(TEXT("Armor PDA exists"), PDA);
 			if (PDA)
 			{
-				TestEqual(TEXT("Armor PDA has two textures"), PDA->Textures.Num(), 2);
-				TestEqual(TEXT("Armor PDA has two materials"), PDA->Materials.Num(), 2);
+				TestTrue(TEXT("Armor PDA keeps at least the two baseline textures"), PDA->Textures.Num() >= 2);
+				TestTrue(TEXT("Armor PDA keeps at least the two baseline materials"), PDA->Materials.Num() >= 2);
 				TestTrue(TEXT("Armor PDA inferred its first texture from ID and folders"), PDA->Textures.Contains(Textures.FindChecked(TEXT("Armor1"))));
 				TestTrue(TEXT("Armor PDA inferred its second material without a CSV asset id"), PDA->Materials.Contains(Materials.FindChecked(TEXT("Armor2"))));
 			}
@@ -1292,8 +1292,8 @@ bool FDataForgePersistentMultiAssetReferenceExampleTest::RunTest(const FString& 
 			TestNotNull(TEXT("Robot PDA exists"), PDA);
 			if (PDA)
 			{
-				TestEqual(TEXT("Robot PDA has two inferred textures"), PDA->Textures.Num(), 2);
-				TestEqual(TEXT("Robot PDA has one inferred material"), PDA->Materials.Num(), 1);
+				TestTrue(TEXT("Robot PDA keeps at least the two baseline textures"), PDA->Textures.Num() >= 2);
+				TestTrue(TEXT("Robot PDA keeps at least the baseline material"), PDA->Materials.Num() >= 1);
 			}
 		}
 	}

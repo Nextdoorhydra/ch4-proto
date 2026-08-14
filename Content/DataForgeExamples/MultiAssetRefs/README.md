@@ -57,13 +57,15 @@ Subject=Armor, AssetKind=Material, Role=Material, Numbering=2
 
 Both slots use `Replace Managed`. The folder inventory is authoritative for these
 arrays, so stale references from the previous CSV-driven example or manual edits
-are replaced by the current inferred set.
+are replaced by the current inferred set. Additional convention-compatible assets
+may be kept in the example folders to demonstrate that extending the inventory does
+not require editing `Products.csv` or changing the RuleSet.
 
 ## Outputs
 
 - `Output/DT_MultiAssetRefs`: each row references its generated PDA.
-- `Generated/PDA_Armor`: two inferred textures and two inferred materials.
-- `Generated/PDA_Robot`: two inferred textures and one inferred material.
+- `Generated/PDA_Armor`: at least the two baseline textures and materials, plus any additional matching inventory assets.
+- `Generated/PDA_Robot`: at least the two baseline textures and one material, plus any additional matching inventory assets.
 
 Adding another convention-compliant asset under `Inventory/Armor/Texture` changes
 the folder inventory revision and the next reconcile appends it to `PDA_Armor`
