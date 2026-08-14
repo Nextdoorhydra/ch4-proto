@@ -97,11 +97,32 @@ void FDataForgeNamingPolicyResolver::ConfigureChimeraDefaults(UDataForgeNamingPo
 	AddKind(TEXT("WidgetBlueprint"), TEXT("WBP"), TEXT("Blueprint"));
 	AddKind(TEXT("Texture"), TEXT("T"), TEXT("Texture"), UTexture::StaticClass());
 	AddKind(TEXT("Material"), TEXT("M"), TEXT("Material"), UMaterialInterface::StaticClass());
+	AddKind(TEXT("MaterialInstance"), TEXT("MI"), TEXT("Material"), UMaterialInterface::StaticClass());
+	AddKind(TEXT("MaterialFunction"), TEXT("MF"), TEXT("Material"));
 	AddKind(TEXT("StaticMesh"), TEXT("SM"), TEXT("Mesh"), UStaticMesh::StaticClass());
 	AddKind(TEXT("SkeletalMesh"), TEXT("SK"), TEXT("Mesh"), USkeletalMesh::StaticClass());
+	AddKind(TEXT("AnimationBlueprint"), TEXT("ABP"), TEXT("Animation"));
+	AddKind(TEXT("AnimationSequence"), TEXT("A"), TEXT("Animation"));
+	AddKind(TEXT("Skeleton"), TEXT("SKEL"), TEXT("Animation"));
+	AddKind(TEXT("PhysicsAsset"), TEXT("PHYS"), TEXT("Physics"));
 	AddKind(TEXT("NiagaraSystem"), TEXT("NS"), TEXT("Niagara"));
+	AddKind(TEXT("NiagaraEmitter"), TEXT("NE"), TEXT("Niagara"));
+	AddKind(TEXT("ParticleSystem"), TEXT("PS"), TEXT("Particle"));
+	AddKind(TEXT("SoundWave"), TEXT("S"), TEXT("Audio"));
+	AddKind(TEXT("SoundCue"), TEXT("SC"), TEXT("Audio"));
+	AddKind(TEXT("DataTable"), TEXT("DT"), TEXT("Data"));
+	AddKind(TEXT("CurveTable"), TEXT("CT"), TEXT("Data"));
+	AddKind(TEXT("CurveFloat"), TEXT("CF"), TEXT("Data"));
+	AddKind(TEXT("DataAsset"), TEXT("DA"), TEXT("Data"), UDataAsset::StaticClass());
+	AddKind(TEXT("PrimaryDataAsset"), TEXT("PDA"), TEXT("Data"), UPrimaryDataAsset::StaticClass());
+	AddKind(TEXT("LevelSequence"), TEXT("LS"), TEXT("Sequence"));
+	AddKind(TEXT("InputAction"), TEXT("IA"), TEXT("Input"));
+	AddKind(TEXT("InputMappingContext"), TEXT("IMC"), TEXT("Input"));
 	AddKind(TEXT("GameplayAbility"), TEXT("GA"), TEXT("GA"));
 	AddKind(TEXT("GameplayEffect"), TEXT("GE"), TEXT("GE"));
+	AddKind(TEXT("UserEnum"), TEXT("E"), TEXT("Data"));
+	AddKind(TEXT("UserStruct"), TEXT("ST"), TEXT("Data"));
+	AddKind(TEXT("Font"), TEXT("FNT"), TEXT("UI"));
 }
 
 FDataForgeResult FDataForgeNamingPolicyResolver::ValidatePolicy(const UDataForgeNamingPolicy& Policy)

@@ -1304,6 +1304,51 @@ bool FDataForgePersistentMultiAssetReferenceExampleTest::RunTest(const FString& 
 	}
 	return !HasAnyErrors();
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FChimeraDefaultNamingPolicyAssetTest,
+	"DataForge.Examples.ChimeraDefaultNamingPolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChimeraDefaultNamingPolicyAssetTest::RunTest(const FString& Parameters)
+{
+	const FString PackageName = TEXT("/Game/Chimera/DataForge/Naming/NP_ChimeraDefault");
+	const FString ObjectPath = PackageName + TEXT(".NP_ChimeraDefault");
+	UDataForgeNamingPolicy* Policy = LoadObject<UDataForgeNamingPolicy>(nullptr, *ObjectPath);
+	if (!Policy)
+	{
+		UPackage* Package = CreatePackage(*PackageName);
+		Policy = NewObject<UDataForgeNamingPolicy>(
+			Package, TEXT("NP_ChimeraDefault"), RF_Public | RF_Standalone | RF_Transactional);
+		FAssetRegistryModule::AssetCreated(Policy);
+	}
+	TestNotNull(TEXT("Chimera default Naming Policy exists"), Policy);
+	if (!Policy) return false;
+
+	FDataForgeNamingPolicyResolver::ConfigureChimeraDefaults(*Policy);
+	const FDataForgeResult Validation = FDataForgeNamingPolicyResolver::ValidatePolicy(*Policy);
+	TestTrue(TEXT("Chimera default Naming Policy is valid"), Validation.bSuccess);
+	for (const FName RequiredKind : { FName(TEXT("Blueprint")), FName(TEXT("Texture")), FName(TEXT("Material")),
+		FName(TEXT("StaticMesh")), FName(TEXT("SkeletalMesh")), FName(TEXT("NiagaraSystem")),
+		FName(TEXT("DataAsset")), FName(TEXT("PrimaryDataAsset")), FName(TEXT("GameplayAbility")), FName(TEXT("GameplayEffect")) })
+	{
+		TestTrue(FString::Printf(TEXT("Default policy supports %s"), *RequiredKind.ToString()),
+			Policy->AssetKinds.ContainsByPredicate([RequiredKind](const FDataForgeAssetKindNamingRule& Rule)
+			{
+				return Rule.AssetKind == RequiredKind;
+			}));
+	}
+
+	Policy->MarkPackageDirty();
+	const FString Filename = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	SaveArgs.SaveFlags = SAVE_NoError;
+	TestTrue(TEXT("Chimera default Naming Policy is saved under Content"),
+		UPackage::SavePackage(Policy->GetOutermost(), Policy, *Filename, SaveArgs));
+	return !HasAnyErrors();
+}
 #endif
 
 #undef LOCTEXT_NAMESPACE
