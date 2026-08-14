@@ -18,6 +18,7 @@
 #include "DataForgeNamingPolicy.h"
 #include "DataForgeRuleSet.h"
 #include "Engine/DataAsset.h"
+#include "Engine/Texture2D.h"
 #include "Dom/JsonObject.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -29,6 +30,7 @@
 #include "Tests/DataForgeEditorTestTypes.h"
 #include "UObject/MetaData.h"
 #include "UObject/Package.h"
+#include "UObject/SavePackage.h"
 #include "UObject/StrongObjectPtr.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -1208,6 +1210,211 @@ bool FDataForgeSourceReconcileTest::RunTest(const FString& Parameters)
 
 	IFileManager::Get().Delete(*CsvFilename, false, true);
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgePersistentRenameAuditExampleTest,
+	"DataForge.Examples.PersistentRenameAuditAssets",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgePersistentRenameAuditExampleTest::RunTest(const FString& Parameters)
+{
+	const FString Root = TEXT("/Game/DataForgeExamples/RenameAudit");
+	const FString Definitions = Root / TEXT("Definitions");
+	const FString Inventory = Root / TEXT("Inventory");
+	const FString CsvFile = TEXT("Content/DataForgeExamples/RenameAudit/Source/Characters.csv");
+
+	const auto SaveAsset = [this](UObject* Asset, const TCHAR* Label)
+	{
+		if (!Asset)
+		{
+			AddError(FString::Printf(TEXT("%s is null."), Label));
+			return false;
+		}
+		Asset->MarkPackageDirty();
+		const FString Filename = FPackageName::LongPackageNameToFilename(
+			Asset->GetOutermost()->GetName(), FPackageName::GetAssetPackageExtension());
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		const bool bSaved = UPackage::SavePackage(Asset->GetOutermost(), Asset, *Filename, SaveArgs);
+		TestTrue(FString::Printf(TEXT("%s is saved under Content"), Label), bSaved);
+		return bSaved;
+	};
+
+	const auto LoadOrCreate = [](UClass* AssetClass, const FString& PackageName) -> UObject*
+	{
+		const FString AssetName = FPackageName::GetLongPackageAssetName(PackageName);
+		const FString ObjectPath = PackageName + TEXT(".") + AssetName;
+		UObject* Asset = StaticFindObject(AssetClass, nullptr, *ObjectPath);
+		if (!Asset && FPackageName::DoesPackageExist(PackageName))
+		{
+			Asset = StaticLoadObject(AssetClass, nullptr, *ObjectPath);
+		}
+		if (!Asset)
+		{
+			UPackage* Package = CreatePackage(*PackageName);
+			Asset = NewObject<UObject>(Package, AssetClass, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
+			FAssetRegistryModule::AssetCreated(Asset);
+		}
+		return Asset;
+	};
+
+	const auto CreateExampleTexture = [&LoadOrCreate, &SaveAsset](
+		const FString& PackageName, const FColor PrimaryColor) -> UTexture2D*
+	{
+		const bool bAlreadyExists = FPackageName::DoesPackageExist(PackageName);
+		UTexture2D* Texture = Cast<UTexture2D>(LoadOrCreate(UTexture2D::StaticClass(), PackageName));
+		if (!Texture || bAlreadyExists) return Texture;
+
+		constexpr int32 Size = 8;
+		TArray<uint8> Pixels;
+		Pixels.SetNumUninitialized(Size * Size * 4);
+		for (int32 PixelIndex = 0; PixelIndex < Size * Size; ++PixelIndex)
+		{
+			const bool bBright = ((PixelIndex % Size) + (PixelIndex / Size)) % 2 == 0;
+			const FColor Pixel = bBright ? PrimaryColor : PrimaryColor.ReinterpretAsLinear().Desaturate(0.5f).ToFColor(true);
+			Pixels[PixelIndex * 4 + 0] = Pixel.B;
+			Pixels[PixelIndex * 4 + 1] = Pixel.G;
+			Pixels[PixelIndex * 4 + 2] = Pixel.R;
+			Pixels[PixelIndex * 4 + 3] = Pixel.A;
+		}
+		Texture->Source.Init(Size, Size, 1, 1, TSF_BGRA8, Pixels.GetData());
+		Texture->SRGB = true;
+		Texture->CompressionSettings = TC_EditorIcon;
+		Texture->MipGenSettings = TMGS_NoMipmaps;
+		Texture->PostEditChange();
+		SaveAsset(Texture, TEXT("Rename Audit example texture"));
+		return Texture;
+	};
+
+	UDataForgeNamingPolicy* Policy = Cast<UDataForgeNamingPolicy>(LoadOrCreate(
+		UDataForgeNamingPolicy::StaticClass(), Definitions / TEXT("NP_RenameAuditExample")));
+	Policy->ProjectPrefix = TEXT("CM");
+	Policy->AssetKinds.Reset();
+	FDataForgeAssetKindNamingRule& Kind = Policy->AssetKinds.AddDefaulted_GetRef();
+	Kind.AssetKind = TEXT("Texture");
+	Kind.TypePrefix = TEXT("T");
+	Kind.FolderName = TEXT("Texture");
+	Kind.ExpectedAssetClass = UTexture2D::StaticClass();
+	SaveAsset(Policy, TEXT("Rename Audit naming policy"));
+
+	UDataForgeAssetLayoutRecipe* Recipe = Cast<UDataForgeAssetLayoutRecipe>(LoadOrCreate(
+		UDataForgeAssetLayoutRecipe::StaticClass(), Definitions / TEXT("ALR_RenameAuditExample")));
+	Recipe->RecipeId = TEXT("RenameAuditExample");
+	Recipe->Domain = TEXT("Example");
+	Recipe->NamingPolicy = Policy;
+	Recipe->SubjectSource = EDataForgeLayoutSubjectSource::FolderSegment;
+	Recipe->SubjectFolderIndex = 0;
+	Recipe->KindFolderIndex = 1;
+	Recipe->bRequireKindFolderMatch = true;
+	SaveAsset(Recipe, TEXT("Rename Audit layout recipe"));
+
+	UDataForgeFolderSourceConfig* FolderConfig = Cast<UDataForgeFolderSourceConfig>(LoadOrCreate(
+		UDataForgeFolderSourceConfig::StaticClass(), Definitions / TEXT("FSC_RenameAuditExample")));
+	FolderConfig->RootFolder = Inventory;
+	FolderConfig->bRecursive = true;
+	FolderConfig->AllowedAssetKinds = { TEXT("Texture") };
+	FolderConfig->ExcludedFolders.Reset();
+	FolderConfig->bExcludeDataForgeManagedAssets = true;
+	FolderConfig->LayoutRecipe = Recipe;
+	SaveAsset(FolderConfig, TEXT("Rename Audit folder source"));
+
+	UDataForgeBindingPreset* Preset = Cast<UDataForgeBindingPreset>(LoadOrCreate(
+		UDataForgeBindingPreset::StaticClass(), Definitions / TEXT("BP_RenameAuditExample")));
+	if (!Preset->PresetId.IsValid()) Preset->PresetId = FGuid::NewGuid();
+	Preset->OutputName = TEXT("CharacterData");
+	Preset->Slots.Reset();
+	FDataForgeBindingPresetSlot& Slot = Preset->Slots.AddDefaulted_GetRef();
+	Slot.SlotId = TEXT("Portrait");
+	Slot.AssetKind = Kind.AssetKind;
+	Slot.Role = TEXT("Portrait");
+	Slot.AssociationSourceId = TEXT("Inventory");
+	Slot.SourceKeyColumn = TEXT("Id");
+	Slot.ExpectedAssetClass = UTexture2D::StaticClass();
+	Slot.Cardinality = EDataForgeBindingCardinality::One;
+	SaveAsset(Preset, TEXT("Rename Audit binding preset"));
+
+	UDataForgeRuleSet* RuleSet = Cast<UDataForgeRuleSet>(LoadOrCreate(
+		UDataForgeRuleSet::StaticClass(), Definitions / TEXT("RS_RenameAuditExample")));
+	if (!RuleSet->RuleSetId.IsValid()) RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source = FDataForgeSourceConfig();
+	RuleSet->Source.AdapterId = TEXT("Csv");
+	RuleSet->Source.File.FilePath = CsvFile;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Schema.RequiredColumns = { TEXT("Id") };
+	RuleSet->BindingPreset = Preset;
+	RuleSet->AssociationSources.Reset();
+	FDataForgeAssociationSourceRule& Association = RuleSet->AssociationSources.AddDefaulted_GetRef();
+	Association.SourceId = Slot.AssociationSourceId;
+	Association.Source.AdapterId = TEXT("AssetRegistryFolder");
+	Association.Source.SourceAsset = FolderConfig;
+	RuleSet->Output = FDataForgeDataTableOutputRule();
+	RuleSet->AssetRules.Reset();
+	RuleSet->GeneratedOutputs.Reset();
+	RuleSet->Bindings.Reset();
+	SaveAsset(RuleSet, TEXT("Rename Audit RuleSet"));
+
+	const FString HeroLegacyPackage = Inventory / TEXT("Hero/Texture/Legacy_HeroPortrait");
+	const FString HeroCompliantPackage = Inventory / TEXT("Hero/Texture/T_CMHeroPortrait");
+	UTexture2D* HeroTexture = nullptr;
+	if (FPackageName::DoesPackageExist(HeroLegacyPackage))
+	{
+		HeroTexture = LoadObject<UTexture2D>(nullptr, *(HeroLegacyPackage + TEXT(".Legacy_HeroPortrait")));
+	}
+	else if (FPackageName::DoesPackageExist(HeroCompliantPackage))
+	{
+		HeroTexture = LoadObject<UTexture2D>(nullptr, *(HeroCompliantPackage + TEXT(".T_CMHeroPortrait")));
+	}
+	else
+	{
+		HeroTexture = CreateExampleTexture(HeroLegacyPackage, FColor(45, 135, 255));
+	}
+	UTexture2D* VillainTexture = CreateExampleTexture(
+		Inventory / TEXT("Villain/Texture/T_CMVillainPortrait"), FColor(220, 55, 85));
+	TestNotNull(TEXT("Hero example texture exists"), HeroTexture);
+	TestNotNull(TEXT("Villain example texture exists"), VillainTexture);
+
+	if (HeroTexture)
+	{
+		const TArray<FDataForgeRenameCandidate> HeroCandidates =
+			FDataForgeRenameAdvisor::BuildCandidatesForRuleSet(FAssetData(HeroTexture), *RuleSet);
+		TestEqual(TEXT("Hero has one evidence-backed candidate"), HeroCandidates.Num(), 1);
+		if (HeroCandidates.Num() == 1)
+		{
+			TestEqual(TEXT("Hero target follows the project naming policy"), HeroCandidates[0].GetSuggestedObjectPath(),
+				HeroCompliantPackage + TEXT(".T_CMHeroPortrait"));
+			TestTrue(TEXT("Hero candidate is recommended"), HeroCandidates[0].bRecommended);
+		}
+	}
+	if (VillainTexture)
+	{
+		const TArray<FDataForgeRenameCandidate> VillainCandidates =
+			FDataForgeRenameAdvisor::BuildCandidatesForRuleSet(FAssetData(VillainTexture), *RuleSet);
+		TestEqual(TEXT("Compliant Villain has one evidence-backed candidate"), VillainCandidates.Num(), 1);
+		if (VillainCandidates.Num() == 1)
+		{
+			TestFalse(TEXT("Compliant Villain does not require a rename"), VillainCandidates[0].IsChange());
+		}
+	}
+	if (HeroTexture && VillainTexture)
+	{
+		const TArray<FDataForgeRenameCandidate> AuditCandidates = FDataForgeRenameAdvisor::BuildCandidates(
+			{ FAssetData(HeroTexture), FAssetData(VillainTexture) });
+		TestTrue(TEXT("Folder audit discovers the persisted RuleSet for Hero"), AuditCandidates.ContainsByPredicate(
+			[HeroTexture](const FDataForgeRenameCandidate& Candidate)
+			{
+				return Candidate.AssetPath == FSoftObjectPath(HeroTexture) && Candidate.bRecommended;
+			}));
+		TestTrue(TEXT("Folder audit discovers the persisted RuleSet for Villain"), AuditCandidates.ContainsByPredicate(
+			[VillainTexture](const FDataForgeRenameCandidate& Candidate)
+			{
+				return Candidate.AssetPath == FSoftObjectPath(VillainTexture) && Candidate.bRecommended;
+			}));
+	}
+
+	return !HasAnyErrors();
 }
 
 #endif
