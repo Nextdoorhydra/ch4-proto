@@ -3,6 +3,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "DataForgeDependencyGraph.h"
+#include "DataForgeBindingPreset.h"
 #include "DataForgeCore.h"
 #include "DataForgePipeline.h"
 #include "DataForgeRuleSet.h"
@@ -238,6 +239,37 @@ namespace DataForgeEditorService
 			RuleSet.Output.bRemoveRowsMissingFromSource,
 			RuleSet.Output.bSaveAfterApply);
 		Signature += FString::Printf(TEXT("|WarnUnmapped:%d"), RuleSet.Schema.bWarnOnUnmappedColumns);
+		Signature += TEXT("|BindingPreset:") + RuleSet.BindingPreset.ToSoftObjectPath().ToString();
+		for (const FDataForgeAssociationSourceRule& Association : RuleSet.AssociationSources)
+		{
+			Signature += FString::Printf(TEXT("|AS:%s:%s:%s:%s:%s:%s:%s:%s"), *Association.SourceId.ToString(), *Association.Source.AdapterId.ToString(),
+				*Association.Source.File.FilePath, *Association.Source.SourceAsset.ToSoftObjectPath().ToString(), *Association.MatchColumn.ToString(),
+				*Association.AssetPathColumn.ToString(), *Association.AssetKindColumn.ToString(), *Association.RoleColumn.ToString());
+			TArray<FName> AssociationParameterKeys;
+			Association.Source.Parameters.GetKeys(AssociationParameterKeys);
+			AssociationParameterKeys.Sort(FNameLexicalLess());
+			for (const FName Key : AssociationParameterKeys) Signature += FString::Printf(TEXT(":%s=%s"), *Key.ToString(), *Association.Source.Parameters.FindChecked(Key));
+			for (int32 InputIndex = 0; InputIndex < Association.Source.Inputs.Num(); ++InputIndex)
+			{
+				const FDataForgeSourceInput& Input = Association.Source.Inputs[InputIndex];
+				Signature += FString::Printf(TEXT("|ASI:%s:%d:%s:%s:%s:%s:%s"), *Association.SourceId.ToString(), InputIndex, *Input.AdapterId.ToString(),
+					*Input.File.FilePath, *Input.SourceAsset.ToSoftObjectPath().ToString(), *Input.JoinColumn.ToString(), *Input.ColumnPrefix);
+				TArray<FName> InputKeys;
+				Input.Parameters.GetKeys(InputKeys);
+				InputKeys.Sort(FNameLexicalLess());
+				for (const FName Key : InputKeys) Signature += FString::Printf(TEXT(":%s=%s"), *Key.ToString(), *Input.Parameters.FindChecked(Key));
+			}
+		}
+		if (const UDataForgeBindingPreset* Preset = RuleSet.BindingPreset.LoadSynchronous())
+		{
+			Signature += FString::Printf(TEXT("|BP:%s:%s:%s"), *Preset->PresetId.ToString(EGuidFormats::Digits), *Preset->OutputName.ToString(), Preset->TargetClass ? *Preset->TargetClass->GetPathName() : TEXT("None"));
+			for (const FDataForgeBindingPresetSlot& Slot : Preset->Slots)
+			{
+				Signature += FString::Printf(TEXT("|BPS:%s:%s:%s:%s:%s:%s:%d:%d:%d"), *Slot.SlotId.ToString(), *Slot.AssociationSourceId.ToString(),
+					*Slot.SourceKeyColumn.ToString(), *Slot.AssetKind.ToString(), *Slot.Role.ToString(), *Slot.TargetProperty,
+					static_cast<int32>(Slot.Cardinality), static_cast<int32>(Slot.Reconcile), Slot.bRequired);
+			}
+		}
 		TArray<FName> SourceParameterKeys;
 		RuleSet.Source.Parameters.GetKeys(SourceParameterKeys);
 		SourceParameterKeys.Sort(FNameLexicalLess());
@@ -652,6 +684,18 @@ FDataForgeResult FDataForgeEditorService::Apply(UDataForgeRuleSet& RuleSet)
 		MetaData.SetValue(Asset, TEXT("DataForge.RecordId"), *PlannedAsset.RecordId.ToString());
 		MetaData.SetValue(Asset, TEXT("DataForge.Role"), *PlannedAsset.OutputName.ToString());
 		MetaData.SetValue(Asset, TEXT("DataForge.RuleVersion"), *FString::FromInt(RuleSet.RuleVersion));
+		TArray<FString> AssociationKeys;
+		PlannedAsset.ManagedAssociations.GetKeys(AssociationKeys);
+		AssociationKeys.Sort();
+		for (const FString& PropertyPath : AssociationKeys)
+		{
+			MetaData.SetValue(Asset, *(TEXT("DataForge.Association.") + PropertyPath), *FString::Join(PlannedAsset.ManagedAssociations.FindChecked(PropertyPath), TEXT("\n")));
+		}
+		for (const FString& RemovedKey : PlannedAsset.RemovedAssociationKeys)
+		{
+			MetaData.RemoveValue(Asset, *(TEXT("DataForge.Association.") + RemovedKey));
+		}
+		MetaData.SetValue(Asset, TEXT("DataForge.Association.Keys"), *FString::Join(AssociationKeys, TEXT("\n")));
 		Asset->MarkPackageDirty();
 		AssetsToSave.Add(Asset);
 	}

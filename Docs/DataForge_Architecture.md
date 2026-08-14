@@ -1,6 +1,6 @@
 # DataForge 플러그인 설계 문서
 
-대상 버전: DataForge 1.4
+대상 버전: DataForge 1.5
 
 ## 1. 목적
 
@@ -164,3 +164,186 @@ Spec 전체를 파싱·검증한 뒤 Probe, schema 추론, exact-name binding, P
 - 전체 자동화 테스트: `Automation RunTests DataForge`
 
 Project Overview에서 RuleSet, source/provider, output, dependency 및 실행 순서를 확인한다. Source file, RuleSet, snapshot과 생성 결과는 같은 변경 단위로 검토한다.
+
+## 13. 폴더 기반 연관과 리네임 안전성
+
+폴더 자동화는 `Naming Policy -> Asset Layout Recipe -> Folder Source Config -> Binding Preset` 계층으로 구성된다. Folder Adapter는 Asset Registry 결과를 `FDataForgeDataSet`으로 정규화하므로 primary CSV/JSON/Google source와 association source가 같은 compiler 계약을 유지한다.
+
+Binding Preset slot은 `AssetKind`, `Role`, `ExpectedAssetClass`, cardinality와 reconcile mode를 선언한다. `One`과 `OptionalOne`은 단일 참조를, `Many`는 배열 참조를 처리하며 `ReplaceManaged`와 `MergeByKey`는 Association Manifest가 소유하는 경로만 변경한다.
+
+Rename Audit는 후보를 다음 증거로 평가한다.
+
+```text
+Existing Association Manifest   1000
+Exact current conventional name  300
+Subject folder = source key       250
+Naming Policy parse success       200
+```
+
+점수는 선택을 설명하기 위한 결정적 우선순위이며 확률이 아니다. slot별 유일 최고점만 Recommended가 되고, 동점과 무근거 후보는 mutation 대상이 되지 않는다. 일괄 적용 직전에는 source asset, RuleSet, source row, destination과 batch 내부 충돌을 다시 검사한다.
+
+## 14. 리네임 복구 상태 기계
+
+리네임과 복원은 AssetTools 호출 전에 원자적 JSON 매니페스트를 기록한다.
+
+```text
+Planned -> Succeeded -> Restored
+       \-> FailedRolledBack
+       \-> FailedRollbackIncomplete -> Recovery Center restore
+```
+
+원본 리네임 매니페스트는 `Rename_*.json`, 역방향 복원 작업은 `Restore_*.json`이다. 배치 실패 시 UObject의 실제 현재 경로를 검사해 이미 이동된 항목만 역연산한다. 복구는 모든 경로가 명확할 때만 실행되며 부분 실패 역시 원래 복원 전 경로로 rollback을 시도한다.
+
+매니페스트는 에셋의 바이너리 사본이 아니라 경로 연산과 감사 기록이다. 따라서 삭제 복구와 이력 보존의 최종 책임은 source control에 있다.
+
+## 15. BodyParser에서 PDA와 폴더 에셋을 결합하는 참조 설계
+
+Body 자동화는 primary parsed data와 Unreal asset inventory를 서로 다른 Source of Truth로 취급한다. BodyParser는 "어떤 Body 레코드가 존재하는가"를 결정하고, Folder Adapter는 "어떤 Unreal 에셋이 존재하는가"를 결정한다. RuleSet compiler는 Binding Preset의 semantic slot을 기준으로 두 데이터 집합을 결합한다.
+
+```mermaid
+flowchart LR
+    subgraph Primary["Primary Source of Truth"]
+        Sheet["Google Sheet / CSV / JSON"]
+        Parser["BodyParser 또는 Source Adapter"]
+        Rows["Parsed rows<br/>ID · BodyType"]
+        Sheet --> Parser --> Rows
+    end
+
+    subgraph Inventory["Unreal Asset Inventory"]
+        Folder["Character/Body/{ID}/{Kind}"]
+        Adapter["Asset Registry Folder Adapter"]
+        Assets["Subject · AssetKind · Role · ObjectPath"]
+        Folder --> Adapter --> Assets
+    end
+
+    subgraph Definitions["DataForge Definitions"]
+        Policy["Naming Policy"]
+        Recipe["Asset Layout Recipe"]
+        Config["Folder Source Config"]
+        Preset["Binding Preset"]
+        RuleSet["Body RuleSet"]
+        Policy --> Recipe --> Config --> RuleSet
+        Preset --> RuleSet
+    end
+
+    Rows --> RuleSet
+    Assets --> RuleSet
+    RuleSet --> PDA["CMBodyDataAsset PDA"]
+    RuleSet --> Table["선택적 Body DataTable"]
+    RuleSet --> Manifest["Association Manifest"]
+```
+
+### 15.1 레코드 식별과 권장 폴더 경계
+
+한 RuleSet이 여러 Body 레코드를 생성한다면 각 레코드의 primary key를 폴더 경계로 노출해야 한다.
+
+```text
+/Game/Chimera/Character/Body
+├─ HumanMale                  # Subject = HumanMale
+│  ├─ Texture                 # AssetKind = Texture
+│  ├─ Material
+│  ├─ Mesh
+│  └─ Niagara
+├─ HumanFemale               # Subject = HumanFemale
+│  └─ {Texture,Material,Mesh,Niagara}
+└─ Generated                 # Folder Source에서 제외
+```
+
+이 구조에서 Folder Source Root는 `/Game/Chimera/Character/Body`, `SubjectFolderIndex=0`, `KindFolderIndex=1`이다. Primary row의 `ID=HumanMale`과 inventory row의 `Subject=HumanMale`이 결합 키가 된다.
+
+Body 레코드가 정확히 하나이고 primary key도 `Body`라면 `/Game/Chimera/Character/Body/{Kind}` 구조를 사용할 수 있다. 이때 Root는 `/Game/Chimera/Character`다. 반대로 여러 primary row가 하나의 `Body/Texture` 폴더를 공유하면 에셋 소유 레코드를 결정할 정보가 없으므로 자동 연결하지 않는다.
+
+### 15.2 정의 에셋 의존성
+
+```mermaid
+flowchart TD
+    NP["NP_CMCharacter<br/>Type prefix · project prefix · kind folder"]
+    ALR["ALR_CMBody<br/>Subject/Kind folder index"]
+    FSC["FSC_CMBodyInventory<br/>Root · recursion · exclusions"]
+    BP["BP_CMBodyPDA<br/>PDA class · semantic slots"]
+    RS["RS_CMBody<br/>primary source · association source · outputs"]
+
+    NP -->|NamingPolicy| ALR
+    ALR -->|LayoutRecipe| FSC
+    FSC -->|AssetRegistryFolder SourceAsset| RS
+    BP -->|BindingPreset| RS
+    RS --> ManagedRule["Managed Asset Rule<br/>PDA_CMBody_{ID}"]
+    ManagedRule --> PDA["Generated PDA"]
+```
+
+Naming Policy는 다음 identity를 빌드하고 파싱한다.
+
+```text
+<TypePrefix>_<ProjectPrefix><Subject><Role>_<Numbering>
+```
+
+예를 들어 `T_CMHumanMalePortrait`은 `AssetKind=Texture`, `Subject=HumanMale`, `Role=Portrait`로 정규화된다. `T_CMHumanMaleTexture_2`는 같은 Subject의 `Texture` 역할 배열에 참여하며 `Numbering=2`를 보존한다.
+
+### 15.3 association match와 cardinality
+
+```mermaid
+flowchart LR
+    Primary["Primary row<br/>ID = HumanMale"]
+    Candidate["Inventory row<br/>Subject = HumanMale<br/>AssetKind = Texture<br/>Role = Portrait"]
+    Key{"ID == Subject"}
+    Slot{"Kind와 Role이<br/>slot과 같은가?"}
+    Scalar["PDA.Portrait<br/>One + Assign"]
+    Array["PDA.Textures[]<br/>Many + MergeByKey"]
+
+    Primary --> Key
+    Candidate --> Key
+    Key -->|yes| Slot
+    Slot -->|scalar slot| Scalar
+    Slot -->|many slot| Array
+```
+
+`One`과 `OptionalOne`은 단일 soft-object property를 요구한다. `Many`는 soft-object array를 요구하고 `Assign`을 사용할 수 없다. `ReplaceManaged`는 배열의 DataForge 관리분을 현재 source와 일치시키며, `MergeByKey`는 이전 Association Manifest가 소유한 항목만 교체하여 개발자가 수동 추가한 항목을 보존한다.
+
+### 15.4 불규칙한 최초 이름과 Rename Audit
+
+Folder Adapter는 폴더에서 Subject를 얻을 수 있지만 임의의 이름 `NewTexture_01`만으로 Portrait, Mask 또는 일반 Texture 역할을 결정할 수 없다. Naming Policy parse가 실패한 inventory row는 `AssetKind`와 `Role`이 비어 있으므로 PDA association 대상으로 사용할 수 없다.
+
+```mermaid
+flowchart TD
+    Legacy["Legacy asset<br/>NewTexture_01"]
+    Subject["Folder evidence<br/>Subject = HumanMale"]
+    Role{"Role을 결정할<br/>충분한 증거가 있는가?"}
+    Audit["Rename Audit 후보 표시"]
+    Approve["개발자 승인"]
+    Rename["T_CMHumanMalePortrait"]
+    Parse["Naming Policy parse 성공"]
+    Bind["PDA.Portrait에 바인딩"]
+    Block["동점 또는 목적지 충돌로 차단"]
+
+    Legacy --> Subject --> Role
+    Role -->|yes| Audit --> Approve --> Rename --> Parse --> Bind
+    Role -->|no| Block
+```
+
+여러 불규칙 에셋이 같은 slot 목적지를 요구하면 DataForge는 `_1`, `_2`를 임의로 배정하지 않는다. 의미 있는 Role 또는 Numbering은 최초 감사에서 개발자가 확정해야 한다. 이름을 바꿀 수 없는 레거시 에셋은 `Subject,ObjectPath,AssetKind,Role` column을 가진 CSV/JSON association source로 명시적으로 연결할 수 있다.
+
+### 15.5 갱신과 실패 원자성
+
+```mermaid
+sequenceDiagram
+    actor Developer
+    participant Source as Body Source
+    participant Inventory as Folder Inventory
+    participant Reconciler as Auto Reconciler
+    participant Compiler as RuleSet Compiler
+    participant PDA as Generated PDA
+
+    Developer->>Source: row 추가 또는 값 수정
+    Developer->>Inventory: asset 추가/삭제/리네임
+    Source-->>Reconciler: SourceRevision 변경
+    Inventory-->>Reconciler: inventory revision 변경
+    Reconciler->>Compiler: 새 Preview 요청
+    Compiler->>Compiler: schema, match, cardinality 검증
+    alt validation success
+        Compiler->>PDA: create/update 및 association manifest 기록
+    else validation failure
+        Compiler-->>Developer: diagnostic 기록, 기존 PDA 보존
+    end
+```
+
+리네임은 PDA association과 별도의 명시적 mutation이다. Rename Audit 승인 후 Asset Registry 변경이 새 Preview/Apply를 유발하며, 적용 직전 source row와 목적지 충돌을 다시 검사한다. 따라서 불규칙 이름의 최초 정리와 정상화된 에셋의 지속적 자동 바인딩을 분리한다.

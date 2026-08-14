@@ -57,7 +57,7 @@ private:
 	void HandleAssetRemoved(const struct FAssetData& AssetData);
 	void HandleAssetRenamed(const struct FAssetData& AssetData, const FString& OldObjectPath);
 	void HandleAssetChange(const struct FAssetData& AssetData, const FString& Reason);
-	void RequestAffectedByPackage(const FString& PackageName, const FString& Reason);
+	int32 RequestAffectedByPackage(const FString& PackageName, const FString& Reason, double DelaySeconds = 0.35);
 	void RequestAll(const FString& Reason);
 	FDataForgeReconcileBatchResult Reconcile(TArray<FPendingRequest> Requests);
 	void SuppressPlannedPackages(const UDataForgeRuleSet& RuleSet, const struct FDataForgeApplyPlan& Plan);

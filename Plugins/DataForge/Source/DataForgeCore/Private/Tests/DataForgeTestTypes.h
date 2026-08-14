@@ -38,6 +38,19 @@ public:
 	FString Description;
 };
 
+UCLASS()
+class UDataForgeAssociationTestAsset : public UDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere)
+	TSoftObjectPtr<UDataForgeTestAsset> PrimaryAsset;
+
+	UPROPERTY(EditAnywhere)
+	TArray<TSoftObjectPtr<UDataForgeTestAsset>> Assets;
+};
+
 USTRUCT()
 struct FDataForgeTestRow : public FTableRowBase
 {

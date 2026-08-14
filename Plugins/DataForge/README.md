@@ -40,6 +40,10 @@ DataForge is an editor-only Unreal Engine plugin that turns canonical parsed row
 - Deterministic JSON/YAML RuleSet snapshots for source-control review
 - Headless single-RuleSet or project-wide validation/Preview/Apply/Cleanup/snapshot commandlet support
 - CI provenance logging for plugin version, RuleSet version, source revision, and materialization summary
+- Naming Policy, folder Layout Recipe, and Binding Preset assets for reusable semantic asset conventions
+- Asset Registry Folder associations with explicit cardinality and managed merge behavior
+- Evidence-ranked Rename Audit for selected assets or recursive Content Browser folders
+- Collision-safe batch rename and Recovery Center restoration backed by persisted manifests
 
 Managed asset identity is `(RuleSetId, RecordId, Role)`. When that identity still exists but its Asset Rule produces a different path, Preview reports a Move and Apply renames the owned asset. Apply always preserves true orphans. Deletion is available only through the separately confirmed **Cleanup Root Orphans** action or the `-CleanupOrphans` commandlet mode; both re-preview/revalidate ownership and drift before deleting. External and unowned assets are never moved or deleted.
 
@@ -64,6 +68,14 @@ Managed asset identity is `(RuleSetId, RecordId, Role)`. When that identity stil
 Auto Map adds only missing exact-name targets. It maps source columns to editable row properties and defined Generated Outputs to same-name soft-object row properties; it never overwrites an existing target binding.
 
 The Source UI shows only the field consumed by the selected adapter: CSV/JSON use `File`, Google Sheet Cache uses `Source Asset`, and Multi Source uses `Inputs`. Deleting a generated DataTable or DataForge-owned DA/PDA in the Content Browser reopens the owning RuleSet's Creation Wizard on the next editor tick so the output can be reviewed and recreated.
+
+## Folder inventory, rename audit, and recovery
+
+Folder-driven association uses a **Naming Policy**, **Asset Layout Recipe**, **Folder Source Config**, and **Binding Preset**. Add the Folder Source Config as an `Asset Registry Folder` Association Source, then reference its Source ID from Binding Preset slots. Folder inventory rows remain canonical `FDataForgeDataSet` rows, so CSV, JSON, Google cache, and folder associations use the same compiler boundary.
+
+For convention repair, select one or more assets and choose **DataForge Rename Audit...**, or right-click a folder and choose **DataForge Audit Folder...**. DataForge ranks candidates by existing Association Manifest, exact current name, Subject folder, and Naming Policy parsing. Only a unique highest score is marked `Recommended`; an evidence-free or tied candidate is never auto-selected.
+
+Checked candidates are revalidated as one batch. DataForge blocks duplicate source selections, duplicate destinations, stale RuleSets/source rows, and occupied packages. Before AssetTools runs, it writes `Saved/DataForge/Recovery/Rename_*.json`. Open **Tools > DataForge Recovery Center...** to inspect persisted batches and restore a collision-free successful or incomplete-rollback batch. Restore writes its own `Restore_*.json` before moving assets and attempts to roll back partial restore failures.
 
 ## Google Sheet cache workflow
 
@@ -269,7 +281,7 @@ UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -VerifySnapshots
 
 Graph Apply is dependency ordered but is not a project-wide atomic transaction. Each RuleSet is previewed and applied independently, so a later failure does not roll back an earlier successful prerequisite.
 
-Recovery manifests are written under `Saved/DataForge/Recovery` before content mutation or orphan deletion. They are audit/reconstruction data, not a binary asset backup or an automatic restore facility; keep deleted assets in source control or another backup until restoration support is implemented. Unreal's AssetTools rename operation saves the moved package even when `Output.bSaveAfterApply` is false.
+Recovery manifests are written under `Saved/DataForge/Recovery` before content mutation, rename/restore, or orphan deletion. Rename manifests can be restored through Recovery Center when every recorded path is unambiguous and collision-free. DataTable/property and deletion manifests remain audit/reconstruction data rather than binary backups; keep deleted assets in source control or another backup. Unreal's AssetTools rename operation saves moved packages even when `Output.bSaveAfterApply` is false.
 
 ## RuleSet snapshots
 
@@ -288,4 +300,4 @@ Conversion suggestions are advisory and never rewrite source values or select a 
 
 ## Remaining architecture work
 
-Post-1.0 architecture work is recovery-manifest restoration and incremental diff/cache optimization.
+The planned naming, folder association, rename continuity, candidate audit, and rename restoration phases are complete. Future work is optional optimization: incremental Asset Registry indexing for very large projects and source-control-provider integration for richer binary recovery.

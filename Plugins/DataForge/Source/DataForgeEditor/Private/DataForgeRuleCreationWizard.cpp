@@ -1,14 +1,18 @@
 #include "DataForgeRuleCreationWizard.h"
 
 #include "AssetRegistry/AssetData.h"
+#include "ContentBrowserModule.h"
 #include "DataForgeAssetLayoutAuthoring.h"
 #include "DataForgeAssetLayoutProfile.h"
+#include "DataForgeBindingPreset.h"
 #include "DataForgePipeline.h"
 #include "DataForgeEditorService.h"
 #include "DataForgeRuleCreationWorkflow.h"
 #include "DataForgeRuleSet.h"
 #include "Framework/Application/SlateApplication.h"
 #include "IDetailsView.h"
+#include "IContentBrowserSingleton.h"
+#include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
 #include "PropertyEditorDelegates.h"
@@ -16,8 +20,10 @@
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
@@ -39,6 +45,7 @@ namespace DataForgeRuleCreationWizard
 		{
 			OwnerWindow = Args._OwnerWindow;
 			Workflow = MakeShared<FDataForgeRuleCreationWorkflow>(*Args._RuleSet);
+			BindingPresetOutputFolder = Workflow->GetBindingPresetOutputFolder();
 
 			for (const FDataForgeSourceDescriptor& Descriptor : FDataForgeSourceAdapterRegistry::Get().DescribeAll())
 			{
@@ -146,6 +153,51 @@ namespace DataForgeRuleCreationWizard
 						]
 					]
 				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f, 12.0f, 8.0f)
+				[
+					SNew(SBorder)
+					.Visibility(this, &SWizard::GetBindingPresetVisibility)
+					.Padding(10.0f)
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("BindingPresetHint", "Optional: select a Binding Preset to create its Managed Asset Rule, PDA/DA output, and safe row-reference binding together."))
+							.AutoWrapText(true)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 6.0f)
+						[
+							SNew(SObjectPropertyEntryBox)
+							.AllowedClass(UDataForgeBindingPreset::StaticClass())
+							.ObjectPath(this, &SWizard::GetSelectedBindingPresetPath)
+							.OnObjectChanged(this, &SWizard::OnBindingPresetSelected)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 0.0f, 6.0f, 0.0f)
+							[
+								SNew(SEditableTextBox)
+								.Text(this, &SWizard::GetBindingPresetOutputFolderText)
+								.OnTextCommitted(this, &SWizard::OnBindingPresetOutputFolderCommitted)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
+							[
+								SAssignNew(BindingPresetPathButton, SComboButton)
+								.OnGetMenuContent(this, &SWizard::MakeBindingPresetPathPicker)
+								.ButtonContent()[SNew(STextBlock).Text(LOCTEXT("BrowseBindingPresetFolder", "Browse"))]
+							]
+							+ SHorizontalBox::Slot().AutoWidth()
+							[
+								SNew(SButton)
+								.Text(LOCTEXT("ApplyBindingPreset", "Apply Preset"))
+								.IsEnabled_Lambda([this]() { return Workflow->GetSelectedBindingPreset() != nullptr; })
+								.OnClicked(this, &SWizard::OnApplyBindingPreset)
+							]
+						]
+					]
+				]
 				+ SVerticalBox::Slot().FillHeight(1.0f).Padding(8.0f)
 				[
 					SNew(SSplitter)
@@ -216,8 +268,8 @@ namespace DataForgeRuleCreationWizard
 			case EDataForgeWizardStep::Schema: return LOCTEXT("SchemaHelp", "Probe inferred required columns and suggested a primary key. Review the suggestion; choose another detected field when needed.");
 			case EDataForgeWizardStep::Output: return LOCTEXT("OutputHelp", "Select the DataTable row struct and choose a Content Browser destination. Creation, deletion, and save behavior are Advanced options.");
 			case EDataForgeWizardStep::AssetLayout: return LOCTEXT("AssetLayoutHelp", "Choose a central AssetLayoutProfile or continue manually. Profile parameters use ${Name}; source columns use {ColumnName}. Materialization changes only this transient draft until Finish & Apply.");
-			case EDataForgeWizardStep::AssetRules: return LOCTEXT("AssetRulesHelp", "Define external lookup rules and Managed asset destinations first. Rule Ids are selected from dropdowns in later steps; {ColumnName} tokens are case-sensitive.");
-			case EDataForgeWizardStep::GeneratedOutputs: return LOCTEXT("GeneratedOutputsHelp", "Define PDA/DA outputs and select a previously configured Managed Asset Rule. Matching source fields are synchronized into Bindings automatically.");
+			case EDataForgeWizardStep::AssetRules: return LOCTEXT("AssetRulesHelp", "Apply an optional Binding Preset first, then review its Managed destination or define rules manually. Rule Ids are selected from dropdowns later; {ColumnName} tokens are case-sensitive.");
+			case EDataForgeWizardStep::GeneratedOutputs: return LOCTEXT("GeneratedOutputsHelp", "Define PDA/DA outputs and optional Association Sources. Association Sources may use any adapter and expose normalized match, path, kind, and role columns.");
 			case EDataForgeWizardStep::Bindings: return LOCTEXT("BindingsHelp", "Review inferred source-to-row, source-to-PDA/DA, and generated-object-to-row mappings. Add only exceptional mappings manually.");
 			case EDataForgeWizardStep::Preview: return LOCTEXT("PreviewHelp", "Compile and inspect the mutation-free desired-state plan. Finish saves the RuleSet, runs a fresh Preview, and immediately Applies the generated content.");
 			default: return FText::GetEmpty();
@@ -254,6 +306,11 @@ namespace DataForgeRuleCreationWizard
 					}
 					Text += TEXT("\nDraft Status: ") + FDataForgeAssetLayoutAuthoring::Analyze(Workflow->GetDraft()).MakeSummary();
 				}
+			}
+			if (Workflow->GetStep() == EDataForgeWizardStep::AssetRules && Workflow->GetSelectedBindingPreset())
+			{
+				Text += FString::Printf(TEXT("\n\nBinding Preset\nPreset: %s\nGenerated Folder: %s"),
+					*Workflow->GetSelectedBindingPreset()->GetName(), *BindingPresetOutputFolder);
 			}
 			if (!Plan.Rows.IsEmpty() || !Plan.ManagedAssets.IsEmpty())
 			{
@@ -316,6 +373,7 @@ namespace DataForgeRuleCreationWizard
 		EVisibility GetSourceVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Source ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetSchemaVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Schema ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetAssetLayoutVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::AssetLayout ? EVisibility::Visible : EVisibility::Collapsed; }
+		EVisibility GetBindingPresetVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::AssetRules ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetActionVisibility() const
 		{
 			const EDataForgeWizardStep Step = Workflow->GetStep();
@@ -357,7 +415,8 @@ namespace DataForgeRuleCreationWizard
 			case EDataForgeWizardStep::AssetRules:
 				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, AssetRules));
 			case EDataForgeWizardStep::GeneratedOutputs:
-				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs));
+				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, AssociationSources))
+					|| IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, GeneratedOutputs));
 			case EDataForgeWizardStep::Bindings:
 				return IsInSection(GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Bindings));
 			default:
@@ -398,6 +457,60 @@ namespace DataForgeRuleCreationWizard
 			Workflow->SelectAssetLayoutProfile(Cast<UDataForgeAssetLayoutProfile>(AssetData.GetAsset()));
 			StatusMessage.Reset();
 			RebuildLayoutParameterRows();
+		}
+
+		FString GetSelectedBindingPresetPath() const
+		{
+			const UDataForgeBindingPreset* Preset = Workflow->GetSelectedBindingPreset();
+			return Preset ? Preset->GetPathName() : FString();
+		}
+
+		void OnBindingPresetSelected(const FAssetData& AssetData)
+		{
+			Workflow->SelectBindingPreset(Cast<UDataForgeBindingPreset>(AssetData.GetAsset()));
+			StatusMessage.Reset();
+		}
+
+		FText GetBindingPresetOutputFolderText() const
+		{
+			return FText::FromString(BindingPresetOutputFolder);
+		}
+
+		void OnBindingPresetOutputFolderCommitted(const FText& Text, ETextCommit::Type)
+		{
+			BindingPresetOutputFolder = Text.ToString();
+			Workflow->SetBindingPresetOutputFolder(BindingPresetOutputFolder);
+			StatusMessage.Reset();
+		}
+
+		TSharedRef<SWidget> MakeBindingPresetPathPicker()
+		{
+			FPathPickerConfig Config;
+			Config.DefaultPath = FPackageName::IsValidLongPackageName(BindingPresetOutputFolder) ? BindingPresetOutputFolder : TEXT("/Game");
+			Config.bAllowClassesFolder = false;
+			Config.bAddDefaultPath = false;
+			Config.bAllowContextMenu = false;
+			Config.OnPathSelected = FOnPathSelected::CreateSP(this, &SWizard::OnBindingPresetOutputFolderSelected);
+			return SNew(SBox).WidthOverride(360.0f).HeightOverride(480.0f)
+			[
+				FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser")).Get().CreatePathPicker(Config)
+			];
+		}
+
+		void OnBindingPresetOutputFolderSelected(const FString& Folder)
+		{
+			BindingPresetOutputFolder = Folder;
+			Workflow->SetBindingPresetOutputFolder(Folder);
+			StatusMessage.Reset();
+			if (BindingPresetPathButton.IsValid()) BindingPresetPathButton->SetIsOpen(false);
+		}
+
+		FReply OnApplyBindingPreset()
+		{
+			Workflow->MaterializeBindingPreset();
+			StatusMessage.Reset();
+			DetailsView->ForceRefresh();
+			return FReply::Handled();
 		}
 
 		FReply OnUseManualLayout()
@@ -534,6 +647,8 @@ namespace DataForgeRuleCreationWizard
 		TArray<TSharedPtr<FName>> PrimaryKeyOptions;
 		TSharedPtr<SComboBox<TSharedPtr<FName>>> PrimaryKeyCombo;
 		TSharedPtr<SVerticalBox> LayoutParameterRows;
+		TSharedPtr<SComboButton> BindingPresetPathButton;
+		FString BindingPresetOutputFolder;
 		FString StatusMessage;
 	};
 }
