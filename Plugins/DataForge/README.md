@@ -72,9 +72,15 @@ Managed asset identity is `(RuleSetId, RecordId, Role)`. When that identity stil
 
 Auto Map adds only missing exact-name targets. It maps source columns to editable row properties and defined Generated Outputs to same-name soft-object row properties; it never overwrites an existing target binding.
 
+A successful Probe immediately reveals a dedicated Primary Key dropdown and it remains visible through Schema; Automatic Setup also reveals it on Source after its internal Probe. Only the latest Probe columns are listed. The column does not need to be named `Id`; a selected `CharacterCode`, `BodyKey`, or other unique source column supplies the subject value represented as `<ID>` in Naming Policy examples. Manual Asset Rule tokens remain literal and case-sensitive, so that example would use `{CharacterCode}`. Asset names do not synthesize missing source columns.
+
 Automatic Setup never guesses among tied reusable definitions. An exact Asset Search Root match reuses the existing `Folder Source Config → Asset Layout Recipe → Naming Policy` chain. Multiple exact matches or multiple policy candidates block analysis and require an explicit Naming Policy override. Any draft edit or repeated Preview invalidates the previous approval.
 
+Reopening Automatic Setup restores the committed RuleSet's asset-search root, generated output folder/class, definition folder, and Naming Policy where they can be recovered from its Generated Output, Binding Preset, and Folder Source chain. The reusable Chimera default policy is `/Game/Chimera/DataForge/Naming/NP_ChimeraDefault`; it covers common Blueprint, UI, texture, material, mesh, animation, Niagara, audio, table, data-asset, sequence, input, Gameplay Ability/Effect, enum, struct, and font prefixes.
+
 The Source UI shows only the field consumed by the selected adapter: CSV/JSON use `File`, Google Sheet Cache uses `Source Asset`, and Multi Source uses `Inputs`. Deleting a generated DataTable or DataForge-owned DA/PDA in the Content Browser reopens the owning RuleSet's Creation Wizard on the next editor tick so the output can be reviewed and recreated.
+
+DataForge diagnostics are recorded in the **DataForge Message Log** and the active tool's status/review area without automatically opening or focusing the Message Log window. A compatible existing PDA/DA at a generated path is adopted by default only when it has no DataForge ownership metadata; Preview reports `DF1219`, Apply updates only declared bindings, and assets owned by another RuleSet remain blocked. Disable **Adopt Compatible Unowned Asset** in a Generated Output's Advanced properties when strict create-only ownership is required.
 
 ## Folder inventory, rename audit, and recovery
 

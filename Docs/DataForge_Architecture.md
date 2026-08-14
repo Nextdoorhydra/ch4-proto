@@ -351,3 +351,11 @@ sequenceDiagram
 ```
 
 리네임은 PDA association과 별도의 명시적 mutation이다. Rename Audit 승인 후 Asset Registry 변경이 새 Preview/Apply를 유발하며, 적용 직전 source row와 목적지 충돌을 다시 검사한다. 따라서 불규칙 이름의 최초 정리와 정상화된 에셋의 지속적 자동 바인딩을 분리한다.
+
+## 16. 편집기 상태 복원과 안전한 기존 에셋 갱신
+
+Creation Wizard를 다시 열 때는 committed RuleSet에서 Generated Output의 class/folder, Binding Preset 또는 Folder Source의 definition folder, Folder Source의 search root와 Naming Policy를 복원한다. Automatic Setup 재분석은 이 값을 초기값으로 사용하므로 반복 설정이 필요하지 않다.
+
+진단은 `DataForge` Message Log listing과 현재 도구의 status/review에 기록하지만 Message Log 창을 자동으로 열거나 포커스하지 않는다. 레벨 편집 작업은 진단 창 때문에 가려지지 않는다.
+
+Generated Output 경로에 호환되는 기존 PDA/DA가 있고 DataForge ownership metadata가 전혀 없다면 기본적으로 migration 대상으로 채택한다. Preview는 `DF1219`를 표시하고 Apply는 선언된 binding property만 갱신한 뒤 ownership metadata를 기록한다. 다른 RuleSet ID가 있는 에셋은 계속 `DF1213`으로 차단한다. 엄격한 create-only 정책이 필요한 Output은 Advanced의 `Adopt Compatible Unowned Asset`을 끈다.
