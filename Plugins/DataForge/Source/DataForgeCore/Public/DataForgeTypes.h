@@ -239,7 +239,7 @@ struct DATAFORGECORE_API FDataForgeBindingRule
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Binding")
 	EDataForgeBindingSource Source = EDataForgeBindingSource::SourceValue;
 
-	/** Canonical source field used as the value, or as input to an external asset rule. */
+	/** Canonical source field used as the value, or as input to an external asset rule. ResolvedAsset bindings to soft-object arrays split semicolon-delimited ids. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Binding", meta = (EditCondition = "Source != EDataForgeBindingSource::GeneratedOutput", EditConditionHides))
 	FName SourceColumn = NAME_None;
 

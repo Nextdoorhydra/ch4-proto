@@ -304,6 +304,38 @@ namespace DataForgePipeline
 		return true;
 	}
 
+	bool ResolveAssetArrayValue(
+		const FDataForgeCompiledBinding& Binding,
+		const FDataForgeAssetRule& AssetRule,
+		const FDataForgeRow& Row,
+		FName RecordId,
+		const FString& SourceValue,
+		FString& OutValue,
+		TArray<FDataForgeDiagnostic>& Diagnostics)
+	{
+		const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Binding.TargetProperty);
+		if (!ArrayProperty || !CastField<FSoftObjectProperty>(ArrayProperty->Inner)) return false;
+
+		TArray<FString> AssetIds;
+		SourceValue.ParseIntoArray(AssetIds, TEXT(";"), true);
+		TArray<FString> ResolvedPaths;
+		for (FString AssetId : AssetIds)
+		{
+			AssetId.TrimStartAndEndInline();
+			if (AssetId.IsEmpty()) continue;
+			FDataForgeRow ElementRow = Row;
+			ElementRow.Values.FindOrAdd(Binding.Rule.SourceColumn) = AssetId;
+			FString ResolvedPath;
+			if (!ResolveAssetValue(AssetRule, ElementRow, RecordId, Binding.Rule.SourceColumn, ResolvedPath, Diagnostics))
+			{
+				return false;
+			}
+			ResolvedPaths.Add(FString::Printf(TEXT("\"%s\""), *ResolvedPath));
+		}
+		OutValue = TEXT("(") + FString::Join(ResolvedPaths, TEXT(",")) + TEXT(")");
+		return true;
+	}
+
 	bool ImportBindingValue(
 		const FDataForgeCompiledBinding& Binding,
 		const FString& Value,
@@ -438,7 +470,13 @@ namespace DataForgePipeline
 		if (Binding.Rule.Source == EDataForgeBindingSource::ResolvedAsset)
 		{
 			const FDataForgeAssetRule* AssetRule = AssetRules.Find(Binding.Rule.AssetRuleId);
-			return AssetRule && ResolveAssetValue(*AssetRule, SourceRow, RecordId, Binding.Rule.SourceColumn, OutValue, Diagnostics);
+			if (!AssetRule) return false;
+			if (CastField<FArrayProperty>(Binding.TargetProperty))
+			{
+				const FString SourceListValue = OutValue;
+				return ResolveAssetArrayValue(Binding, *AssetRule, SourceRow, RecordId, SourceListValue, OutValue, Diagnostics);
+			}
+			return ResolveAssetValue(*AssetRule, SourceRow, RecordId, Binding.Rule.SourceColumn, OutValue, Diagnostics);
 		}
 		return true;
 	}
