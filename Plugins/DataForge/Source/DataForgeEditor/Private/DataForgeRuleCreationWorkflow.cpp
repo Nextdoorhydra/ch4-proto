@@ -9,6 +9,7 @@
 #include "DataForgeBindingPresetAuthoring.h"
 #include "DataForgeEditorService.h"
 #include "DataForgeDefinitionDiscovery.h"
+#include "DataForgeFolderSource.h"
 #include "DataForgePipeline.h"
 #include "DataForgeNamingPolicy.h"
 #include "Engine/DataTable.h"
@@ -127,6 +128,63 @@ void FDataForgeRuleCreationWorkflow::SetAutomaticReviewApproved(bool bApproved)
 	LastMessage = bAutomaticReviewApproved
 		? TEXT("Automatic Setup Preview approved. Finish & Apply is now available.")
 		: TEXT("Review the Automatic Setup Preview before Finish & Apply.");
+}
+
+FDataForgeAutomaticSetupDefaults FDataForgeRuleCreationWorkflow::GetAutomaticSetupDefaults() const
+{
+	FDataForgeAutomaticSetupDefaults Defaults;
+	const UDataForgeRuleSet& RuleSet = GetDraft();
+	Defaults.GeneratedOutputFolder = FPackageName::IsValidLongPackageName(RuleSet.Output.AssetPath)
+		? FPackageName::GetLongPackagePath(RuleSet.Output.AssetPath)
+		: TEXT("/Game/DataForgeGenerated");
+	Defaults.DefinitionFolder = Target.IsValid()
+		? FPackageName::GetLongPackagePath(Target->GetOutermost()->GetName()) + TEXT("/Definitions")
+		: TEXT("/Game/DataForge/Definitions");
+
+	if (!RuleSet.GeneratedOutputs.IsEmpty())
+	{
+		const FDataForgeGeneratedAssetOutputRule& Output = RuleSet.GeneratedOutputs[0];
+		Defaults.GeneratedOutputClass = Output.AssetClass.Get();
+		if (const FDataForgeAssetRule* Rule = RuleSet.AssetRules.FindByPredicate([&Output](const FDataForgeAssetRule& Candidate)
+		{
+			return Candidate.RuleId == Output.AssetRuleId && Candidate.Ownership == EDataForgeAssetOwnership::Managed;
+		}))
+		{
+			Defaults.GeneratedOutputFolder = Rule->BaseFolder;
+		}
+	}
+
+	UDataForgeBindingPreset* Preset = RuleSet.BindingPreset.Get();
+	if (!Preset && !RuleSet.BindingPreset.IsNull()) Preset = RuleSet.BindingPreset.LoadSynchronous();
+	if (Preset)
+	{
+		Defaults.DefinitionFolder = FPackageName::GetLongPackagePath(Preset->GetOutermost()->GetName());
+	}
+	for (const FDataForgeAssociationSourceRule& Association : RuleSet.AssociationSources)
+	{
+		if (Association.Source.AdapterId != TEXT("AssetRegistryFolder")) continue;
+		UObject* SourceAsset = Association.Source.SourceAsset.Get();
+		if (!SourceAsset && !Association.Source.SourceAsset.IsNull()) SourceAsset = Association.Source.SourceAsset.LoadSynchronous();
+		UDataForgeFolderSourceConfig* FolderSource = Cast<UDataForgeFolderSourceConfig>(SourceAsset);
+		if (!FolderSource) continue;
+		Defaults.AssetSearchRoot = FolderSource->RootFolder;
+		if (!RuleSet.BindingPreset.IsValid())
+		{
+			Defaults.DefinitionFolder = FPackageName::GetLongPackagePath(FolderSource->GetOutermost()->GetName());
+		}
+		UDataForgeAssetLayoutRecipe* Recipe = FolderSource->LayoutRecipe.Get();
+		if (!Recipe && !FolderSource->LayoutRecipe.IsNull()) Recipe = FolderSource->LayoutRecipe.LoadSynchronous();
+		if (Recipe)
+		{
+			Defaults.NamingPolicy = Recipe->NamingPolicy.Get();
+			if (!Defaults.NamingPolicy.IsValid() && !Recipe->NamingPolicy.IsNull())
+			{
+				Defaults.NamingPolicy = Recipe->NamingPolicy.LoadSynchronous();
+			}
+		}
+		break;
+	}
+	return Defaults;
 }
 
 FString FDataForgeRuleCreationWorkflow::GetAutomaticSetupInspection() const

@@ -51,12 +51,12 @@ namespace DataForgeRuleCreationWizard
 			OwnerWindow = Args._OwnerWindow;
 			Workflow = MakeShared<FDataForgeRuleCreationWorkflow>(*Args._RuleSet);
 			BindingPresetOutputFolder = Workflow->GetBindingPresetOutputFolder();
-			AutomaticGeneratedFolder = FPackageName::IsValidLongPackageName(Workflow->GetDraft().Output.AssetPath)
-				? FPackageName::GetLongPackagePath(Workflow->GetDraft().Output.AssetPath)
-				: TEXT("/Game/DataForgeGenerated");
-			AutomaticDefinitionFolder = Args._RuleSet
-				? Args._RuleSet->GetOutermost()->GetName().LeftChop(Args._RuleSet->GetName().Len() + 1) + TEXT("/Definitions")
-				: TEXT("/Game/DataForge/Definitions");
+			const FDataForgeAutomaticSetupDefaults AutomaticDefaults = Workflow->GetAutomaticSetupDefaults();
+			AutomaticAssetRoot = AutomaticDefaults.AssetSearchRoot;
+			AutomaticGeneratedFolder = AutomaticDefaults.GeneratedOutputFolder;
+			AutomaticDefinitionFolder = AutomaticDefaults.DefinitionFolder;
+			AutomaticNamingPolicy = AutomaticDefaults.NamingPolicy;
+			AutomaticOutputClass = AutomaticDefaults.GeneratedOutputClass;
 
 			for (const FDataForgeSourceDescriptor& Descriptor : FDataForgeSourceAdapterRegistry::Get().DescribeAll())
 			{
@@ -107,23 +107,38 @@ namespace DataForgeRuleCreationWizard
 							SNew(STextBlock).Text(this, &SWizard::GetSelectedAdapterText)
 						]
 					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(12.0f, 0.0f, 8.0f, 0.0f)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f, 12.0f, 8.0f)
+				[
+					SNew(SBorder)
+					.Visibility(this, &SWizard::GetPrimaryKeyVisibility)
+					.Padding(10.0f)
 					[
-						SNew(STextBlock).Text(LOCTEXT("PrimaryKey", "Primary Key"))
-						.Visibility(this, &SWizard::GetSchemaVisibility)
-					]
-					+ SHorizontalBox::Slot().FillWidth(1.0f)
-					[
-						SAssignNew(PrimaryKeyCombo, SComboBox<TSharedPtr<FName>>)
-						.OptionsSource(&PrimaryKeyOptions)
-						.OnGenerateWidget_Lambda([](TSharedPtr<FName> Item)
-						{
-							return SNew(STextBlock).Text(Item.IsValid() ? FText::FromName(*Item) : FText::GetEmpty());
-						})
-						.OnSelectionChanged(this, &SWizard::OnPrimaryKeySelected)
-						.Visibility(this, &SWizard::GetSchemaVisibility)
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
 						[
-							SNew(STextBlock).Text(this, &SWizard::GetSelectedPrimaryKeyText)
+							SNew(STextBlock)
+							.Text(LOCTEXT("PrimaryKey", "Primary Key"))
+							.Font(FAppStyle::GetFontStyle(TEXT("HeadingSmall")))
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 6.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("PrimaryKeyHelp", "Choose the probed source column whose value uniquely identifies each row. This value is also the default subject key used by folder and naming association rules."))
+							.AutoWrapText(true)
+						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+						[
+							SAssignNew(PrimaryKeyCombo, SComboBox<TSharedPtr<FName>>)
+							.OptionsSource(&PrimaryKeyOptions)
+							.OnGenerateWidget_Lambda([](TSharedPtr<FName> Item)
+							{
+								return SNew(STextBlock).Text(Item.IsValid() ? FText::FromName(*Item) : FText::GetEmpty());
+							})
+							.OnSelectionChanged(this, &SWizard::OnPrimaryKeySelected)
+							[
+								SNew(STextBlock).Text(this, &SWizard::GetSelectedPrimaryKeyText)
+							]
 						]
 					]
 				]
@@ -609,7 +624,15 @@ namespace DataForgeRuleCreationWizard
 		}
 
 		EVisibility GetSourceVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Source ? EVisibility::Visible : EVisibility::Collapsed; }
-		EVisibility GetSchemaVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::Schema ? EVisibility::Visible : EVisibility::Collapsed; }
+		EVisibility GetPrimaryKeyVisibility() const
+		{
+			const EDataForgeWizardStep Step = Workflow->GetStep();
+			const bool bRelevantStep = Step == EDataForgeWizardStep::Source
+				|| Step == EDataForgeWizardStep::Probe
+				|| Step == EDataForgeWizardStep::Schema;
+			return bRelevantStep && !Workflow->GetProbedDataSet().Columns.IsEmpty()
+				? EVisibility::Visible : EVisibility::Collapsed;
+		}
 		EVisibility GetAssetLayoutVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::AssetLayout ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetBindingPresetVisibility() const { return Workflow->GetStep() == EDataForgeWizardStep::AssetRules ? EVisibility::Visible : EVisibility::Collapsed; }
 		EVisibility GetActionVisibility() const

@@ -47,7 +47,20 @@ bool FDataForgeAutomaticSetupWorkflowTest::RunTest(const FString& Parameters)
 			FString(TEXT("/Game/DataForgeExamples/MultiAssetRefs/Definitions/FSC_MultiAssetRefs.FSC_MultiAssetRefs")));
 	}
 	TestEqual(TEXT("One generated output is configured"), Workflow.GetDraft().GeneratedOutputs.Num(), 1);
+	if (Workflow.GetDraft().GeneratedOutputs.Num() == 1)
+	{
+		TestTrue(TEXT("Automatic Setup can adopt a compatible legacy unowned PDA"),
+			Workflow.GetDraft().GeneratedOutputs[0].bAdoptCompatibleUnownedAsset);
+	}
 	TestEqual(TEXT("One Managed Asset Rule is configured"), Workflow.GetDraft().AssetRules.Num(), 1);
+	const FDataForgeAutomaticSetupDefaults Remembered = Workflow.GetAutomaticSetupDefaults();
+	TestEqual(TEXT("Committed folder root can prefill a reopened Wizard"), Remembered.AssetSearchRoot,
+		FString(TEXT("/Game/DataForgeExamples/MultiAssetRefs/Inventory")));
+	TestEqual(TEXT("Managed output folder can prefill a reopened Wizard"), Remembered.GeneratedOutputFolder,
+		FString(TEXT("/Game/DataForgeTests/AutomaticSetup/Generated")));
+	TestEqual(TEXT("Generated class can prefill a reopened Wizard"), Remembered.GeneratedOutputClass.Get(),
+		UDataForgeEditorManyPresetAsset::StaticClass());
+	TestNotNull(TEXT("Discovered Naming Policy can prefill a reopened Wizard"), Remembered.NamingPolicy.Get());
 	TestTrue(TEXT("Automatic inspection exposes the inferred result"),
 		Workflow.GetAutomaticSetupInspection().Contains(TEXT("Automatic Setup Review")));
 	const FString ReviewBeforePreview = Workflow.GetAutomaticSetupInspection();
@@ -57,11 +70,18 @@ bool FDataForgeAutomaticSetupWorkflowTest::RunTest(const FString& Parameters)
 		TEXT("Reuse - /Game/DataForgeExamples/MultiAssetRefs/Definitions/FSC_MultiAssetRefs")));
 	TestTrue(TEXT("Review exposes inferred assignment cardinality"), ReviewBeforePreview.Contains(TEXT("(Many)")));
 	FString AdvanceReason;
-	while (Workflow.GetStep() != EDataForgeWizardStep::Preview)
+	for (int32 StepIndex = 0;
+		StepIndex < 8 && Workflow.GetStep() != EDataForgeWizardStep::Preview;
+		++StepIndex)
 	{
-		TestTrue(TEXT("Automatically configured workflow advances to Preview"), Workflow.Next(AdvanceReason));
-		if (!AdvanceReason.IsEmpty()) AddError(AdvanceReason);
+		AdvanceReason.Reset();
+		if (!TestTrue(TEXT("Automatically configured workflow advances to Preview"), Workflow.Next(AdvanceReason)))
+		{
+			AddError(AdvanceReason);
+			break;
+		}
 	}
+	TestEqual(TEXT("Automatically configured workflow reaches Preview"), Workflow.GetStep(), EDataForgeWizardStep::Preview);
 	const FDataForgeResult Preview = Workflow.Preview();
 	TestTrue(TEXT("Automatically configured Draft passes the normal Preview"), Preview.bSuccess);
 	const FString ReviewAfterPreview = Workflow.GetAutomaticSetupInspection();

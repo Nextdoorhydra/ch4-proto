@@ -10,6 +10,15 @@ class UDataForgeAssetLayoutProfile;
 class UDataForgeBindingPreset;
 class UDataForgeNamingPolicy;
 
+struct DATAFORGEEDITOR_API FDataForgeAutomaticSetupDefaults
+{
+	FString AssetSearchRoot = TEXT("/Game");
+	FString GeneratedOutputFolder;
+	FString DefinitionFolder;
+	TWeakObjectPtr<UDataForgeNamingPolicy> NamingPolicy;
+	TWeakObjectPtr<UClass> GeneratedOutputClass;
+};
+
 enum class EDataForgeWizardStep : uint8
 {
 	Source,
@@ -43,6 +52,7 @@ public:
 	bool HasSuccessfulPreview() const;
 	bool IsAutomaticReviewApproved() const;
 	void SetAutomaticReviewApproved(bool bApproved);
+	FDataForgeAutomaticSetupDefaults GetAutomaticSetupDefaults() const;
 	FString GetAutomaticSetupInspection() const;
 
 	FDataForgeResult Probe();
