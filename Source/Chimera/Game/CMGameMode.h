@@ -6,7 +6,7 @@
 #include "CMGameMode.generated.h"
 
 class ACMPlayerState;
-class ACMPawn;
+class ACMChimera;
 
 UCLASS()
 class CHIMERA_API ACMGameMode : public AGameModeBase
@@ -20,13 +20,16 @@ public:
     virtual void Logout(AController* Exiting) override;
     virtual void RestartPlayer(AController* NewPlayer) override;
     virtual void GenericPlayerInitialization(AController* C) override;
+    virtual UClass* GetDefaultPawnClassForController_Implementation(
+        AController* InController
+    ) override;
 
     bool TryRetryGame(APlayerController* RequestingPlayer);
 
 private:
     bool IsGameplayMap() const;
     void AssignPlayerColors();
-    ACMPawn* EnsureSharedChimera();
+    ACMChimera* EnsureSharedChimera();
     void RebalanceControlAssignments(
         const ACMPlayerState* ExcludedPlayerState = nullptr
     );

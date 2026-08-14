@@ -16,7 +16,8 @@ public class Chimera : ModuleRules
 			"Engine",
 			"GameplayAbilities",
 			"GameplayTags",
-			"GameplayTasks"
+			"GameplayTasks",
+			"PhysicsCore"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[]

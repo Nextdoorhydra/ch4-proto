@@ -6,8 +6,9 @@
 struct CHIMERA_API FCMControlAssignmentPolicy
 {
     static void Rebalance(
-        const TArray<TArray<ECMControlPart>>& ExistingAssignments,
+        const TArray<TArray<FCMPartSlotAddress>>& ExistingAssignments,
+        int32 ActiveSegmentCount,
         FRandomStream& RandomStream,
-        TArray<TArray<ECMControlPart>>& OutAssignments
+        TArray<TArray<FCMPartSlotAddress>>& OutAssignments
     );
 };

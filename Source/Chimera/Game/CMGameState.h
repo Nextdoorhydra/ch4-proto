@@ -5,7 +5,7 @@
 
 #include "CMGameState.generated.h"
 
-class ACMPawn;
+class ACMChimera;
 class APlayerState;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraSharedPawnChanged);
@@ -24,7 +24,7 @@ public:
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
 
-    void SetSharedChimera(ACMPawn* NewSharedChimera);
+    void SetSharedChimera(ACMChimera* NewSharedChimera);
     void NotifyLobbyRosterChanged();
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Lobby")
@@ -41,7 +41,7 @@ public:
         BlueprintReadOnly,
         Category = "Chimera|Shared Pawn"
     )
-    TObjectPtr<ACMPawn> SharedChimera;
+    TObjectPtr<ACMChimera> SharedChimera;
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Shared Pawn")
     FChimeraSharedPawnChanged OnSharedChimeraChanged;
@@ -52,4 +52,5 @@ public:
 private:
     UFUNCTION()
     void OnRep_SharedChimera();
+
 };
