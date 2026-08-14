@@ -20,7 +20,11 @@ DataForge is an editor-only Unreal Engine plugin that turns canonical parsed row
 - Persistent ownership metadata and managed orphan detection across managed folders
 - Ownership-identity-based managed asset move/rename when a rule changes the desired package path
 - Dedicated RuleSet Editor with side-by-side rule details, source rows, and managed path plan
-- Staged six-step Rule Creation Wizard: Source, Probe, Schema, Output, Bindings, Preview
+- Staged nine-step Rule Creation Wizard: Source, Probe, Schema, Output, Asset Layout, Asset Rules, Generated Outputs, Bindings, Preview
+- One-click Automatic Setup for primary-key, folder-layout, reflected slot, association, and exact-name binding inference
+- Exact-root reuse of existing Folder Source Config, Layout Recipe, and Naming Policy definitions
+- Structured Automatic Setup review with evidence, create/reuse paths, assignment cardinality, diagnostics, and Preview effects
+- Explicit developer approval of an Automatic Setup Preview before Finish & Apply
 - Reflection Property Picker for DataTable and generated-output targets
 - Exact-name Auto Map for editable DataTable row properties
 - Automatic exact-name inference when the Wizard enters Bindings, including same-name Generated Output soft references
@@ -53,19 +57,22 @@ Managed asset identity is `(RuleSetId, RecordId, Role)`. When that identity stil
 2. Double-click it to open the dedicated **DataForge RuleSet Editor**.
 3. Select **Creation Wizard**. The wizard edits a transient draft, not the RuleSet asset.
 4. Choose `CSV`, `JSON`, or `Google Sheet Cache` from the adapter dropdown. Use the file browser or Source Asset picker; do not type an Adapter ID.
-5. Complete Source → Probe → Schema → Output → Bindings → Preview. Each step shows only its own settings. Probe infers required columns and suggests a primary key for review.
-6. Enter **Bindings** to infer missing exact-name source and Generated Output bindings, then review the result.
-7. Select **Finish & Apply**. The Wizard commits the staged rules, runs a fresh Preview, and immediately Applies when validation succeeds.
-8. Use the **Pick** menu beside `TargetProperty` to choose writable properties through reflection instead of typing paths. Choose `Source Output` and `Target Output` from the Generated Outputs dropdown.
-9. Review the adjacent **Conversion** result. `Risky` and `Unsupported` results require an explicit rule correction.
-10. Open **Binding Graph**, run **Probe + Refresh**, then drag source fields/outputs onto target properties. The graph creates only `Direct` or `Convertible` bindings.
-11. For existing project assets, add an External Asset Rule and use a `ResolvedAsset` binding. For DA/PDA generation, add a Managed Asset Rule and Generated Output.
-12. Open **Semantic Diff** to review structured changes from its captured baseline. Reordering keyed rule arrays alone does not produce noise.
-13. Add prerequisite RuleSets to `Dependencies`, then open **Project Overview** to review dependency-first execution order and every project RuleSet's source/output/dependent files. Empty, missing, or cyclic dependencies fail compilation.
-14. Select **Preview Dependency Graph** and then **Apply Dependency Graph**. Each RuleSet is re-previewed immediately before its dependency-ordered Apply; source, rule, dependency, DataTable, or managed-asset drift blocks that RuleSet.
-15. If Preview reports managed orphans, review them and use **Cleanup Root Orphans** as a separate destructive action. Apply does not remove them.
+5. For the recommended path, set Asset Search Root, Row Struct, generated PDA/DA class, DataTable path, generated folder, and definition folder under **Automatic Setup**, then select **Analyze & Build Draft**. Naming Policy is optional when one compatible definition can be discovered.
+6. Complete Source → Probe → Schema → Output → Asset Layout → Asset Rules → Generated Outputs → Bindings → Preview. Advanced steps remain editable after automatic analysis.
+7. Run **Preview**, inspect inference evidence, create/reuse paths, assignment relationships, diagnostics, and concrete row/asset effects, then check the explicit review approval.
+8. Select **Finish & Apply**. The Wizard promotes reviewed definitions, commits the staged rules, runs a fresh Preview, and immediately Applies when validation succeeds.
+9. Use the **Pick** menu beside `TargetProperty` to choose writable properties through reflection instead of typing paths. Choose `Source Output` and `Target Output` from the Generated Outputs dropdown.
+10. Review the adjacent **Conversion** result. `Risky` and `Unsupported` results require an explicit rule correction.
+11. Open **Binding Graph**, run **Probe + Refresh**, then drag source fields/outputs onto target properties. The graph creates only `Direct` or `Convertible` bindings.
+12. For existing project assets, add an External Asset Rule and use a `ResolvedAsset` binding. For DA/PDA generation, add a Managed Asset Rule and Generated Output.
+13. Open **Semantic Diff** to review structured changes from its captured baseline. Reordering keyed rule arrays alone does not produce noise.
+14. Add prerequisite RuleSets to `Dependencies`, then open **Project Overview** to review dependency-first execution order and every project RuleSet's source/output/dependent files. Empty, missing, or cyclic dependencies fail compilation.
+15. Select **Preview Dependency Graph** and then **Apply Dependency Graph**. Each RuleSet is re-previewed immediately before its dependency-ordered Apply; source, rule, dependency, DataTable, or managed-asset drift blocks that RuleSet.
+16. If Preview reports managed orphans, review them and use **Cleanup Root Orphans** as a separate destructive action. Apply does not remove them.
 
 Auto Map adds only missing exact-name targets. It maps source columns to editable row properties and defined Generated Outputs to same-name soft-object row properties; it never overwrites an existing target binding.
+
+Automatic Setup never guesses among tied reusable definitions. An exact Asset Search Root match reuses the existing `Folder Source Config → Asset Layout Recipe → Naming Policy` chain. Multiple exact matches or multiple policy candidates block analysis and require an explicit Naming Policy override. Any draft edit or repeated Preview invalidates the previous approval.
 
 The Source UI shows only the field consumed by the selected adapter: CSV/JSON use `File`, Google Sheet Cache uses `Source Asset`, and Multi Source uses `Inputs`. Deleting a generated DataTable or DataForge-owned DA/PDA in the Content Browser reopens the owning RuleSet's Creation Wizard on the next editor tick so the output can be reviewed and recreated.
 

@@ -7,19 +7,53 @@
 1. Content Browser에서 `Miscellaneous > DataForge RuleSet`을 생성한다.
 2. RuleSet을 열고 `Creation Wizard`를 선택한다.
 3. Source Adapter와 File 또는 Source Asset을 선택한다.
-4. `Run Probe`로 column과 sample row를 읽는다.
-5. Primary Key와 DataTable Row Struct를 확인한다.
-6. Output DataTable의 Content 경로를 선택한다.
-7. 필요한 Asset Rule과 Generated Output을 정의한다.
-8. 자동 생성된 Bindings를 검토한다.
-9. `Run Preview` 후 `Finish & Apply`를 선택한다.
+4. 권장 흐름에서는 Automatic Setup의 Asset Search Root, Row Struct, PDA/DA class와 저장 경로를 지정한다.
+5. `Analyze & Build Draft`로 Probe, schema, layout, association 및 binding을 자동 구성한다.
+6. Asset Layout, Asset Rules, Generated Outputs 및 Bindings 단계에서 추론 결과를 검토한다.
+7. `Run Preview`로 생성/재사용 파일, 할당 관계, diagnostic 및 변경 건수를 확인한다.
+8. Automatic Setup 결과에 대한 명시적 승인 체크 후 `Finish & Apply`를 선택한다.
 
 Wizard는 다음 순서로 필요한 설정만 보여준다.
 
 ```text
 Source → Probe → Schema → Output
-       → Asset Rules → Generated Outputs → Bindings → Preview
+       → Asset Layout → Asset Rules → Generated Outputs → Bindings → Preview
 ```
+
+### 1.1 권장 Automatic Setup
+
+처음부터 내부 LR index, Binding Preset slot, Association column을 계산하지 않는다. Creation Wizard의 Source 단계에서 다음 항목만 지정한다.
+
+| 항목 | 의미 |
+|---|---|
+| Source Adapter와 File/Source Asset | CSV, JSON 또는 Google cache 원본 |
+| Asset Search Root | ID별 Texture/Material/Mesh/Niagara 등을 찾을 Content 폴더 |
+| DataTable Row Struct | 생성할 DataTable row 형식 |
+| Generated PDA/DA Class | row마다 생성할 PrimaryDataAsset 또는 DataAsset 형식 |
+| Naming Policy Override | 자동 발견이 불가능하거나 여러 후보 중 하나를 명시할 때만 선택 |
+| Output DataTable Path | DataTable package 경로 |
+| Generated PDA/DA Folder | 생성물 저장 폴더 |
+| Rule Definition Folder | 신규 Binding Preset, Layout Recipe, Folder Source Config 저장 폴더 |
+
+`Analyze & Build Draft`를 누르면 DataForge가 Probe와 폴더 scan을 수행하고 다음 항목을 추론한다.
+
+- Primary Key와 source column
+- Subject/AssetKind 폴더 위치
+- PDA/DA reflection property, Role 및 `One`/`OptionalOne`/`Many` cardinality
+- Association Source와 exact-name source/output binding
+- 기존 Folder Source Config, Asset Layout Recipe 및 Naming Policy 재사용 여부
+
+Asset Search Root에 정확히 대응하는 정의 체인이 하나이면 재사용한다. 후보가 여러 개이면 DataForge는 임의로 선택하지 않으며 후보 경로를 표시한다. 이 경우 `Naming Policy Override`에서 프로젝트 에셋을 명시하고 다시 분석한다.
+
+Preview 단계의 우측 검토 화면에서 다음을 확인한다.
+
+1. `Inferred Decisions`: 선택값과 Evidence
+2. `Files and Definitions`: Create/Reuse와 실제 object path
+3. `Assignment Relationships`: AssetKind, Role, Cardinality 및 target property
+4. `Preview Effects`: DataTable row와 Managed asset의 Create/Move/Update/Orphan 수
+5. `Diagnostics`: Apply를 막거나 검토해야 할 진단
+
+Preview가 성공하면 **I reviewed...** 체크박스로 승인한 뒤 `Finish & Apply`한다. Draft를 수정하거나 Preview를 다시 실행하면 승인이 해제되므로 현재 결과를 다시 검토해야 한다. 수동으로 구성한 기존 RuleSet에는 이 추가 승인 체크가 적용되지 않는다.
 
 ## 2. Source 설정
 

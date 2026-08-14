@@ -102,13 +102,17 @@ Wizard는 실제 RuleSet이 아닌 transient draft를 편집한다.
 
 ```text
 Source → Probe → Schema → Output
-       → Asset Rules → Generated Outputs → Bindings → Preview
+       → Asset Layout → Asset Rules → Generated Outputs → Bindings → Preview
 ```
 
 - 각 단계에는 해당 설정만 표시한다.
 - Asset Rule을 먼저 정의한 뒤 Generated Output에서 Managed Rule을 드롭다운으로 선택한다.
 - Generated Output 변경은 바인딩을 즉시 동기화한다.
-- `Finish & Apply`에서만 draft를 RuleSet에 복사하고 새 Preview 후 Apply한다.
+- Automatic Setup은 Primary Key, folder layout, PDA/DA reflection slot, cardinality, association 및 exact-name binding을 mutation 없이 계획한다.
+- Asset Search Root와 정확히 일치하는 기존 `Folder Source Config → Asset Layout Recipe → Naming Policy` 체인은 재사용한다. 동률 후보는 임의 선택하지 않는다.
+- Preview review는 추론 근거, 생성/재사용 파일, 할당 관계, diagnostic 및 실제 row/asset effect를 표시한다.
+- Automatic Setup은 성공한 Preview 뒤 개발자의 명시적 승인이 있어야 `Finish & Apply`할 수 있다. Draft 변경 또는 Preview 재실행은 승인을 무효화한다.
+- `Finish & Apply`에서만 transient definition을 승격하고 draft를 RuleSet에 복사한 뒤 새 Preview와 Apply를 수행한다.
 
 ## 8. Source of Truth 재조정
 
