@@ -23,7 +23,8 @@ public class Chimera : ModuleRules
 		{
 			"ListenServerNetwork",
 			"EnhancedInput",
-			"InputCore"
+			"InputCore",
+			"PhysicsCore"
 		});
 	}
 }

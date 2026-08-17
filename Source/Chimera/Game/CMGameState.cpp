@@ -27,7 +27,7 @@ void ACMGameState::GetLifetimeReplicatedProps(
 }
 
 void ACMGameState::SetSharedChimera(
-    ACMPawn* NewSharedChimera
+    ACMChimera* NewSharedChimera
 )
 {
     if (!HasAuthority() || SharedChimera == NewSharedChimera)

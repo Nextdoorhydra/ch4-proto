@@ -5,23 +5,38 @@
 
 namespace
 {
-    bool HasUniqueValidParts(
-        const TArray<TArray<ECMControlPart>>& Assignments
+    FCMPartSlotAddress MakeAddress(
+        int32 SegmentIndex,
+        int32 PartSlotIndex
     )
     {
-        TSet<ECMControlPart> SeenParts;
-        for (const TArray<ECMControlPart>& PlayerAssignments
+        FCMPartSlotAddress Address;
+        Address.SegmentIndex = SegmentIndex;
+        Address.PartSlotIndex = PartSlotIndex;
+        return Address;
+    }
+
+    bool HasUniqueValidPartSlots(
+        const TArray<TArray<FCMPartSlotAddress>>& Assignments,
+        int32 ActiveSegmentCount
+    )
+    {
+        TSet<FCMPartSlotAddress> SeenPartSlots;
+        for (const TArray<FCMPartSlotAddress>& PlayerAssignments
             : Assignments)
         {
-            for (ECMControlPart Part : PlayerAssignments)
+            for (const FCMPartSlotAddress& Address
+                : PlayerAssignments)
             {
-                if (!CMControl::IsValidPart(Part)
-                    || SeenParts.Contains(Part))
+                if (!CMControl::IsValidPartSlot(
+                        Address,
+                        ActiveSegmentCount)
+                    || SeenPartSlots.Contains(Address))
                 {
                     return false;
                 }
 
-                SeenParts.Add(Part);
+                SeenPartSlots.Add(Address);
             }
         }
 
@@ -36,57 +51,70 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
         | EAutomationTestFlags::EngineFilter
 )
 
-bool FChimeraControlAssignmentCountTest::RunTest(const FString& Parameters)
+bool FChimeraControlAssignmentCountTest::RunTest(
+    const FString& Parameters
+)
 {
-    const TArray<TArray<int32>> ExpectedCounts = {
-        { 4 },
-        { 4, 4 },
-        { 3, 3, 2 },
-        { 2, 2, 2, 2 },
-        { 2, 2, 2, 1, 1 },
-        { 2, 2, 1, 1, 1, 1 },
-        { 2, 1, 1, 1, 1, 1, 1 },
-        { 1, 1, 1, 1, 1, 1, 1, 1 }
-    };
-
     for (int32 PlayerCount = 1;
         PlayerCount <= CMControl::MaxPlayers;
         ++PlayerCount)
     {
-        TArray<TArray<ECMControlPart>> ExistingAssignments;
+        TArray<TArray<FCMPartSlotAddress>> ExistingAssignments;
         ExistingAssignments.SetNum(PlayerCount);
-        TArray<TArray<ECMControlPart>> NewAssignments;
+        TArray<TArray<FCMPartSlotAddress>> NewAssignments;
         FRandomStream RandomStream(1000 + PlayerCount);
 
         FCMControlAssignmentPolicy::Rebalance(
             ExistingAssignments,
+            PlayerCount,
             RandomStream,
             NewAssignments
         );
 
         TestEqual(
-            FString::Printf(TEXT("Player array count for %d players"), PlayerCount),
+            FString::Printf(
+                TEXT("Player array count for %d players"),
+                PlayerCount
+            ),
             NewAssignments.Num(),
             PlayerCount
         );
+
+        int32 TotalAssignedPartSlots = 0;
         for (int32 PlayerIndex = 0;
             PlayerIndex < PlayerCount;
             ++PlayerIndex)
         {
             TestEqual(
                 FString::Printf(
-                    TEXT("Assignment count for player %d of %d"),
+                    TEXT("Four controls for player %d of %d"),
                     PlayerIndex,
                     PlayerCount
                 ),
                 NewAssignments[PlayerIndex].Num(),
-                ExpectedCounts[PlayerCount - 1][PlayerIndex]
+                CMControl::MaxKeysPerPlayer
             );
+            TotalAssignedPartSlots +=
+                NewAssignments[PlayerIndex].Num();
         }
 
+        TestEqual(
+            FString::Printf(
+                TEXT("All active PartSlots assigned for %d players"),
+                PlayerCount
+            ),
+            TotalAssignedPartSlots,
+            PlayerCount * CMControl::PartSlotsPerSegment
+        );
         TestTrue(
-            FString::Printf(TEXT("Unique assignments for %d players"), PlayerCount),
-            HasUniqueValidParts(NewAssignments)
+            FString::Printf(
+                TEXT("Unique valid PartSlots for %d players"),
+                PlayerCount
+            ),
+            HasUniqueValidPartSlots(
+                NewAssignments,
+                PlayerCount
+            )
         );
     }
 
@@ -104,50 +132,44 @@ bool FChimeraControlAssignmentFullShuffleTest::RunTest(
     const FString& Parameters
 )
 {
-    TArray<TArray<ECMControlPart>> FirstExistingAssignments = {
+    constexpr int32 PlayerCount = 3;
+    TArray<TArray<FCMPartSlotAddress>> FirstExistingAssignments = {
         {
-            ECMControlPart::FirstLeft,
-            ECMControlPart::FirstRight,
-            ECMControlPart::SecondLeft,
-            ECMControlPart::SecondRight
+            MakeAddress(0, 0),
+            MakeAddress(1, 1),
+            MakeAddress(2, 2),
+            MakeAddress(0, 3)
         },
-        {
-            ECMControlPart::ThirdLeft,
-            ECMControlPart::ThirdRight,
-            ECMControlPart::FourthLeft,
-            ECMControlPart::FourthRight
-        },
+        { MakeAddress(1, 0) },
         {}
     };
-    TArray<TArray<ECMControlPart>> SecondExistingAssignments = {
+    TArray<TArray<FCMPartSlotAddress>> SecondExistingAssignments = {
         {},
-        {
-            ECMControlPart::FourthRight,
-            ECMControlPart::ThirdRight
-        },
-        {
-            ECMControlPart::FirstLeft
-        }
+        { MakeAddress(2, 3), MakeAddress(0, 1) },
+        { MakeAddress(1, 2) }
     };
-    TArray<TArray<ECMControlPart>> FirstResult;
-    TArray<TArray<ECMControlPart>> SecondResult;
-    TArray<TArray<ECMControlPart>> DifferentSeedResult;
+    TArray<TArray<FCMPartSlotAddress>> FirstResult;
+    TArray<TArray<FCMPartSlotAddress>> SecondResult;
+    TArray<TArray<FCMPartSlotAddress>> DifferentSeedResult;
     FRandomStream FirstRandomStream(42);
     FRandomStream SecondRandomStream(42);
     FRandomStream DifferentRandomStream(99);
 
     FCMControlAssignmentPolicy::Rebalance(
         FirstExistingAssignments,
+        PlayerCount,
         FirstRandomStream,
         FirstResult
     );
     FCMControlAssignmentPolicy::Rebalance(
         SecondExistingAssignments,
+        PlayerCount,
         SecondRandomStream,
         SecondResult
     );
     FCMControlAssignmentPolicy::Rebalance(
         FirstExistingAssignments,
+        PlayerCount,
         DifferentRandomStream,
         DifferentSeedResult
     );
@@ -162,7 +184,7 @@ bool FChimeraControlAssignmentFullShuffleTest::RunTest(
     );
     TestTrue(
         TEXT("Fully shuffled assignments remain unique"),
-        HasUniqueValidParts(FirstResult)
+        HasUniqueValidPartSlots(FirstResult, PlayerCount)
     );
 
     return true;

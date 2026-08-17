@@ -14,7 +14,6 @@ void ACMPlayerState::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    DOREPLIFETIME(ACMPlayerState, AssignedControlParts);
     DOREPLIFETIME(ACMPlayerState, PlayerColorIndex);
 }
 
@@ -40,34 +39,6 @@ void ACMPlayerState::OnRep_PlayerName()
     {
         GameState->NotifyLobbyRosterChanged();
     }
-}
-
-ECMControlPart ACMPlayerState::GetControlPartForSlot(
-    int32 SlotIndex
-) const
-{
-    return AssignedControlParts.IsValidIndex(SlotIndex)
-        ? AssignedControlParts[SlotIndex]
-        : ECMControlPart::None;
-}
-
-void ACMPlayerState::SetAssignedControlParts(
-    const TArray<ECMControlPart>& NewAssignments
-)
-{
-    if (!HasAuthority() || AssignedControlParts == NewAssignments)
-    {
-        return;
-    }
-
-    AssignedControlParts = NewAssignments;
-    OnRep_AssignedControlParts();
-    ForceNetUpdate();
-}
-
-int32 ACMPlayerState::GetAssignedControlCount() const
-{
-    return AssignedControlParts.Num();
 }
 
 void ACMPlayerState::SetPlayerColorIndex(int32 NewPlayerColorIndex)
@@ -105,11 +76,6 @@ FLinearColor ACMPlayerState::GetPlayerColor() const
 int32 ACMPlayerState::GetPlayerColorIndex() const
 {
     return PlayerColorIndex;
-}
-
-void ACMPlayerState::OnRep_AssignedControlParts()
-{
-    OnControlAssignmentsChanged.Broadcast();
 }
 
 void ACMPlayerState::OnRep_PlayerColorIndex()
