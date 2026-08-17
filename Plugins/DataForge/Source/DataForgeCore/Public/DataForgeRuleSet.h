@@ -1,10 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataForgeAssetLayoutProfile.h"
 #include "DataForgeTypes.h"
 #include "Engine/DataAsset.h"
 #include "DataForgeRuleSet.generated.h"
 
+class UDataForgeBindingPreset;
 class UDataForgeRuleSet;
 
 USTRUCT(BlueprintType)
@@ -40,6 +42,18 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Asset Rules", AdvancedDisplay, meta = (ToolTip = "Optional asset lookup/creation rules. {ColumnName} tokens use canonical source column values."))
 	TArray<FDataForgeAssetRule> AssetRules;
+
+	/** Optional authoring provenance. AssetRules remain concrete and compile without the Profile. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Asset Layout", AdvancedDisplay)
+	FDataForgeProfileOrigin ProfileOrigin;
+
+	/** Authoring preset that defines the semantic slots of generated PDA/DA outputs. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generated Outputs", AdvancedDisplay)
+	TSoftObjectPtr<UDataForgeBindingPreset> BindingPreset;
+
+	/** Generic secondary Parsed Data sources consumed by Binding Preset association slots. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generated Outputs", AdvancedDisplay)
+	TArray<FDataForgeAssociationSourceRule> AssociationSources;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generated Outputs", AdvancedDisplay)
 	TArray<FDataForgeGeneratedAssetOutputRule> GeneratedOutputs;

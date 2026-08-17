@@ -1,9 +1,12 @@
 #include "DataForgeAssetTypeActions.h"
 
 #include "DataForgeEditorService.h"
+#include "DataForgeAssetLayoutProfile.h"
+#include "DataForgeBindingPreset.h"
 #include "DataForgeRuleSet.h"
 #include "DataForgeRuleSetEditorToolkit.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Toolkits/SimpleAssetEditor.h"
 
 #define LOCTEXT_NAMESPACE "DataForgeAssetTypeActions"
 
@@ -87,6 +90,74 @@ void FDataForgeAssetTypeActions::GetActions(const TArray<UObject*>& InObjects, F
 				}
 			}
 		})));
+}
+
+FText FDataForgeAssetLayoutProfileActions::GetName() const
+{
+	return LOCTEXT("LayoutProfileAssetName", "DataForge Asset Layout Profile");
+}
+
+FColor FDataForgeAssetLayoutProfileActions::GetTypeColor() const
+{
+	return FColor(155, 105, 235);
+}
+
+UClass* FDataForgeAssetLayoutProfileActions::GetSupportedClass() const
+{
+	return UDataForgeAssetLayoutProfile::StaticClass();
+}
+
+uint32 FDataForgeAssetLayoutProfileActions::GetCategories()
+{
+	return EAssetTypeCategories::Misc;
+}
+
+void FDataForgeAssetLayoutProfileActions::OpenAssetEditor(
+	const TArray<UObject*>& InObjects,
+	TSharedPtr<IToolkitHost> EditWithinLevelEditor)
+{
+	const EToolkitMode::Type Mode = EditWithinLevelEditor.IsValid() ? EToolkitMode::WorldCentric : EToolkitMode::Standalone;
+	for (UObject* Object : InObjects)
+	{
+		if (UDataForgeAssetLayoutProfile* Profile = Cast<UDataForgeAssetLayoutProfile>(Object))
+		{
+			FSimpleAssetEditor::CreateEditor(Mode, EditWithinLevelEditor, Profile);
+		}
+	}
+}
+
+FText FDataForgeBindingPresetActions::GetName() const
+{
+	return LOCTEXT("BindingPresetAssetName", "DataForge Binding Preset");
+}
+
+FColor FDataForgeBindingPresetActions::GetTypeColor() const
+{
+	return FColor(75, 170, 210);
+}
+
+UClass* FDataForgeBindingPresetActions::GetSupportedClass() const
+{
+	return UDataForgeBindingPreset::StaticClass();
+}
+
+uint32 FDataForgeBindingPresetActions::GetCategories()
+{
+	return EAssetTypeCategories::Misc;
+}
+
+void FDataForgeBindingPresetActions::OpenAssetEditor(
+	const TArray<UObject*>& InObjects,
+	TSharedPtr<IToolkitHost> EditWithinLevelEditor)
+{
+	const EToolkitMode::Type Mode = EditWithinLevelEditor.IsValid() ? EToolkitMode::WorldCentric : EToolkitMode::Standalone;
+	for (UObject* Object : InObjects)
+	{
+		if (UDataForgeBindingPreset* Preset = Cast<UDataForgeBindingPreset>(Object))
+		{
+			FSimpleAssetEditor::CreateEditor(Mode, EditWithinLevelEditor, Preset);
+		}
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

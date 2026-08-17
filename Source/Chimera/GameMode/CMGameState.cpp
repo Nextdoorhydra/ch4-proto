@@ -31,7 +31,7 @@ void ACMGameState::GetLifetimeReplicatedProps(
 
 // 서버에서 공용 키메라 참조를 변경하고 즉시 복제 요청
 void ACMGameState::SetSharedChimera(
-    ACMPawn* NewSharedChimera
+    ACMChimera* NewSharedChimera
 )
 {
     if (!HasAuthority() || SharedChimera == NewSharedChimera)

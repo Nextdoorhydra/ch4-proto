@@ -23,3 +23,17 @@ DataTable and managed assets.
 Run the Unreal automation test `DataForge.Examples.PersistentCsvAssets`. It
 creates or updates the preserved RuleSet and texture assets, applies the RuleSet,
 and verifies the join, generated DA/PDA files, and texture assignments.
+
+## Rename Audit and recovery example
+
+`RenameAudit/` is an independent example for the folder-based naming workflow.
+Run `DataForge.Examples.PersistentRenameAuditAssets`, then right-click its
+`Inventory` folder and choose **DataForge Audit Folder**. The detailed experiment
+and expected results are documented in `RenameAudit/README.md`.
+
+## Multiple Texture and Material references
+
+`MultiAssetRefs/` keeps only the record `Id` in CSV. A Naming Policy, Layout
+Recipe, Folder Source and Binding Preset infer every Texture/Material association
+from `Inventory/{Id}/{Kind}` and convention-compliant asset names. Run
+`DataForge.Examples.PersistentMultiAssetReferences` to rebuild and verify it.

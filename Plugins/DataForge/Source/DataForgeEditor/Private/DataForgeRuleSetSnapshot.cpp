@@ -8,7 +8,7 @@
 
 namespace DataForgeRuleSetSnapshot
 {
-	constexpr int32 SnapshotVersion = 2;
+	constexpr int32 SnapshotVersion = 5;
 
 	struct FParameter
 	{
@@ -35,12 +35,28 @@ namespace DataForgeRuleSetSnapshot
 		FString AssetNamePattern;
 	};
 
+	struct FAssociationSource
+	{
+		FString SourceId;
+		FString AdapterId;
+		FString File;
+		FString Asset;
+		FString MatchColumn;
+		FString AssetPathColumn;
+		FString AssetKindColumn;
+		FString RoleColumn;
+		int32 ProbeRowLimit = 20;
+		TArray<FParameter> Parameters;
+		TArray<FSourceInput> Inputs;
+	};
+
 	struct FGeneratedOutput
 	{
 		FString OutputName;
 		FString Type;
 		FString AssetClass;
 		FString AssetRuleId;
+		bool bAdoptCompatibleUnownedAsset = false;
 	};
 
 	struct FBinding
@@ -53,6 +69,14 @@ namespace DataForgeRuleSetSnapshot
 		FString TargetProperty;
 		FString AssetRuleId;
 		bool bRequired = true;
+	};
+
+	struct FProfileRuleOrigin
+	{
+		FString GroupTemplateId;
+		FString RuleTemplateId;
+		FAssetRule Baseline;
+		TArray<FString> OverrideFields;
 	};
 
 	struct FSnapshot
@@ -74,6 +98,14 @@ namespace DataForgeRuleSetSnapshot
 		bool bCreateIfMissing = true;
 		bool bRemoveRowsMissingFromSource = false;
 		bool bSaveAfterApply = true;
+		FString ProfilePath;
+		FString ProfileId;
+		int32 MaterializedProfileVersion = 0;
+		FString MaterializedProfileHash;
+		TArray<FParameter> ProfileParameters;
+		TArray<FProfileRuleOrigin> ProfileRules;
+		FString BindingPreset;
+		TArray<FAssociationSource> AssociationSources;
 		TArray<FAssetRule> AssetRules;
 		TArray<FGeneratedOutput> GeneratedOutputs;
 		TArray<FBinding> Bindings;
@@ -128,6 +160,74 @@ namespace DataForgeRuleSetSnapshot
 		Snapshot.bCreateIfMissing = RuleSet.Output.bCreateIfMissing;
 		Snapshot.bRemoveRowsMissingFromSource = RuleSet.Output.bRemoveRowsMissingFromSource;
 		Snapshot.bSaveAfterApply = RuleSet.Output.bSaveAfterApply;
+		Snapshot.ProfilePath = RuleSet.ProfileOrigin.Profile.ToSoftObjectPath().ToString();
+		Snapshot.ProfileId = RuleSet.ProfileOrigin.ProfileId.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Snapshot.MaterializedProfileVersion = RuleSet.ProfileOrigin.MaterializedVersion;
+		Snapshot.MaterializedProfileHash = RuleSet.ProfileOrigin.MaterializedHash;
+		for (const TPair<FName, FString>& Pair : RuleSet.ProfileOrigin.ParameterValues)
+		{
+			Snapshot.ProfileParameters.Add({ Pair.Key.ToString(), Pair.Value });
+		}
+		Snapshot.ProfileParameters.Sort([](const FParameter& Left, const FParameter& Right) { return Left.Key < Right.Key; });
+		for (const FDataForgeMaterializedRuleOrigin& Origin : RuleSet.ProfileOrigin.Rules)
+		{
+			FProfileRuleOrigin& SnapshotOrigin = Snapshot.ProfileRules.AddDefaulted_GetRef();
+			SnapshotOrigin.GroupTemplateId = Origin.GroupTemplateId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			SnapshotOrigin.RuleTemplateId = Origin.RuleTemplateId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			SnapshotOrigin.Baseline = {
+				Origin.BaselineRule.RuleId.ToString(),
+				EnumName(StaticEnum<EDataForgeAssetOwnership>(), static_cast<int64>(Origin.BaselineRule.Ownership)),
+				Origin.BaselineRule.BaseFolder,
+				Origin.BaselineRule.SubfolderPattern,
+				Origin.BaselineRule.AssetNamePattern };
+			const FDataForgeAssetRule* Current = RuleSet.AssetRules.FindByPredicate([&Origin](const FDataForgeAssetRule& Rule)
+			{
+				return Rule.RuleId == Origin.BaselineRule.RuleId;
+			});
+			if (!Current)
+			{
+				SnapshotOrigin.OverrideFields.Add(TEXT("Missing"));
+			}
+			else
+			{
+				if (Current->Ownership != Origin.BaselineRule.Ownership) SnapshotOrigin.OverrideFields.Add(TEXT("Ownership"));
+				if (Current->BaseFolder != Origin.BaselineRule.BaseFolder) SnapshotOrigin.OverrideFields.Add(TEXT("BaseFolder"));
+				if (Current->SubfolderPattern != Origin.BaselineRule.SubfolderPattern) SnapshotOrigin.OverrideFields.Add(TEXT("SubfolderPattern"));
+				if (Current->AssetNamePattern != Origin.BaselineRule.AssetNamePattern) SnapshotOrigin.OverrideFields.Add(TEXT("AssetNamePattern"));
+			}
+		}
+		Snapshot.BindingPreset = RuleSet.BindingPreset.ToSoftObjectPath().ToString();
+		for (const FDataForgeAssociationSourceRule& Source : RuleSet.AssociationSources)
+		{
+			FAssociationSource& SnapshotSource = Snapshot.AssociationSources.AddDefaulted_GetRef();
+			SnapshotSource.SourceId = Source.SourceId.ToString();
+			SnapshotSource.AdapterId = Source.Source.AdapterId.ToString();
+			SnapshotSource.File = Source.Source.File.FilePath;
+			SnapshotSource.Asset = Source.Source.SourceAsset.ToSoftObjectPath().ToString();
+			SnapshotSource.MatchColumn = Source.MatchColumn.ToString();
+			SnapshotSource.AssetPathColumn = Source.AssetPathColumn.ToString();
+			SnapshotSource.AssetKindColumn = Source.AssetKindColumn.ToString();
+			SnapshotSource.RoleColumn = Source.RoleColumn.ToString();
+			SnapshotSource.ProbeRowLimit = Source.Source.ProbeRowLimit;
+			for (const TPair<FName, FString>& Parameter : Source.Source.Parameters) SnapshotSource.Parameters.Add({ Parameter.Key.ToString(), Parameter.Value });
+			SnapshotSource.Parameters.Sort([](const FParameter& Left, const FParameter& Right) { return Left.Key < Right.Key; });
+			for (const FDataForgeSourceInput& Input : Source.Source.Inputs)
+			{
+				FSourceInput& SnapshotInput = SnapshotSource.Inputs.AddDefaulted_GetRef();
+				SnapshotInput.AdapterId = Input.AdapterId.ToString();
+				SnapshotInput.File = Input.File.FilePath;
+				SnapshotInput.Asset = Input.SourceAsset.ToSoftObjectPath().ToString();
+				SnapshotInput.JoinColumn = Input.JoinColumn.ToString();
+				SnapshotInput.ColumnPrefix = Input.ColumnPrefix;
+				for (const TPair<FName, FString>& Parameter : Input.Parameters) SnapshotInput.Parameters.Add({ Parameter.Key.ToString(), Parameter.Value });
+				SnapshotInput.Parameters.Sort([](const FParameter& Left, const FParameter& Right) { return Left.Key < Right.Key; });
+			}
+		}
+		Snapshot.AssociationSources.Sort([](const FAssociationSource& Left, const FAssociationSource& Right) { return Left.SourceId < Right.SourceId; });
+		Snapshot.ProfileRules.Sort([](const FProfileRuleOrigin& Left, const FProfileRuleOrigin& Right)
+		{
+			return Left.RuleTemplateId < Right.RuleTemplateId;
+		});
 
 		for (const FDataForgeAssetRule& Rule : RuleSet.AssetRules)
 		{
@@ -150,7 +250,8 @@ namespace DataForgeRuleSetSnapshot
 				Output.OutputName.ToString(),
 				EnumName(StaticEnum<EDataForgeGeneratedAssetType>(), static_cast<int64>(Output.Type)),
 				Output.AssetClass ? Output.AssetClass->GetPathName() : TEXT("None"),
-				Output.AssetRuleId.ToString() });
+				Output.AssetRuleId.ToString(),
+				Output.bAdoptCompatibleUnownedAsset });
 		}
 		Snapshot.GeneratedOutputs.Sort([](const FGeneratedOutput& Left, const FGeneratedOutput& Right)
 		{
@@ -314,6 +415,70 @@ FString FDataForgeRuleSetSnapshot::SerializeJson(const UDataForgeRuleSet& RuleSe
 	Writer->WriteValue(TEXT("saveAfterApply"), Snapshot.bSaveAfterApply);
 	Writer->WriteObjectEnd();
 
+	Writer->WriteObjectStart(TEXT("profileOrigin"));
+	Writer->WriteValue(TEXT("profilePath"), Snapshot.ProfilePath);
+	Writer->WriteValue(TEXT("profileId"), Snapshot.ProfileId);
+	Writer->WriteValue(TEXT("materializedVersion"), Snapshot.MaterializedProfileVersion);
+	Writer->WriteValue(TEXT("materializedHash"), Snapshot.MaterializedProfileHash);
+	Writer->WriteObjectStart(TEXT("parameterValues"));
+	for (const FParameter& Parameter : Snapshot.ProfileParameters) Writer->WriteValue(Parameter.Key, Parameter.Value);
+	Writer->WriteObjectEnd();
+	Writer->WriteArrayStart(TEXT("rules"));
+	for (const FProfileRuleOrigin& Origin : Snapshot.ProfileRules)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("groupTemplateId"), Origin.GroupTemplateId);
+		Writer->WriteValue(TEXT("ruleTemplateId"), Origin.RuleTemplateId);
+		Writer->WriteObjectStart(TEXT("baseline"));
+		Writer->WriteValue(TEXT("ruleId"), Origin.Baseline.RuleId);
+		Writer->WriteValue(TEXT("ownership"), Origin.Baseline.Ownership);
+		Writer->WriteValue(TEXT("baseFolder"), Origin.Baseline.BaseFolder);
+		Writer->WriteValue(TEXT("subfolderPattern"), Origin.Baseline.SubfolderPattern);
+		Writer->WriteValue(TEXT("assetNamePattern"), Origin.Baseline.AssetNamePattern);
+		Writer->WriteObjectEnd();
+		Writer->WriteArrayStart(TEXT("overrideFields"));
+		for (const FString& Field : Origin.OverrideFields) Writer->WriteValue(Field);
+		Writer->WriteArrayEnd();
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteObjectEnd();
+	Writer->WriteValue(TEXT("bindingPreset"), Snapshot.BindingPreset);
+	Writer->WriteArrayStart(TEXT("associationSources"));
+	for (const FAssociationSource& Source : Snapshot.AssociationSources)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("sourceId"), Source.SourceId);
+		Writer->WriteValue(TEXT("adapterId"), Source.AdapterId);
+		Writer->WriteValue(TEXT("file"), Source.File);
+		Writer->WriteValue(TEXT("asset"), Source.Asset);
+		Writer->WriteValue(TEXT("matchColumn"), Source.MatchColumn);
+		Writer->WriteValue(TEXT("assetPathColumn"), Source.AssetPathColumn);
+		Writer->WriteValue(TEXT("assetKindColumn"), Source.AssetKindColumn);
+		Writer->WriteValue(TEXT("roleColumn"), Source.RoleColumn);
+		Writer->WriteValue(TEXT("probeRowLimit"), Source.ProbeRowLimit);
+		Writer->WriteObjectStart(TEXT("parameters"));
+		for (const FParameter& Parameter : Source.Parameters) Writer->WriteValue(Parameter.Key, Parameter.Value);
+		Writer->WriteObjectEnd();
+		Writer->WriteArrayStart(TEXT("inputs"));
+		for (const FSourceInput& Input : Source.Inputs)
+		{
+			Writer->WriteObjectStart();
+			Writer->WriteValue(TEXT("adapterId"), Input.AdapterId);
+			Writer->WriteValue(TEXT("file"), Input.File);
+			Writer->WriteValue(TEXT("asset"), Input.Asset);
+			Writer->WriteValue(TEXT("joinColumn"), Input.JoinColumn);
+			Writer->WriteValue(TEXT("columnPrefix"), Input.ColumnPrefix);
+			Writer->WriteObjectStart(TEXT("parameters"));
+			for (const FParameter& Parameter : Input.Parameters) Writer->WriteValue(Parameter.Key, Parameter.Value);
+			Writer->WriteObjectEnd();
+			Writer->WriteObjectEnd();
+		}
+		Writer->WriteArrayEnd();
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+
 	Writer->WriteArrayStart(TEXT("assetRules"));
 	for (const FAssetRule& Rule : Snapshot.AssetRules)
 	{
@@ -335,6 +500,7 @@ FString FDataForgeRuleSetSnapshot::SerializeJson(const UDataForgeRuleSet& RuleSe
 		Writer->WriteValue(TEXT("type"), Output.Type);
 		Writer->WriteValue(TEXT("assetClass"), Output.AssetClass);
 		Writer->WriteValue(TEXT("assetRuleId"), Output.AssetRuleId);
+		Writer->WriteValue(TEXT("adoptCompatibleUnownedAsset"), Output.bAdoptCompatibleUnownedAsset);
 		Writer->WriteObjectEnd();
 	}
 	Writer->WriteArrayEnd();
@@ -439,6 +605,98 @@ FString FDataForgeRuleSetSnapshot::SerializeYaml(const UDataForgeRuleSet& RuleSe
 	AddYamlBool(Yaml, 2, TEXT("removeRowsMissingFromSource"), Snapshot.bRemoveRowsMissingFromSource);
 	AddYamlBool(Yaml, 2, TEXT("saveAfterApply"), Snapshot.bSaveAfterApply);
 
+	Yaml += TEXT("profileOrigin:\n");
+	AddYamlString(Yaml, 2, TEXT("profilePath"), Snapshot.ProfilePath);
+	AddYamlString(Yaml, 2, TEXT("profileId"), Snapshot.ProfileId);
+	Yaml += FString::Printf(TEXT("  materializedVersion: %d\n"), Snapshot.MaterializedProfileVersion);
+	AddYamlString(Yaml, 2, TEXT("materializedHash"), Snapshot.MaterializedProfileHash);
+	if (Snapshot.ProfileParameters.IsEmpty())
+	{
+		Yaml += TEXT("  parameterValues: {}\n");
+	}
+	else
+	{
+		Yaml += TEXT("  parameterValues:\n");
+		for (const FParameter& Parameter : Snapshot.ProfileParameters)
+		{
+			Yaml += TEXT("    ") + JsonString(Parameter.Key) + TEXT(": ") + JsonString(Parameter.Value) + TEXT("\n");
+		}
+	}
+	if (Snapshot.ProfileRules.IsEmpty())
+	{
+		Yaml += TEXT("  rules: []\n");
+	}
+	else
+	{
+		Yaml += TEXT("  rules:\n");
+		for (const FProfileRuleOrigin& Origin : Snapshot.ProfileRules)
+		{
+			Yaml += TEXT("    - groupTemplateId: ") + JsonString(Origin.GroupTemplateId) + TEXT("\n");
+			AddYamlString(Yaml, 6, TEXT("ruleTemplateId"), Origin.RuleTemplateId);
+			Yaml += TEXT("      baseline:\n");
+			AddYamlString(Yaml, 8, TEXT("ruleId"), Origin.Baseline.RuleId);
+			AddYamlString(Yaml, 8, TEXT("ownership"), Origin.Baseline.Ownership);
+			AddYamlString(Yaml, 8, TEXT("baseFolder"), Origin.Baseline.BaseFolder);
+			AddYamlString(Yaml, 8, TEXT("subfolderPattern"), Origin.Baseline.SubfolderPattern);
+			AddYamlString(Yaml, 8, TEXT("assetNamePattern"), Origin.Baseline.AssetNamePattern);
+			if (Origin.OverrideFields.IsEmpty())
+			{
+				Yaml += TEXT("      overrideFields: []\n");
+			}
+			else
+			{
+				Yaml += TEXT("      overrideFields:\n");
+				for (const FString& Field : Origin.OverrideFields) Yaml += TEXT("        - ") + JsonString(Field) + TEXT("\n");
+			}
+		}
+	}
+	AddYamlString(Yaml, 0, TEXT("bindingPreset"), Snapshot.BindingPreset);
+	if (Snapshot.AssociationSources.IsEmpty())
+	{
+		Yaml += TEXT("associationSources: []\n");
+	}
+	else
+	{
+		Yaml += TEXT("associationSources:\n");
+		for (const FAssociationSource& Source : Snapshot.AssociationSources)
+		{
+			Yaml += TEXT("  - sourceId: ") + JsonString(Source.SourceId) + TEXT("\n");
+			AddYamlString(Yaml, 4, TEXT("adapterId"), Source.AdapterId);
+			AddYamlString(Yaml, 4, TEXT("file"), Source.File);
+			AddYamlString(Yaml, 4, TEXT("asset"), Source.Asset);
+			AddYamlString(Yaml, 4, TEXT("matchColumn"), Source.MatchColumn);
+			AddYamlString(Yaml, 4, TEXT("assetPathColumn"), Source.AssetPathColumn);
+			AddYamlString(Yaml, 4, TEXT("assetKindColumn"), Source.AssetKindColumn);
+			AddYamlString(Yaml, 4, TEXT("roleColumn"), Source.RoleColumn);
+			Yaml += FString::Printf(TEXT("    probeRowLimit: %d\n"), Source.ProbeRowLimit);
+			if (Source.Parameters.IsEmpty()) Yaml += TEXT("    parameters: {}\n");
+			else
+			{
+				Yaml += TEXT("    parameters:\n");
+				for (const FParameter& Parameter : Source.Parameters) AddYamlString(Yaml, 6, *Parameter.Key, Parameter.Value);
+			}
+			if (Source.Inputs.IsEmpty()) Yaml += TEXT("    inputs: []\n");
+			else
+			{
+				Yaml += TEXT("    inputs:\n");
+				for (const FSourceInput& Input : Source.Inputs)
+				{
+					Yaml += TEXT("      - adapterId: ") + JsonString(Input.AdapterId) + TEXT("\n");
+					AddYamlString(Yaml, 8, TEXT("file"), Input.File);
+					AddYamlString(Yaml, 8, TEXT("asset"), Input.Asset);
+					AddYamlString(Yaml, 8, TEXT("joinColumn"), Input.JoinColumn);
+					AddYamlString(Yaml, 8, TEXT("columnPrefix"), Input.ColumnPrefix);
+					if (Input.Parameters.IsEmpty()) Yaml += TEXT("        parameters: {}\n");
+					else
+					{
+						Yaml += TEXT("        parameters:\n");
+						for (const FParameter& Parameter : Input.Parameters) AddYamlString(Yaml, 10, *Parameter.Key, Parameter.Value);
+					}
+				}
+			}
+		}
+	}
+
 	if (Snapshot.AssetRules.IsEmpty())
 	{
 		Yaml += TEXT("assetRules: []\n");
@@ -469,6 +727,7 @@ FString FDataForgeRuleSetSnapshot::SerializeYaml(const UDataForgeRuleSet& RuleSe
 			AddYamlString(Yaml, 4, TEXT("type"), Output.Type);
 			AddYamlString(Yaml, 4, TEXT("assetClass"), Output.AssetClass);
 			AddYamlString(Yaml, 4, TEXT("assetRuleId"), Output.AssetRuleId);
+			Yaml += FString::Printf(TEXT("    adoptCompatibleUnownedAsset: %s\n"), Output.bAdoptCompatibleUnownedAsset ? TEXT("true") : TEXT("false"));
 		}
 	}
 

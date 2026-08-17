@@ -3,7 +3,8 @@
 #include "Game/CMControlAssignmentPolicy.h"
 #include "GameMode/CMGameState.h"
 #include "GameMode/Play/CMPlayGameMode.h"
-#include "Player/CMPawn.h"
+#include "Player/CMControlBody.h"
+#include "Player/CMChimera.h"
 #include "Player/CMPlayerState.h"
 #include "Player/CMPlayerController.h"
 #include "EngineUtils.h"
@@ -20,7 +21,7 @@ ACMGameMode::ACMGameMode()
     PlayerControllerClass = ACMPlayerController::StaticClass();
     PlayerStateClass = ACMPlayerState::StaticClass();
     GameStateClass = ACMGameState::StaticClass();
-    DefaultPawnClass = ACMPawn::StaticClass();
+    DefaultPawnClass = ACMChimera::StaticClass();
     bUseSeamlessTravel = true;
 }
 
@@ -34,7 +35,6 @@ void ACMGameMode::BeginPlay()
     if (IsGameplayMap())
     {
         EnsureSharedChimera();
-        RebalanceControlAssignments();
     }
 }
 
@@ -61,10 +61,25 @@ void ACMGameMode::RestartPlayer(AController* NewPlayer)
         return;
     }
 
-    ACMPawn* SharedChimera = EnsureSharedChimera();
+    // Shared Chimera는 누구도 Possess하지 않는다. 각 플레이어에게는 충돌 없는
+    // ControlBody를 하나씩 생성해 네트워크 소유권과 입력 RPC의 주체로 사용한다.
+    if (NewPlayer && !Cast<ACMControlBody>(NewPlayer->GetPawn()))
+    {
+        Super::RestartPlayer(NewPlayer);
+    }
+
+    ACMChimera* SharedChimera = EnsureSharedChimera();
+    RebalanceControlAssignments();
     if (APlayerController* PlayerController =
         Cast<APlayerController>(NewPlayer))
     {
+        UE_LOG(LogChimeraMultiplayer, Log,
+            TEXT("Player=%s possesses ControlBody=%s"),
+            *GetNameSafe(PlayerController),
+            *GetNameSafe(PlayerController->GetPawn()));
+
+        // Possess 대상은 개인 ControlBody지만, 화면은 계속 한 대의 공용
+        // Shared Chimera 카메라를 사용한다.
         if (SharedChimera)
         {
             PlayerController->ClientSetViewTarget(SharedChimera);
@@ -73,6 +88,22 @@ void ACMGameMode::RestartPlayer(AController* NewPlayer)
 }
 
 // 신규 접속·Seamless Travel 플레이어의 색상·조작·시점 초기화
+UClass* ACMGameMode::GetDefaultPawnClassForController_Implementation(
+    AController* InController
+)
+{
+    if (IsGameplayMap())
+    {
+        // DefaultPawnClass는 기존 Shared Chimera 클래스 선택에 사용 중이므로
+        // 플레이어 Spawn 경로에서만 ControlBody로 명확히 분리한다.
+        return ACMControlBody::StaticClass();
+    }
+
+    return Super::GetDefaultPawnClassForController_Implementation(
+        InController
+    );
+}
+
 void ACMGameMode::GenericPlayerInitialization(AController* C)
 {
     Super::GenericPlayerInitialization(C);
@@ -84,8 +115,7 @@ void ACMGameMode::GenericPlayerInitialization(AController* C)
         return;
     }
 
-    ACMPawn* SharedChimera = EnsureSharedChimera();
-    RebalanceControlAssignments();
+    ACMChimera* SharedChimera = EnsureSharedChimera();
 
     if (APlayerController* PlayerController = Cast<APlayerController>(C))
     {
@@ -200,7 +230,7 @@ bool ACMGameMode::IsGameplayMap() const
 }
 
 // 월드의 기존 공용 키메라를 찾거나 서버에서 새로 생성하여 GameState에 등록
-ACMPawn* ACMGameMode::EnsureSharedChimera()
+ACMChimera* ACMGameMode::EnsureSharedChimera()
 {
     if (!HasAuthority() || !IsGameplayMap())
     {
@@ -218,8 +248,8 @@ ACMPawn* ACMGameMode::EnsureSharedChimera()
         return CMGameState->SharedChimera;
     }
 
-    ACMPawn* SharedChimera = nullptr;
-    for (TActorIterator<ACMPawn> It(GetWorld()); It; ++It)
+    ACMChimera* SharedChimera = nullptr;
+    for (TActorIterator<ACMChimera> It(GetWorld()); It; ++It)
     {
         SharedChimera = *It;
         break;
@@ -237,17 +267,17 @@ ACMPawn* ACMGameMode::EnsureSharedChimera()
         UClass* SharedPawnClass = DefaultPawnClass;
         if (!SharedPawnClass
             || !SharedPawnClass->IsChildOf(
-                ACMPawn::StaticClass()
+                ACMChimera::StaticClass()
             ))
         {
-            SharedPawnClass = ACMPawn::StaticClass();
+            SharedPawnClass = ACMChimera::StaticClass();
         }
 
         FActorSpawnParameters SpawnParameters;
         SpawnParameters.SpawnCollisionHandlingOverride =
             ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-        SharedChimera = GetWorld()->SpawnActor<ACMPawn>(
+        SharedChimera = GetWorld()->SpawnActor<ACMChimera>(
             SharedPawnClass,
             SpawnTransform,
             SpawnParameters
@@ -297,6 +327,7 @@ void ACMGameMode::RebalanceControlAssignments(
 
     CMGameState->SharedChimera->ClearPressedControlParts();
 
+    TArray<ACMControlBody*> ControlBodies;
     TArray<ACMPlayerState*> Players;
     for (APlayerState* PlayerState : CMGameState->PlayerArray)
     {
@@ -306,21 +337,74 @@ void ACMGameMode::RebalanceControlAssignments(
             && CMPlayerState != ExcludedPlayerState
             && !CMPlayerState->IsOnlyASpectator())
         {
-            Players.Add(CMPlayerState);
+            AController* PlayerController = Cast<AController>(
+                CMPlayerState->GetOwner()
+            );
+            ACMControlBody* ControlBody = PlayerController
+                ? Cast<ACMControlBody>(PlayerController->GetPawn())
+                : nullptr;
+            if (ControlBody)
+            {
+                Players.Add(CMPlayerState);
+                ControlBodies.Add(ControlBody);
+            }
         }
     }
 
-    TArray<TArray<ECMControlPart>> ExistingAssignments;
-    ExistingAssignments.Reserve(Players.Num());
-    for (const ACMPlayerState* Player : Players)
+    const int32 RequestedSegmentCount = ExcludedPlayerState
+        ? CMGameState->SharedChimera->GetActiveSegmentCount()
+        : Players.Num();
+    CMGameState->SharedChimera->SetActiveSegmentCountForPlayers(
+        RequestedSegmentCount
+    );
+
+    // OwnedSegmentIndex controls player life only. Preserve existing
+    // ownership and give a newly joined player the first unused Segment.
+    TSet<int32> ClaimedSegmentIndices;
+    for (const ACMControlBody* ControlBody : ControlBodies)
     {
-        ExistingAssignments.Add(Player->AssignedControlParts);
+        if (ControlBody
+            && ControlBody->GetOwnedSegmentIndex() >= 0)
+        {
+            ClaimedSegmentIndices.Add(
+                ControlBody->GetOwnedSegmentIndex()
+            );
+        }
+    }
+    for (ACMControlBody* ControlBody : ControlBodies)
+    {
+        if (!ControlBody
+            || ControlBody->GetOwnedSegmentIndex() >= 0)
+        {
+            continue;
+        }
+
+        for (int32 SegmentIndex = 0;
+            SegmentIndex
+                < CMGameState->SharedChimera->GetActiveSegmentCount();
+            ++SegmentIndex)
+        {
+            if (!ClaimedSegmentIndices.Contains(SegmentIndex))
+            {
+                ControlBody->SetOwnedSegmentIndex(SegmentIndex);
+                ClaimedSegmentIndices.Add(SegmentIndex);
+                break;
+            }
+        }
     }
 
-    TArray<TArray<ECMControlPart>> NewAssignments;
+    TArray<TArray<FCMPartSlotAddress>> ExistingAssignments;
+    ExistingAssignments.Reserve(ControlBodies.Num());
+    for (const ACMControlBody* ControlBody : ControlBodies)
+    {
+        ExistingAssignments.Add(ControlBody->GetControlSlots());
+    }
+
+    TArray<TArray<FCMPartSlotAddress>> NewAssignments;
     FRandomStream RandomStream(FMath::Rand());
     FCMControlAssignmentPolicy::Rebalance(
         ExistingAssignments,
+        CMGameState->SharedChimera->GetActiveSegmentCount(),
         RandomStream,
         NewAssignments
     );
@@ -329,16 +413,17 @@ void ACMGameMode::RebalanceControlAssignments(
         PlayerIndex < Players.Num();
         ++PlayerIndex)
     {
-        Players[PlayerIndex]->SetAssignedControlParts(
+        ControlBodies[PlayerIndex]->SetControlSlots(
             NewAssignments[PlayerIndex]
         );
 
         UE_LOG(
             LogChimeraMultiplayer,
             Log,
-            TEXT("Assigned %d control part(s) to %s."),
+            TEXT("Assigned %d mixed PartSlot(s) to %s. OwnedSegment=%d"),
             NewAssignments[PlayerIndex].Num(),
-            *Players[PlayerIndex]->GetPlayerName()
+            *Players[PlayerIndex]->GetPlayerName(),
+            ControlBodies[PlayerIndex]->GetOwnedSegmentIndex()
         );
     }
 }

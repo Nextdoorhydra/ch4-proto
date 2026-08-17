@@ -67,6 +67,9 @@ public:
 	FListenServerOperationResult GetLastOperationResult() const;
 
 	UFUNCTION(BlueprintPure, Category="Listen Server Network")
+	bool GetCurrentSessionAttribute(FName Key, FString& OutValue) const;
+
+	UFUNCTION(BlueprintPure, Category="Listen Server Network")
 	int32 GetSearchResultCount() const;
 
 	UFUNCTION(BlueprintPure, Category="Listen Server Network")

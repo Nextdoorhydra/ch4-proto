@@ -20,7 +20,11 @@ DataForge is an editor-only Unreal Engine plugin that turns canonical parsed row
 - Persistent ownership metadata and managed orphan detection across managed folders
 - Ownership-identity-based managed asset move/rename when a rule changes the desired package path
 - Dedicated RuleSet Editor with side-by-side rule details, source rows, and managed path plan
-- Staged six-step Rule Creation Wizard: Source, Probe, Schema, Output, Bindings, Preview
+- Staged nine-step Rule Creation Wizard: Source, Probe, Schema, Output, Asset Layout, Asset Rules, Generated Outputs, Bindings, Preview
+- One-click Automatic Setup for primary-key, folder-layout, reflected slot, association, and exact-name binding inference
+- Exact-root reuse of existing Folder Source Config, Layout Recipe, and Naming Policy definitions
+- Structured Automatic Setup review with evidence, create/reuse paths, assignment cardinality, diagnostics, and Preview effects
+- Explicit developer approval of an Automatic Setup Preview before Finish & Apply
 - Reflection Property Picker for DataTable and generated-output targets
 - Exact-name Auto Map for editable DataTable row properties
 - Automatic exact-name inference when the Wizard enters Bindings, including same-name Generated Output soft references
@@ -40,6 +44,10 @@ DataForge is an editor-only Unreal Engine plugin that turns canonical parsed row
 - Deterministic JSON/YAML RuleSet snapshots for source-control review
 - Headless single-RuleSet or project-wide validation/Preview/Apply/Cleanup/snapshot commandlet support
 - CI provenance logging for plugin version, RuleSet version, source revision, and materialization summary
+- Naming Policy, folder Layout Recipe, and Binding Preset assets for reusable semantic asset conventions
+- Asset Registry Folder associations with explicit cardinality and managed merge behavior
+- Evidence-ranked Rename Audit for selected assets or recursive Content Browser folders
+- Collision-safe batch rename and Recovery Center restoration backed by persisted manifests
 
 Managed asset identity is `(RuleSetId, RecordId, Role)`. When that identity still exists but its Asset Rule produces a different path, Preview reports a Move and Apply renames the owned asset. Apply always preserves true orphans. Deletion is available only through the separately confirmed **Cleanup Root Orphans** action or the `-CleanupOrphans` commandlet mode; both re-preview/revalidate ownership and drift before deleting. External and unowned assets are never moved or deleted.
 
@@ -49,21 +57,38 @@ Managed asset identity is `(RuleSetId, RecordId, Role)`. When that identity stil
 2. Double-click it to open the dedicated **DataForge RuleSet Editor**.
 3. Select **Creation Wizard**. The wizard edits a transient draft, not the RuleSet asset.
 4. Choose `CSV`, `JSON`, or `Google Sheet Cache` from the adapter dropdown. Use the file browser or Source Asset picker; do not type an Adapter ID.
-5. Complete Source → Probe → Schema → Output → Bindings → Preview. Each step shows only its own settings. Probe infers required columns and suggests a primary key for review.
-6. Enter **Bindings** to infer missing exact-name source and Generated Output bindings, then review the result.
-7. Select **Finish & Apply**. The Wizard commits the staged rules, runs a fresh Preview, and immediately Applies when validation succeeds.
-8. Use the **Pick** menu beside `TargetProperty` to choose writable properties through reflection instead of typing paths. Choose `Source Output` and `Target Output` from the Generated Outputs dropdown.
-9. Review the adjacent **Conversion** result. `Risky` and `Unsupported` results require an explicit rule correction.
-10. Open **Binding Graph**, run **Probe + Refresh**, then drag source fields/outputs onto target properties. The graph creates only `Direct` or `Convertible` bindings.
-11. For existing project assets, add an External Asset Rule and use a `ResolvedAsset` binding. For DA/PDA generation, add a Managed Asset Rule and Generated Output.
-12. Open **Semantic Diff** to review structured changes from its captured baseline. Reordering keyed rule arrays alone does not produce noise.
-13. Add prerequisite RuleSets to `Dependencies`, then open **Project Overview** to review dependency-first execution order and every project RuleSet's source/output/dependent files. Empty, missing, or cyclic dependencies fail compilation.
-14. Select **Preview Dependency Graph** and then **Apply Dependency Graph**. Each RuleSet is re-previewed immediately before its dependency-ordered Apply; source, rule, dependency, DataTable, or managed-asset drift blocks that RuleSet.
-15. If Preview reports managed orphans, review them and use **Cleanup Root Orphans** as a separate destructive action. Apply does not remove them.
+5. For the recommended path, set Asset Search Root, Row Struct, generated PDA/DA class, DataTable path, generated folder, and definition folder under **Automatic Setup**, then select **Analyze & Build Draft**. Naming Policy is optional when one compatible definition can be discovered.
+6. Complete Source → Probe → Schema → Output → Asset Layout → Asset Rules → Generated Outputs → Bindings → Preview. Advanced steps remain editable after automatic analysis.
+7. Run **Preview**, inspect inference evidence, create/reuse paths, assignment relationships, diagnostics, and concrete row/asset effects, then check the explicit review approval.
+8. Select **Finish & Apply**. The Wizard promotes reviewed definitions, commits the staged rules, runs a fresh Preview, and immediately Applies when validation succeeds.
+9. Use the **Pick** menu beside `TargetProperty` to choose writable properties through reflection instead of typing paths. Choose `Source Output` and `Target Output` from the Generated Outputs dropdown.
+10. Review the adjacent **Conversion** result. `Risky` and `Unsupported` results require an explicit rule correction.
+11. Open **Binding Graph**, run **Probe + Refresh**, then drag source fields/outputs onto target properties. The graph creates only `Direct` or `Convertible` bindings.
+12. For existing project assets, add an External Asset Rule and use a `ResolvedAsset` binding. For DA/PDA generation, add a Managed Asset Rule and Generated Output.
+13. Open **Semantic Diff** to review structured changes from its captured baseline. Reordering keyed rule arrays alone does not produce noise.
+14. Add prerequisite RuleSets to `Dependencies`, then open **Project Overview** to review dependency-first execution order and every project RuleSet's source/output/dependent files. Empty, missing, or cyclic dependencies fail compilation.
+15. Select **Preview Dependency Graph** and then **Apply Dependency Graph**. Each RuleSet is re-previewed immediately before its dependency-ordered Apply; source, rule, dependency, DataTable, or managed-asset drift blocks that RuleSet.
+16. If Preview reports managed orphans, review them and use **Cleanup Root Orphans** as a separate destructive action. Apply does not remove them.
 
 Auto Map adds only missing exact-name targets. It maps source columns to editable row properties and defined Generated Outputs to same-name soft-object row properties; it never overwrites an existing target binding.
 
+A successful Probe immediately reveals a dedicated Primary Key dropdown and it remains visible through Schema; Automatic Setup also reveals it on Source after its internal Probe. Only the latest Probe columns are listed. The column does not need to be named `Id`; a selected `CharacterCode`, `BodyKey`, or other unique source column supplies the subject value represented as `<ID>` in Naming Policy examples. Manual Asset Rule tokens remain literal and case-sensitive, so that example would use `{CharacterCode}`. Asset names do not synthesize missing source columns.
+
+Automatic Setup never guesses among tied reusable definitions. An exact Asset Search Root match reuses the existing `Folder Source Config → Asset Layout Recipe → Naming Policy` chain. Multiple exact matches or multiple policy candidates block analysis and require an explicit Naming Policy override. Any draft edit or repeated Preview invalidates the previous approval.
+
+Reopening Automatic Setup restores the committed RuleSet's asset-search root, generated output folder/class, definition folder, and Naming Policy where they can be recovered from its Generated Output, Binding Preset, and Folder Source chain. The reusable Chimera default policy is `/Game/Chimera/DataForge/Naming/NP_ChimeraDefault`; it covers common Blueprint, UI, texture, material, mesh, animation, Niagara, audio, table, data-asset, sequence, input, Gameplay Ability/Effect, enum, struct, and font prefixes.
+
 The Source UI shows only the field consumed by the selected adapter: CSV/JSON use `File`, Google Sheet Cache uses `Source Asset`, and Multi Source uses `Inputs`. Deleting a generated DataTable or DataForge-owned DA/PDA in the Content Browser reopens the owning RuleSet's Creation Wizard on the next editor tick so the output can be reviewed and recreated.
+
+DataForge diagnostics are recorded in the **DataForge Message Log** and the active tool's status/review area without automatically opening or focusing the Message Log window. A compatible existing PDA/DA at a generated path is adopted by default only when it has no DataForge ownership metadata; Preview reports `DF1219`, Apply updates only declared bindings, and assets owned by another RuleSet remain blocked. Disable **Adopt Compatible Unowned Asset** in a Generated Output's Advanced properties when strict create-only ownership is required.
+
+## Folder inventory, rename audit, and recovery
+
+Folder-driven association uses a **Naming Policy**, **Asset Layout Recipe**, **Folder Source Config**, and **Binding Preset**. Add the Folder Source Config as an `Asset Registry Folder` Association Source, then reference its Source ID from Binding Preset slots. Folder inventory rows remain canonical `FDataForgeDataSet` rows, so CSV, JSON, Google cache, and folder associations use the same compiler boundary.
+
+For convention repair, select one or more assets and choose **DataForge Rename Audit...**, or right-click a folder and choose **DataForge Audit Folder...**. DataForge ranks candidates by existing Association Manifest, exact current name, Subject folder, and Naming Policy parsing. Only a unique highest score is marked `Recommended`; an evidence-free or tied candidate is never auto-selected.
+
+Checked candidates are revalidated as one batch. DataForge blocks duplicate source selections, duplicate destinations, stale RuleSets/source rows, and occupied packages. Before AssetTools runs, it writes `Saved/DataForge/Recovery/Rename_*.json`. Open **Tools > DataForge Recovery Center...** to inspect persisted batches and restore a collision-free successful or incomplete-rollback batch. Restore writes its own `Restore_*.json` before moving assets and attempts to roll back partial restore failures.
 
 ## Google Sheet cache workflow
 
@@ -74,7 +99,7 @@ The Source UI shows only the field consumed by the selected adapter: CSV/JSON us
 
 Fetch remains the explicit network trigger. When automatic application is enabled, DataForge still performs a fresh validation Preview internally before it mutates project assets.
 
-As of 1.3, new GoogleSheetConfig assets enable **Save Normalized Json** and **Auto Apply DataForge** by default. A successful Fetch broadcasts the cache update, discovers every direct or Multi Source RuleSet referencing that config, runs a fresh Preview, and immediately Applies when validation succeeds. Preview/foreign-key/schema failures block only the affected RuleSet and are appended to the Google Sheet status. Existing config assets keep their serialized option values, so enable both options once when upgrading an existing asset.
+As of 1.4, new GoogleSheetConfig assets enable **Save Normalized Json** and **Auto Apply DataForge** by default. A successful Fetch broadcasts the cache update, discovers every direct or Multi Source RuleSet referencing that config, runs a fresh Preview, and immediately Applies when validation succeeds. Preview/foreign-key/schema failures block only the affected RuleSet and are appended to the Google Sheet status. Existing config assets keep their serialized option values, so enable both options once when upgrading an existing asset.
 
 For MCP-assisted initial creation, call the project command through the canonical `system_control.console_command` capability:
 
@@ -83,6 +108,16 @@ DataForge.MCP.CreateRuleSetFromGoogleParser Config=/Game/Data/GS_Items
 ```
 
 The command reuses the parser's TargetTable when available, probes the normalized cache, infers schema and bindings, previews, applies, saves, and enables Google auto-apply. It refuses to overwrite an existing RuleSet; subsequent maintenance belongs in the RuleSet Editor. Cache-only parsers must also provide `RowStruct=` and `Output=`. See `Docs/DataForge_MCP_Guide.md` and the project `AGENTS.md` for the MCP contract.
+
+Requests that also define Managed PDA/DA outputs, external texture/mesh lookups, or explicit bindings use a validated JSON spec instead of fragile repeated console arguments:
+
+```text
+DataForge.MCP.CreateRuleSetFromGoogleParser Spec=Saved/DataForge/McpRequests/items.json
+```
+
+The same atomic bootstrap parses the complete spec, probes the source, adds exact-name bindings, runs Preview, and only then creates/applies the RuleSet. The Korean copy-ready prompt template and JSON schema are in `Docs/DataForge_MCP_Guide.md`.
+
+Structured specs may select an Asset Layout Profile by exact asset path or by an exact `Purpose`/`Tags` discovery key. Discovery succeeds only for one candidate; ambiguous results are reported instead of guessed. Profile `${Parameter}` values materialize into concrete RuleSet Asset Rules after Probe validates every remaining `{Column}` token. Existing `assetRules` remain compatible and become Custom rules when combined with a Profile.
 
 ## Multi Source foreign-key join
 
@@ -209,6 +244,28 @@ Fail CI when validation succeeds but the desired state differs from current cont
 UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -ValidateOnly -FailOnChanges
 ```
 
+Validate every Asset Layout Profile and fail CI when any Profile-backed RuleSet is outdated:
+
+```text
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -ValidateOnly -FailOnOutdatedProfiles
+```
+
+Profile definition errors, duplicate Profile IDs, and missing/mismatched provenance always fail validation. Profile drift is reported as `DF1643` but only becomes a CI failure when `-FailOnOutdatedProfiles` is specified.
+
+Preview a dependency-ordered rebase for every RuleSet using one Profile, without mutation:
+
+```text
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -Profile=/Game/DataForge/Profiles/ALP_Character -Rebase -ValidateOnly
+```
+
+Explicitly persist the rebased concrete rules and apply their content:
+
+```text
+UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -Profile=/Game/DataForge/Profiles/ALP_Character -Rebase -Apply
+```
+
+Profile Rebase uses the same batch stale checks, global path-collision validation, and dependency ordering as Project Overview. It cannot be combined with `-RuleSet`, `-All`, snapshot, cleanup, or CI failure modes.
+
 Controlled apply (internally previews first):
 
 ```text
@@ -233,11 +290,11 @@ Fail CI when either snapshot is missing or stale:
 UnrealEditor-Cmd.exe Chimera.uproject -run=DataForge -All -VerifySnapshots
 ```
 
-`-RuleSet` includes its transitive prerequisites; `-All` discovers every RuleSet asset. Dependencies and independent roots are ordered deterministically by asset path. `-Apply`, `-CleanupOrphans`, `-ExportSnapshots`, and `-VerifySnapshots` are mutually exclusive, and none can be combined with `-FailOnChanges`. `-FailOnChanges` returns exit code `3`, validation/action errors return `1`, and invalid arguments return `2`.
+`-RuleSet` includes its transitive prerequisites; `-All` discovers every RuleSet asset. Dependencies and independent roots are ordered deterministically by asset path. `-Apply`, `-CleanupOrphans`, `-ExportSnapshots`, and `-VerifySnapshots` are mutually exclusive, and none can be combined with `-FailOnChanges` or `-FailOnOutdatedProfiles`. `-FailOnChanges` returns exit code `3`, `-FailOnOutdatedProfiles` returns `4`, validation/action errors return `1`, and invalid arguments return `2`.
 
 Graph Apply is dependency ordered but is not a project-wide atomic transaction. Each RuleSet is previewed and applied independently, so a later failure does not roll back an earlier successful prerequisite.
 
-Recovery manifests are written under `Saved/DataForge/Recovery` before content mutation or orphan deletion. They are audit/reconstruction data, not a binary asset backup or an automatic restore facility; keep deleted assets in source control or another backup until restoration support is implemented. Unreal's AssetTools rename operation saves the moved package even when `Output.bSaveAfterApply` is false.
+Recovery manifests are written under `Saved/DataForge/Recovery` before content mutation, rename/restore, or orphan deletion. Rename manifests can be restored through Recovery Center when every recorded path is unambiguous and collision-free. DataTable/property and deletion manifests remain audit/reconstruction data rather than binary backups; keep deleted assets in source control or another backup. Unreal's AssetTools rename operation saves moved packages even when `Output.bSaveAfterApply` is false.
 
 ## RuleSet snapshots
 
@@ -248,7 +305,7 @@ Config/DataForge/Snapshots/<RuleSet package path>.json
 Config/DataForge/Snapshots/<RuleSet package path>.yaml
 ```
 
-Both formats include every persistent RuleSet field and exclude transient editor status. Parameters, required columns, Asset Rules, generated outputs, bindings, and dependencies are sorted by stable semantic keys, so array reorder noise does not affect review. Commit these files alongside the RuleSet assets and run `-VerifySnapshots` in CI. Edit the UAsset through the RuleSet Editor and export again; snapshots are deliberately not imported as a competing source of truth.
+Both formats include every persistent RuleSet field and exclude transient editor status. Snapshot version 3 includes the Profile asset path, stable Profile ID, materialized version/hash, parameter values, rule-template baselines, and local override fields. Parameters, required columns, Profile origins, Asset Rules, generated outputs, bindings, and dependencies are sorted by stable semantic keys, so array reorder noise does not affect review. Commit these files alongside the RuleSet assets and run `-VerifySnapshots` in CI. Edit the UAsset through the RuleSet Editor and export again; snapshots are deliberately not imported as a competing source of truth.
 
 ## Authoring review tools
 
@@ -256,4 +313,4 @@ Conversion suggestions are advisory and never rewrite source values or select a 
 
 ## Remaining architecture work
 
-Post-1.0 architecture work is recovery-manifest restoration and incremental diff/cache optimization.
+The planned naming, folder association, rename continuity, candidate audit, and rename restoration phases are complete. Future work is optional optimization: incremental Asset Registry indexing for very large projects and source-control-provider integration for richer binary recovery.

@@ -19,6 +19,7 @@ public class DataForgeEditor : ModuleRules
 			"AssetRegistry",
 			"AssetTools",
 			"ContentBrowser",
+			"DirectoryWatcher",
 			"InputCore",
 			"Json",
 			"MessageLog",

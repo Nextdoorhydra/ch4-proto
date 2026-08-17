@@ -28,6 +28,7 @@ public class ChimeraEditor : ModuleRules
                 "Engine",
                 "AssetRegistry",
 				"InputCore",
+				"Json",
                 "Slate",
                 "SlateCore"
             }

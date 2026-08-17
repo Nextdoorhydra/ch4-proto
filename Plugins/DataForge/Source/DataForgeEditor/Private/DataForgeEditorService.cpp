@@ -3,6 +3,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "DataForgeDependencyGraph.h"
+#include "DataForgeBindingPreset.h"
 #include "DataForgeCore.h"
 #include "DataForgePipeline.h"
 #include "DataForgeRuleSet.h"
@@ -238,6 +239,37 @@ namespace DataForgeEditorService
 			RuleSet.Output.bRemoveRowsMissingFromSource,
 			RuleSet.Output.bSaveAfterApply);
 		Signature += FString::Printf(TEXT("|WarnUnmapped:%d"), RuleSet.Schema.bWarnOnUnmappedColumns);
+		Signature += TEXT("|BindingPreset:") + RuleSet.BindingPreset.ToSoftObjectPath().ToString();
+		for (const FDataForgeAssociationSourceRule& Association : RuleSet.AssociationSources)
+		{
+			Signature += FString::Printf(TEXT("|AS:%s:%s:%s:%s:%s:%s:%s:%s"), *Association.SourceId.ToString(), *Association.Source.AdapterId.ToString(),
+				*Association.Source.File.FilePath, *Association.Source.SourceAsset.ToSoftObjectPath().ToString(), *Association.MatchColumn.ToString(),
+				*Association.AssetPathColumn.ToString(), *Association.AssetKindColumn.ToString(), *Association.RoleColumn.ToString());
+			TArray<FName> AssociationParameterKeys;
+			Association.Source.Parameters.GetKeys(AssociationParameterKeys);
+			AssociationParameterKeys.Sort(FNameLexicalLess());
+			for (const FName Key : AssociationParameterKeys) Signature += FString::Printf(TEXT(":%s=%s"), *Key.ToString(), *Association.Source.Parameters.FindChecked(Key));
+			for (int32 InputIndex = 0; InputIndex < Association.Source.Inputs.Num(); ++InputIndex)
+			{
+				const FDataForgeSourceInput& Input = Association.Source.Inputs[InputIndex];
+				Signature += FString::Printf(TEXT("|ASI:%s:%d:%s:%s:%s:%s:%s"), *Association.SourceId.ToString(), InputIndex, *Input.AdapterId.ToString(),
+					*Input.File.FilePath, *Input.SourceAsset.ToSoftObjectPath().ToString(), *Input.JoinColumn.ToString(), *Input.ColumnPrefix);
+				TArray<FName> InputKeys;
+				Input.Parameters.GetKeys(InputKeys);
+				InputKeys.Sort(FNameLexicalLess());
+				for (const FName Key : InputKeys) Signature += FString::Printf(TEXT(":%s=%s"), *Key.ToString(), *Input.Parameters.FindChecked(Key));
+			}
+		}
+		if (const UDataForgeBindingPreset* Preset = RuleSet.BindingPreset.LoadSynchronous())
+		{
+			Signature += FString::Printf(TEXT("|BP:%s:%s:%s"), *Preset->PresetId.ToString(EGuidFormats::Digits), *Preset->OutputName.ToString(), Preset->TargetClass ? *Preset->TargetClass->GetPathName() : TEXT("None"));
+			for (const FDataForgeBindingPresetSlot& Slot : Preset->Slots)
+			{
+				Signature += FString::Printf(TEXT("|BPS:%s:%s:%s:%s:%s:%s:%d:%d:%d"), *Slot.SlotId.ToString(), *Slot.AssociationSourceId.ToString(),
+					*Slot.SourceKeyColumn.ToString(), *Slot.AssetKind.ToString(), *Slot.Role.ToString(), *Slot.TargetProperty,
+					static_cast<int32>(Slot.Cardinality), static_cast<int32>(Slot.Reconcile), Slot.bRequired);
+			}
+		}
 		TArray<FName> SourceParameterKeys;
 		RuleSet.Source.Parameters.GetKeys(SourceParameterKeys);
 		SourceParameterKeys.Sort(FNameLexicalLess());
@@ -276,11 +308,12 @@ namespace DataForgeEditorService
 		for (const FDataForgeGeneratedAssetOutputRule& Output : RuleSet.GeneratedOutputs)
 		{
 			Signature += FString::Printf(
-				TEXT("|GO:%s:%d:%s:%s"),
+				TEXT("|GO:%s:%d:%s:%s:%d"),
 				*Output.OutputName.ToString(),
 				static_cast<int32>(Output.Type),
 				Output.AssetClass ? *Output.AssetClass->GetPathName() : TEXT("None"),
-				*Output.AssetRuleId.ToString());
+				*Output.AssetRuleId.ToString(),
+				Output.bAdoptCompatibleUnownedAsset);
 		}
 		for (const FDataForgeBindingRule& Binding : RuleSet.Bindings)
 		{
@@ -652,6 +685,18 @@ FDataForgeResult FDataForgeEditorService::Apply(UDataForgeRuleSet& RuleSet)
 		MetaData.SetValue(Asset, TEXT("DataForge.RecordId"), *PlannedAsset.RecordId.ToString());
 		MetaData.SetValue(Asset, TEXT("DataForge.Role"), *PlannedAsset.OutputName.ToString());
 		MetaData.SetValue(Asset, TEXT("DataForge.RuleVersion"), *FString::FromInt(RuleSet.RuleVersion));
+		TArray<FString> AssociationKeys;
+		PlannedAsset.ManagedAssociations.GetKeys(AssociationKeys);
+		AssociationKeys.Sort();
+		for (const FString& PropertyPath : AssociationKeys)
+		{
+			MetaData.SetValue(Asset, *(TEXT("DataForge.Association.") + PropertyPath), *FString::Join(PlannedAsset.ManagedAssociations.FindChecked(PropertyPath), TEXT("\n")));
+		}
+		for (const FString& RemovedKey : PlannedAsset.RemovedAssociationKeys)
+		{
+			MetaData.RemoveValue(Asset, *(TEXT("DataForge.Association.") + RemovedKey));
+		}
+		MetaData.SetValue(Asset, TEXT("DataForge.Association.Keys"), *FString::Join(AssociationKeys, TEXT("\n")));
 		Asset->MarkPackageDirty();
 		AssetsToSave.Add(Asset);
 	}
@@ -919,29 +964,53 @@ int32 FDataForgeEditorService::AutoMapExactNames(UDataForgeRuleSet& RuleSet, con
 		{
 			continue;
 		}
-		FProperty* Property = FindFProperty<FProperty>(RuleSet.Output.RowStruct, Output.OutputName);
-		if (!CastField<FSoftObjectProperty>(Property)
-			|| !Property->HasAnyPropertyFlags(CPF_Edit)
-			|| Property->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated))
+		UClass* OutputClass = Output.AssetClass.Get();
+		if (OutputClass)
 		{
-			continue;
+			for (const FName Column : SourceColumns)
+			{
+				FProperty* OutputProperty = FindFProperty<FProperty>(OutputClass, Column);
+				if (!OutputProperty || !OutputProperty->HasAnyPropertyFlags(CPF_Edit)
+					|| OutputProperty->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated))
+				{
+					continue;
+				}
+				const bool bOutputPropertyAlreadyMapped = RuleSet.Bindings.ContainsByPredicate([&Output, Column](const FDataForgeBindingRule& Candidate)
+				{
+					return Candidate.Target == EDataForgeBindingTarget::GeneratedOutput
+						&& Candidate.TargetOutput == Output.OutputName
+						&& Candidate.TargetProperty.Equals(Column.ToString(), ESearchCase::IgnoreCase);
+				});
+				if (bOutputPropertyAlreadyMapped) continue;
+
+				FDataForgeBindingRule& OutputBinding = RuleSet.Bindings.AddDefaulted_GetRef();
+				OutputBinding.Source = EDataForgeBindingSource::SourceValue;
+				OutputBinding.SourceColumn = Column;
+				OutputBinding.Target = EDataForgeBindingTarget::GeneratedOutput;
+				OutputBinding.TargetOutput = Output.OutputName;
+				OutputBinding.TargetProperty = Column.ToString();
+				++AddedCount;
+			}
 		}
-		const bool bAlreadyMapped = RuleSet.Bindings.ContainsByPredicate([&Output](const FDataForgeBindingRule& Binding)
+
+		FProperty* RowProperty = FindFProperty<FProperty>(RuleSet.Output.RowStruct, Output.OutputName);
+		const bool bCanReferenceOutput = CastField<FSoftObjectProperty>(RowProperty)
+			&& RowProperty->HasAnyPropertyFlags(CPF_Edit)
+			&& !RowProperty->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated);
+		const bool bOutputReferenceMapped = RuleSet.Bindings.ContainsByPredicate([&Output](const FDataForgeBindingRule& Binding)
 		{
 			return Binding.Target == EDataForgeBindingTarget::DataTableRow
 				&& Binding.TargetProperty.Equals(Output.OutputName.ToString(), ESearchCase::IgnoreCase);
 		});
-		if (bAlreadyMapped)
+		if (bCanReferenceOutput && !bOutputReferenceMapped)
 		{
-			continue;
+			FDataForgeBindingRule& Binding = RuleSet.Bindings.AddDefaulted_GetRef();
+			Binding.Source = EDataForgeBindingSource::GeneratedOutput;
+			Binding.SourceOutput = Output.OutputName;
+			Binding.Target = EDataForgeBindingTarget::DataTableRow;
+			Binding.TargetProperty = Output.OutputName.ToString();
+			++AddedCount;
 		}
-
-		FDataForgeBindingRule& Binding = RuleSet.Bindings.AddDefaulted_GetRef();
-		Binding.Source = EDataForgeBindingSource::GeneratedOutput;
-		Binding.SourceOutput = Output.OutputName;
-		Binding.Target = EDataForgeBindingTarget::DataTableRow;
-		Binding.TargetProperty = Output.OutputName.ToString();
-		++AddedCount;
 	}
 	for (const FName Column : SourceColumns)
 	{
@@ -1104,6 +1173,9 @@ void FDataForgeEditorService::InvalidateProbeCache(UDataForgeRuleSet& RuleSet)
 
 void FDataForgeEditorService::LogResult(const UDataForgeRuleSet& RuleSet, const FDataForgeResult& Result, bool bOpenMessageLog)
 {
+	// Keep diagnostics available in the DataForge listing without stealing focus from
+	// the level editor. Callers surface their result in the active tool/status UI.
+	(void)bOpenMessageLog;
 	FMessageLog MessageLog(TEXT("DataForge"));
 	MessageLog.NewPage(FText::FromString(RuleSet.GetName()));
 	for (const FDataForgeDiagnostic& Diagnostic : Result.Diagnostics)
@@ -1129,11 +1201,6 @@ void FDataForgeEditorService::LogResult(const UDataForgeRuleSet& RuleSet, const 
 		}
 	}
 	MessageLog.Info(FText::FromString(Result.Summary));
-	if (bOpenMessageLog)
-	{
-		MessageLog.Open(Result.bSuccess ? EMessageSeverity::Warning : EMessageSeverity::Error, true);
-	}
-
 	UE_LOG(LogDataForge, Display, TEXT("%s: %s"), *RuleSet.GetPathName(), *Result.Summary);
 }
 

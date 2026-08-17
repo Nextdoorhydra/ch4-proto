@@ -1,46 +1,46 @@
 #include "CMControlAssignmentPolicy.h"
 
 void FCMControlAssignmentPolicy::Rebalance(
-    const TArray<TArray<ECMControlPart>>& ExistingAssignments,
+    const TArray<TArray<FCMPartSlotAddress>>& ExistingAssignments,
+    int32 ActiveSegmentCount,
     FRandomStream& RandomStream,
-    TArray<TArray<ECMControlPart>>& OutAssignments
+    TArray<TArray<FCMPartSlotAddress>>& OutAssignments
 )
 {
     const int32 AssignedPlayerCount = FMath::Min(
         ExistingAssignments.Num(),
         CMControl::MaxPlayers
     );
-    const int32 TotalAssignedParts = FMath::Min(
-        CMControl::MaxControlParts,
-        AssignedPlayerCount * CMControl::MaxKeysPerPlayer
+    const int32 SafeSegmentCount = FMath::Clamp(
+        ActiveSegmentCount,
+        0,
+        CMControl::MaxSegments
     );
 
-    TArray<int32> TargetCounts;
-    TargetCounts.Init(0, ExistingAssignments.Num());
-    if (AssignedPlayerCount > 0)
+    TArray<FCMPartSlotAddress> AvailablePartSlots;
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < SafeSegmentCount;
+        ++SegmentIndex)
     {
-        const int32 BaseCount = TotalAssignedParts / AssignedPlayerCount;
-        const int32 Remainder = TotalAssignedParts % AssignedPlayerCount;
-        for (int32 PlayerIndex = 0;
-            PlayerIndex < AssignedPlayerCount;
-            ++PlayerIndex)
+        for (int32 PartSlotIndex = 0;
+            PartSlotIndex < CMControl::PartSlotsPerSegment;
+            ++PartSlotIndex)
         {
-            TargetCounts[PlayerIndex] =
-                BaseCount + (PlayerIndex < Remainder ? 1 : 0);
+            FCMPartSlotAddress& Address =
+                AvailablePartSlots.AddDefaulted_GetRef();
+            Address.SegmentIndex = SegmentIndex;
+            Address.PartSlotIndex = PartSlotIndex;
         }
     }
 
-    TArray<ECMControlPart> AvailableParts;
-    for (int32 PartIndex = 0;
-        PartIndex < CMControl::MaxControlParts;
-        ++PartIndex)
+    for (int32 Index = AvailablePartSlots.Num() - 1;
+        Index > 0;
+        --Index)
     {
-        AvailableParts.Add(static_cast<ECMControlPart>(PartIndex));
-    }
-
-    for (int32 Index = AvailableParts.Num() - 1; Index > 0; --Index)
-    {
-        AvailableParts.Swap(Index, RandomStream.RandRange(0, Index));
+        AvailablePartSlots.Swap(
+            Index,
+            RandomStream.RandRange(0, Index)
+        );
     }
 
     OutAssignments.Reset();
@@ -50,12 +50,13 @@ void FCMControlAssignmentPolicy::Rebalance(
         PlayerIndex < ExistingAssignments.Num();
         ++PlayerIndex)
     {
-        while (OutAssignments[PlayerIndex].Num()
-                < TargetCounts[PlayerIndex]
-            && !AvailableParts.IsEmpty())
+        while (PlayerIndex < AssignedPlayerCount
+            && OutAssignments[PlayerIndex].Num()
+                < CMControl::MaxKeysPerPlayer
+            && !AvailablePartSlots.IsEmpty())
         {
             OutAssignments[PlayerIndex].Add(
-                AvailableParts.Pop(EAllowShrinking::No)
+                AvailablePartSlots.Pop(EAllowShrinking::No)
             );
         }
     }

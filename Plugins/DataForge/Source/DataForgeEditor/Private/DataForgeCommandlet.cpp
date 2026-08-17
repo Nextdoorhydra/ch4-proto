@@ -1,13 +1,17 @@
 #include "DataForgeCommandlet.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "DataForgeAssetLayoutBatchRebase.h"
+#include "DataForgeAssetLayoutProfile.h"
 #include "DataForgeDependencyGraph.h"
 #include "DataForgeEditorService.h"
+#include "DataForgeProfileValidation.h"
 #include "DataForgeRuleSet.h"
 #include "DataForgeRuleSetSnapshot.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
+#include "UObject/SavePackage.h"
 
 namespace DataForgeCommandlet
 {
@@ -76,6 +80,66 @@ namespace DataForgeCommandlet
 			|| Plan.AssetUpdateCount > 0
 			|| Plan.AssetOrphanCount > 0;
 	}
+
+	UDataForgeAssetLayoutProfile* LoadProfile(const FString& ConfiguredPath)
+	{
+		FString ObjectPath = ConfiguredPath;
+		if (FPackageName::IsValidLongPackageName(ObjectPath))
+		{
+			ObjectPath += TEXT(".") + FPackageName::GetLongPackageAssetName(ObjectPath);
+		}
+		return LoadObject<UDataForgeAssetLayoutProfile>(nullptr, *ObjectPath);
+	}
+
+	bool SaveRebasedRuleSets(const FDataForgeAssetLayoutBatchPlan& Plan)
+	{
+		for (const FDataForgeAssetLayoutBatchEntry& Entry : Plan.Entries)
+		{
+			UDataForgeRuleSet* RuleSet = Entry.RuleSet.Get();
+			if (!RuleSet) return false;
+			UPackage* Package = RuleSet->GetOutermost();
+			const FString Filename = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+			FSavePackageArgs SaveArgs;
+			SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+			SaveArgs.SaveFlags = SAVE_NoError;
+			if (!UPackage::SavePackage(Package, RuleSet, *Filename, SaveArgs))
+			{
+				UE_LOG(LogTemp, Error, TEXT("Could not save rebased RuleSet: %s"), *RuleSet->GetPathName());
+				return false;
+			}
+		}
+		return true;
+	}
+
+	int32 RunProfileRebase(const FString& ProfilePath, bool bApply)
+	{
+		UDataForgeAssetLayoutProfile* Profile = LoadProfile(ProfilePath);
+		if (!Profile)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Could not load DataForge Asset Layout Profile: %s"), *ProfilePath);
+			return 2;
+		}
+		FDataForgeAssetLayoutBatchPlan Plan = FDataForgeAssetLayoutBatchRebase::Preview(*Profile);
+		LogDiagnostics(Plan.Diagnostics);
+		UE_LOG(LogTemp, Display, TEXT("%s"), *Plan.MakeSummary());
+		for (const FDataForgeAssetLayoutBatchEntry& Entry : Plan.Entries)
+		{
+			if (!Entry.RuleSet.IsValid()) continue;
+			UE_LOG(LogTemp, Display, TEXT("DataForge Profile Rebase: rule=%s rebase=%s content=%s"),
+				*Entry.RuleSet->GetPathName(), *Entry.Candidate.MakeSummary(), *Entry.ContentPlan.MakeSummary());
+		}
+		if (!Plan.bSuccess) return 1;
+		if (!bApply)
+		{
+			UE_LOG(LogTemp, Display, TEXT("Profile Rebase Preview completed without mutation. Add -Apply to persist and materialize content."));
+			return 0;
+		}
+		const FDataForgeResult ApplyResult = FDataForgeAssetLayoutBatchRebase::Apply(Plan);
+		LogDiagnostics(ApplyResult.Diagnostics);
+		UE_LOG(LogTemp, Display, TEXT("%s"), *ApplyResult.Summary);
+		if (!ApplyResult.bSuccess || !SaveRebasedRuleSets(Plan)) return 1;
+		return 0;
+	}
 }
 
 UDataForgeCommandlet::UDataForgeCommandlet()
@@ -92,24 +156,36 @@ int32 UDataForgeCommandlet::Main(const FString& Params)
 	const bool bAll = FParse::Param(*Params, TEXT("All"));
 	FString ExplicitRuleSetPath;
 	const bool bHasExplicitRuleSet = FParse::Value(*Params, TEXT("RuleSet="), ExplicitRuleSetPath);
-	if (bAll == bHasExplicitRuleSet)
-	{
-		UE_LOG(LogTemp, Error, TEXT("DataForge requires exactly one of -RuleSet or -All."));
-		return 2;
-	}
-
 	const bool bApply = FParse::Param(*Params, TEXT("Apply"));
 	const bool bCleanupOrphans = FParse::Param(*Params, TEXT("CleanupOrphans"));
 	const bool bExportSnapshots = FParse::Param(*Params, TEXT("ExportSnapshots"));
 	const bool bVerifySnapshots = FParse::Param(*Params, TEXT("VerifySnapshots"));
 	const bool bFailOnChanges = FParse::Param(*Params, TEXT("FailOnChanges"));
+	const bool bFailOnOutdatedProfiles = FParse::Param(*Params, TEXT("FailOnOutdatedProfiles"));
+	const bool bRebase = FParse::Param(*Params, TEXT("Rebase"));
+	FString ProfilePath;
+	const bool bHasProfile = FParse::Value(*Params, TEXT("Profile="), ProfilePath);
+	if (bRebase || bHasProfile)
+	{
+		if (!bRebase || !bHasProfile || bAll || bHasExplicitRuleSet || bCleanupOrphans || bExportSnapshots || bVerifySnapshots || bFailOnChanges || bFailOnOutdatedProfiles)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Profile Rebase requires -Profile=/Game/Path/ALP_Name -Rebase, optionally with -Apply, and cannot be combined with RuleSet/All or other action/CI modes."));
+			return 2;
+		}
+		return DataForgeCommandlet::RunProfileRebase(ProfilePath, bApply);
+	}
+	if (bAll == bHasExplicitRuleSet)
+	{
+		UE_LOG(LogTemp, Error, TEXT("DataForge requires exactly one of -RuleSet or -All."));
+		return 2;
+	}
 	const int32 ActionModeCount = static_cast<int32>(bApply)
 		+ static_cast<int32>(bCleanupOrphans)
 		+ static_cast<int32>(bExportSnapshots)
 		+ static_cast<int32>(bVerifySnapshots);
-	if (ActionModeCount > 1 || (bFailOnChanges && ActionModeCount > 0))
+	if (ActionModeCount > 1 || ((bFailOnChanges || bFailOnOutdatedProfiles) && ActionModeCount > 0))
 	{
-		UE_LOG(LogTemp, Error, TEXT("DataForge action modes -Apply, -CleanupOrphans, -ExportSnapshots, and -VerifySnapshots are mutually exclusive; none can be combined with -FailOnChanges."));
+		UE_LOG(LogTemp, Error, TEXT("DataForge action modes -Apply, -CleanupOrphans, -ExportSnapshots, and -VerifySnapshots are mutually exclusive; none can be combined with -FailOnChanges or -FailOnOutdatedProfiles."));
 		return 2;
 	}
 
@@ -125,6 +201,33 @@ int32 UDataForgeCommandlet::Main(const FString& Params)
 	{
 		DataForgeCommandlet::LogDiagnostics(GraphDiagnostics);
 		return 1;
+	}
+
+	FDataForgeProfileValidationReport ProfileReport;
+	if (bAll)
+	{
+		ProfileReport = FDataForgeProfileValidation::ValidateProject();
+	}
+	else
+	{
+		TArray<UDataForgeAssetLayoutProfile*> Profiles;
+		for (const UDataForgeRuleSet* RuleSet : ExecutionOrder)
+		{
+			if (!RuleSet || !RuleSet->ProfileOrigin.IsSet()) continue;
+			if (UDataForgeAssetLayoutProfile* Profile = RuleSet->ProfileOrigin.Profile.LoadSynchronous()) Profiles.AddUnique(Profile);
+		}
+		ProfileReport = FDataForgeProfileValidation::Validate(Profiles, ExecutionOrder);
+	}
+	DataForgeCommandlet::LogDiagnostics(ProfileReport.Diagnostics);
+	UE_LOG(LogTemp, Display, TEXT("%s"), *ProfileReport.MakeSummary());
+	if (!ProfileReport.bSuccess)
+	{
+		return 1;
+	}
+	if (bFailOnOutdatedProfiles && ProfileReport.OutdatedRuleSetCount > 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("DataForge validation found %d outdated Profile-backed RuleSet(s) and -FailOnOutdatedProfiles was specified."), ProfileReport.OutdatedRuleSetCount);
+		return 4;
 	}
 
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("DataForge"));
