@@ -1,4 +1,4 @@
-#include "CMNetworkWidget.h"
+#include "CMNetworkTestWidget.h"
 
 #include "Game/CMGameState.h"
 #include "Player/CMPlayerState.h"
@@ -14,7 +14,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraUI, Log, All);
 
-void UCMNetworkWidget::NativeConstruct()
+void UCMNetworkTestWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
@@ -25,19 +25,19 @@ void UCMNetworkWidget::NativeConstruct()
     {
         NetworkSubsystem->OnStateChanged.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleNetworkStateChanged
+            &UCMNetworkTestWidget::HandleNetworkStateChanged
         );
         NetworkSubsystem->OnOperationCompleted.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleOperationCompleted
+            &UCMNetworkTestWidget::HandleOperationCompleted
         );
         NetworkSubsystem->OnSearchResultsChanged.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleSearchResultsChanged
+            &UCMNetworkTestWidget::HandleSearchResultsChanged
         );
         NetworkSubsystem->OnNetworkFailure.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleNetworkFailure
+            &UCMNetworkTestWidget::HandleNetworkFailure
         );
     }
 
@@ -45,70 +45,70 @@ void UCMNetworkWidget::NativeConstruct()
     {
         Btn_Host->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleHostClicked
+            &UCMNetworkTestWidget::HandleHostClicked
         );
     }
     if (Btn_Find)
     {
         Btn_Find->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleFindClicked
+            &UCMNetworkTestWidget::HandleFindClicked
         );
     }
     if (Btn_JoinFirst)
     {
         Btn_JoinFirst->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleJoinFirstClicked
+            &UCMNetworkTestWidget::HandleJoinFirstClicked
         );
     }
     if (Btn_QuickMatch)
     {
         Btn_QuickMatch->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleQuickMatchClicked
+            &UCMNetworkTestWidget::HandleQuickMatchClicked
         );
     }
     if (Btn_Invite)
     {
         Btn_Invite->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleInviteClicked
+            &UCMNetworkTestWidget::HandleInviteClicked
         );
     }
     if (Btn_StartGame)
     {
         Btn_StartGame->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleStartGameClicked
+            &UCMNetworkTestWidget::HandleStartGameClicked
         );
     }
     if (Btn_Leave)
     {
         Btn_Leave->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleLeaveClicked
+            &UCMNetworkTestWidget::HandleLeaveClicked
         );
     }
     if (Btn_ToggleDetails)
     {
         Btn_ToggleDetails->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleToggleDetailsClicked
+            &UCMNetworkTestWidget::HandleToggleDetailsClicked
         );
     }
     if (Btn_Retry)
     {
         Btn_Retry->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleRetryClicked
+            &UCMNetworkTestWidget::HandleRetryClicked
         );
     }
     if (Btn_GameLeave)
     {
         Btn_GameLeave->OnClicked.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleGameLeaveClicked
+            &UCMNetworkTestWidget::HandleGameLeaveClicked
         );
     }
 
@@ -136,39 +136,39 @@ void UCMNetworkWidget::NativeConstruct()
     );
 }
 
-void UCMNetworkWidget::NativeDestruct()
+void UCMNetworkTestWidget::NativeDestruct()
 {
     if (NetworkSubsystem)
     {
         NetworkSubsystem->OnStateChanged.RemoveDynamic(
             this,
-            &UCMNetworkWidget::HandleNetworkStateChanged
+            &UCMNetworkTestWidget::HandleNetworkStateChanged
         );
         NetworkSubsystem->OnOperationCompleted.RemoveDynamic(
             this,
-            &UCMNetworkWidget::HandleOperationCompleted
+            &UCMNetworkTestWidget::HandleOperationCompleted
         );
         NetworkSubsystem->OnSearchResultsChanged.RemoveDynamic(
             this,
-            &UCMNetworkWidget::HandleSearchResultsChanged
+            &UCMNetworkTestWidget::HandleSearchResultsChanged
         );
         NetworkSubsystem->OnNetworkFailure.RemoveDynamic(
             this,
-            &UCMNetworkWidget::HandleNetworkFailure
+            &UCMNetworkTestWidget::HandleNetworkFailure
         );
     }
     if (BoundGameState.IsValid())
     {
         BoundGameState->OnLobbyRosterChanged.RemoveDynamic(
             this,
-            &UCMNetworkWidget::HandleLobbyRosterChanged
+            &UCMNetworkTestWidget::HandleLobbyRosterChanged
         );
     }
 
     Super::NativeDestruct();
 }
 
-void UCMNetworkWidget::BindCurrentGameState()
+void UCMNetworkTestWidget::BindCurrentGameState()
 {
     ACMGameState* CurrentGameState = GetWorld()
         ? GetWorld()->GetGameState<ACMGameState>()
@@ -182,7 +182,7 @@ void UCMNetworkWidget::BindCurrentGameState()
     {
         BoundGameState->OnLobbyRosterChanged.RemoveDynamic(
             this,
-            &UCMNetworkWidget::HandleLobbyRosterChanged
+            &UCMNetworkTestWidget::HandleLobbyRosterChanged
         );
     }
 
@@ -191,12 +191,12 @@ void UCMNetworkWidget::BindCurrentGameState()
     {
         BoundGameState->OnLobbyRosterChanged.AddUniqueDynamic(
             this,
-            &UCMNetworkWidget::HandleLobbyRosterChanged
+            &UCMNetworkTestWidget::HandleLobbyRosterChanged
         );
     }
 }
 
-void UCMNetworkWidget::MovePlayerLegend(bool bUseGamePosition)
+void UCMNetworkTestWidget::MovePlayerLegend(bool bUseGamePosition)
 {
     if (!Panel_PlayerLegend)
     {
@@ -215,7 +215,7 @@ void UCMNetworkWidget::MovePlayerLegend(bool bUseGamePosition)
     TargetHost->AddChild(Panel_PlayerLegend);
 }
 
-void UCMNetworkWidget::RefreshLobbyRoster()
+void UCMNetworkTestWidget::RefreshLobbyRoster()
 {
     BindCurrentGameState();
     if (!BoundGameState.IsValid())
@@ -284,7 +284,7 @@ void UCMNetworkWidget::RefreshLobbyRoster()
     }
 }
 
-void UCMNetworkWidget::RefreshNetworkStatus()
+void UCMNetworkTestWidget::RefreshNetworkStatus()
 {
     if (!NetworkSubsystem || !Txt_State)
     {
@@ -311,7 +311,7 @@ void UCMNetworkWidget::RefreshNetworkStatus()
     ));
 }
 
-void UCMNetworkWidget::RefreshSearchCount()
+void UCMNetworkTestWidget::RefreshSearchCount()
 {
     if (NetworkSubsystem && Txt_SearchCount)
     {
@@ -322,7 +322,7 @@ void UCMNetworkWidget::RefreshSearchCount()
     }
 }
 
-void UCMNetworkWidget::SetOperationResultText(
+void UCMNetworkTestWidget::SetOperationResultText(
     EListenServerOperation Operation,
     const FListenServerOperationResult& Result
 )
@@ -353,7 +353,7 @@ void UCMNetworkWidget::SetOperationResultText(
     ));
 }
 
-void UCMNetworkWidget::ApplyConnectionUI(
+void UCMNetworkTestWidget::ApplyConnectionUI(
     EListenServerConnectionState ConnectionState,
     EListenServerRole Role
 )
@@ -479,7 +479,7 @@ void UCMNetworkWidget::ApplyConnectionUI(
     }
 }
 
-void UCMNetworkWidget::UpdateDetailsVisibility()
+void UCMNetworkTestWidget::UpdateDetailsVisibility()
 {
     if (Panel_Details)
     {
@@ -498,7 +498,7 @@ void UCMNetworkWidget::UpdateDetailsVisibility()
     }
 }
 
-void UCMNetworkWidget::HandleNetworkStateChanged(
+void UCMNetworkTestWidget::HandleNetworkStateChanged(
     EListenServerRole Role,
     EListenServerConnectionState ConnectionState,
     EListenServerOperation Operation
@@ -508,12 +508,12 @@ void UCMNetworkWidget::HandleNetworkStateChanged(
     RefreshNetworkStatus();
 }
 
-void UCMNetworkWidget::HandleLobbyRosterChanged()
+void UCMNetworkTestWidget::HandleLobbyRosterChanged()
 {
     RefreshLobbyRoster();
 }
 
-void UCMNetworkWidget::HandleOperationCompleted(
+void UCMNetworkTestWidget::HandleOperationCompleted(
     EListenServerOperation CompletedOperation,
     const FListenServerOperationResult& Result
 )
@@ -530,7 +530,7 @@ void UCMNetworkWidget::HandleOperationCompleted(
     }
 }
 
-void UCMNetworkWidget::HandleSearchResultsChanged()
+void UCMNetworkTestWidget::HandleSearchResultsChanged()
 {
     RefreshSearchCount();
     if (NetworkSubsystem)
@@ -542,7 +542,7 @@ void UCMNetworkWidget::HandleSearchResultsChanged()
     }
 }
 
-void UCMNetworkWidget::HandleNetworkFailure(
+void UCMNetworkTestWidget::HandleNetworkFailure(
     const FListenServerOperationResult& Result
 )
 {
@@ -550,7 +550,7 @@ void UCMNetworkWidget::HandleNetworkFailure(
     RefreshNetworkStatus();
 }
 
-void UCMNetworkWidget::HandleHostClicked()
+void UCMNetworkTestWidget::HandleHostClicked()
 {
     if (NetworkSubsystem)
     {
@@ -558,7 +558,7 @@ void UCMNetworkWidget::HandleHostClicked()
     }
 }
 
-void UCMNetworkWidget::HandleFindClicked()
+void UCMNetworkTestWidget::HandleFindClicked()
 {
     if (NetworkSubsystem)
     {
@@ -566,7 +566,7 @@ void UCMNetworkWidget::HandleFindClicked()
     }
 }
 
-void UCMNetworkWidget::HandleJoinFirstClicked()
+void UCMNetworkTestWidget::HandleJoinFirstClicked()
 {
     if (!NetworkSubsystem)
     {
@@ -586,7 +586,7 @@ void UCMNetworkWidget::HandleJoinFirstClicked()
     }
 }
 
-void UCMNetworkWidget::HandleQuickMatchClicked()
+void UCMNetworkTestWidget::HandleQuickMatchClicked()
 {
     if (NetworkSubsystem)
     {
@@ -594,7 +594,7 @@ void UCMNetworkWidget::HandleQuickMatchClicked()
     }
 }
 
-void UCMNetworkWidget::HandleInviteClicked()
+void UCMNetworkTestWidget::HandleInviteClicked()
 {
     if (NetworkSubsystem)
     {
@@ -602,7 +602,7 @@ void UCMNetworkWidget::HandleInviteClicked()
     }
 }
 
-void UCMNetworkWidget::HandleStartGameClicked()
+void UCMNetworkTestWidget::HandleStartGameClicked()
 {
     if (NetworkSubsystem)
     {
@@ -620,13 +620,13 @@ void UCMNetworkWidget::HandleStartGameClicked()
     }
 }
 
-void UCMNetworkWidget::HandleLeaveClicked()
+void UCMNetworkTestWidget::HandleLeaveClicked()
 {
     UE_LOG(LogChimeraUI, Log, TEXT("Lobby Leave clicked."));
     HandleGameLeaveClicked();
 }
 
-void UCMNetworkWidget::HandleToggleDetailsClicked()
+void UCMNetworkTestWidget::HandleToggleDetailsClicked()
 {
     if (CurrentConnectionState != EListenServerConnectionState::InGame)
     {
@@ -637,7 +637,7 @@ void UCMNetworkWidget::HandleToggleDetailsClicked()
     UpdateDetailsVisibility();
 }
 
-void UCMNetworkWidget::HandleRetryClicked()
+void UCMNetworkTestWidget::HandleRetryClicked()
 {
     APlayerController* OwningPlayer = GetOwningPlayer();
     if (!OwningPlayer && GetWorld())
@@ -652,7 +652,7 @@ void UCMNetworkWidget::HandleRetryClicked()
     }
 }
 
-void UCMNetworkWidget::HandleGameLeaveClicked()
+void UCMNetworkTestWidget::HandleGameLeaveClicked()
 {
     if (NetworkSubsystem)
     {

@@ -1,0 +1,85 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Blueprint/UserWidget.h"
+#include "ListenServerNetworkTypes.h"
+
+#include "CMLobbyWidget.generated.h"
+
+class ACMGameState;
+class UButton;
+class UCMLobbyPlayerRowWidget;
+class UListenServerSessionSubsystem;
+class UScrollBox;
+class UTextBlock;
+
+UCLASS(Abstract, Blueprintable)
+class UI_API UCMLobbyWidget : public UUserWidget
+{
+    GENERATED_BODY()
+
+protected:
+    virtual void NativeConstruct() override;
+    virtual void NativeDestruct() override;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Lobby")
+    TSubclassOf<UCMLobbyPlayerRowWidget> LobbyPlayerRowClass;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UButton> Btn_StartGame;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UButton> Btn_Invite;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UButton> Btn_Leave;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UTextBlock> Txt_RoomId;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UTextBlock> Txt_PlayerCount;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UScrollBox> SB_LobbyPlayers;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UTextBlock> Txt_Result;
+
+private:
+    void BindCurrentGameState();
+    void RefreshRoomId();
+    void RefreshLobbyRoster();
+    void UpdateControls();
+    void SetResultText(const FText& Message);
+
+    UFUNCTION()
+    void HandleNetworkStateChanged(
+        EListenServerRole Role,
+        EListenServerConnectionState ConnectionState,
+        EListenServerOperation Operation
+    );
+
+    UFUNCTION()
+    void HandleOperationCompleted(
+        EListenServerOperation CompletedOperation,
+        const FListenServerOperationResult& Result
+    );
+
+    UFUNCTION()
+    void HandleLobbyRosterChanged();
+
+    UFUNCTION()
+    void HandleStartGameClicked();
+
+    UFUNCTION()
+    void HandleInviteClicked();
+
+    UFUNCTION()
+    void HandleLeaveClicked();
+
+    UPROPERTY(Transient)
+    TObjectPtr<UListenServerSessionSubsystem> NetworkSubsystem;
+
+    TWeakObjectPtr<ACMGameState> BoundGameState;
+};
