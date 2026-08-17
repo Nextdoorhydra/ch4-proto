@@ -1,6 +1,6 @@
 #include "CMNetworkWidget.h"
 
-#include "Game/CMGameState.h"
+#include "GameMode/CMGameState.h"
 #include "Player/CMPlayerState.h"
 #include "Player/CMPlayerController.h"
 #include "CMLobbyPlayerRowWidget.h"

@@ -1,6 +1,6 @@
 #include "CMPawn.h"
 
-#include "Game/CMGameState.h"
+#include "GameMode/CMGameState.h"
 #include "Player/CMPlayerState.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"

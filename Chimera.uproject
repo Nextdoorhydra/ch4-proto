@@ -48,6 +48,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "AsyncPDALoader",
+			"Enabled": true
+		},
+		{
 			"Name": "ModelingToolsEditorMode",
 			"Enabled": true,
 			"TargetAllowList": [
@@ -60,6 +64,10 @@
 		},
 		{
 			"Name": "DataForge",
+			"Enabled": true
+		},
+		{
+			"Name": "Niagara",
 			"Enabled": true
 		}
 	]

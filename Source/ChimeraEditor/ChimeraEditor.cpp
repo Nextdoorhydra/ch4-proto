@@ -1,6 +1,7 @@
 ﻿#include "ChimeraEditor.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AsyncLoad/CMAsyncLoadScheduleEntryCustomization.h"
 #include "DataForgeCore.h"
 #include "DataForge/DataForgeMcpCommands.h"
 #include "DataForgeEditorService.h"
@@ -13,6 +14,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
+#include "PropertyEditorModule.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Engine/DataTable.h"
 #include "Engine/Texture2D.h"
@@ -267,6 +269,13 @@ namespace
 
 void FChimeraEditorModule::StartupModule()
 {
+	// AsyncPDALoader catalog 항목을 Chimera의 LoadGroup 드롭다운 방식으로 표시
+	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
+	PropertyEditor.RegisterCustomPropertyTypeLayout(
+		TEXT("AsyncLoadScheduleEntry"),
+		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FCMAsyncLoadScheduleEntryCustomization::MakeInstance));
+	PropertyEditor.NotifyCustomizationModuleChanged();
+
 	FDataForgeSourceAdapterRegistry::Get().Register(MakeShared<FGoogleSheetCacheDataForgeAdapter>());
 	FDataForgeSourceAdapterRegistry::Get().Register(MakeShared<FMultiSourceDataForgeAdapter>());
 	GoogleSheetCacheUpdatedHandle = UGoogleSheetConfig::OnCacheUpdated().AddRaw(this, &FChimeraEditorModule::OnGoogleSheetCacheUpdated);
@@ -275,6 +284,14 @@ void FChimeraEditorModule::StartupModule()
 
 void FChimeraEditorModule::ShutdownModule()
 {
+	// Editor 모듈 재로드 시 중복 customization 등록 방지
+	if (FModuleManager::Get().IsModuleLoaded(TEXT("PropertyEditor")))
+	{
+		FPropertyEditorModule& PropertyEditor = FModuleManager::GetModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
+		PropertyEditor.UnregisterCustomPropertyTypeLayout(TEXT("AsyncLoadScheduleEntry"));
+		PropertyEditor.NotifyCustomizationModuleChanged();
+	}
+
 	DataForgeMcpCommands::Unregister(DataForgeMcpCommand);
 	UGoogleSheetConfig::OnCacheUpdated().Remove(GoogleSheetCacheUpdatedHandle);
 	FDataForgeSourceAdapterRegistry::Get().Unregister(TEXT("GoogleSheetCache"));

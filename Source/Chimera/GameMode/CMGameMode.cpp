@@ -1,7 +1,8 @@
-#include "CMGameMode.h"
+#include "GameMode/CMGameMode.h"
 
 #include "Game/CMControlAssignmentPolicy.h"
-#include "Game/CMGameState.h"
+#include "GameMode/CMGameState.h"
+#include "GameMode/Play/CMPlayGameMode.h"
 #include "Player/CMPawn.h"
 #include "Player/CMPlayerState.h"
 #include "Player/CMPlayerController.h"
@@ -13,6 +14,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraMultiplayer, Log, All);
 
+// 공통 PlayerController·PlayerState·GameState·Pawn 클래스와 Seamless Travel 설정
 ACMGameMode::ACMGameMode()
 {
     PlayerControllerClass = ACMPlayerController::StaticClass();
@@ -22,6 +24,7 @@ ACMGameMode::ACMGameMode()
     bUseSeamlessTravel = true;
 }
 
+// 맵 시작 시 플레이어 색상과 공용 키메라 조작 상태 초기화
 void ACMGameMode::BeginPlay()
 {
     Super::BeginPlay();
@@ -35,6 +38,7 @@ void ACMGameMode::BeginPlay()
     }
 }
 
+// 플레이어 이탈 시 해당 플레이어를 제외하고 조작 부위 재배정
 void ACMGameMode::Logout(AController* Exiting)
 {
     const ACMPlayerState* ExitingPlayerState = Exiting
@@ -49,6 +53,7 @@ void ACMGameMode::Logout(AController* Exiting)
     }
 }
 
+// 개별 Pawn 생성 대신 플레이어 시점을 공용 키메라로 설정
 void ACMGameMode::RestartPlayer(AController* NewPlayer)
 {
     if (!IsGameplayMap())
@@ -67,6 +72,7 @@ void ACMGameMode::RestartPlayer(AController* NewPlayer)
     }
 }
 
+// 신규 접속·Seamless Travel 플레이어의 색상·조작·시점 초기화
 void ACMGameMode::GenericPlayerInitialization(AController* C)
 {
     Super::GenericPlayerInitialization(C);
@@ -90,6 +96,7 @@ void ACMGameMode::GenericPlayerInitialization(AController* C)
     }
 }
 
+// 서버에서 각 플레이어에게 중복되지 않는 색상 인덱스 배정
 void ACMGameMode::AssignPlayerColors()
 {
     if (!HasAuthority())
@@ -141,6 +148,7 @@ void ACMGameMode::AssignPlayerColors()
     }
 }
 
+// 리슨 서버 호스트 요청을 검증하고 현재 플레이 맵 재시작
 bool ACMGameMode::TryRetryGame(APlayerController* RequestingPlayer)
 {
     if (!HasAuthority()
@@ -163,8 +171,14 @@ bool ACMGameMode::TryRetryGame(APlayerController* RequestingPlayer)
     return bRetryInProgress;
 }
 
+// 현재 월드가 네트워크 설정에 등록된 기본 플레이 맵인지 확인
 bool ACMGameMode::IsGameplayMap() const
 {
+    if (IsA<ACMPlayGameMode>())
+    {
+        return true;
+    }
+
     const UWorld* World = GetWorld();
     const UListenServerNetworkSettings* NetworkSettings =
         GetDefault<UListenServerNetworkSettings>();
@@ -185,6 +199,7 @@ bool ACMGameMode::IsGameplayMap() const
     return !GameMapName.IsEmpty() && CurrentMapName == GameMapName;
 }
 
+// 월드의 기존 공용 키메라를 찾거나 서버에서 새로 생성하여 GameState에 등록
 ACMPawn* ACMGameMode::EnsureSharedChimera()
 {
     if (!HasAuthority() || !IsGameplayMap())
@@ -264,6 +279,7 @@ ACMPawn* ACMGameMode::EnsureSharedChimera()
     return SharedChimera;
 }
 
+// 활성 플레이어들에게 공용 키메라 조작 부위를 다시 배정
 void ACMGameMode::RebalanceControlAssignments(
     const ACMPlayerState* ExcludedPlayerState
 )

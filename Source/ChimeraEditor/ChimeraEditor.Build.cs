@@ -5,6 +5,7 @@ public class ChimeraEditor : ModuleRules
     public ChimeraEditor(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+		PublicIncludePaths.Add(ModuleDirectory);
 
         PublicDependencyModuleNames.AddRange(
             new string[]
@@ -14,6 +15,8 @@ public class ChimeraEditor : ModuleRules
                 "DataForgeCore",
                 "DataForgeEditor",
                 "GoogleSheetLoader", 
+				"AsyncPDALoader",
+				"PropertyEditor",
                 "UnrealEd"
             }
         );
@@ -24,6 +27,7 @@ public class ChimeraEditor : ModuleRules
                 "CoreUObject",
                 "Engine",
                 "AssetRegistry",
+				"InputCore",
                 "Slate",
                 "SlateCore"
             }

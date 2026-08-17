@@ -1,6 +1,6 @@
 #include "CMPlayerState.h"
 
-#include "Game/CMGameState.h"
+#include "GameMode/CMGameState.h"
 #include "Net/UnrealNetwork.h"
 
 ACMPlayerState::ACMPlayerState()

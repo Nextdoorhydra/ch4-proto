@@ -8,6 +8,7 @@
 
 class ACMPawn;
 class UInputMappingContext;
+class UCMClientStageLoadComponent;
 
 UCLASS()
 class CHIMERA_API ACMPlayerController : public APlayerController
@@ -22,6 +23,12 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
     void RequestRetryGame();
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Lobby")
+    void RequestStartCampaign();
+
+    // 로컬 로드 컴포넌트의 결과를 서버 RPC로 전달
+    void ReportLocalStageLoadComplete(FGuid RequestId, bool bSucceeded);
 
 protected:
     virtual void BeginPlay() override;
@@ -57,8 +64,17 @@ private:
     UFUNCTION(Server, Reliable)
     void ServerRequestRetryGame();
 
+    UFUNCTION(Server, Reliable)
+    void ServerRequestStartCampaign();
+
+    UFUNCTION(Server, Reliable)
+    void ServerReportStageLoadComplete(FGuid RequestId, bool bSucceeded);
+
     UPROPERTY(Transient)
     TObjectPtr<ACMPawn> CachedSharedChimera;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCMClientStageLoadComponent> ClientStageLoadComponent;
 
     FRotator LocalCameraRotation = FRotator::ZeroRotator;
     bool bLocalCameraInitialized = false;

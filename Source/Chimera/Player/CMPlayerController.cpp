@@ -2,8 +2,11 @@
 
 #include "Player/CMPawn.h"
 #include "Player/CMPlayerState.h"
-#include "Game/CMGameState.h"
-#include "Game/CMGameMode.h"
+#include "GameMode/CMGameState.h"
+#include "GameMode/CMGameMode.h"
+#include "GameMode/Play/CMPlayGameMode.h"
+#include "GameMode/Lobby/CMLobbyGameMode.h"
+#include "AsyncLoad/CMClientStageLoadComponent.h"
 #include "Components/InputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputCoreTypes.h"
@@ -12,6 +15,8 @@
 ACMPlayerController::ACMPlayerController()
 {
     PrimaryActorTick.bCanEverTick = true;
+    ClientStageLoadComponent = CreateDefaultSubobject<UCMClientStageLoadComponent>(
+        TEXT("ClientStageLoadComponent"));
 
     for (ECMControlPart& PressedPart : PressedControlParts)
     {
@@ -150,6 +155,7 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
         return;
     }
 
+
     ACMPawn* SharedChimera = GetSharedChimera();
     if (CachedSharedChimera != SharedChimera)
     {
@@ -174,6 +180,47 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
     }
 
     SharedChimera->SetLocalCameraRotation(LocalCameraRotation);
+}
+
+// 로컬 로비 UI의 시작 요청을 서버 RPC로 전달
+void ACMPlayerController::RequestStartCampaign()
+{
+    if (IsLocalController())
+    {
+        ServerRequestStartCampaign();
+    }
+}
+
+// 서버 LobbyGameMode가 준비 상태와 캠페인 설정을 최종 검증
+void ACMPlayerController::ServerRequestStartCampaign_Implementation()
+{
+    ACMLobbyGameMode* LobbyGameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMLobbyGameMode>() : nullptr;
+    if (LobbyGameMode)
+    {
+        LobbyGameMode->TryStartCampaign(this);
+    }
+}
+
+// 로컬 로드 컴포넌트 결과를 소유 Controller의 서버 RPC로 전달
+void ACMPlayerController::ReportLocalStageLoadComplete(FGuid RequestId, bool bSucceeded)
+{
+    if (IsLocalController())
+    {
+        ServerReportStageLoadComplete(RequestId, bSucceeded);
+    }
+}
+
+// 보고한 Controller를 서버 권한 로드 배리어에 전달
+void ACMPlayerController::ServerReportStageLoadComplete_Implementation(
+    FGuid RequestId, bool bSucceeded)
+{
+    ACMPlayGameMode* PlayGameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>() : nullptr;
+    if (PlayGameMode)
+    {
+        PlayGameMode->HandleStageLoadComplete(this, RequestId, bSucceeded);
+    }
 }
 
 void ACMPlayerController::FirstControlKeyPressed()

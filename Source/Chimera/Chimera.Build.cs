@@ -11,12 +11,15 @@ public class Chimera : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new[]
 		{
+			"AsyncPDALoader",
 			"Core",
 			"CoreUObject",
 			"Engine",
 			"GameplayAbilities",
+			"GameplayMessageRuntime",
 			"GameplayTags",
-			"GameplayTasks"
+			"GameplayTasks",
+			"Niagara"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[]
