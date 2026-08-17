@@ -2748,6 +2748,25 @@ FListenServerOperationResult UListenServerSessionSubsystem::GetLastOperationResu
 	return Impl->LastResult;
 }
 
+bool UListenServerSessionSubsystem::GetCurrentSessionAttribute(
+	FName Key,
+	FString& OutValue
+) const
+{
+	OutValue.Reset();
+	if (Key.IsNone())
+	{
+		return false;
+	}
+
+	const IOnlineSessionPtr Sessions = Impl->GetSessionInterface();
+	const FOnlineSessionSettings* SessionSettings = Sessions.IsValid()
+		? Sessions->GetSessionSettings(NAME_GameSession)
+		: nullptr;
+	return SessionSettings != nullptr
+		&& GetStringSetting(*SessionSettings, Key, OutValue);
+}
+
 int32 UListenServerSessionSubsystem::GetSearchResultCount() const
 {
 	return Impl->SearchResults.Num();

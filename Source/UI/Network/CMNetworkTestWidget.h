@@ -4,7 +4,7 @@
 #include "Blueprint/UserWidget.h"
 #include "ListenServerNetworkTypes.h"
 
-#include "CMNetworkWidget.generated.h"
+#include "CMNetworkTestWidget.generated.h"
 
 class ACMGameState;
 class UButton;
@@ -16,7 +16,7 @@ class UTextBlock;
 class UWidget;
 
 UCLASS(Abstract, Blueprintable)
-class UI_API UCMNetworkWidget : public UUserWidget
+class UI_API UCMNetworkTestWidget : public UUserWidget
 {
     GENERATED_BODY()
 
