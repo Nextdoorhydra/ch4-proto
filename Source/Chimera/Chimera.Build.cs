@@ -16,15 +16,15 @@ public class Chimera : ModuleRules
 			"Engine",
 			"GameplayAbilities",
 			"GameplayTags",
-			"GameplayTasks",
-			"PhysicsCore"
+			"GameplayTasks"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
 			"ListenServerNetwork",
 			"EnhancedInput",
-			"InputCore"
+			"InputCore",
+			"PhysicsCore"
 		});
 	}
 }

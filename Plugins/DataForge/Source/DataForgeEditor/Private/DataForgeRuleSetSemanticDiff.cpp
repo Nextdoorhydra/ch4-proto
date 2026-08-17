@@ -87,6 +87,24 @@ namespace DataForgeSemanticDiff
 		}
 		return FString::Join(Values, TEXT(";"));
 	}
+
+	FString AssociationSources(const TArray<FDataForgeAssociationSourceRule>& Sources)
+	{
+		TArray<FString> Values;
+		for (const FDataForgeAssociationSourceRule& Source : Sources)
+		{
+			FString Value = FString::Printf(TEXT("%s:%s:%s:%s:%s:%s:%s:%s"), *Source.SourceId.ToString(), *Source.Source.AdapterId.ToString(),
+				*Source.Source.File.FilePath, *Source.Source.SourceAsset.ToSoftObjectPath().ToString(), *Source.MatchColumn.ToString(),
+				*Source.AssetPathColumn.ToString(), *Source.AssetKindColumn.ToString(), *Source.RoleColumn.ToString());
+			TArray<FName> Keys;
+			Source.Source.Parameters.GetKeys(Keys);
+			Keys.Sort(FNameLexicalLess());
+			for (const FName Key : Keys) Value += FString::Printf(TEXT(":%s=%s"), *Key.ToString(), *Source.Source.Parameters.FindChecked(Key));
+			Values.Add(MoveTemp(Value));
+		}
+		Values.Sort();
+		return FString::Join(Values, TEXT(";"));
+	}
 }
 
 FString FDataForgeSemanticDiffEntry::ToDisplayString() const
@@ -131,6 +149,8 @@ TArray<FDataForgeSemanticDiffEntry> FDataForgeRuleSetSemanticDiff::Compare(
 	AddValue(Entries, TEXT("Output.CreateIfMissing"), Bool(Before.Output.bCreateIfMissing), Bool(After.Output.bCreateIfMissing));
 	AddValue(Entries, TEXT("Output.RemoveRowsMissingFromSource"), Bool(Before.Output.bRemoveRowsMissingFromSource), Bool(After.Output.bRemoveRowsMissingFromSource));
 	AddValue(Entries, TEXT("Output.SaveAfterApply"), Bool(Before.Output.bSaveAfterApply), Bool(After.Output.bSaveAfterApply));
+	AddValue(Entries, TEXT("BindingPreset"), Before.BindingPreset.ToSoftObjectPath().ToString(), After.BindingPreset.ToSoftObjectPath().ToString());
+	AddValue(Entries, TEXT("AssociationSources"), AssociationSources(Before.AssociationSources), AssociationSources(After.AssociationSources));
 
 	TMap<FName, const FDataForgeAssetRule*> BeforeAssetRules;
 	TMap<FName, const FDataForgeAssetRule*> AfterAssetRules;
@@ -169,6 +189,7 @@ TArray<FDataForgeSemanticDiffEntry> FDataForgeRuleSetSemanticDiff::Compare(
 		AddValue(Entries, Prefix + TEXT(".Type"), FString::FromInt(static_cast<int32>((*BeforeOutput)->Type)), FString::FromInt(static_cast<int32>((*AfterOutput)->Type)));
 		AddValue(Entries, Prefix + TEXT(".AssetClass"), (*BeforeOutput)->AssetClass ? (*BeforeOutput)->AssetClass->GetPathName() : TEXT("None"), (*AfterOutput)->AssetClass ? (*AfterOutput)->AssetClass->GetPathName() : TEXT("None"));
 		AddValue(Entries, Prefix + TEXT(".AssetRuleId"), (*BeforeOutput)->AssetRuleId.ToString(), (*AfterOutput)->AssetRuleId.ToString());
+		AddValue(Entries, Prefix + TEXT(".AdoptCompatibleUnownedAsset"), (*BeforeOutput)->bAdoptCompatibleUnownedAsset ? TEXT("true") : TEXT("false"), (*AfterOutput)->bAdoptCompatibleUnownedAsset ? TEXT("true") : TEXT("false"));
 	}
 
 	TMap<FString, const FDataForgeBindingRule*> BeforeBindings;

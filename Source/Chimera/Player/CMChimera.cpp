@@ -65,7 +65,7 @@ ACMChimera::ACMChimera()
         );
 
     BodyDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(
-        TEXT("/Game/Data/Body/DT_BodyDataTable.DT_BodyDataTable")
+        TEXT("/Game/Chimera/Data/Body/DT_BodyDataTable.DT_BodyDataTable")
     ));
 
     BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(

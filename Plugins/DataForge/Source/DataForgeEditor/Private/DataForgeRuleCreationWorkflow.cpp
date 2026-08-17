@@ -2,13 +2,39 @@
 
 #include "DataForgeAssetLayoutAuthoring.h"
 #include "DataForgeAssetLayoutProfile.h"
+#include "DataForgeAuthoringApply.h"
+#include "DataForgeAuthoringReview.h"
+#include "DataForgeAuthoringPlanner.h"
+#include "DataForgeBindingPreset.h"
+#include "DataForgeBindingPresetAuthoring.h"
 #include "DataForgeEditorService.h"
+#include "DataForgeDefinitionDiscovery.h"
+#include "DataForgeFolderSource.h"
 #include "DataForgePipeline.h"
+#include "DataForgeNamingPolicy.h"
 #include "Engine/DataTable.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
 
 #define LOCTEXT_NAMESPACE "DataForgeRuleCreationWorkflow"
+
+namespace DataForgeRuleCreationWorkflow
+{
+	void CopyConfiguration(UDataForgeRuleSet& Target, const UDataForgeRuleSet& Source)
+	{
+		Target.RuleVersion = Source.RuleVersion;
+		Target.Source = Source.Source;
+		Target.Schema = Source.Schema;
+		Target.Output = Source.Output;
+		Target.AssetRules = Source.AssetRules;
+		Target.ProfileOrigin = Source.ProfileOrigin;
+		Target.BindingPreset = Source.BindingPreset;
+		Target.AssociationSources = Source.AssociationSources;
+		Target.GeneratedOutputs = Source.GeneratedOutputs;
+		Target.Bindings = Source.Bindings;
+		Target.Dependencies = Source.Dependencies;
+	}
+}
 
 FDataForgeRuleCreationWorkflow::FDataForgeRuleCreationWorkflow(UDataForgeRuleSet& InTarget)
 	: Target(&InTarget)
@@ -18,6 +44,15 @@ FDataForgeRuleCreationWorkflow::FDataForgeRuleCreationWorkflow(UDataForgeRuleSet
 	bManualAssetLayout = !GetDraft().ProfileOrigin.IsSet();
 	SelectedAssetLayoutProfile = GetDraft().ProfileOrigin.Profile.LoadSynchronous();
 	AssetLayoutParameterValues = GetDraft().ProfileOrigin.ParameterValues;
+	SelectedBindingPreset = GetDraft().BindingPreset.LoadSynchronous();
+	if (const UDataForgeBindingPreset* Preset = SelectedBindingPreset.Get())
+	{
+		const FName RuleId(*(Preset->OutputName.ToString() + TEXT("_Managed")));
+		if (const FDataForgeAssetRule* Rule = GetDraft().AssetRules.FindByPredicate([RuleId](const FDataForgeAssetRule& Candidate) { return Candidate.RuleId == RuleId; }))
+		{
+			BindingPresetOutputFolder = Rule->BaseFolder;
+		}
+	}
 	bAssetLayoutReady = bManualAssetLayout;
 }
 
@@ -52,6 +87,16 @@ UDataForgeAssetLayoutProfile* FDataForgeRuleCreationWorkflow::GetSelectedAssetLa
 	return SelectedAssetLayoutProfile.Get();
 }
 
+UDataForgeBindingPreset* FDataForgeRuleCreationWorkflow::GetSelectedBindingPreset() const
+{
+	return SelectedBindingPreset.Get();
+}
+
+const FString& FDataForgeRuleCreationWorkflow::GetBindingPresetOutputFolder() const
+{
+	return BindingPresetOutputFolder;
+}
+
 const TMap<FName, FString>& FDataForgeRuleCreationWorkflow::GetAssetLayoutParameterValues() const
 {
 	return AssetLayoutParameterValues;
@@ -60,6 +105,96 @@ const TMap<FName, FString>& FDataForgeRuleCreationWorkflow::GetAssetLayoutParame
 bool FDataForgeRuleCreationWorkflow::IsManualAssetLayout() const
 {
 	return bManualAssetLayout;
+}
+
+bool FDataForgeRuleCreationWorkflow::HasAutomaticSetup() const
+{
+	return AutomaticDraft.IsValid() && AutomaticDraft->bSuccess;
+}
+
+bool FDataForgeRuleCreationWorkflow::HasSuccessfulPreview() const
+{
+	return bPreviewSucceeded;
+}
+
+bool FDataForgeRuleCreationWorkflow::IsAutomaticReviewApproved() const
+{
+	return bAutomaticReviewApproved;
+}
+
+void FDataForgeRuleCreationWorkflow::SetAutomaticReviewApproved(bool bApproved)
+{
+	bAutomaticReviewApproved = bApproved && HasAutomaticSetup() && bPreviewSucceeded;
+	LastMessage = bAutomaticReviewApproved
+		? TEXT("Automatic Setup Preview approved. Finish & Apply is now available.")
+		: TEXT("Review the Automatic Setup Preview before Finish & Apply.");
+}
+
+FDataForgeAutomaticSetupDefaults FDataForgeRuleCreationWorkflow::GetAutomaticSetupDefaults() const
+{
+	FDataForgeAutomaticSetupDefaults Defaults;
+	const UDataForgeRuleSet& RuleSet = GetDraft();
+	Defaults.GeneratedOutputFolder = FPackageName::IsValidLongPackageName(RuleSet.Output.AssetPath)
+		? FPackageName::GetLongPackagePath(RuleSet.Output.AssetPath)
+		: TEXT("/Game/DataForgeGenerated");
+	Defaults.DefinitionFolder = Target.IsValid()
+		? FPackageName::GetLongPackagePath(Target->GetOutermost()->GetName()) + TEXT("/Definitions")
+		: TEXT("/Game/DataForge/Definitions");
+
+	if (!RuleSet.GeneratedOutputs.IsEmpty())
+	{
+		const FDataForgeGeneratedAssetOutputRule& Output = RuleSet.GeneratedOutputs[0];
+		Defaults.GeneratedOutputClass = Output.AssetClass.Get();
+		if (const FDataForgeAssetRule* Rule = RuleSet.AssetRules.FindByPredicate([&Output](const FDataForgeAssetRule& Candidate)
+		{
+			return Candidate.RuleId == Output.AssetRuleId && Candidate.Ownership == EDataForgeAssetOwnership::Managed;
+		}))
+		{
+			Defaults.GeneratedOutputFolder = Rule->BaseFolder;
+		}
+	}
+
+	UDataForgeBindingPreset* Preset = RuleSet.BindingPreset.Get();
+	if (!Preset && !RuleSet.BindingPreset.IsNull()) Preset = RuleSet.BindingPreset.LoadSynchronous();
+	if (Preset)
+	{
+		Defaults.DefinitionFolder = FPackageName::GetLongPackagePath(Preset->GetOutermost()->GetName());
+	}
+	for (const FDataForgeAssociationSourceRule& Association : RuleSet.AssociationSources)
+	{
+		if (Association.Source.AdapterId != TEXT("AssetRegistryFolder")) continue;
+		UObject* SourceAsset = Association.Source.SourceAsset.Get();
+		if (!SourceAsset && !Association.Source.SourceAsset.IsNull()) SourceAsset = Association.Source.SourceAsset.LoadSynchronous();
+		UDataForgeFolderSourceConfig* FolderSource = Cast<UDataForgeFolderSourceConfig>(SourceAsset);
+		if (!FolderSource) continue;
+		Defaults.AssetSearchRoot = FolderSource->RootFolder;
+		if (!RuleSet.BindingPreset.IsValid())
+		{
+			Defaults.DefinitionFolder = FPackageName::GetLongPackagePath(FolderSource->GetOutermost()->GetName());
+		}
+		UDataForgeAssetLayoutRecipe* Recipe = FolderSource->LayoutRecipe.Get();
+		if (!Recipe && !FolderSource->LayoutRecipe.IsNull()) Recipe = FolderSource->LayoutRecipe.LoadSynchronous();
+		if (Recipe)
+		{
+			Defaults.NamingPolicy = Recipe->NamingPolicy.Get();
+			if (!Defaults.NamingPolicy.IsValid() && !Recipe->NamingPolicy.IsNull())
+			{
+				Defaults.NamingPolicy = Recipe->NamingPolicy.LoadSynchronous();
+			}
+		}
+		break;
+	}
+	return Defaults;
+}
+
+FString FDataForgeRuleCreationWorkflow::GetAutomaticSetupInspection() const
+{
+	if (!HasAutomaticSetup()) return TEXT("Automatic Setup has not been analyzed.");
+	if (!AutomaticPlan) return TEXT("Automatic Setup Ready, but its inference plan is unavailable.");
+	const FString RuleSetPath = Target.IsValid() ? Target->GetOutermost()->GetName() : FString();
+	const FDataForgeApplyPlan* Effects = bPreviewSucceeded ? &PreviewPlan : nullptr;
+	return FDataForgeAuthoringReviewBuilder::Build(
+		*AutomaticPlan, *AutomaticDraft, GetDraft(), RuleSetPath, AutomaticDefinitionFolder, Effects).ToDisplayString();
 }
 
 FDataForgeResult FDataForgeRuleCreationWorkflow::Probe()
@@ -180,6 +315,67 @@ FDataForgeResult FDataForgeRuleCreationWorkflow::MaterializeAssetLayout()
 	return Result;
 }
 
+void FDataForgeRuleCreationWorkflow::SelectBindingPreset(UDataForgeBindingPreset* Preset)
+{
+	SelectedBindingPreset = Preset;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	LastMessage = Preset
+		? TEXT("Binding Preset selected. Choose the generated output folder, then Apply Preset.")
+		: TEXT("Binding Preset cleared. Existing concrete output rules remain unchanged.");
+}
+
+void FDataForgeRuleCreationWorkflow::SetBindingPresetOutputFolder(const FString& OutputFolder)
+{
+	BindingPresetOutputFolder = OutputFolder;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	LastMessage = TEXT("Binding Preset output folder changed. Apply Preset again before continuing.");
+}
+
+FDataForgeResult FDataForgeRuleCreationWorkflow::MaterializeBindingPreset()
+{
+	FDataForgeResult Result;
+	UDataForgeBindingPreset* Preset = SelectedBindingPreset.Get();
+	if (!Preset)
+	{
+		FDataForgeDiagnostic& Diagnostic = Result.Diagnostics.AddDefaulted_GetRef();
+		Diagnostic.Severity = EDataForgeSeverity::Error;
+		Diagnostic.Code = TEXT("DF1915");
+		Diagnostic.Message = TEXT("Select a Binding Preset before applying it.");
+		Result.Summary = Diagnostic.Message;
+		LastMessage = Result.Summary;
+		return Result;
+	}
+	if (!bProbeSucceeded)
+	{
+		FDataForgeDiagnostic& Diagnostic = Result.Diagnostics.AddDefaulted_GetRef();
+		Diagnostic.Severity = EDataForgeSeverity::Error;
+		Diagnostic.Code = TEXT("DF1913");
+		Diagnostic.Message = TEXT("Run Probe and confirm the Primary Key before applying a Binding Preset.");
+		Result.Summary = Diagnostic.Message;
+		LastMessage = Result.Summary;
+		return Result;
+	}
+
+	const FDataForgeBindingPresetMaterialization Materialized = FDataForgeBindingPresetAuthoring::Materialize(GetDraft(), *Preset, BindingPresetOutputFolder);
+	Result.bSuccess = Materialized.bSuccess;
+	Result.Diagnostics = Materialized.Diagnostics;
+	if (Result.bSuccess)
+	{
+		const int32 AddedBindings = FDataForgeEditorService::AutoMapExactNames(GetDraft(), ProbedDataSet.Columns);
+		Result.Summary = Materialized.MakeSummary() + FString::Printf(TEXT(" %d exact-name binding(s) added."), AddedBindings);
+	}
+	else
+	{
+		Result.Summary = Materialized.MakeSummary();
+	}
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	LastMessage = Result.Summary;
+	return Result;
+}
+
 int32 FDataForgeRuleCreationWorkflow::AutoMapExactNames()
 {
 	const int32 AddedCount = bProbeSucceeded
@@ -192,8 +388,111 @@ int32 FDataForgeRuleCreationWorkflow::AutoMapExactNames()
 
 FDataForgeResult FDataForgeRuleCreationWorkflow::Preview()
 {
+	bAutomaticReviewApproved = false;
 	FDataForgeResult Result = FDataForgeEditorService::Preview(GetDraft(), &PreviewPlan);
 	bPreviewSucceeded = Result.bSuccess;
+	LastMessage = Result.bSuccess && HasAutomaticSetup()
+		? Result.Summary + TEXT(" Review the inferred decisions and approve them before Finish & Apply.")
+		: Result.Summary;
+	return Result;
+}
+
+FDataForgeResult FDataForgeRuleCreationWorkflow::ConfigureAutomatically(
+	const FString& AssetSearchRoot,
+	UDataForgeNamingPolicy* NamingPolicy,
+	UClass* GeneratedOutputClass,
+	const FString& GeneratedOutputFolder,
+	const FString& DefinitionFolder)
+{
+	FDataForgeResult Result;
+	AutomaticDraft.Reset();
+	AutomaticPlan.Reset();
+	bAutomaticReviewApproved = false;
+	if (!GeneratedOutputClass || !GeneratedOutputClass->IsChildOf(UDataAsset::StaticClass())
+		|| !FPackageName::IsValidLongPackageName(AssetSearchRoot)
+		|| !FPackageName::IsValidLongPackageName(GeneratedOutputFolder)
+		|| !FPackageName::IsValidLongPackageName(DefinitionFolder)
+		|| !GetDraft().Output.RowStruct
+		|| !GetDraft().Output.RowStruct->IsChildOf(FTableRowBase::StaticStruct())
+		|| !FPackageName::IsValidLongPackageName(GetDraft().Output.AssetPath))
+	{
+		FDataForgeDiagnostic& Diagnostic = Result.Diagnostics.AddDefaulted_GetRef();
+		Diagnostic.Severity = EDataForgeSeverity::Error;
+		Diagnostic.Code = TEXT("DF2090");
+		Diagnostic.Message = TEXT("Automatic Setup requires an asset root, DataAsset class, generated folder, definition folder, Row Struct, and DataTable path.");
+		Result.Summary = Diagnostic.Message;
+		LastMessage = Result.Summary;
+		return Result;
+	}
+	const FDataForgeDefinitionDiscoveryResult Discovery =
+		FDataForgeDefinitionDiscovery::Discover(AssetSearchRoot, NamingPolicy);
+	Result.Diagnostics.Append(Discovery.Diagnostics);
+	if (!Discovery.IsResolved())
+	{
+		Result.Summary = Discovery.Decision.Alternatives.IsEmpty()
+			? TEXT("Automatic Setup found no reusable Naming Policy.")
+			: TEXT("Automatic Setup found multiple reusable definitions. Select a Naming Policy explicitly: ")
+				+ FString::Join(Discovery.Decision.Alternatives, TEXT(", "));
+		LastMessage = Result.Summary;
+		return Result;
+	}
+	UDataForgeNamingPolicy* ResolvedNamingPolicy = Discovery.NamingPolicy.Get();
+
+	const FDataForgeResult ProbeResult = Probe();
+	if (!ProbeResult.bSuccess) return ProbeResult;
+	TArray<FDataForgeFolderAssetObservation> Observations;
+	if (!FDataForgeSourceFolderAnalyzer::ScanFolder(AssetSearchRoot, ResolvedNamingPolicy, Observations, Result.Diagnostics))
+	{
+		Result.Summary = TEXT("Automatic Setup could not scan the selected asset root.");
+		LastMessage = Result.Summary;
+		return Result;
+	}
+
+	FDataForgeAuthoringPlannerRequest PlannerRequest;
+	PlannerRequest.Intent.Source = GetDraft().Source;
+	PlannerRequest.Intent.PreferredPrimaryKey = GetDraft().Schema.PrimaryKey;
+	PlannerRequest.Intent.AssetSearchRoots = { AssetSearchRoot };
+	PlannerRequest.Intent.RowStruct = GetDraft().Output.RowStruct;
+	PlannerRequest.Intent.DataTablePath = GetDraft().Output.AssetPath;
+	FDataForgeRequestedOutput& Output = PlannerRequest.Intent.Outputs.AddDefaulted_GetRef();
+	Output.OutputName = TEXT("Data");
+	Output.AssetClass = GeneratedOutputClass;
+	Output.OutputFolder = GeneratedOutputFolder;
+	PlannerRequest.PrimaryData = ProbedDataSet;
+	FDataForgeObservedAssetRoot& Root = PlannerRequest.AssetRoots.AddDefaulted_GetRef();
+	Root.RootFolder = AssetSearchRoot;
+	Root.Observations = MoveTemp(Observations);
+	FDataForgeAssociationSchema& Association = PlannerRequest.AssociationSchemas.AddDefaulted_GetRef();
+	Association.SourceId = TEXT("FolderAssets");
+	Association.AdapterId = TEXT("AssetRegistryFolder");
+	Association.Columns = { TEXT("Subject"), TEXT("ObjectPath"), TEXT("AssetKind"), TEXT("Role") };
+
+	FDataForgeAuthoringMaterializationRequest MaterializationRequest;
+	MaterializationRequest.Planned = FDataForgeAuthoringPlanner::BuildPlan(PlannerRequest);
+	MaterializationRequest.NamingPolicy = ResolvedNamingPolicy;
+	MaterializationRequest.ReusableFolderSource = Discovery.FolderSource;
+	FDataForgeAuthoringDraft Materialized = FDataForgeAuthoringMaterializer::BuildDraft(MaterializationRequest);
+	Result.Diagnostics.Append(MaterializationRequest.Planned.Plan.Diagnostics);
+	Result.Diagnostics.Append(Materialized.Diagnostics);
+	if (!Materialized.bSuccess)
+	{
+		Result.Summary = Materialized.Summary;
+		LastMessage = Result.Summary;
+		return Result;
+	}
+
+	DataForgeRuleCreationWorkflow::CopyConfiguration(GetDraft(), *Materialized.RuleSet);
+	AutomaticPlan = MakeUnique<FDataForgeAuthoringPlannerResult>(MoveTemp(MaterializationRequest.Planned));
+	AutomaticDraft = MakeUnique<FDataForgeAuthoringDraft>(MoveTemp(Materialized));
+	AutomaticDefinitionFolder = DefinitionFolder;
+	SelectedBindingPreset = AutomaticDraft->BindingPresets.IsEmpty() ? nullptr : AutomaticDraft->BindingPresets[0].Get();
+	BindingPresetOutputFolder = GeneratedOutputFolder;
+	bManualAssetLayout = true;
+	bAssetLayoutReady = true;
+	bPreviewSucceeded = false;
+	PreviewPlan = FDataForgeApplyPlan();
+	Result.bSuccess = true;
+	Result.Summary = AutomaticDraft->Summary + TEXT(" Review the inferred fields, then run Preview.");
 	LastMessage = Result.Summary;
 	return Result;
 }
@@ -201,6 +500,7 @@ FDataForgeResult FDataForgeRuleCreationWorkflow::Preview()
 void FDataForgeRuleCreationWorkflow::NotifyDraftChanged(FName MemberPropertyName)
 {
 	bPreviewSucceeded = false;
+	bAutomaticReviewApproved = false;
 	PreviewPlan = FDataForgeApplyPlan();
 	if (MemberPropertyName == GET_MEMBER_NAME_CHECKED(UDataForgeRuleSet, Source))
 	{
@@ -344,6 +644,11 @@ bool FDataForgeRuleCreationWorkflow::CanAdvance(FString& OutReason) const
 			OutReason = TEXT("Run a successful mutation-free Preview before finishing.");
 			return false;
 		}
+		if (HasAutomaticSetup() && !bAutomaticReviewApproved)
+		{
+			OutReason = TEXT("Review and approve the inferred Automatic Setup before finishing.");
+			return false;
+		}
 		return true;
 	default:
 		return false;
@@ -392,16 +697,30 @@ bool FDataForgeRuleCreationWorkflow::Finish(FString& OutReason)
 
 	const UDataForgeRuleSet& DraftRuleSet = GetDraft();
 	const FScopedTransaction Transaction(LOCTEXT("CommitWizard", "Commit DataForge Rule Creation Wizard"));
-	TargetRuleSet->Modify();
-	TargetRuleSet->RuleVersion = DraftRuleSet.RuleVersion;
-	TargetRuleSet->Source = DraftRuleSet.Source;
-	TargetRuleSet->Schema = DraftRuleSet.Schema;
-	TargetRuleSet->Output = DraftRuleSet.Output;
-	TargetRuleSet->AssetRules = DraftRuleSet.AssetRules;
-	TargetRuleSet->ProfileOrigin = DraftRuleSet.ProfileOrigin;
-	TargetRuleSet->GeneratedOutputs = DraftRuleSet.GeneratedOutputs;
-	TargetRuleSet->Bindings = DraftRuleSet.Bindings;
-	TargetRuleSet->Dependencies = DraftRuleSet.Dependencies;
+	if (HasAutomaticSetup())
+	{
+		DataForgeRuleCreationWorkflow::CopyConfiguration(*AutomaticDraft->RuleSet, DraftRuleSet);
+		FDataForgeAuthoringApplyRequest ApplyRequest;
+		ApplyRequest.Draft = AutomaticDraft.Get();
+		ApplyRequest.ExistingRuleSet = TargetRuleSet;
+		ApplyRequest.RuleSetPath = TargetRuleSet->GetOutermost()->GetName();
+		ApplyRequest.DefinitionFolder = AutomaticDefinitionFolder;
+		ApplyRequest.bSaveAssets = false;
+		const FDataForgeAuthoringApplyResult Applied = FDataForgeAuthoringApply::Apply(ApplyRequest);
+		if (!Applied.bSuccess)
+		{
+			OutReason = TEXT("Automatic Setup promotion failed: ") + Applied.Summary;
+			return false;
+		}
+		DataForgeRuleCreationWorkflow::CopyConfiguration(GetDraft(), *TargetRuleSet);
+		SelectedBindingPreset = TargetRuleSet->BindingPreset.LoadSynchronous();
+		AutomaticDraft.Reset();
+	}
+	else
+	{
+		TargetRuleSet->Modify();
+		DataForgeRuleCreationWorkflow::CopyConfiguration(*TargetRuleSet, DraftRuleSet);
+	}
 #if WITH_EDITORONLY_DATA
 	TargetRuleSet->LastStatus = TEXT("Wizard Committed");
 	TargetRuleSet->LastSummary = TEXT("Wizard configuration committed. Preparing automatic Apply.");

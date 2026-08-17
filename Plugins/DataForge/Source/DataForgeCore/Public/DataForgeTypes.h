@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataForgeBindingPreset.h"
 #include "Engine/EngineTypes.h"
 #include "UObject/SoftObjectPtr.h"
 #include "DataForgeTypes.generated.h"
@@ -122,6 +123,32 @@ struct DATAFORGECORE_API FDataForgeSourceConfig
 	TMap<FName, FString> Parameters;
 };
 
+/** Secondary parsed-data source used to associate one or more assets with each primary source row. */
+USTRUCT(BlueprintType)
+struct DATAFORGECORE_API FDataForgeAssociationSourceRule
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Association")
+	FName SourceId = NAME_None;
+
+	/** Any registered adapter is valid; the result is consumed as canonical Parsed Data. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Association")
+	FDataForgeSourceConfig Source;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Columns")
+	FName MatchColumn = TEXT("Subject");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Columns")
+	FName AssetPathColumn = TEXT("ObjectPath");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Columns")
+	FName AssetKindColumn = TEXT("AssetKind");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Columns")
+	FName RoleColumn = TEXT("Role");
+};
+
 USTRUCT(BlueprintType)
 struct DATAFORGECORE_API FDataForgeSchemaRule
 {
@@ -202,6 +229,10 @@ struct DATAFORGECORE_API FDataForgeGeneratedAssetOutputRule
 	/** Must reference an Asset Rule whose ownership is Managed. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generated Output")
 	FName AssetRuleId = NAME_None;
+
+	/** Adopt a compatible asset at the generated path only when it has no DataForge ownership metadata. Disable for strict create-only ownership. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generated Output", AdvancedDisplay)
+	bool bAdoptCompatibleUnownedAsset = true;
 };
 
 USTRUCT(BlueprintType)
@@ -212,7 +243,7 @@ struct DATAFORGECORE_API FDataForgeBindingRule
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Binding")
 	EDataForgeBindingSource Source = EDataForgeBindingSource::SourceValue;
 
-	/** Canonical source field used as the value, or as input to an external asset rule. */
+	/** Canonical source field used as the value, or as input to an external asset rule. ResolvedAsset bindings to soft-object arrays split semicolon-delimited ids. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Binding", meta = (EditCondition = "Source != EDataForgeBindingSource::GeneratedOutput", EditConditionHides))
 	FName SourceColumn = NAME_None;
 
@@ -289,6 +320,22 @@ struct DATAFORGECORE_API FDataForgeCompiledOutput
 	TWeakObjectPtr<UClass> AssetClass;
 };
 
+struct DATAFORGECORE_API FDataForgeCompiledAssociationSlot
+{
+	FName OutputName = NAME_None;
+	FName SlotId = NAME_None;
+	FName AssociationSourceId = NAME_None;
+	FName SourceKeyColumn = NAME_None;
+	FName AssetKind = NAME_None;
+	FName Role = NAME_None;
+	FString TargetPropertyPath;
+	EDataForgeBindingCardinality Cardinality = EDataForgeBindingCardinality::One;
+	EDataForgeBindingReconcileMode Reconcile = EDataForgeBindingReconcileMode::Assign;
+	bool bRequired = true;
+	FProperty* TargetProperty = nullptr;
+	TArray<FProperty*> PropertyChain;
+};
+
 struct DATAFORGECORE_API FCompiledDataForgeRuleSet
 {
 	TWeakObjectPtr<const class UDataForgeRuleSet> RuleSet;
@@ -296,6 +343,9 @@ struct DATAFORGECORE_API FCompiledDataForgeRuleSet
 	TArray<FDataForgeCompiledBinding> Bindings;
 	TMap<FName, FDataForgeAssetRule> AssetRules;
 	TMap<FName, FDataForgeCompiledOutput> GeneratedOutputs;
+	TMap<FName, FDataForgeAssociationSourceRule> AssociationSourceRules;
+	TMap<FName, FDataForgeDataSet> AssociationDataSets;
+	TArray<FDataForgeCompiledAssociationSlot> AssociationSlots;
 	FDataForgeDataSet DataSet;
 };
 
@@ -325,6 +375,10 @@ struct DATAFORGECORE_API FDataForgePlannedAsset
 	TWeakObjectPtr<UDataAsset> ExistingAsset;
 	EDataForgeManagedAssetChange Change = EDataForgeManagedAssetChange::Unchanged;
 	TArray<FDataForgePlannedPropertyWrite> PropertyWrites;
+	/** Property path -> sorted paths owned by the Association Manifest after Apply. */
+	TMap<FString, TArray<FString>> ManagedAssociations;
+	/** Removed slots preserve their current property value as manual data and drop only stale ownership metadata. */
+	TArray<FString> RemovedAssociationKeys;
 };
 
 struct DATAFORGECORE_API FDataForgeApplyPlan

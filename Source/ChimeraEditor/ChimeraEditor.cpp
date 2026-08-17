@@ -5,9 +5,14 @@
 #include "DataForge/DataForgeMcpCommands.h"
 #include "DataForgeAssetLayoutProfile.h"
 #include "DataForgeAutoReconciler.h"
+#include "DataForgeBindingPresetAuthoring.h"
 #include "DataForgeEditorService.h"
+#include "DataForgeBindingPreset.h"
+#include "DataForgeFolderSource.h"
+#include "DataForgeNamingPolicy.h"
 #include "DataForgePipeline.h"
 #include "DataForgeRuleSet.h"
+#include "Data/DataForgeExamples/CMMultiAssetReferenceExample.h"
 #include "GoogleSheetConfig.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
@@ -18,6 +23,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Engine/DataTable.h"
 #include "Engine/Texture2D.h"
+#include "Materials/Material.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/GoogleDataForgeIntegrationTestTypes.h"
 #include "UObject/Package.h"
@@ -1022,6 +1028,326 @@ bool FDataForgePersistentCsvExampleTest::RunTest(const FString& Parameters)
 		TestTrue(FString::Printf(TEXT("Persistent asset file exists: %s"), *PackageName), FPackageName::DoesPackageExist(PackageName));
 	}
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataForgePersistentMultiAssetReferenceExampleTest,
+	"DataForge.Examples.PersistentMultiAssetReferences",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataForgePersistentMultiAssetReferenceExampleTest::RunTest(const FString& Parameters)
+{
+	const FString Root = TEXT("/Game/DataForgeExamples/MultiAssetRefs");
+	const FString SourceFile = TEXT("Content/DataForgeExamples/MultiAssetRefs/Source/Products.csv");
+	const FString Definitions = Root / TEXT("Definitions");
+	const FString Inventory = Root / TEXT("Inventory");
+	const FString RuleSetPackageName = Root / TEXT("Rules/RS_MultiAssetRefs");
+	const FString TablePackageName = Root / TEXT("Output/DT_MultiAssetRefs");
+
+	const auto SaveAsset = [this](UObject* Asset, const TCHAR* Label)
+	{
+		if (!Asset)
+		{
+			AddError(FString::Printf(TEXT("%s is null."), Label));
+			return false;
+		}
+		Asset->MarkPackageDirty();
+		const FString Filename = FPackageName::LongPackageNameToFilename(
+			Asset->GetOutermost()->GetName(), FPackageName::GetAssetPackageExtension());
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		const bool bSaved = UPackage::SavePackage(Asset->GetOutermost(), Asset, *Filename, SaveArgs);
+		TestTrue(FString::Printf(TEXT("%s is saved under Content"), Label), bSaved);
+		return bSaved;
+	};
+
+	const auto LoadOrCreate = [](UClass* AssetClass, const FString& PackageName, bool& bOutCreated) -> UObject*
+	{
+		const FString AssetName = FPackageName::GetLongPackageAssetName(PackageName);
+		const FString ObjectPath = PackageName + TEXT(".") + AssetName;
+		UObject* Asset = StaticFindObject(AssetClass, nullptr, *ObjectPath);
+		if (!Asset && FPackageName::DoesPackageExist(PackageName))
+		{
+			Asset = StaticLoadObject(AssetClass, nullptr, *ObjectPath);
+		}
+		bOutCreated = !Asset;
+		if (!Asset)
+		{
+			UPackage* Package = CreatePackage(*PackageName);
+			Asset = NewObject<UObject>(Package, AssetClass, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
+			FAssetRegistryModule::AssetCreated(Asset);
+		}
+		return Asset;
+	};
+
+	const auto CreateTexture = [&LoadOrCreate, &SaveAsset](
+		const FString& Subject, int32 Numbering, const FColor Color) -> UTexture2D*
+	{
+		const FString AssetName = FString::Printf(TEXT("T_CM%sTexture_%d"), *Subject, Numbering);
+		const FString PackageName = FString::Printf(TEXT("/Game/DataForgeExamples/MultiAssetRefs/Inventory/%s/Texture/%s"), *Subject, *AssetName);
+		bool bCreated = false;
+		UTexture2D* Texture = Cast<UTexture2D>(LoadOrCreate(UTexture2D::StaticClass(), PackageName, bCreated));
+		if (!Texture || !bCreated) return Texture;
+		constexpr int32 Size = 8;
+		TArray<uint8> Pixels;
+		Pixels.SetNumUninitialized(Size * Size * 4);
+		for (int32 PixelIndex = 0; PixelIndex < Size * Size; ++PixelIndex)
+		{
+			const FColor Pixel = ((PixelIndex % Size) + (PixelIndex / Size)) % 2 == 0
+				? Color : Color.ReinterpretAsLinear().Desaturate(0.5f).ToFColor(true);
+			Pixels[PixelIndex * 4 + 0] = Pixel.B;
+			Pixels[PixelIndex * 4 + 1] = Pixel.G;
+			Pixels[PixelIndex * 4 + 2] = Pixel.R;
+			Pixels[PixelIndex * 4 + 3] = Pixel.A;
+		}
+		Texture->Source.Init(Size, Size, 1, 1, TSF_BGRA8, Pixels.GetData());
+		Texture->SRGB = true;
+		Texture->CompressionSettings = TC_EditorIcon;
+		Texture->MipGenSettings = TMGS_NoMipmaps;
+		Texture->PostEditChange();
+		SaveAsset(Texture, TEXT("Multi-reference texture"));
+		return Texture;
+	};
+
+	const auto CreateMaterial = [&LoadOrCreate, &SaveAsset](const FString& Subject, int32 Numbering) -> UMaterial*
+	{
+		const FString AssetName = FString::Printf(TEXT("M_CM%sMaterial_%d"), *Subject, Numbering);
+		const FString PackageName = FString::Printf(TEXT("/Game/DataForgeExamples/MultiAssetRefs/Inventory/%s/Material/%s"), *Subject, *AssetName);
+		bool bCreated = false;
+		UMaterial* Material = Cast<UMaterial>(LoadOrCreate(UMaterial::StaticClass(), PackageName, bCreated));
+		if (Material && bCreated)
+		{
+			Material->PostEditChange();
+			SaveAsset(Material, TEXT("Multi-reference material"));
+		}
+		return Material;
+	};
+
+	TMap<FString, UTexture2D*> Textures;
+	Textures.Add(TEXT("Armor1"), CreateTexture(TEXT("Armor"), 1, FColor(45, 120, 220)));
+	Textures.Add(TEXT("Armor2"), CreateTexture(TEXT("Armor"), 2, FColor(100, 100, 255)));
+	Textures.Add(TEXT("Robot1"), CreateTexture(TEXT("Robot"), 1, FColor(210, 110, 40)));
+	Textures.Add(TEXT("Robot2"), CreateTexture(TEXT("Robot"), 2, FColor(80, 80, 80)));
+	TMap<FString, UMaterial*> Materials;
+	Materials.Add(TEXT("Armor1"), CreateMaterial(TEXT("Armor"), 1));
+	Materials.Add(TEXT("Armor2"), CreateMaterial(TEXT("Armor"), 2));
+	Materials.Add(TEXT("Robot1"), CreateMaterial(TEXT("Robot"), 1));
+	for (const TPair<FString, UTexture2D*>& Pair : Textures) TestNotNull(*FString::Printf(TEXT("Texture %s exists"), *Pair.Key), Pair.Value);
+	for (const TPair<FString, UMaterial*>& Pair : Materials) TestNotNull(*FString::Printf(TEXT("Material %s exists"), *Pair.Key), Pair.Value);
+
+	bool bCreated = false;
+	UDataForgeNamingPolicy* Policy = Cast<UDataForgeNamingPolicy>(LoadOrCreate(
+		UDataForgeNamingPolicy::StaticClass(), Definitions / TEXT("NP_MultiAssetRefs"), bCreated));
+	Policy->ProjectPrefix = TEXT("CM");
+	Policy->AssetKinds.Reset();
+	FDataForgeAssetKindNamingRule& TextureKind = Policy->AssetKinds.AddDefaulted_GetRef();
+	TextureKind.AssetKind = TEXT("Texture");
+	TextureKind.TypePrefix = TEXT("T");
+	TextureKind.FolderName = TEXT("Texture");
+	TextureKind.ExpectedAssetClass = UTexture2D::StaticClass();
+	FDataForgeAssetKindNamingRule& MaterialKind = Policy->AssetKinds.AddDefaulted_GetRef();
+	MaterialKind.AssetKind = TEXT("Material");
+	MaterialKind.TypePrefix = TEXT("M");
+	MaterialKind.FolderName = TEXT("Material");
+	MaterialKind.ExpectedAssetClass = UMaterialInterface::StaticClass();
+	SaveAsset(Policy, TEXT("Multi-reference Naming Policy"));
+
+	UDataForgeAssetLayoutRecipe* Recipe = Cast<UDataForgeAssetLayoutRecipe>(LoadOrCreate(
+		UDataForgeAssetLayoutRecipe::StaticClass(), Definitions / TEXT("ALR_MultiAssetRefs"), bCreated));
+	Recipe->RecipeId = TEXT("MultiAssetRefs");
+	Recipe->Domain = TEXT("Example");
+	Recipe->NamingPolicy = Policy;
+	Recipe->SubjectSource = EDataForgeLayoutSubjectSource::FolderSegment;
+	Recipe->SubjectFolderIndex = 0;
+	Recipe->KindFolderIndex = 1;
+	Recipe->bRequireKindFolderMatch = true;
+	SaveAsset(Recipe, TEXT("Multi-reference Layout Recipe"));
+
+	UDataForgeFolderSourceConfig* FolderConfig = Cast<UDataForgeFolderSourceConfig>(LoadOrCreate(
+		UDataForgeFolderSourceConfig::StaticClass(), Definitions / TEXT("FSC_MultiAssetRefs"), bCreated));
+	FolderConfig->RootFolder = Inventory;
+	FolderConfig->bRecursive = true;
+	FolderConfig->AllowedAssetKinds = { TEXT("Texture"), TEXT("Material") };
+	FolderConfig->ExcludedFolders.Reset();
+	FolderConfig->bExcludeDataForgeManagedAssets = true;
+	FolderConfig->LayoutRecipe = Recipe;
+	SaveAsset(FolderConfig, TEXT("Multi-reference Folder Source"));
+
+	UDataForgeBindingPreset* Preset = Cast<UDataForgeBindingPreset>(LoadOrCreate(
+		UDataForgeBindingPreset::StaticClass(), Definitions / TEXT("BP_MultiAssetRefs"), bCreated));
+	if (!Preset->PresetId.IsValid()) Preset->PresetId = FGuid::NewGuid();
+	Preset->OutputName = TEXT("PrimaryAsset");
+	Preset->TargetClass = UCMMultiAssetReferencePrimaryAsset::StaticClass();
+	Preset->AssetNamePrefix = TEXT("PDA");
+	Preset->RowReferenceProperty = TEXT("PrimaryAsset");
+	Preset->Slots.Reset();
+	FDataForgeBindingPresetSlot& TextureSlot = Preset->Slots.AddDefaulted_GetRef();
+	TextureSlot.SlotId = TEXT("Textures");
+	TextureSlot.AssetKind = TEXT("Texture");
+	TextureSlot.Role = TEXT("Texture");
+	TextureSlot.AssociationSourceId = TEXT("Inventory");
+	TextureSlot.SourceKeyColumn = TEXT("Id");
+	TextureSlot.TargetProperty = TEXT("Textures");
+	TextureSlot.ExpectedAssetClass = UTexture2D::StaticClass();
+	TextureSlot.Cardinality = EDataForgeBindingCardinality::Many;
+	TextureSlot.Reconcile = EDataForgeBindingReconcileMode::ReplaceManaged;
+	TextureSlot.bRequired = true;
+	FDataForgeBindingPresetSlot& MaterialSlot = Preset->Slots.AddDefaulted_GetRef();
+	MaterialSlot.SlotId = TEXT("Materials");
+	MaterialSlot.AssetKind = TEXT("Material");
+	MaterialSlot.Role = TEXT("Material");
+	MaterialSlot.AssociationSourceId = TEXT("Inventory");
+	MaterialSlot.SourceKeyColumn = TEXT("Id");
+	MaterialSlot.TargetProperty = TEXT("Materials");
+	MaterialSlot.ExpectedAssetClass = UMaterialInterface::StaticClass();
+	MaterialSlot.Cardinality = EDataForgeBindingCardinality::Many;
+	MaterialSlot.Reconcile = EDataForgeBindingReconcileMode::ReplaceManaged;
+	MaterialSlot.bRequired = true;
+	SaveAsset(Preset, TEXT("Multi-reference Binding Preset"));
+
+	bool bRuleSetCreated = false;
+	UDataForgeRuleSet* RuleSet = Cast<UDataForgeRuleSet>(LoadOrCreate(
+		UDataForgeRuleSet::StaticClass(), RuleSetPackageName, bRuleSetCreated));
+	if (!RuleSet) return false;
+	if (!RuleSet->RuleSetId.IsValid()) RuleSet->RuleSetId = FGuid::NewGuid();
+	RuleSet->Source = FDataForgeSourceConfig();
+	RuleSet->Source.AdapterId = TEXT("Csv");
+	RuleSet->Source.File.FilePath = SourceFile;
+	RuleSet->Schema.PrimaryKey = TEXT("Id");
+	RuleSet->Schema.RequiredColumns = { TEXT("Id"), TEXT("DisplayName") };
+	RuleSet->Schema.bWarnOnUnmappedColumns = false;
+	RuleSet->Output.RowStruct = FCMMultiAssetReferenceRow::StaticStruct();
+	RuleSet->Output.AssetPath = TablePackageName;
+	RuleSet->Output.bCreateIfMissing = true;
+	RuleSet->Output.bSaveAfterApply = true;
+	RuleSet->AssetRules.Reset();
+	RuleSet->GeneratedOutputs.Reset();
+	RuleSet->Bindings.Reset();
+
+	RuleSet->AssociationSources.Reset();
+	FDataForgeAssociationSourceRule& Association = RuleSet->AssociationSources.AddDefaulted_GetRef();
+	Association.SourceId = TEXT("Inventory");
+	Association.Source.AdapterId = TEXT("AssetRegistryFolder");
+	Association.Source.SourceAsset = FolderConfig;
+	Association.MatchColumn = TEXT("Subject");
+	Association.AssetPathColumn = TEXT("ObjectPath");
+	Association.AssetKindColumn = TEXT("AssetKind");
+	Association.RoleColumn = TEXT("Role");
+	RuleSet->BindingPreset = Preset;
+	const FDataForgeBindingPresetMaterialization Materialization =
+		FDataForgeBindingPresetAuthoring::Materialize(*RuleSet, *Preset, Root / TEXT("Generated"));
+	TestTrue(TEXT("Binding Preset materializes the PDA output and slots"), Materialization.bSuccess);
+
+	const auto AddBinding = [RuleSet](
+		EDataForgeBindingSource Source, FName SourceColumn, EDataForgeBindingTarget Target,
+		FName TargetOutput, const TCHAR* TargetProperty, FName AssetRuleId = NAME_None, FName SourceOutput = NAME_None)
+	{
+		FDataForgeBindingRule& Binding = RuleSet->Bindings.AddDefaulted_GetRef();
+		Binding.Source = Source;
+		Binding.SourceColumn = SourceColumn;
+		Binding.SourceOutput = SourceOutput;
+		Binding.Target = Target;
+		Binding.TargetOutput = TargetOutput;
+		Binding.TargetProperty = TargetProperty;
+		Binding.AssetRuleId = AssetRuleId;
+	};
+	for (const FName Column : { FName(TEXT("Id")), FName(TEXT("DisplayName")) })
+	{
+		AddBinding(EDataForgeBindingSource::SourceValue, Column, EDataForgeBindingTarget::DataTableRow, NAME_None, *Column.ToString());
+		AddBinding(EDataForgeBindingSource::SourceValue, Column, EDataForgeBindingTarget::GeneratedOutput, TEXT("PrimaryAsset"), *Column.ToString());
+	}
+	SaveAsset(RuleSet, TEXT("Multi-reference RuleSet"));
+
+	FDataForgeApplyPlan Plan;
+	const FDataForgeResult Preview = FDataForgeEditorService::Preview(*RuleSet, &Plan);
+	TestTrue(TEXT("Multi-reference example previews without errors"), Preview.bSuccess);
+	const FDataForgeResult Apply = FDataForgeEditorService::Apply(*RuleSet);
+	TestTrue(TEXT("Multi-reference example applies"), Apply.bSuccess);
+
+	UDataTable* Table = LoadObject<UDataTable>(nullptr, *(TablePackageName + TEXT(".DT_MultiAssetRefs")));
+	TestNotNull(TEXT("Multi-reference DataTable exists"), Table);
+	if (Table)
+	{
+		const FCMMultiAssetReferenceRow* Armor = Table->FindRow<FCMMultiAssetReferenceRow>(TEXT("Armor"), TEXT("Multi-reference example"));
+		const FCMMultiAssetReferenceRow* Robot = Table->FindRow<FCMMultiAssetReferenceRow>(TEXT("Robot"), TEXT("Multi-reference example"));
+		TestNotNull(TEXT("Armor row exists"), Armor);
+		TestNotNull(TEXT("Robot row exists"), Robot);
+		if (Armor)
+		{
+			UCMMultiAssetReferencePrimaryAsset* PDA = Armor->PrimaryAsset.LoadSynchronous();
+			TestNotNull(TEXT("Armor PDA exists"), PDA);
+			if (PDA)
+			{
+				TestTrue(TEXT("Armor PDA keeps at least the two baseline textures"), PDA->Textures.Num() >= 2);
+				TestTrue(TEXT("Armor PDA keeps at least the two baseline materials"), PDA->Materials.Num() >= 2);
+				TestTrue(TEXT("Armor PDA inferred its first texture from ID and folders"), PDA->Textures.Contains(Textures.FindChecked(TEXT("Armor1"))));
+				TestTrue(TEXT("Armor PDA inferred its second material without a CSV asset id"), PDA->Materials.Contains(Materials.FindChecked(TEXT("Armor2"))));
+			}
+		}
+		if (Robot)
+		{
+			UCMMultiAssetReferencePrimaryAsset* PDA = Robot->PrimaryAsset.LoadSynchronous();
+			TestNotNull(TEXT("Robot PDA exists"), PDA);
+			if (PDA)
+			{
+				TestTrue(TEXT("Robot PDA keeps at least the two baseline textures"), PDA->Textures.Num() >= 2);
+				TestTrue(TEXT("Robot PDA keeps at least the baseline material"), PDA->Materials.Num() >= 1);
+			}
+		}
+	}
+
+	for (const FString& PackageName : { TablePackageName, Root / TEXT("Generated/PDA_Armor"), Root / TEXT("Generated/PDA_Robot") })
+	{
+		TestTrue(FString::Printf(TEXT("Persistent multi-reference asset exists: %s"), *PackageName), FPackageName::DoesPackageExist(PackageName));
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FChimeraDefaultNamingPolicyAssetTest,
+	"DataForge.Examples.ChimeraDefaultNamingPolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FChimeraDefaultNamingPolicyAssetTest::RunTest(const FString& Parameters)
+{
+	const FString PackageName = TEXT("/Game/Chimera/DataForge/Naming/NP_ChimeraDefault");
+	const FString ObjectPath = PackageName + TEXT(".NP_ChimeraDefault");
+	UDataForgeNamingPolicy* Policy = LoadObject<UDataForgeNamingPolicy>(nullptr, *ObjectPath);
+	if (!Policy)
+	{
+		UPackage* Package = CreatePackage(*PackageName);
+		Policy = NewObject<UDataForgeNamingPolicy>(
+			Package, TEXT("NP_ChimeraDefault"), RF_Public | RF_Standalone | RF_Transactional);
+		FAssetRegistryModule::AssetCreated(Policy);
+	}
+	TestNotNull(TEXT("Chimera default Naming Policy exists"), Policy);
+	if (!Policy) return false;
+
+	FDataForgeNamingPolicyResolver::ConfigureChimeraDefaults(*Policy);
+	const FDataForgeResult Validation = FDataForgeNamingPolicyResolver::ValidatePolicy(*Policy);
+	TestTrue(TEXT("Chimera default Naming Policy is valid"), Validation.bSuccess);
+	for (const FName RequiredKind : { FName(TEXT("Blueprint")), FName(TEXT("Texture")), FName(TEXT("Material")),
+		FName(TEXT("StaticMesh")), FName(TEXT("SkeletalMesh")), FName(TEXT("NiagaraSystem")),
+		FName(TEXT("DataAsset")), FName(TEXT("PrimaryDataAsset")), FName(TEXT("GameplayAbility")), FName(TEXT("GameplayEffect")) })
+	{
+		TestTrue(FString::Printf(TEXT("Default policy supports %s"), *RequiredKind.ToString()),
+			Policy->AssetKinds.ContainsByPredicate([RequiredKind](const FDataForgeAssetKindNamingRule& Rule)
+			{
+				return Rule.AssetKind == RequiredKind;
+			}));
+	}
+
+	Policy->MarkPackageDirty();
+	const FString Filename = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	SaveArgs.SaveFlags = SAVE_NoError;
+	TestTrue(TEXT("Chimera default Naming Policy is saved under Content"),
+		UPackage::SavePackage(Policy->GetOutermost(), Policy, *Filename, SaveArgs));
+	return !HasAnyErrors();
 }
 #endif
 
