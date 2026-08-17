@@ -23,6 +23,8 @@ class UPhysicalMaterial;
 class ACMPlayerState;
 class AActor;
 
+DECLARE_LOG_CATEGORY_EXTERN(LogChimeraLineBody, Log, All);
+
 /** Fired once on the authoritative Chimera when every active body segment is dead. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMAllSegmentsDeadSignature);
 
