@@ -7,6 +7,7 @@
 #include "CMPlayerController.generated.h"
 
 class ACMChimera;
+class UCMVisionInputComponent;
 class UInputAction;
 class UInputMappingContext;
 
@@ -37,6 +38,9 @@ protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void SetupInputComponent() override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Vision")
+    TObjectPtr<UCMVisionInputComponent> VisionInputComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputMappingContext> DefaultMappingContext;
