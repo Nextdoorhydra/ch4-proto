@@ -29,10 +29,6 @@ protected:
     ) override;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-        Category = "Chimera|Vision|Input")
-    TEnumAsByte<ECollisionChannel> VisionGroundTraceChannel = ECC_Visibility;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Vision|Input",
         meta = (ClampMin = "0.01"))
     float AimUpdateInterval = 0.05f;

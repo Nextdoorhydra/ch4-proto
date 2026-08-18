@@ -1,6 +1,8 @@
 #include "Parts/Head/CMVisionComponent.h"
 
 #include "Net/UnrealNetwork.h"
+#include "Parts/Core/CMPartActorBase.h"
+#include "Player/CMPartSlotComponent.h"
 #include "Vision/CMVisionManagerSubsystem.h"
 
 UCMVisionComponent::UCMVisionComponent()
@@ -83,6 +85,21 @@ FVector UCMVisionComponent::GetAimDirection() const
     return AimDirection;
 }
 
+FVector UCMVisionComponent::GetVisionOrigin() const
+{
+    const ACMPartActorBase* PartOwner = Cast<ACMPartActorBase>(GetOwner());
+    const UCMPartSlotComponent* PartSlot = PartOwner
+        ? PartOwner->GetAttachedPartSlot()
+        : nullptr;
+
+    // The Part root is snapped to the slot when equipped. Use that replicated
+    // root transform so the rendered Head and its vision always share an
+    // origin, even while the physics-driven slot transform is between updates.
+    return PartSlot && PartOwner
+        ? PartOwner->GetActorLocation()
+        : GetComponentLocation();
+}
+
 bool UCMVisionComponent::IsLocationVisible(
     const FVector& WorldLocation
 ) const
@@ -94,7 +111,7 @@ bool UCMVisionComponent::IsLocationVisible(
     }
 
     return IsPointInsideVisionCone(
-        GetComponentLocation(),
+        GetVisionOrigin(),
         AimDirection,
         VisionAngleDegrees,
         VisionDistance,

@@ -2,38 +2,63 @@
 
 #include "Camera/CameraComponent.h"
 #include "CanvasItem.h"
+#include "Components/PrimitiveComponent.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/Canvas.h"
 #include "Engine/CanvasRenderTarget2D.h"
 #include "Engine/Texture2D.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Parts/Head/CMVisionComponent.h"
+#include "Vision/CMVisionRenderConfig.h"
+#include "Vision/CMVisionSettings.h"
 
 namespace
 {
-    constexpr int32 VisibilityMaskResolution = 512;
-    constexpr int32 VisionArcSegments = 24;
-    constexpr float VisibilityMaskUpdateInterval = 0.05f;
-    const TCHAR* VisionPostProcessMaterialPath =
-        TEXT("/Game/Chimera/Vision/M_CMVisionMaskPostProcess.M_CMVisionMaskPostProcess");
+    const FName OccluderVisionMaskParameterName(
+        TEXT("OccluderVisionMask")
+    );
+    const FName BaseVisionMaskParameterName(TEXT("BaseVisionMask"));
+    const FName VisionMaskWorldCenterParameterName(
+        TEXT("VisionMaskWorldCenter")
+    );
+    const FName VisionMaskWorldSizeParameterName(
+        TEXT("VisionMaskWorldSize")
+    );
+    const FName OccluderStencilValueParameterName(
+        TEXT("OccluderStencilValue")
+    );
+
+#if !UE_BUILD_SHIPPING
+    TAutoConsoleVariable<int32> CVarVisionDebugDraw(
+        TEXT("CM.Vision.DebugDraw"),
+        0,
+        TEXT("Draws slot vision origins (green), component locations (red), and aim rays (cyan)."),
+        ECVF_Cheat
+    );
+#endif
+}
+
+DEFINE_LOG_CATEGORY_STATIC(LogChimeraVisionManager, Log, All);
+
+void UCMVisionManagerSubsystem::Initialize(
+    FSubsystemCollectionBase& Collection
+)
+{
+    Super::Initialize(Collection);
+    LoadRenderConfig();
 }
 
 void UCMVisionManagerSubsystem::Deinitialize()
 {
-    if (UCameraComponent* Camera = BoundCamera.Get())
-    {
-        if (PostProcessMaterial)
-        {
-            Camera->PostProcessSettings.RemoveBlendable(
-                PostProcessMaterial
-            );
-        }
-    }
-
-    BoundCamera.Reset();
-    PostProcessMaterial = nullptr;
-    VisibilityMask = nullptr;
+    RestoreOccluderRenderStates();
+    RemovePostProcessBinding();
+    PostProcessMaterialAsset = nullptr;
+    RenderConfig = nullptr;
+    OccluderVisibilityMask = nullptr;
+    BaseVisibilityMask = nullptr;
     MaskDrawTexture = nullptr;
     VisionSources.Reset();
     Super::Deinitialize();
@@ -47,9 +72,20 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
         return;
     }
 
+    if (!RenderConfig && !LoadRenderConfig())
+    {
+        return;
+    }
+
+    VisionSources.RemoveAllSwap([](
+        const TWeakObjectPtr<UCMVisionComponent>& Source)
+    {
+        return !Source.IsValid();
+    });
+
     EnsureVisibilityMask();
     EnsurePostProcessBinding();
-    if (!VisibilityMask)
+    if (!OccluderVisibilityMask || !BaseVisibilityMask)
     {
         return;
     }
@@ -63,13 +99,11 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
     TArray<UCMVisionComponent*> ActiveSources;
     GetActiveVisionSources(ActiveSources);
     UpdateVisibilityMaskBounds(ActiveSources);
-    VisibilityMask->UpdateResource();
-    TimeUntilMaskUpdate = VisibilityMaskUpdateInterval;
 
-    if (PostProcessMaterial)
+    if (PostProcessMaterialInstance)
     {
-        PostProcessMaterial->SetVectorParameterValue(
-            TEXT("VisionMaskCenter"),
+        PostProcessMaterialInstance->SetVectorParameterValue(
+            VisionMaskWorldCenterParameterName,
             FLinearColor(
                 MaskWorldCenter.X,
                 MaskWorldCenter.Y,
@@ -77,11 +111,87 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
                 0.0f
             )
         );
-        PostProcessMaterial->SetScalarParameterValue(
-            TEXT("VisionMaskHalfExtent"),
-            MaskWorldHalfExtent
+        PostProcessMaterialInstance->SetScalarParameterValue(
+            VisionMaskWorldSizeParameterName,
+            MaskWorldHalfExtent * 2.0f
         );
     }
+
+#if !UE_BUILD_SHIPPING
+    if (CVarVisionDebugDraw.GetValueOnGameThread() != 0)
+    {
+        for (const UCMVisionComponent* VisionSource : ActiveSources)
+        {
+            const FVector Origin = VisionSource->GetVisionOrigin();
+            DrawDebugSphere(
+                World,
+                Origin,
+                18.0f,
+                12,
+                FColor::Green,
+                false,
+                RenderConfig->MaskUpdateInterval
+            );
+            DrawDebugSphere(
+                World,
+                VisionSource->GetComponentLocation(),
+                12.0f,
+                12,
+                FColor::Red,
+                false,
+                RenderConfig->MaskUpdateInterval
+            );
+            DrawDebugLine(
+                World,
+                Origin,
+                Origin + VisionSource->GetAimDirection()
+                    * VisionSource->GetVisionDistance(),
+                FColor::Cyan,
+                false,
+                RenderConfig->MaskUpdateInterval,
+                0,
+                2.0f
+            );
+        }
+    }
+#endif
+
+    BaseVisibilityMask->UpdateResource();
+    OccluderVisibilityMask->UpdateResource();
+    TimeUntilMaskUpdate = FMath::Max(
+        RenderConfig->MaskUpdateInterval,
+        0.01f
+    );
+
+}
+
+bool UCMVisionManagerSubsystem::LoadRenderConfig()
+{
+    const UCMVisionSettings* Settings = GetDefault<UCMVisionSettings>();
+    RenderConfig = Settings
+        ? Settings->DefaultRenderConfig.LoadSynchronous()
+        : nullptr;
+    PostProcessMaterialAsset = RenderConfig
+        ? RenderConfig->PostProcessMaterial.LoadSynchronous()
+        : nullptr;
+
+    if (RenderConfig && PostProcessMaterialAsset)
+    {
+        bConfigurationFailureLogged = false;
+        MaskWorldHalfExtent = FMath::Max(
+            RenderConfig->MinimumWorldHalfExtent,
+            1.0f
+        );
+        return true;
+    }
+
+    if (!bConfigurationFailureLogged)
+    {
+        UE_LOG(LogChimeraVisionManager, Error,
+            TEXT("Vision rendering is disabled. Assign a Vision Render Config with a Post Process Material in Project Settings > Chimera > Vision."));
+        bConfigurationFailureLogged = true;
+    }
+    return false;
 }
 
 TStatId UCMVisionManagerSubsystem::GetStatId() const
@@ -118,7 +228,8 @@ bool UCMVisionManagerSubsystem::IsLocationVisible(
     {
         if (const UCMVisionComponent* VisionComponent = VisionSource.Get())
         {
-            if (VisionComponent->IsLocationVisible(WorldLocation))
+            if (VisionComponent->IsLocationVisible(WorldLocation)
+                && HasLineOfSight(*VisionComponent, WorldLocation))
             {
                 return true;
             }
@@ -147,7 +258,7 @@ void UCMVisionManagerSubsystem::GetActiveVisionSources(
 UCanvasRenderTarget2D*
 UCMVisionManagerSubsystem::GetVisibilityMask() const
 {
-    return VisibilityMask;
+    return BaseVisibilityMask;
 }
 
 FVector2D UCMVisionManagerSubsystem::GetVisibilityMaskWorldCenter() const
@@ -162,24 +273,50 @@ float UCMVisionManagerSubsystem::GetVisibilityMaskWorldHalfExtent() const
 
 void UCMVisionManagerSubsystem::EnsureVisibilityMask()
 {
-    if (VisibilityMask)
+    if ((OccluderVisibilityMask && BaseVisibilityMask) || !RenderConfig)
     {
         return;
     }
 
-    VisibilityMask = UCanvasRenderTarget2D::CreateCanvasRenderTarget2D(
+    const int32 SafeResolution = FMath::Clamp(
+        RenderConfig->MaskResolution,
+        64,
+        2048
+    );
+
+    OccluderVisibilityMask = UCanvasRenderTarget2D::CreateCanvasRenderTarget2D(
         this,
         UCanvasRenderTarget2D::StaticClass(),
-        VisibilityMaskResolution,
-        VisibilityMaskResolution
+        SafeResolution,
+        SafeResolution
     );
-    if (VisibilityMask)
+    if (OccluderVisibilityMask)
     {
-        VisibilityMask->ClearColor = FLinearColor::Black;
-        VisibilityMask->SetShouldClearRenderTargetOnReceiveUpdate(true);
-        VisibilityMask->OnCanvasRenderTargetUpdate.AddDynamic(
+        OccluderVisibilityMask->AddressX = TA_Clamp;
+        OccluderVisibilityMask->AddressY = TA_Clamp;
+        OccluderVisibilityMask->ClearColor = FLinearColor::Black;
+        OccluderVisibilityMask->SetShouldClearRenderTargetOnReceiveUpdate(true);
+        OccluderVisibilityMask->OnCanvasRenderTargetUpdate.AddDynamic(
             this,
-            &UCMVisionManagerSubsystem::DrawVisibilityMask
+            &UCMVisionManagerSubsystem::DrawOccluderVisibilityMask
+        );
+    }
+
+    BaseVisibilityMask = UCanvasRenderTarget2D::CreateCanvasRenderTarget2D(
+        this,
+        UCanvasRenderTarget2D::StaticClass(),
+        SafeResolution,
+        SafeResolution
+    );
+    if (BaseVisibilityMask)
+    {
+        BaseVisibilityMask->AddressX = TA_Clamp;
+        BaseVisibilityMask->AddressY = TA_Clamp;
+        BaseVisibilityMask->ClearColor = FLinearColor::Black;
+        BaseVisibilityMask->SetShouldClearRenderTargetOnReceiveUpdate(true);
+        BaseVisibilityMask->OnCanvasRenderTargetUpdate.AddDynamic(
+            this,
+            &UCMVisionManagerSubsystem::DrawBaseVisibilityMask
         );
     }
 
@@ -201,15 +338,18 @@ void UCMVisionManagerSubsystem::UpdateVisibilityMaskBounds(
     FVector2D CenterSum = FVector2D::ZeroVector;
     for (const UCMVisionComponent* VisionSource : ActiveSources)
     {
-        const FVector Location = VisionSource->GetComponentLocation();
+        const FVector Location = VisionSource->GetVisionOrigin();
         CenterSum += FVector2D(Location.X, Location.Y);
     }
     MaskWorldCenter = CenterSum / ActiveSources.Num();
 
-    float RequiredHalfExtent = 1000.0f;
+    float RequiredHalfExtent = FMath::Max(
+        RenderConfig->MinimumWorldHalfExtent,
+        1.0f
+    );
     for (const UCMVisionComponent* VisionSource : ActiveSources)
     {
-        const FVector Location = VisionSource->GetComponentLocation();
+        const FVector Location = VisionSource->GetVisionOrigin();
         RequiredHalfExtent = FMath::Max(
             RequiredHalfExtent,
             FMath::Max(
@@ -218,42 +358,254 @@ void UCMVisionManagerSubsystem::UpdateVisibilityMaskBounds(
             ) + VisionSource->GetVisionDistance()
         );
     }
-    MaskWorldHalfExtent = RequiredHalfExtent;
+    MaskWorldHalfExtent = RequiredHalfExtent * FMath::Max(
+        RenderConfig->MaskBoundsPadding,
+        1.0f
+    );
 }
 
 void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
 {
-    if (PostProcessMaterial && BoundCamera.IsValid())
+    UCameraComponent* Camera = FindViewCamera();
+    if (BoundCamera.Get() != Camera)
+    {
+        RemovePostProcessBinding();
+    }
+
+    if (PostProcessMaterialInstance && Camera)
     {
         return;
     }
 
-    UWorld* World = GetWorld();
-    APlayerController* PlayerController = World
+    if (!Camera || !PostProcessMaterialAsset || !OccluderVisibilityMask
+        || !BaseVisibilityMask)
+    {
+        return;
+    }
+
+    PostProcessMaterialInstance = UMaterialInstanceDynamic::Create(
+        PostProcessMaterialAsset,
+        this
+    );
+    if (!PostProcessMaterialInstance)
+    {
+        return;
+    }
+
+    PostProcessMaterialInstance->SetTextureParameterValue(
+        OccluderVisionMaskParameterName,
+        OccluderVisibilityMask
+    );
+    PostProcessMaterialInstance->SetTextureParameterValue(
+        BaseVisionMaskParameterName,
+        BaseVisibilityMask
+    );
+    PostProcessMaterialInstance->SetScalarParameterValue(
+        OccluderStencilValueParameterName,
+        RenderConfig->OccluderStencilValue
+    );
+
+    Camera->PostProcessSettings.AddBlendable(
+        PostProcessMaterialInstance,
+        RenderConfig->PostProcessBlendWeight
+    );
+    BoundCamera = Camera;
+
+    UE_LOG(LogChimeraVisionManager, Log,
+        TEXT("Bound Vision Post Process to camera %s using config %s."),
+        *GetNameSafe(Camera),
+        *GetNameSafe(RenderConfig));
+}
+
+UCameraComponent* UCMVisionManagerSubsystem::FindViewCamera() const
+{
+    const UWorld* World = GetWorld();
+    const APlayerController* PlayerController = World
         ? World->GetFirstPlayerController()
         : nullptr;
     AActor* ViewTarget = PlayerController
         ? PlayerController->GetViewTarget()
         : nullptr;
-    UCameraComponent* Camera = ViewTarget
+    return ViewTarget
         ? ViewTarget->FindComponentByClass<UCameraComponent>()
         : nullptr;
-    UMaterialInterface* Material = LoadObject<UMaterialInterface>(
-        nullptr,
-        VisionPostProcessMaterialPath
-    );
-    if (!Camera || !Material || !VisibilityMask)
+}
+
+void UCMVisionManagerSubsystem::RemovePostProcessBinding()
+{
+    if (UCameraComponent* Camera = BoundCamera.Get())
     {
-        return;
+        if (PostProcessMaterialInstance)
+        {
+            Camera->PostProcessSettings.RemoveBlendable(
+                PostProcessMaterialInstance
+            );
+        }
+
     }
 
-    PostProcessMaterial = UMaterialInstanceDynamic::Create(Material, this);
-    PostProcessMaterial->SetTextureParameterValue(
-        TEXT("VisionMask"),
-        VisibilityMask
+    BoundCamera.Reset();
+    PostProcessMaterialInstance = nullptr;
+}
+
+void UCMVisionManagerSubsystem::RestoreOccluderRenderStates()
+{
+    for (const FCMVisionOccluderRenderState& State : OccluderRenderStates)
+    {
+        if (UPrimitiveComponent* Component = State.Component.Get())
+        {
+            Component->SetCustomDepthStencilValue(
+                State.CustomDepthStencilValue
+            );
+            Component->SetRenderCustomDepth(State.bRenderCustomDepth);
+        }
+    }
+    OccluderRenderStates.Reset();
+}
+
+void UCMVisionManagerSubsystem::UpdateOccluderRenderStates(
+    const TSet<UPrimitiveComponent*>& CurrentOccluders
+)
+{
+    for (int32 Index = OccluderRenderStates.Num() - 1; Index >= 0; --Index)
+    {
+        FCMVisionOccluderRenderState& State = OccluderRenderStates[Index];
+        UPrimitiveComponent* Component = State.Component.Get();
+        if (Component && CurrentOccluders.Contains(Component))
+        {
+            continue;
+        }
+
+        if (Component)
+        {
+            Component->SetCustomDepthStencilValue(
+                State.CustomDepthStencilValue
+            );
+            Component->SetRenderCustomDepth(State.bRenderCustomDepth);
+        }
+        OccluderRenderStates.RemoveAtSwap(Index);
+    }
+
+    for (UPrimitiveComponent* Component : CurrentOccluders)
+    {
+        if (!Component || OccluderRenderStates.ContainsByPredicate(
+            [Component](const FCMVisionOccluderRenderState& State)
+            {
+                return State.Component.Get() == Component;
+            }))
+        {
+            continue;
+        }
+
+        FCMVisionOccluderRenderState& State =
+            OccluderRenderStates.AddDefaulted_GetRef();
+        State.Component = Component;
+        State.bRenderCustomDepth = Component->bRenderCustomDepth;
+        State.CustomDepthStencilValue = Component->CustomDepthStencilValue;
+        Component->SetCustomDepthStencilValue(
+            RenderConfig->OccluderStencilValue
+        );
+        Component->SetRenderCustomDepth(true);
+    }
+}
+
+FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
+    const UCMVisionComponent& VisionSource,
+    const FVector& RayOrigin,
+    const FVector& DesiredEnd,
+    float RevealDistance,
+    FHitResult* OutHit
+) const
+{
+    if (OutHit)
+    {
+        *OutHit = FHitResult();
+    }
+
+    if (!RenderConfig || !RenderConfig->bTraceOcclusion)
+    {
+        return DesiredEnd;
+    }
+
+    const UWorld* World = GetWorld();
+    if (!World)
+    {
+        return DesiredEnd;
+    }
+
+    const FVector TraceOffset(
+        0.0f,
+        0.0f,
+        FMath::Max(RenderConfig->OcclusionTraceHeight, 0.0f)
     );
-    Camera->PostProcessSettings.AddBlendable(PostProcessMaterial, 1.0f);
-    BoundCamera = Camera;
+    const FVector TraceStart = RayOrigin + TraceOffset;
+    const FVector TraceEnd(
+        DesiredEnd.X,
+        DesiredEnd.Y,
+        TraceStart.Z
+    );
+    FCollisionQueryParams QueryParams(
+        SCENE_QUERY_STAT(CMVisionOcclusion),
+        false
+    );
+    const AActor* SourceOwner = VisionSource.GetOwner();
+    QueryParams.AddIgnoredActor(SourceOwner);
+    if (SourceOwner)
+    {
+        QueryParams.AddIgnoredActor(SourceOwner->GetAttachParentActor());
+    }
+
+    FCollisionObjectQueryParams ObjectQueryParams;
+    for (const TEnumAsByte<ECollisionChannel> ObjectType
+        : RenderConfig->OccluderObjectTypes)
+    {
+        ObjectQueryParams.AddObjectTypesToQuery(ObjectType);
+    }
+    if (!ObjectQueryParams.IsValid())
+    {
+        return DesiredEnd;
+    }
+
+    FHitResult Hit;
+    if (!World->LineTraceSingleByObjectType(
+        Hit,
+        TraceStart,
+        TraceEnd,
+        ObjectQueryParams,
+        QueryParams
+    ))
+    {
+        return DesiredEnd;
+    }
+
+    if (OutHit)
+    {
+        *OutHit = Hit;
+    }
+
+    const FVector TraceDirection = (TraceEnd - TraceStart).GetSafeNormal();
+    const float RevealedDistance = FMath::Min(
+        Hit.Distance + FMath::Max(RevealDistance, 0.0f),
+        FVector::Distance(TraceStart, TraceEnd)
+    );
+    const FVector RevealedPoint = TraceStart
+        + TraceDirection * RevealedDistance;
+    return FVector(RevealedPoint.X, RevealedPoint.Y, DesiredEnd.Z);
+}
+
+bool UCMVisionManagerSubsystem::HasLineOfSight(
+    const UCMVisionComponent& VisionSource,
+    const FVector& WorldLocation
+) const
+{
+    const FVector Origin = VisionSource.GetVisionOrigin();
+    const FVector PlanarTarget(
+        WorldLocation.X,
+        WorldLocation.Y,
+        Origin.Z
+    );
+    return ClipVisionRayToOccluder(VisionSource, Origin, PlanarTarget)
+        .Equals(PlanarTarget, 1.0f);
 }
 
 FVector2D UCMVisionManagerSubsystem::WorldToMaskPixel(
@@ -262,21 +614,53 @@ FVector2D UCMVisionManagerSubsystem::WorldToMaskPixel(
     int32 Height
 ) const
 {
-    const float SafeExtent = FMath::Max(MaskWorldHalfExtent, 1.0f);
+    const float SafeWorldSize = FMath::Max(
+        MaskWorldHalfExtent * 2.0f,
+        1.0f
+    );
     const float U = (WorldLocation.X - MaskWorldCenter.X)
-        / (SafeExtent * 2.0f) + 0.5f;
-    const float V = 0.5f - (WorldLocation.Y - MaskWorldCenter.Y)
-        / (SafeExtent * 2.0f);
+        / SafeWorldSize + 0.5f;
+    const float V = (WorldLocation.Y - MaskWorldCenter.Y)
+        / SafeWorldSize + 0.5f;
     return FVector2D(U * Width, V * Height);
 }
 
-void UCMVisionManagerSubsystem::DrawVisibilityMask(
+void UCMVisionManagerSubsystem::DrawOccluderVisibilityMask(
     UCanvas* Canvas,
     int32 Width,
     int32 Height
 )
 {
-    if (!Canvas || !MaskDrawTexture || !MaskDrawTexture->GetResource())
+    TSet<UPrimitiveComponent*> CurrentOccluders;
+    DrawVisionMask(
+        Canvas,
+        Width,
+        Height,
+        &CurrentOccluders,
+        RenderConfig ? RenderConfig->OccluderSurfaceRevealDistance : 0.0f
+    );
+    UpdateOccluderRenderStates(CurrentOccluders);
+}
+
+void UCMVisionManagerSubsystem::DrawBaseVisibilityMask(
+    UCanvas* Canvas,
+    int32 Width,
+    int32 Height
+)
+{
+    DrawVisionMask(Canvas, Width, Height, nullptr, 0.0f);
+}
+
+void UCMVisionManagerSubsystem::DrawVisionMask(
+    UCanvas* Canvas,
+    int32 Width,
+    int32 Height,
+    TSet<UPrimitiveComponent*>* OutOccluders,
+    float RevealDistance
+)
+{
+    if (!Canvas || !RenderConfig || !MaskDrawTexture
+        || !MaskDrawTexture->GetResource())
     {
         return;
     }
@@ -285,7 +669,7 @@ void UCMVisionManagerSubsystem::DrawVisibilityMask(
     GetActiveVisionSources(ActiveSources);
     for (const UCMVisionComponent* VisionSource : ActiveSources)
     {
-        const FVector Origin = VisionSource->GetComponentLocation();
+        const FVector Origin = VisionSource->GetVisionOrigin();
         const FVector Direction = VisionSource->GetAimDirection();
         const float Distance = VisionSource->GetVisionDistance();
         const float HalfAngleRadians = FMath::DegreesToRadians(
@@ -299,15 +683,35 @@ void UCMVisionManagerSubsystem::DrawVisibilityMask(
         );
 
         TArray<FCanvasUVTri> Triangles;
-        Triangles.Reserve(VisionArcSegments);
+        const int32 ArcSegmentCount = FMath::Max(
+            RenderConfig->ArcSegmentCount,
+            3
+        );
+        Triangles.Reserve(ArcSegmentCount);
+        const auto AddMaskTriangle = [&Triangles](
+            const FVector2D& A,
+            const FVector2D& B,
+            const FVector2D& C)
+        {
+            FCanvasUVTri& Triangle = Triangles.AddDefaulted_GetRef();
+            Triangle.V0_Pos = A;
+            Triangle.V1_Pos = B;
+            Triangle.V2_Pos = C;
+            Triangle.V0_UV = FVector2D::ZeroVector;
+            Triangle.V1_UV = FVector2D::ZeroVector;
+            Triangle.V2_UV = FVector2D::ZeroVector;
+            Triangle.V0_Color = FLinearColor::White;
+            Triangle.V1_Color = FLinearColor::White;
+            Triangle.V2_Color = FLinearColor::White;
+        };
         for (int32 ArcIndex = 0;
-            ArcIndex < VisionArcSegments;
+            ArcIndex < ArcSegmentCount;
             ++ArcIndex)
         {
             const float AlphaA =
-                static_cast<float>(ArcIndex) / VisionArcSegments;
+                static_cast<float>(ArcIndex) / ArcSegmentCount;
             const float AlphaB =
-                static_cast<float>(ArcIndex + 1) / VisionArcSegments;
+                static_cast<float>(ArcIndex + 1) / ArcSegmentCount;
             const float AngleA = FMath::Lerp(
                 CenterAngle - HalfAngleRadians,
                 CenterAngle + HalfAngleRadians,
@@ -319,27 +723,57 @@ void UCMVisionManagerSubsystem::DrawVisibilityMask(
                 AlphaB
             );
 
-            const FVector PointA = Origin + FVector(
+            const FVector DesiredPointA = Origin + FVector(
                 FMath::Cos(AngleA) * Distance,
                 FMath::Sin(AngleA) * Distance,
                 0.0f
             );
-            const FVector PointB = Origin + FVector(
+            const FVector DesiredPointB = Origin + FVector(
                 FMath::Cos(AngleB) * Distance,
                 FMath::Sin(AngleB) * Distance,
                 0.0f
             );
+            FHitResult HitA;
+            FHitResult HitB;
+            const FVector ClippedPointA = ClipVisionRayToOccluder(
+                *VisionSource,
+                Origin,
+                DesiredPointA,
+                RevealDistance,
+                &HitA
+            );
+            const FVector ClippedPointB = ClipVisionRayToOccluder(
+                *VisionSource,
+                Origin,
+                DesiredPointB,
+                RevealDistance,
+                &HitB
+            );
 
-            FCanvasUVTri& Triangle = Triangles.AddDefaulted_GetRef();
-            Triangle.V0_Pos = OriginPixel;
-            Triangle.V1_Pos = WorldToMaskPixel(PointA, Width, Height);
-            Triangle.V2_Pos = WorldToMaskPixel(PointB, Width, Height);
-            Triangle.V0_UV = FVector2D::ZeroVector;
-            Triangle.V1_UV = FVector2D::ZeroVector;
-            Triangle.V2_UV = FVector2D::ZeroVector;
-            Triangle.V0_Color = FLinearColor::White;
-            Triangle.V1_Color = FLinearColor::White;
-            Triangle.V2_Color = FLinearColor::White;
+            if (OutOccluders)
+            {
+                if (UPrimitiveComponent* Component = HitA.GetComponent())
+                {
+                    OutOccluders->Add(Component);
+                }
+                if (UPrimitiveComponent* Component = HitB.GetComponent())
+                {
+                    OutOccluders->Add(Component);
+                }
+            }
+
+            const FVector2D PointAPixel = WorldToMaskPixel(
+                ClippedPointA,
+                Width,
+                Height
+            );
+            const FVector2D PointBPixel = WorldToMaskPixel(
+                ClippedPointB,
+                Width,
+                Height
+            );
+
+            AddMaskTriangle(OriginPixel, PointAPixel, PointBPixel);
         }
 
         FCanvasTriangleItem TriangleItem(

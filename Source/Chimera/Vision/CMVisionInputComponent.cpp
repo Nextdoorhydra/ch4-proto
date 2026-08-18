@@ -57,16 +57,43 @@ void UCMVisionInputComponent::TickComponent(
         return;
     }
 
-    FHitResult CursorHit;
-    if (!PlayerController->GetHitResultUnderCursor(
-        VisionGroundTraceChannel,
-        false,
-        CursorHit))
+    UCMVisionComponent* ReferenceVision = nullptr;
+    for (const ACMHeadPartActor* HeadPart : ControlledHeads)
+    {
+        UCMVisionComponent* VisionComponent = HeadPart
+            ? HeadPart->GetVisionComponent()
+            : nullptr;
+        if (VisionComponent && VisionComponent->IsVisionActive())
+        {
+            ReferenceVision = VisionComponent;
+            break;
+        }
+    }
+    if (!ReferenceVision)
     {
         return;
     }
 
-    const FVector WorldTarget = CursorHit.ImpactPoint;
+    FVector MouseRayOrigin;
+    FVector MouseRayDirection;
+    if (!PlayerController->DeprojectMousePositionToWorld(
+            MouseRayOrigin,
+            MouseRayDirection)
+        || FMath::IsNearlyZero(MouseRayDirection.Z))
+    {
+        return;
+    }
+
+    const FVector VisionOrigin = ReferenceVision->GetVisionOrigin();
+    const float IntersectionDistance =
+        (VisionOrigin.Z - MouseRayOrigin.Z) / MouseRayDirection.Z;
+    if (IntersectionDistance <= 0.0f)
+    {
+        return;
+    }
+
+    const FVector WorldTarget = MouseRayOrigin
+        + MouseRayDirection * IntersectionDistance;
     if (bHasSentWorldTarget
         && FVector::DistSquared2D(WorldTarget, LastSentWorldTarget)
             < FMath::Square(MinimumTargetMovement))
@@ -101,7 +128,7 @@ void UCMVisionInputComponent::ServerUpdateVisionTarget_Implementation(
         }
 
         FVector AimDirection =
-            FVector(WorldTarget) - VisionComponent->GetComponentLocation();
+            FVector(WorldTarget) - VisionComponent->GetVisionOrigin();
         AimDirection.Z = 0.0f;
         VisionComponent->SetAimDirection(AimDirection);
     }

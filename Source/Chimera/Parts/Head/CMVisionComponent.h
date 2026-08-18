@@ -43,6 +43,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     FVector GetAimDirection() const;
 
+    /** Uses the authored Part Slot transform while this Head is attached. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    FVector GetVisionOrigin() const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     bool IsLocationVisible(const FVector& WorldLocation) const;
 

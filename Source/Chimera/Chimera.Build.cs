@@ -13,6 +13,7 @@ public class Chimera : ModuleRules
 		{
 			"Core",
 			"CoreUObject",
+			"DeveloperSettings",
 			"Engine",
 			"GameplayAbilities",
 			"GameplayTags",
