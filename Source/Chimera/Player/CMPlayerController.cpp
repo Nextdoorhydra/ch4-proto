@@ -13,6 +13,7 @@
 #include "InputCoreTypes.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "Vision/CMVisionInputComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPlayerController, Log, All);
 
@@ -25,6 +26,9 @@ ACMPlayerController::ACMPlayerController()
         TEXT("ClientStageLoadComponent"));
     bAutoManageActiveCameraTarget = false;
 
+    VisionInputComponent = CreateDefaultSubobject<UCMVisionInputComponent>(
+        TEXT("VisionInputComponent")
+    );
 }
 
 bool ACMPlayerController::CanRequestRetryGame() const
@@ -125,6 +129,12 @@ void ACMPlayerController::BeginPlay()
     {
         return;
     }
+
+    bShowMouseCursor = true;
+    FInputModeGameAndUI InputMode;
+    InputMode.SetHideCursorDuringCapture(false);
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    SetInputMode(InputMode);
 
     // 서버에서 Shared Chimera를 만들거나 클라이언트가 그 참조를 복제받으면
     // GameState가 이 이벤트를 한 번 발생시킨다. 매 프레임 포인터를 찾지 않는다.
