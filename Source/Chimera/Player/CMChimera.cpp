@@ -360,6 +360,34 @@ void ACMChimera::Tick(float DeltaTime)
     UpdateReplicatedSegmentStates();
 }
 
+// 서버에서 전후 Force와 좌우 Yaw Torque를 적용해 충돌 가능한 테스트 이동 제공
+void ACMChimera::ApplyDebugMovementInput(
+    float ForwardInput,
+    float TurnInput)
+{
+#if !UE_BUILD_SHIPPING
+    if (!HasAuthority() || !BodyMesh || !BodyMesh->IsSimulatingPhysics())
+    {
+        return;
+    }
+
+    FVector ForwardDirection = BodyMesh->GetForwardVector();
+    ForwardDirection.Z = 0.0f;
+    ForwardDirection.Normalize();
+
+    if (!FMath::IsNearlyZero(ForwardInput))
+    {
+        BodyMesh->AddForce(
+            ForwardDirection * ForwardInput * DebugMovementForce);
+    }
+    if (!FMath::IsNearlyZero(TurnInput))
+    {
+        BodyMesh->AddTorqueInRadians(
+            FVector::UpVector * TurnInput * DebugTurnTorque);
+    }
+#endif
+}
+
 void ACMChimera::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const
@@ -430,6 +458,32 @@ void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
 int32 ACMChimera::GetActiveSegmentCount() const
 {
     return ActiveSegmentCount;
+}
+
+// 파츠와 ControlBody를 제외하고 활성 BodySegment 컴포넌트만 Volume과 비교
+bool ACMChimera::AreAllActiveBodySegmentsOverlapping(
+    const UPrimitiveComponent* Volume) const
+{
+    if (!IsValid(Volume) || ActiveSegmentCount <= 0)
+    {
+        return false;
+    }
+
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < ActiveSegmentCount;
+        ++SegmentIndex)
+    {
+        const UStaticMeshComponent* SegmentBody =
+            BodySegments.IsValidIndex(SegmentIndex)
+                ? BodySegments[SegmentIndex]
+                : nullptr;
+        if (!IsValid(SegmentBody)
+            || !SegmentBody->IsOverlappingComponent(Volume))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 void ACMChimera::ApplyBlueprintSettings()

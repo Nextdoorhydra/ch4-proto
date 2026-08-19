@@ -48,6 +48,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "AsyncPDALoader",
+			"Enabled": true
+		},
+		{
 			"Name": "GameplayAbilities",
 			"Enabled": true
 		},
@@ -98,6 +102,10 @@
 		},
 		{
 			"Name": "DataForge",
+			"Enabled": true
+		},
+		{
+			"Name": "Niagara",
 			"Enabled": true
 		}
 	]
