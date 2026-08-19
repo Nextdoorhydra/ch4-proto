@@ -895,7 +895,7 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             Triangles,
             MaskDrawTexture->GetResource()
         );
-        TriangleItem.BlendMode = SE_BLEND_Additive;
+        TriangleItem.BlendMode = SE_BLEND_Opaque;
         Canvas->DrawItem(TriangleItem);
     }
 }
