@@ -1,5 +1,0 @@
-RowName,ID,PartType,Species,MaxDurability,Power,StaminaCost,Cooldown,MovementImpulse,VisionRange,VisionAngle,PartClass
-HumanHead,Head01,,,,,,,,1200,60,
-DinoHead,Head02,,,,,,,,600,30,
-GiraffeHead,Head03,,,,,,,,1600,120,
-OwlHead,Head04,,,,,,,,3000,90,
