@@ -26,13 +26,25 @@ public:
 
     bool TryRetryGame(APlayerController* RequestingPlayer);
 
-private:
+protected:
+    // 하위 GameMode가 이탈 플레이어의 배정을 유예할지 결정
+    virtual bool ShouldPreservePlayerOnLogout(
+        AController* Exiting,
+        const ACMPlayerState* ExitingPlayerState) const;
+
+    // 하위 GameMode가 기존 배정을 복원하면 기본 재배정 생략
+    virtual bool RestorePreservedControlAssignment(
+        AController* NewPlayer,
+        ACMChimera* SharedChimera);
+
     bool IsGameplayMap() const;
+    void AssignPlayerSlots();
     void AssignPlayerColors();
     ACMChimera* EnsureSharedChimera();
     void RebalanceControlAssignments(
         const ACMPlayerState* ExcludedPlayerState = nullptr
     );
 
+private:
     bool bRetryInProgress = false;
 };

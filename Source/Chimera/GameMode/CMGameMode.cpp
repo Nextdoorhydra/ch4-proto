@@ -30,6 +30,7 @@ void ACMGameMode::BeginPlay()
 {
     Super::BeginPlay();
 
+    AssignPlayerSlots();
     AssignPlayerColors();
 
     if (IsGameplayMap())
@@ -41,13 +42,22 @@ void ACMGameMode::BeginPlay()
 // 플레이어 이탈 시 해당 플레이어를 제외하고 조작 부위 재배정
 void ACMGameMode::Logout(AController* Exiting)
 {
-    const ACMPlayerState* ExitingPlayerState = Exiting
+    ACMPlayerState* ExitingPlayerState = Exiting
         ? Exiting->GetPlayerState<ACMPlayerState>()
         : nullptr;
 
+    const bool bPreserveAssignment = ExitingPlayerState
+        && IsGameplayMap()
+        && ShouldPreservePlayerOnLogout(Exiting, ExitingPlayerState);
+    if (ExitingPlayerState && IsGameplayMap() && !bPreserveAssignment)
+    {
+        ExitingPlayerState->SetParticipationState(
+            ECMPlayerParticipationState::Disconnected);
+    }
+
     Super::Logout(Exiting);
 
-    if (IsGameplayMap())
+    if (IsGameplayMap() && !bPreserveAssignment)
     {
         RebalanceControlAssignments(ExitingPlayerState);
     }
@@ -69,7 +79,10 @@ void ACMGameMode::RestartPlayer(AController* NewPlayer)
     }
 
     ACMChimera* SharedChimera = EnsureSharedChimera();
-    RebalanceControlAssignments();
+    if (!RestorePreservedControlAssignment(NewPlayer, SharedChimera))
+    {
+        RebalanceControlAssignments();
+    }
     if (APlayerController* PlayerController =
         Cast<APlayerController>(NewPlayer))
     {
@@ -104,10 +117,27 @@ UClass* ACMGameMode::GetDefaultPawnClassForController_Implementation(
     );
 }
 
+// 기본 GameMode는 이탈 즉시 플레이어 배정을 해제
+bool ACMGameMode::ShouldPreservePlayerOnLogout(
+    AController* Exiting,
+    const ACMPlayerState* ExitingPlayerState) const
+{
+    return false;
+}
+
+// 기본 GameMode에는 복원할 재접속 배정이 없음
+bool ACMGameMode::RestorePreservedControlAssignment(
+    AController* NewPlayer,
+    ACMChimera* SharedChimera)
+{
+    return false;
+}
+
 void ACMGameMode::GenericPlayerInitialization(AController* C)
 {
     Super::GenericPlayerInitialization(C);
 
+    AssignPlayerSlots();
     AssignPlayerColors();
 
     if (!IsGameplayMap())
@@ -122,6 +152,53 @@ void ACMGameMode::GenericPlayerInitialization(AController* C)
         if (SharedChimera)
         {
             PlayerController->ClientSetViewTarget(SharedChimera);
+        }
+    }
+}
+
+// 현재 참가자에게 중복되지 않는 고정 슬롯을 입장 순서대로 배정
+void ACMGameMode::AssignPlayerSlots()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    ACMGameState* CMGameState = GetGameState<ACMGameState>();
+    if (!CMGameState)
+    {
+        return;
+    }
+
+    TSet<int32> UsedSlotIds;
+    for (APlayerState* PlayerState : CMGameState->PlayerArray)
+    {
+        const ACMPlayerState* CMPlayerState =
+            Cast<ACMPlayerState>(PlayerState);
+        if (CMPlayerState && CMPlayerState->GetPlayerSlotId() != INDEX_NONE)
+        {
+            UsedSlotIds.Add(CMPlayerState->GetPlayerSlotId());
+        }
+    }
+
+    for (APlayerState* PlayerState : CMGameState->PlayerArray)
+    {
+        ACMPlayerState* CMPlayerState = Cast<ACMPlayerState>(PlayerState);
+        if (!CMPlayerState
+            || CMPlayerState->IsOnlyASpectator()
+            || CMPlayerState->GetPlayerSlotId() != INDEX_NONE)
+        {
+            continue;
+        }
+
+        for (int32 SlotId = 0; SlotId < CMControl::MaxPlayers; ++SlotId)
+        {
+            if (!UsedSlotIds.Contains(SlotId))
+            {
+                CMPlayerState->SetPlayerSlotId(SlotId);
+                UsedSlotIds.Add(SlotId);
+                break;
+            }
         }
     }
 }
@@ -258,6 +335,7 @@ ACMChimera* ACMGameMode::EnsureSharedChimera()
     if (!SharedChimera)
     {
         FTransform SpawnTransform = FTransform::Identity;
+        // 공용 키메라는 레벨에 배치된 첫 PlayerStart에서 생성한다.
         for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
         {
             SpawnTransform = It->GetActorTransform();

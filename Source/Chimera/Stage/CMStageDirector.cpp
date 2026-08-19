@@ -362,10 +362,10 @@ void ACMStageDirector::FinishStartingPresentation()
         return;
     }
 
-    bStartingPresentationFinished = true;
     if (ACMPlayGameMode* PlayGameMode = GetPlayGameMode())
     {
-        PlayGameMode->HandleStartingPresentationFinished(this);
+        bStartingPresentationFinished =
+            PlayGameMode->HandleStartingPresentationFinished(this);
     }
 }
 
@@ -383,10 +383,10 @@ void ACMStageDirector::FinishResultPresentation()
         return;
     }
 
-    bResultPresentationFinished = true;
     if (ACMPlayGameMode* PlayGameMode = GetPlayGameMode())
     {
-        PlayGameMode->HandleResultPresentationFinished(this);
+        bResultPresentationFinished =
+            PlayGameMode->HandleResultPresentationFinished(this);
     }
 }
 
@@ -398,10 +398,9 @@ void ACMStageDirector::CompleteStage()
         return;
     }
 
-    bStageResolved = true;
     if (ACMPlayGameMode* PlayGameMode = GetPlayGameMode())
     {
-        PlayGameMode->HandleStageCompleted(this);
+        bStageResolved = PlayGameMode->HandleStageCompleted(this);
     }
 }
 
@@ -413,10 +412,9 @@ void ACMStageDirector::FailStage()
         return;
     }
 
-    bStageResolved = true;
     if (ACMPlayGameMode* PlayGameMode = GetPlayGameMode())
     {
-        PlayGameMode->HandleStageFailed(this);
+        bStageResolved = PlayGameMode->HandleStageFailed(this);
     }
 }
 

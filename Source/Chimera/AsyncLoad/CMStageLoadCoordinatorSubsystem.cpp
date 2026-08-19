@@ -30,7 +30,7 @@ void UCMStageLoadCoordinatorSubsystem::Deinitialize()
 		LoadCompleteListenerHandle.Unregister();
 	}
 
-	ResetCampaignLoading();
+	ResetStageRouteLoading();
 	Super::Deinitialize();
 }
 
@@ -75,7 +75,7 @@ bool UCMStageLoadCoordinatorSubsystem::ActivateStageSchedule(UCMStageLoadSchedul
 }
 
 // 캠페인 종료·재시작 시 Session을 포함한 모든 추적 에셋과 진행 중 요청 초기화
-void UCMStageLoadCoordinatorSubsystem::ResetCampaignLoading()
+void UCMStageLoadCoordinatorSubsystem::ResetStageRouteLoading()
 {
 	UAsyncPDALoader* Loader = GetAsyncLoader();
 	bChangingSchedule = true;
@@ -164,6 +164,23 @@ bool UCMStageLoadCoordinatorSubsystem::StartStageScheduleRequest(
 
 	ActiveStageRequestId = RequestId;
 	PendingScheduleId = ScheduleId;
+
+	// 같은 테스트 스테이지를 다시 여는 경우 Schedule PDA는 GameInstance의
+	// AssetManager에 이미 남아 있을 수 있다. 이 상태를 로드 실패로 보지 않고
+	// 기존 객체를 새 스테이지 실행 상태로 다시 활성화한다.
+	if (UCMStageLoadSchedule* LoadedSchedule = Cast<UCMStageLoadSchedule>(
+		UAssetManager::Get().GetPrimaryAssetObject(ScheduleId)))
+	{
+		if (ActivateStageSchedule(LoadedSchedule) && StartAutomaticLoadQueue())
+		{
+			return true;
+		}
+
+		ActiveStageRequestId.Invalidate();
+		PendingScheduleId = FPrimaryAssetId();
+		return false;
+	}
+
 	ScheduleLoadHandle = UAssetManager::Get().LoadPrimaryAsset(
 		ScheduleId, TArray<FName>(),
 		FStreamableDelegate::CreateUObject(this, &ThisClass::HandleScheduleLoaded));

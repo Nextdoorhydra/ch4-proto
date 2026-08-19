@@ -32,6 +32,7 @@
 
 - `Character`: 플레이 가능한 캐릭터와 게임 내 인물
 - `Environment`: 레벨, 스폰, 장애물 등 월드 구성 요소
+- `Data`: 게임 런타임에서 공용으로 사용하는 DataTable과 정의 데이터
 - `UI`: 공용 UI 기반, HUD, 프런트엔드 화면
 - `GameMode`: 플레이 규칙과 게임 흐름
 - `Input`: 입력 액션과 매핑 컨텍스트
@@ -78,6 +79,13 @@ Content/
    ├─ Environment/
    │  ├─ Spawn/
    │  ├─ Level/
+   │  │  └─ <StageName>/
+   │  │     ├─ Map/
+   │  │     ├─ Blueprint/
+   │  │     ├─ Data/
+   │  │     ├─ Lighting/
+   │  │     ├─ Effect/
+   │  │     └─ Sequence/
    │  └─ Obstacle/
    │     └─ {Blueprint, Mesh, Material, Texture, Niagara}
    ├─ UI/
@@ -104,6 +112,7 @@ Content/
 | `Environment/Spawn` | 플레이어·NPC·오브젝트 생성 지점과 규칙 | Spawn Point, Spawn Manager |
 | `Environment/Level` | 레벨 고유 구성과 월드 자산 | Level Blueprint 보조 자산, Level Instance |
 | `Environment/Obstacle` | 장애물의 표현과 동작 | 장애물 Blueprint, Mesh, Material |
+| `Data` | 여러 기능에서 공유하는 런타임 데이터 | 몸통 DataTable, 공용 정의 데이터 |
 | `UI/Foundation` | 여러 UI 영역이 공유하는 기반 요소 | 공용 위젯, 스타일, 폰트, UI Material |
 | `UI/HUD` | 플레이 중 표시되는 UI | 체력, 조준점, 상태 표시 위젯 |
 | `UI/Frontend` | 플레이 전후의 화면 흐름 | 타이틀, 로비, 설정, 결과 화면 |
@@ -224,12 +233,13 @@ Chimera.UI.Frontend
 
 파일 탐색기에서 `.uasset` 파일을 직접 이동하면 참조가 깨질 수 있으므로 반드시 Unreal Editor의 Content Browser 또는 검증된 에디터 도구를 사용한다.
 
-## 8. 설계 시 추가로 확정할 항목
+## 8. 현재 프로젝트 적용 사항
 
-다음 항목은 팀 합의 후 이 문서에 반영한다.
+맵과 스테이지 전용 데이터는 `/Game/Chimera/Environment/Level/<StageName>`에 함께 둔다. 스테이지 제작 상세 규칙은 [Chimera 스테이지 제작 가이드](Chimera_Stage_Authoring_Guide.md)를 따른다.
 
-- `Environment/Level`과 프로젝트의 맵 파일 저장 위치를 동일하게 할지 여부
-- `Character/Part`가 외형 파츠만 담당하는지, 장비와 부착물까지 포함하는지 여부
+`GameMode` 폴더 표기를 기준으로 사용한다. 현재 Content Browser에 `Gamemode`처럼 대소문자가 다른 기존 폴더가 있다면 파일 탐색기로 바꾸지 말고 Unreal Editor에서 이관하고 Redirector를 정리한다.
+
+`Character/Part`는 공용 키메라에 탈부착되는 신체 파츠와 그 정의 데이터를 담당한다. 일반 장비 체계가 추가되면 별도 기능 폴더를 만든다.
 
 ## 9. 완료 기준
 

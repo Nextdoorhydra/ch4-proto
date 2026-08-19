@@ -37,6 +37,10 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Lobby")
     FChimeraLobbyStateChanged OnLobbyStateChanged;
 
+    // 새 Route 시작 전에 서버와 모든 클라이언트의 이전 로드 세션 제거
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastResetStageRouteLoading();
+
 private:
     UFUNCTION()
     void OnRep_LobbyState();

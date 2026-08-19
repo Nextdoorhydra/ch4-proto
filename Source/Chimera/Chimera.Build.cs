@@ -19,7 +19,9 @@ public class Chimera : ModuleRules
 			"GameplayMessageRuntime",
 			"GameplayTags",
 			"GameplayTasks",
-			"Niagara"
+			"Niagara",
+			"OnlineSubsystem",
+			"OnlineSubsystemUtils"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[]

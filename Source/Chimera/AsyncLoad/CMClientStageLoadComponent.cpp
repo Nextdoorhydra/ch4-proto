@@ -87,11 +87,14 @@ void UCMClientStageLoadComponent::HandleStageLoadRequestChanged(
         return;
     }
 
-    LastHandledRequestId = Request.RequestId;
+    // 동기 실패 콜백이 GameState 요청을 비워도 같은 ID로 한 번만 보고하도록 복사
+    const FGuid RequestId = Request.RequestId;
+    const FPrimaryAssetId ScheduleId = Request.ScheduleId;
+    LastHandledRequestId = RequestId;
     if (!StageLoadCoordinator->StartStageScheduleRequest(
-        Request.ScheduleId, Request.RequestId))
+        ScheduleId, RequestId))
     {
-        Controller->ReportLocalStageLoadComplete(Request.RequestId, false);
+        Controller->ReportLocalStageLoadComplete(RequestId, false);
     }
 }
 

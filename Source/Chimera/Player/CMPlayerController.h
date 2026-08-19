@@ -26,7 +26,14 @@ public:
     void RequestRetryGame();
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Lobby")
-    void RequestStartCampaign();
+    void RequestStartStageRoute();
+
+    // 로비 UI에서 설정된 TestRoute 멀티플레이 시작 요청
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Lobby")
+    void RequestStartTestStageRoute();
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Lobby")
+    void RequestSetReady(bool bReady);
 
     // 로컬 로드 컴포넌트의 결과를 서버 RPC로 전달
     void ReportLocalStageLoadComplete(FGuid RequestId, bool bSucceeded);
@@ -39,11 +46,14 @@ public:
 
     void RequestCheatSpawnRandomParts();
     void RequestCheatClearRandomParts();
+    // 콘솔 명령으로 현재 로컬 플레이어의 화살표 디버그 이동 활성화
+    void SetCheatDebugMovementEnabled(bool bEnabled);
 
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void SetupInputComponent() override;
+    virtual void PlayerTick(float DeltaTime) override;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputMappingContext> DefaultMappingContext;
@@ -79,6 +89,14 @@ private:
     void DetachModifierPressed();
     void DetachModifierReleased();
     void SetControlSlotPressed(int32 SlotIndex, bool bPressed);
+    void DebugMoveForwardPressed();
+    void DebugMoveForwardReleased();
+    void DebugMoveBackwardPressed();
+    void DebugMoveBackwardReleased();
+    void DebugTurnLeftPressed();
+    void DebugTurnLeftReleased();
+    void DebugTurnRightPressed();
+    void DebugTurnRightReleased();
 
     ACMChimera* GetSharedChimera() const;
 
@@ -90,7 +108,13 @@ private:
     void ServerRequestRetryGame();
 
     UFUNCTION(Server, Reliable)
-    void ServerRequestStartCampaign();
+    void ServerRequestStartStageRoute();
+
+    UFUNCTION(Server, Reliable)
+    void ServerRequestStartTestStageRoute();
+
+    UFUNCTION(Server, Reliable)
+    void ServerSetReady(bool bReady);
 
     UFUNCTION(Server, Reliable)
     void ServerReportStageLoadComplete(FGuid RequestId, bool bSucceeded);
@@ -107,6 +131,9 @@ private:
     UFUNCTION(Server, Reliable)
     void ServerCheatClearRandomParts();
 
+    UFUNCTION(Server, Unreliable)
+    void ServerApplyCheatDebugMovement(float ForwardInput, float TurnInput);
+
     UPROPERTY(Transient)
     TObjectPtr<ACMChimera> CachedSharedChimera;
 
@@ -114,5 +141,10 @@ private:
     TObjectPtr<UCMClientStageLoadComponent> ClientStageLoadComponent;
 
     bool bDetachModifierHeld = false;
+    bool bCheatDebugMovementEnabled = false;
+    bool bDebugMoveForwardHeld = false;
+    bool bDebugMoveBackwardHeld = false;
+    bool bDebugTurnLeftHeld = false;
+    bool bDebugTurnRightHeld = false;
 
 };

@@ -1,218 +1,143 @@
-# Chimera 레벨 디자인 및 스테이지 제작 규칙
+# Chimera 스테이지 제작 가이드
 
-## 1. 문서 목적
+## 1. 목적
 
-이 문서는 각 개발자가 스테이지 하나를 독립적으로 제작하더라도 같은 구조와 명명 규칙을 사용하기 위한 기준이다.
+여러 개발자가 스테이지를 하나씩 맡아도 같은 규칙으로 레벨, 기믹, 데이터와 비동기 로드를 구성하기 위한 실무 기준이다. 런타임 책임과 상태 전환은 [게임 흐름·스테이지 런타임 구조](Chimera_GameFlow_Stage_Architecture.md)를 따른다.
 
-핵심 원칙은 다음과 같다.
+- 위치, 크기, Transform과 최종 시각 결과는 Level에서 조정한다.
+- 장애물·퍼즐의 구체 동작은 해당 C++ 또는 Blueprint가 소유한다.
+- 사건과 대상 명령 연결은 스테이지 전용 Sequence DataTable이 소유한다.
+- StageDirector는 등록·라우팅·완료 보고만 담당한다.
+- Sheet나 CSV는 편집 원본일 수 있지만 런타임은 DataTable과 PDA만 읽는다.
+- 각 개발자의 Map, DataTable, Schedule을 스테이지별로 분리한다.
 
-- 액터 위치와 시각 결과는 레벨에서 제작한다.
-- 장애물의 구체적인 동작은 장애물 C++ 또는 Blueprint가 담당한다.
-- 실행 순서와 대상 연결은 스테이지 전용 DataTable이 담당한다.
-- StageDirector는 등록, 명령 전달, 스테이지 완료 보고만 담당한다.
-- 개별 배치 액터는 `PlacementId`, 의미와 분류는 Gameplay Tag로 표현한다.
-- 런타임은 Google Sheet나 CSV를 직접 읽지 않고 DataTable과 PDA를 사용한다.
+## 2. 권장 자산 구조
 
-## 2. 책임 분리
-
-```text
-Level
-  액터 Transform, Trigger Volume, Light, Fog, Post Process 배치
-
-Obstacle / Puzzle Blueprint 또는 C++ Actor
-  이동, 충돌, 데미지, 애니메이션, 내부 상태
-
-CMStageElementComponent
-  PlacementId와 GroupTag 등록
-  StageDirector 명령 수신
-
-CMStageSequenceComponent
-  DataTable 조회
-  Stage Event에 연결된 행을 순서대로 실행
-
-CMStageDirector
-  StageElement 등록소
-  개별·그룹 명령 라우팅
-  멀티플레이 명령 전달
-  클리어·실패를 GameMode에 보고
-
-PlayGameMode
-  게임 Phase, 승패, 다음 스테이지 전환
-```
-
-StageDirector에 장애물별 이동 코드나 조명별 수치를 직접 추가하지 않는다.
-
-## 3. 개발자별 작업 범위
-
-각 개발자는 자신의 스테이지 폴더와 데이터만 수정한다.
+현재 맵 루트는 `/Game/Chimera/Environment/Level`이다.
 
 ```text
-Content/Chimera/Stage/Stage01/
-├─ Map/
+/Game/Chimera/Environment/Level/Stage01/
+├─ Map/L_CMStage01
 ├─ Blueprint/
 ├─ Data/
 │  ├─ DT_CMStage01Sequence
 │  └─ PDA_CMStage01LoadSchedule
 ├─ Lighting/
+├─ Effect/
 ├─ Audio/
 └─ Sequence/
 ```
 
-권장 담당 범위:
+공용 장애물은 `/Game/Chimera/Environment/Obstacle`처럼 가장 가까운 공용 기능 폴더에 둔다. 특정 스테이지만 쓰는 변형은 해당 스테이지 폴더에 둔다. 프로젝트 전체 Route PDA는 동시 수정 충돌을 줄이도록 담당자를 정한다.
 
-```text
-개발자 A → Stage01
-개발자 B → Stage02
-개발자 C → Stage03
-개발자 D → Stage04
-```
+## 3. 새 스테이지 제작 순서
 
-공용 장애물은 `Content/Chimera/Environment/Obstacle`에 둔다. 특정 스테이지에서만 사용하는 변형은 공용 Blueprint의 자식으로 만들어 해당 스테이지 폴더에 둔다.
+1. 스테이지 Map과 전용 폴더를 만든다.
+2. 공용 키메라가 생성될 `PlayerStart`를 배치한다.
+3. `ACMStageDirector` 또는 Blueprint 자식을 정확히 하나 배치한다.
+4. 시작 연출과 결과 연출을 StageDirector에 구현하거나 연결한다.
+5. 장애물, 퍼즐, Trigger, 조명, 이펙트를 배치한다.
+6. 제어할 대상에 `CMStageElementComponent` 또는 파생 컴포넌트를 추가한다.
+7. 모든 StageElement에 고유 `PlacementId`와 필요한 `GroupTags`를 지정한다.
+8. `FCMStageSequenceRow` 기반 DataTable을 만들고 StageDirector의 Sequence Component에 연결한다.
+9. 스테이지 전용 `CMStageLoadSchedule` PDA를 만든다.
+10. Schedule에서 `RefreshAndRebuildCatalog`를 실행해 Scope를 자동 생성한다.
+11. `StageRouteDefinition`에 `StageId`, Map, Schedule을 연결한다.
+12. `CMStageDestination`을 배치하고 모든 활성 몸통 마디가 함께 들어갈 크기로 Volume을 조정한다.
+13. 현재 맵 직접 PIE와 2인 리슨 서버를 모두 시험한다.
 
-## 4. 새 스테이지 제작 순서
+Schedule에 로드할 PDA가 없어도 초기 프로토타입 실행은 가능하다. 다만 Route 행에는 Asset Manager에 등록된 유효한 Schedule ID가 있어야 데이터 검증을 통과한다.
 
-### 4.1 기본 레벨 구성
+## 4. 책임 분리
 
-1. 스테이지 전용 Map을 만든다.
-2. 플레이 시작 지점과 목적지 지점을 배치한다.
-3. `ACMStageDirector` 또는 그 Blueprint 자식을 정확히 하나 배치한다.
-4. 시작 연출과 결과 연출을 연결한다.
-5. 게임 진행용 Trigger를 배치한다.
-6. 장애물, 문, 퍼즐, 조명을 배치한다.
-7. 스테이지 전용 Sequence DataTable을 만든다.
-8. StageDirector의 `StageSequence` 컴포넌트에 DataTable을 연결한다.
-9. 스테이지 Load Schedule PDA를 만들고 캠페인 데이터에 연결한다.
+| 영역 | 담당 |
+|---|---|
+| Level | 액터 배치, Transform, Trigger Volume, Light, Fog, Post Process |
+| 장애물·퍼즐 Actor | 이동, 충돌, 데미지, 애니메이션, 내부 상태 |
+| `CMStageElementComponent` | PlacementId·GroupTags 등록, Command 수신, Event 발행 |
+| `CMStageSequenceComponent` | Stage Event에 맞는 DataTable 행 정렬·실행 |
+| `CMStageDirector` | 요소 등록소, 명령 라우팅, 연출·완료·실패 보고 |
+| `CMStageLoadSchedule` | 로드 그룹과 순서·정책·해제 정책 |
+| `PlayGameMode` | Phase, 로드 배리어, 승패와 다음 맵 전환 |
 
-### 4.2 권장 레벨 분리
+StageDirector에 특정 피스톤의 속도, 특정 문의 잠금 로직, 조명 색상 수치를 직접 추가하지 않는다.
 
-작은 선형 맵은 다음과 같이 기능별 Sublevel로 나눌 수 있다.
-
-```text
-Stage01_Persistent
-Stage01_Gameplay
-Stage01_Lighting
-Stage01_Audio
-Stage01_Cinematic
-```
-
-큰 맵은 World Partition과 One File Per Actor 사용을 고려한다. 하나의 스테이지 안에서 World Partition 방식과 수동 Streaming Sublevel 방식을 임의로 혼용하지 않는다.
-
-## 5. 식별자와 태그 구분
+## 5. 식별자와 태그
 
 | 종류 | 자료형 | 역할 | 예시 |
 |---|---|---|---|
-| `PlacementId` | `FName` | 개별 배치 액터 식별 | `Hallway.Obstacle.Piston01` |
-| `GroupTag` | Gameplay Tag | 여러 액터 동시 선택 | `Chimera.Stage.Group.Hallway.Obstacle` |
-| `EventTag` | Gameplay Tag | 발생한 사건 표현 | `Chimera.Stage.Event.PowerRestored` |
-| `CommandTag` | Gameplay Tag | 대상에게 내릴 명령 | `Chimera.Stage.Command.Activate` |
-| `LoadGroupId` | `FName` | 함께 비동기 로드할 자산 묶음 | `Stage01.Hallway` |
+| `StageId` | `FName` | Route, Schedule, Sequence의 스테이지 식별 | `S01` |
+| `PlacementId` | `FName` | 현재 스테이지의 개별 배치 대상 | `Hallway.Door.Exit` |
+| `GroupTag` | Gameplay Tag | 여러 StageElement 동시 선택 | `Chimera.Stage.Group.Hallway.Lighting` |
+| `EventTag` | Gameplay Tag | 발생한 사실 | `Chimera.Stage.Event.PowerRestored` |
+| `CommandTag` | Gameplay Tag | 대상에 요구하는 동작 | `Chimera.Stage.Command.Unlock` |
+| `LoadGroupId` | `FName` | 함께 로드·해제할 콘텐츠 묶음 | `S01.Hallway` |
 
-개별 인스턴스 이름을 Gameplay Tag로 만들지 않는다.
+개별 인스턴스는 PlacementId, 집합과 의미는 Gameplay Tag를 사용한다.
 
-## 6. PlacementId 규칙
+### PlacementId
 
-PlacementId는 같은 스테이지 안에서 유일해야 한다.
-
-형식:
-
-```text
-구역.종류.의미있는이름
-```
-
-권장 예시:
+형식은 `구역.종류.의미있는이름`이다.
 
 ```text
 TankRoom.Door.Entry
-PowerRoom.Door.Exit
-Hallway.Obstacle.Piston01
-Hallway.Obstacle.Piston02
 PowerRoom.Puzzle.MainPanel
+Hallway.Obstacle.Piston01
 Laboratory.Lighting.Main
-Hallway.Trigger.Entry
+Hallway.Effect.Steam
 StageExit.Trigger.Goal
 ```
 
-규칙:
+- 같은 스테이지 안에서 유일해야 한다.
+- 영문·숫자를 사용하고 공백과 한글은 사용하지 않는다.
+- UObject 경로, 자동 생성 Actor 이름, Outliner Label에 의존하지 않는다.
+- DataTable에서 참조하기 시작한 ID는 함부로 변경하지 않는다.
+- StageDirector 등록소가 맵마다 분리되므로 StageId를 반복하지 않아도 된다.
 
-- 영문과 숫자를 사용한다.
-- 공백과 한글을 사용하지 않는다.
-- Outliner의 Actor Label이나 UObject 경로를 ID로 사용하지 않는다.
-- `Actor01`, `Object03`처럼 의미 없는 이름을 사용하지 않는다.
-- DataTable에서 사용하기 시작한 ID는 가급적 변경하지 않는다.
-- 스테이지 번호는 넣지 않아도 된다. StageDirector 등록소가 스테이지별로 분리되어 있다.
-
-잘못된 예:
-
-```text
-Actor01
-문1
-BP_Piston_C_0
-Chimera.Stage.Obstacle.Piston01
-```
-
-## 7. Gameplay Tag 최상위 구조
-
-```text
-Chimera.Stage
-├─ Event
-├─ Command
-└─ Group
-```
-
-세 분류의 역할을 섞지 않는다.
-
-```text
-Event   → 무슨 일이 발생했는가
-Command → 대상에게 무엇을 시킬 것인가
-Group   → 어떤 여러 대상을 함께 선택할 것인가
-```
-
-## 8. EventTag 규칙
-
-형식:
+### Gameplay Tag 루트
 
 ```text
 Chimera.Stage.Event.<사건>
+Chimera.Stage.Command.<동작>
+Chimera.Stage.Group.<구역>.<종류>
 ```
 
-공통 이벤트:
+- Event: 무엇이 발생했는가
+- Command: 대상이 무엇을 해야 하는가
+- Group: 어떤 대상들을 함께 선택하는가
+
+`OpenTankRoomDoor`처럼 대상이 섞인 Command를 만들지 않는다.
 
 ```text
-Chimera.Stage.Event.Starting
+TargetPlacementId = TankRoom.Door.Entry
+CommandTag = Chimera.Stage.Command.Open
+```
+
+## 6. 태그 카탈로그와 승인
+
+현재 Native Stage Command:
+
+```text
+Chimera.Stage.Command.Effect.Activate
+Chimera.Stage.Command.Effect.Deactivate
+Chimera.Stage.Command.Effect.Restart
+Chimera.Stage.Command.Effect.Burst
+```
+
+내부 메시지 채널은 `Chimera.Message.Stage.Event`다. 이는 `FCMStageEventMessage` 전달용 채널이므로 DataTable의 `StartEvent`로 사용하지 않는다.
+
+다음은 제작에 유용하지만 프로젝트 태그 등록과 대상 구현이 함께 필요한 후보다.
+
+```text
 Chimera.Stage.Event.Started
 Chimera.Stage.Event.AreaEntered
 Chimera.Stage.Event.AreaExited
-Chimera.Stage.Event.TriggerEntered
-Chimera.Stage.Event.TriggerExited
 Chimera.Stage.Event.ObjectiveCompleted
 Chimera.Stage.Event.PuzzleCompleted
 Chimera.Stage.Event.BranchSelected
 Chimera.Stage.Event.ExitReached
 Chimera.Stage.Event.Failed
-```
 
-현재 구현은 `EventTag` 하나로 DataTable 행을 찾는다. 특정 진행 사건은 다음처럼 구체적인 태그를 사용할 수 있다.
-
-```text
-Chimera.Stage.Event.TankOpened
-Chimera.Stage.Event.PowerRestored
-Chimera.Stage.Event.HallwayEntered
-Chimera.Stage.Event.HallwayCleared
-```
-
-새 이벤트를 만들기 전에 기존 공통 이벤트로 표현할 수 있는지 확인한다. 장소나 액터 하나마다 이벤트 태그를 무조건 만들지 않는다.
-
-## 9. CommandTag 규칙
-
-형식:
-
-```text
-Chimera.Stage.Command.<동작>
-```
-
-공통 명령:
-
-```text
 Chimera.Stage.Command.Activate
 Chimera.Stage.Command.Deactivate
 Chimera.Stage.Command.Enable
@@ -222,178 +147,107 @@ Chimera.Stage.Command.Close
 Chimera.Stage.Command.Lock
 Chimera.Stage.Command.Unlock
 Chimera.Stage.Command.Reset
-```
-
-조명 명령:
-
-```text
 Chimera.Stage.Command.Lighting.Default
 Chimera.Stage.Command.Lighting.Alert
 Chimera.Stage.Command.Lighting.Blackout
 ```
 
-규칙:
+후보 문자열을 DataTable에 쓰는 것만으로 기능이 생기지 않는다. 태그 등록과 대상의 Command 처리가 필요하다.
 
-- CommandTag에는 대상 이름을 넣지 않는다.
-- `OpenTankRoomDoor` 대신 대상과 명령을 분리한다.
-- 의미가 같은 동작에 새 태그를 중복 생성하지 않는다.
+새 태그는 기존 의미 검색 → Event/Command/Group 분류 → 공용 태그 합의 → 등록 → 대상 구현과 DataTable 검증 순으로 추가한다. 이름을 바꾸면 C++, Blueprint, 태그 설정, DataTable과 Sheet 참조를 모두 확인한다. 런타임 중 CSV나 Sheet에서 태그를 만들지 않는다.
 
-```text
-TargetPlacementId = TankRoom.Door.Entry
-CommandTag = Chimera.Stage.Command.Open
-```
+## 7. StageElement 제작
 
-## 10. GroupTag 규칙
+Blueprint와 C++ 모두 같은 계약을 따른다.
 
-형식:
+1. Actor에 `UCMStageElementComponent` 또는 파생 컴포넌트를 둔다.
+2. PlacementId와 선택적인 GroupTags를 지정한다.
+3. 게임 판정 대상은 `AuthorityOnly`를 사용한다.
+4. `ExecuteStageCommand`에서 지원 CommandTag를 처리한다.
+5. 완료가 다음 진행 조건이면 서버에서 `BroadcastStageEvent`를 호출한다.
 
-```text
-Chimera.Stage.Group.<구역>.<종류>
-```
+속도, 데미지, 반복 횟수, 이동 Curve와 퍼즐 내부 규칙은 해당 클래스나 전용 데이터가 소유한다. Sequence DataTable은 사건과 명령 연결만 가진다.
 
-예시:
+`AuthorityOnly`는 충돌, 물리, 데미지, 문 잠금, 퍼즐 상태와 클리어 판정에 사용한다. `AllMachines`는 조명, 나이아가라, 로컬 사운드와 비판정 표현에 사용한다. 서버 권한 Actor의 최종 상태는 해당 Actor가 Replication 또는 RepNotify로 동기화한다.
 
-```text
-Chimera.Stage.Group.Hallway.Obstacle
-Chimera.Stage.Group.PowerRoom.Obstacle
-Chimera.Stage.Group.Laboratory.Door
-Chimera.Stage.Group.Hallway.Lighting
-Chimera.Stage.Group.Laboratory.Lighting
-```
+## 8. 조명과 이펙트
 
-규칙:
+### CMStageLightingComponent
 
-- 여러 액터에 같은 명령을 보낼 때만 사용한다.
-- 개별 액터 하나를 위한 GroupTag를 만들지 않는다.
-- 같은 의미의 그룹은 다른 스테이지에서도 태그를 재사용할 수 있다.
-- DataTable 한 행에는 `TargetPlacementId`와 `TargetGroup` 중 하나만 설정한다.
+1. 조명 그룹 Actor에 `CMStageLightingComponent`를 추가한다.
+2. PlacementId를 `<Area>.Lighting.<Name>`으로 정한다.
+3. Light, Height Fog, Post Process Volume을 등록한다.
+4. `Presets`에 CommandTag별 상태를 만든다.
+5. 레벨에서 기준 조명을 조정하고 `Capture Current Lighting`으로 캡처한다.
+6. `PreviewCommandTag`와 `Preview Selected Preset`으로 확인한다.
+7. `Restore Captured Lighting`으로 프리뷰 전 상태를 복원한다.
 
-잘못된 예:
+Preset은 Light Intensity 배수, 선택적 Light Color, Fog Density, Post Process Color Gain을 가진다. 조명 표현은 일반적으로 `AllMachines`를 사용한다.
 
-```text
-Chimera.Stage.Group.Hallway.Obstacle.Piston01
-```
+### CMStageEffectComponent
 
-이 경우에는 다음 PlacementId를 사용한다.
+1. Actor에 Niagara Component와 `CMStageEffectComponent`를 둔다.
+2. PlacementId를 `<Area>.Effect.<Name>`으로 정한다.
+3. Niagara Component를 `Effects`에 등록한다.
+4. 처음부터 보여야 하는 경우가 아니면 Auto Activate를 끈다.
+5. `PreviewAction`과 `Preview Selected Action`으로 확인한다.
+6. DataTable에서 Native Effect Command를 보낸다.
 
-```text
-Hallway.Obstacle.Piston01
-```
+Niagara Spawn Rate, Color와 User Parameter는 Niagara System 또는 전용 Blueprint에서 조정한다. Sequence DataTable에 시각 수치를 넣지 않는다.
 
-## 11. 태그 등록과 변경 규칙
+## 9. Sequence DataTable
 
-고정 태그 후보, CSV 확장 범위와 승인 절차는 [Chimera 스테이지 Gameplay Tag 카탈로그](Chimera_Stage_Tag_Catalog.md)를 기준으로 한다.
-
-프로젝트 전체에서 공통으로 사용하는 Event와 Command는 Native Gameplay Tag로 관리하는 것을 권장한다.
-
-레벨 제작자가 새 태그를 추가할 때는 다음 절차를 따른다.
-
-1. Google Sheet의 `Common_Tag` 또는 프로젝트 태그 목록에서 같은 의미의 태그를 검색한다.
-2. 기존 태그로 표현할 수 없다면 새 이름을 제안한다.
-3. Event, Command, Group 중 정확한 분류를 선택한다.
-4. 공통 Event와 Command는 코드 담당자가 Native Tag로 등록한다.
-5. 레벨 그룹 태그는 Gameplay Tag 설정에 등록한다.
-6. 태그를 등록한 후에 DataTable과 레벨 컴포넌트에서 사용한다.
-
-태그 이름을 변경할 때 DataTable 문자열만 수정하면 안 된다. C++, Blueprint, Gameplay Tag 설정, Google Sheet 참조를 함께 확인한다.
-
-## 12. 장애물 배치 규칙
-
-### Blueprint 장애물
-
-1. 장애물 Blueprint에 `CMStageElementComponent`를 추가한다.
-2. 레벨에 배치한다.
-3. 배치된 인스턴스에 고유 PlacementId를 지정한다.
-4. 필요하면 GroupTags를 지정한다.
-5. 충돌이나 게임 판정이 있으면 `AuthorityOnly`를 사용한다.
-6. `ExecuteStageCommand` 이벤트에서 지원할 CommandTag를 처리한다.
-7. 동작 완료가 다음 단계 조건이면 `BroadcastStageEvent`를 서버에서 호출한다.
-
-### C++ 장애물
-
-C++ Actor에서도 같은 규칙을 사용한다. `UCMStageElementComponent`의 자식 컴포넌트를 만들고 `ExecuteStageCommand_Implementation`을 재정의한다.
-
-장애물의 이동 속도, 데미지, 반복 횟수, 이동 Curve는 장애물 클래스 또는 장애물 전용 데이터가 소유한다. Stage Sequence DataTable에는 넣지 않는다.
-
-## 13. 조명 배치 규칙
-
-1. 조명 그룹 관리 Actor를 레벨에 배치한다.
-2. `CMStageLightingComponent`를 추가한다.
-3. PlacementId를 `<Area>.Lighting.<Name>` 형식으로 지정한다.
-4. 제어할 Light, Fog, Post Process Volume을 등록한다.
-5. `Presets`에 조명 CommandTag별 상태를 추가한다.
-6. 기본 조명을 맞춘 뒤 `Capture Current Lighting`을 누른다.
-7. `PreviewCommandTag`를 선택하고 `Preview Selected Preset`으로 확인한다.
-8. 확인 후 `Restore Captured Lighting`으로 기준 상태를 복원한다.
-9. DataTable에서 PlacementId 또는 GroupTag를 대상으로 조명 CommandTag를 보낸다.
-
-조명은 모든 클라이언트에서 표현되어야 하므로 기본 실행 정책은 `AllMachines`를 사용한다.
-
-### 13.1 나이아가라 이펙트 배치 규칙
-
-1. 이펙트 관리 Actor에 Niagara Component를 배치한다.
-2. `CMStageEffectComponent`를 추가한다.
-3. PlacementId를 `<Area>.Effect.<Name>` 형식으로 지정한다.
-4. 함께 제어할 Niagara Component를 `Effects` 배열에 등록한다.
-5. Niagara Component의 `Auto Activate`는 시작부터 보여야 하는 경우가 아니면 끈다.
-6. `PreviewAction`을 선택하고 `Preview Selected Action`으로 에디터에서 확인한다.
-7. DataTable에서 PlacementId 또는 GroupTag를 대상으로 Effect Command를 보낸다.
-
-지원하는 명령:
-
-```text
-Chimera.Stage.Command.Effect.Activate
-Chimera.Stage.Command.Effect.Deactivate
-Chimera.Stage.Command.Effect.Restart
-Chimera.Stage.Command.Effect.Burst
-```
-
-- `Activate`: 현재 상태에서 지속형 이펙트 활성화
-- `Deactivate`: 자연스러운 종료 요청
-- `Restart`: 시스템을 초기화하고 다시 실행
-- `Burst`: 즉시 정지한 뒤 처음부터 일회성 실행
-
-예시:
-
-```text
-PlacementId = Hallway.Effect.Steam
-GroupTag = Chimera.Stage.Group.Hallway.Effect
-ExecutionPolicy = AllMachines
-```
-
-이펙트는 모든 클라이언트에서 보여야 하므로 `CMStageEffectComponent`는 기본적으로 `AllMachines`를 사용한다. Niagara의 Spawn Rate, Color, User Parameter 같은 시각 수치를 Stage Sequence DataTable에 넣지 않는다. 해당 수치는 Niagara System 또는 이펙트 전용 Blueprint에서 조정한다.
-
-## 14. DataTable 작성 규칙
-
-Row Struct는 `FCMStageSequenceRow`를 사용한다.
+Row Struct는 `FCMStageSequenceRow`다.
 
 | 열 | 역할 | 규칙 |
 |---|---|---|
-| `StageId` | 스테이지 식별 | `S01`, `S02` 형식 |
-| `StepOrder` | 큰 진행 단계 순서 | 10 단위 권장 |
-| `StepId` | 단계 의미 이름 | 변경에 강한 이름 사용 |
-| `ActionOrder` | 같은 이벤트 안의 호출 순서 | 10 단위 권장 |
-| `StartEvent` | 행 실행 조건 | 등록된 EventTag 사용 |
-| `TargetPlacementId` | 개별 대상 | TargetGroup과 동시 사용 금지 |
-| `TargetGroup` | 복수 대상 | PlacementId와 동시 사용 금지 |
-| `CommandTag` | 실행 명령 | 대상이 지원하는 명령 사용 |
-| `DelaySeconds` | 실행 지연 | 0 이상 |
-| `PreloadGroupId` | OnDemand 로드 요청 | Schedule에 존재하는 ID 사용 |
+| `StageId` | 스테이지 식별 | Route와 같은 ID 권장 |
+| `StepOrder` | 큰 진행 단계 정렬 | 10 단위 권장 |
+| `StepId` | 사람이 읽는 단계 ID | 의미 있는 영문 이름 |
+| `ActionOrder` | 같은 단계 실행 정렬 | 10 단위 권장 |
+| `StartEvent` | 행 실행 조건 | 정확히 일치하는 등록 EventTag |
+| `TargetPlacementId` | 개별 대상 | TargetGroup과 둘 중 하나만 설정 |
+| `TargetGroup` | 복수 대상 | PlacementId와 둘 중 하나만 설정 |
+| `CommandTag` | 실행 명령 | 대상이 처리하는 등록 Tag |
+| `DelaySeconds` | Event 이후 지연 | 0 이상 |
+| `PreloadGroupId` | 명령 전 준비할 OnDemand 그룹 | Schedule의 LoadGroupId |
 
-`StepOrder`는 이전 단계의 애니메이션 완료를 기다리는 기능이 아니다. 완료를 기다려야 한다면 액터가 완료 Event를 발행하고 다음 행이 그 Event를 `StartEvent`로 사용한다.
+런타임 정렬은 `StepOrder → ActionOrder → StepId → TargetPlacementId`다. 숫자 순서는 이전 액션 완료를 기다리지 않는다. 완료 의존성이 있으면 Actor가 완료 Event를 발행하고 다음 행이 그 Event를 구독한다.
+
+행은 StartEvent/CommandTag 누락, PlacementId와 Group이 둘 다 비었거나 모두 설정, 음수 Delay일 때 오류로 제외된다.
+
+## 10. Load Schedule PDA
+
+스테이지마다 `CMStageLoadSchedule` 하나를 만든다. LoadGroupId는 `<StageId>.<AreaOrPurpose>`를 권장한다.
 
 ```text
-PowerRestored 이벤트
-  → 조명 Alert 명령
-  → 출구 Unlock 명령
-
-문 열림 완료 이벤트
-  → 다음 퍼즐 Activate 명령
+S01.Entry
+S01.Hallway
+S01.PowerRoom
+S01.BranchA
 ```
 
-## 15. Google Sheet 구성 규칙
+LoadGroup은 같은 시점에 함께 준비하고 같은 수명 정책으로 관리할 Primary Asset 묶음이다. 장애물 인스턴스의 배치 순서가 아니다.
 
-프로젝트 Google Sheet 파일 하나에 스테이지별 탭을 분리하는 것을 기본으로 한다.
+| 정책 | 사용 |
+|---|---|
+| `BeforeStageStart` | 첫 화면, 시작 연출, 초기 구역처럼 플레이 전 필수 |
+| `Sequential` | 진행 순서에 따라 미리 준비할 후속 콘텐츠 |
+| `OnDemand` | 선택 전에는 필요 없는 큰 분기·선택 콘텐츠 |
+
+Schedule 시작 시 BeforeStageStart와 Sequential은 자동 큐에 들어간다. 서버 시작 배리어는 BeforeStageStart 완료까지만 기다리고 Sequential은 LoadOrder 순서로 계속 준비된다. OnDemand는 `PreloadGroupId`나 StageDirector 요청이 있을 때 로드한다.
+
+- LoadOrder는 10, 20, 30처럼 간격을 둔다.
+- 첫 구역은 반드시 BeforeStageStart다.
+- 결과 연출은 마지막 순간에 로드하지 말고 BeforeStageStart 또는 충분히 앞선 Sequential에 둔다.
+- Scope는 직접 입력하지 않는다.
+- Catalog에 PDA를 GroupId로 배정하고 `RefreshAndRebuildCatalog`를 실행한다.
+- 분기 탈락 후 해제할 그룹만 `ReleaseWhenBranchRejected`를 쓴다.
+- 프로파일 근거 없이 작은 오브젝트마다 그룹을 만들지 않는다.
+
+## 11. DataForge와 Sheet
+
+DataForge는 선택적인 에디터 자동화다. 런타임은 DataForge 없이 수동 생성한 DataTable/PDA도 동일하게 사용한다.
 
 ```text
 Chimera Stage Data
@@ -401,106 +255,76 @@ Chimera Stage Data
 ├─ S01_Sequence
 ├─ S01_LoadGroup
 ├─ S02_Sequence
-├─ S02_LoadGroup
-├─ S03_Sequence
-├─ S03_LoadGroup
-├─ S04_Sequence
-└─ S04_LoadGroup
+└─ S02_LoadGroup
 ```
 
-각 개발자는 자신의 스테이지 탭만 수정한다. Google Sheet는 원본 편집 데이터이며 런타임 데이터가 아니다.
-
 ```text
-Google Sheet
+Google Sheet 또는 CSV
 → DataForge Preview/Apply
-→ DataTable 또는 PDA
-→ StageDirector와 StageLoadCoordinator
+→ DataTable / PDA
+→ 런타임
 ```
 
-## 16. 비동기 로드 연결 규칙
+Transform, Actor 경로와 복잡한 퍼즐 스크립트는 Sheet에 넣지 않는다. PlacementId, 논리 연결과 LoadGroup 정의처럼 검증하기 좋은 데이터만 관리한다. DataForge 생성 방식이 확정되기 전에는 수동 PDA가 기준이며, 생성 PDA도 StageRoute와 Catalog에 명시적으로 연결해야 한다.
 
-Stage Load Schedule의 정책은 다음 세 가지다.
+## 12. 시작점과 목적지
 
-```text
-BeforeStageStart
-  시작 전에 반드시 준비할 콘텐츠
+`PlayerStart`는 공용 키메라 생성 지점이다. 레벨마다 하나만 배치하고 화살표의 +X 방향을 키메라가 바라볼 방향으로 맞춘다. 플레이어별 ControlBody는 별도 시작점을 요구하지 않으므로 여러 PlayerStart를 배치하지 않는다.
 
-Sequential
-  게임 시작 후 LoadOrder 순서로 미리 준비할 콘텐츠
+`CMStageDestination`은 목적지 판정 Volume을 소유한다. 제작자는 위치와 `DestinationVolume` 크기만 조정한다. 서버에서 공용 키메라의 모든 활성 BodySegment가 Volume과 동시에 Overlap하면 성공하며, 파츠·머리·ControlBody는 세지 않는다. 현재 판정은 각 마디의 완전한 기하학적 포함이 아니라 Overlap 기준이므로, 경계에서 오판하지 않도록 Volume에 충분한 여유를 둔다. 성공 시 StageDirector에 보고하며 목적지 액터가 직접 ServerTravel하지 않는다.
 
-OnDemand
-  분기나 특정 기믹에서 요청할 콘텐츠
-```
+## 13. 테스트
 
-DataTable의 `PreloadGroupId`가 지정된 행은 각 머신에서 해당 OnDemand 그룹이 준비될 때까지 명령 실행을 보류한다. 로드에 실패하거나 준비 직후 해제된 경우 명령은 실행하지 않고 오류 로그를 남긴다.
+개발자는 Route 중간 스테이지 맵을 직접 PIE할 수 있다. `BP_CMPlayGameMode.DefaultStageRouteDefinition`에 현재 Map이 등록되어 있어야 한다. 에디터 전용 부트스트랩이며 Shipping에서는 로비를 거친다.
 
-## 17. 멀티플레이 실행 정책
+반복 여부는 실행 방법이 아니라 `StageRouteDefinition.RouteMode`가 결정한다. 테스트 맵 전용 `TestRoute`를 만들고 `LoopCurrentStage`로 지정하면 직접 PIE와 로비 멀티플레이 모두 목적지 도착, 스테이지 실패 또는 전체 패배 확정 후 `LoopingStageRestartDelay`만큼 기다렸다가 현재 맵을 다시 연다. 키메라와 레벨 기믹은 초기화되고 `PlayerStart`에서 재시작한다. 개별 플레이어 마디 하나의 파괴는 기존 멀티플레이 규칙상 전체 패배가 아니므로 재시작 조건에 포함하지 않는다. 정식 Route는 `Normal`을 사용한다.
 
-`AuthorityOnly`를 사용하는 대상:
+로비 GameMode의 `TestStageRouteDefinition`에 TestRoute를 연결하고 테스트 시작 UI에서 로컬 PlayerController의 `RequestStartTestStageRoute`를 호출한다. 모든 플레이어가 Ready이고 최소 인원을 만족해야 서버가 TestRoute의 첫 맵으로 함께 이동한다.
 
-- 충돌 판정
-- 데미지 적용
-- 문 잠금 상태
-- 퍼즐 진행 상태
-- 클리어 조건
-- 물리 게임플레이 결과
+1. 1인 PIE로 배치와 기믹을 빠르게 확인한다.
+2. 2인 리슨 서버 PIE로 복제와 로드 배리어를 확인한다.
+3. Route에 맵 2개 이상을 넣고 Result 이후 ServerTravel을 확인한다.
+4. 늦은 로드, 이탈과 로드 실패 로그를 확인한다.
 
-`AllMachines`를 사용하는 대상:
+1인 직접 PIE는 정상 지원한다. 로비의 정식 최소 인원 2명 정책과 별개다.
 
-- 조명
-- 로컬 사운드
-- 파티클
-- 화면 연출
-- 게임 결과에 영향을 주지 않는 시각 효과
+파츠 이동이 완성되기 전 목적지·기믹 동선을 시험할 때는 Non-Shipping 콘솔에서 `CM.DebugMove.Enable 1`을 실행한다. 위·아래 화살표는 공용 키메라를 전진·후진시키고 왼쪽·오른쪽 화살표는 몸통을 해당 방향으로 회전시킨다. `CM.DebugMove.Enable 0`으로 끈다. 이 기능은 물리 Force·Torque를 사용하며 Q/W/E/R 파츠 입력과 스태미나 규칙을 변경하지 않는다.
 
-AuthorityOnly 액터의 최종 상태와 표현은 해당 액터가 Replication 또는 RepNotify로 동기화한다.
+## 14. 완료 체크리스트
 
-## 18. 레벨 완료 체크리스트
+### 레벨과 요소
 
-### 레벨 구조
+- StageDirector가 정확히 하나 있다.
+- `PlayerStart`가 하나 있고 방향이 올바르다.
+- `CMStageDestination`이 있고 모든 활성 몸통 마디가 동시에 Overlap할 수 있다.
+- PlacementId가 비어 있지 않고 중복되지 않는다.
+- 판정은 AuthorityOnly, 로컬 표현은 AllMachines다.
+- 대상이 DataTable의 CommandTag를 처리한다.
 
-- StageDirector가 정확히 하나 배치되어 있다.
-- 시작 지점과 목적지 지점이 있다.
-- 시작 및 결과 연출이 연결되어 있다.
-- 스테이지 전용 DataTable과 Load Schedule이 연결되어 있다.
+### 데이터와 로드
 
-### 배치 액터
+- Route, Schedule과 Sequence의 StageId가 일관된다.
+- 태그가 등록되어 있다.
+- 한 Sequence 행은 PlacementId와 TargetGroup 중 하나만 가진다.
+- PreloadGroupId가 Schedule에 존재한다.
+- Scope를 수동 편집하지 않았다.
+- 첫 구역이 BeforeStageStart다.
+- 완료 의존성을 숫자 순서가 아니라 Event로 연결했다.
 
-- 모든 StageElement의 PlacementId가 비어 있지 않다.
-- 같은 스테이지 안에 중복 PlacementId가 없다.
-- 개별 대상에 불필요한 GroupTag를 만들지 않았다.
-- 게임 판정 요소는 AuthorityOnly다.
-- 조명과 로컬 연출은 AllMachines다.
+### 실행
 
-### 태그와 데이터
+- 직접 PIE에서 시작부터 완료까지 진행된다.
+- 2인 리슨 서버에서 판정과 표현이 일치한다.
+- 전환 후 이전 StageDirector와 상태가 남지 않는다.
+- 로드 실패 시 동기 로드나 자동 진행 없이 Error가 발생한다.
 
-- 모든 Event, Command, Group 태그가 프로젝트에 등록되어 있다.
-- 기존 태그와 의미가 중복되는 새 태그가 없다.
-- DataTable의 PlacementId가 실제 레벨에 존재한다.
-- DataTable 한 행에 PlacementId와 GroupTag를 동시에 넣지 않았다.
-- 대상 액터가 CommandTag를 지원한다.
-- PreloadGroupId가 Load Schedule에 존재한다.
-- 완료 의존성은 숫자 순서가 아니라 Stage Event로 연결되어 있다.
+## 15. 아직 자동화되지 않은 검증
 
-### 테스트
-
-- Standalone에서 시작부터 클리어까지 진행된다.
-- 리슨 서버 2인 이상 PIE에서 동일하게 진행된다.
-- 장애물 충돌과 데미지가 서버 기준으로 동일하다.
-- 조명과 연출이 모든 클라이언트에서 동일하게 보인다.
-- 중도 이탈 또는 늦은 로드 상황에서 진행이 잘못 열리지 않는다.
-- 스테이지 전환 후 이전 스테이지 자산과 상태가 남지 않는다.
-
-## 19. 아직 추가해야 할 에디터 지원
-
-다음 항목은 규칙은 정해졌지만 자동 검증 기능은 아직 구현되지 않았다.
-
-- PlacementId 중복·누락 Data Validation
-- DataTable 대상과 실제 레벨 배치 비교
+- 레벨 전체 PlacementId 중복·누락 검사
+- DataTable 대상과 실제 배치 비교
 - 대상이 지원하지 않는 CommandTag 검사
-- 등록되지 않은 Gameplay Tag 검사
-- PreloadGroupId와 Load Schedule 비교
+- PreloadGroupId와 Schedule 교차 검사
 - StageDirector 복수 배치 검사
-- OnDemand Activation Gate
+- 목적지 Volume 크기 적절성 검사
 
-자동 검증이 추가되기 전까지는 이 문서의 체크리스트를 코드 리뷰와 레벨 리뷰 기준으로 사용한다.
+자동 Validator가 추가되기 전까지 이 체크리스트를 레벨 리뷰 기준으로 사용한다.

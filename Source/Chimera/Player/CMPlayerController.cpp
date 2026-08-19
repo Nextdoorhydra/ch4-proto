@@ -10,6 +10,7 @@
 #include "Player/CMChimera.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "InputCoreTypes.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 
@@ -17,8 +18,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogChimeraPlayerController, Log, All);
 
 ACMPlayerController::ACMPlayerController()
 {
-    // APlayerController의 기본 Tick은 입력 처리를 위해 유지한다.
-    // 대신 이 클래스에서 매 프레임 Shared Chimera를 검색하던 PlayerTick은 제거했다.
+    // APlayerController Tick은 입력 처리와 Non-Shipping 화살표 치트 전송에 사용한다.
+    // Shared Chimera 검색은 이벤트 기반이므로 매 프레임 수행하지 않는다.
     PrimaryActorTick.bCanEverTick = true;
     ClientStageLoadComponent = CreateDefaultSubobject<UCMClientStageLoadComponent>(
         TEXT("ClientStageLoadComponent"));
@@ -78,6 +79,31 @@ void ACMPlayerController::RequestCheatClearRandomParts()
     {
         ServerCheatClearRandomParts();
     }
+}
+
+// Non-Shipping 콘솔 명령이 화살표 디버그 이동을 켜거나 끄는 진입점
+void ACMPlayerController::SetCheatDebugMovementEnabled(bool bEnabled)
+{
+#if !UE_BUILD_SHIPPING
+    if (!IsLocalController())
+    {
+        return;
+    }
+
+    bCheatDebugMovementEnabled = bEnabled;
+    if (!bEnabled)
+    {
+        bDebugMoveForwardHeld = false;
+        bDebugMoveBackwardHeld = false;
+        bDebugTurnLeftHeld = false;
+        bDebugTurnRightHeld = false;
+    }
+
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] Arrow-key debug movement %s for %s."),
+        bEnabled ? TEXT("enabled") : TEXT("disabled"),
+        *GetName());
+#endif
 }
 
 void ACMPlayerController::ServerRequestRetryGame_Implementation()
@@ -233,6 +259,21 @@ void ACMPlayerController::ServerCheatClearRandomParts_Implementation()
 #endif
 }
 
+// 화살표 입력을 서버 공용 키메라의 개발용 물리 이동으로 전달
+void ACMPlayerController::ServerApplyCheatDebugMovement_Implementation(
+    float ForwardInput,
+    float TurnInput)
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        SharedChimera->ApplyDebugMovementInput(
+            FMath::Clamp(ForwardInput, -1.0f, 1.0f),
+            FMath::Clamp(TurnInput, -1.0f, 1.0f));
+    }
+#endif
+}
+
 void ACMPlayerController::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
@@ -331,6 +372,51 @@ void ACMPlayerController::SetupInputComponent()
             TEXT("DetachModifierAction is not assigned on %s."),
             *GetName());
     }
+
+#if !UE_BUILD_SHIPPING
+    // 기존 Q/W/E/R Mapping Context와 분리된 개발 전용 화살표 입력
+    InputComponent->BindKey(EKeys::Up, IE_Pressed,
+        this, &ThisClass::DebugMoveForwardPressed);
+    InputComponent->BindKey(EKeys::Up, IE_Released,
+        this, &ThisClass::DebugMoveForwardReleased);
+    InputComponent->BindKey(EKeys::Down, IE_Pressed,
+        this, &ThisClass::DebugMoveBackwardPressed);
+    InputComponent->BindKey(EKeys::Down, IE_Released,
+        this, &ThisClass::DebugMoveBackwardReleased);
+    InputComponent->BindKey(EKeys::Left, IE_Pressed,
+        this, &ThisClass::DebugTurnLeftPressed);
+    InputComponent->BindKey(EKeys::Left, IE_Released,
+        this, &ThisClass::DebugTurnLeftReleased);
+    InputComponent->BindKey(EKeys::Right, IE_Pressed,
+        this, &ThisClass::DebugTurnRightPressed);
+    InputComponent->BindKey(EKeys::Right, IE_Released,
+        this, &ThisClass::DebugTurnRightReleased);
+#endif
+}
+
+// 활성화된 로컬 화살표 상태를 서버에 낮은 신뢰도의 연속 입력으로 전달
+void ACMPlayerController::PlayerTick(float DeltaTime)
+{
+    Super::PlayerTick(DeltaTime);
+
+#if !UE_BUILD_SHIPPING
+    if (!IsLocalController() || !bCheatDebugMovementEnabled)
+    {
+        return;
+    }
+
+    const float ForwardInput =
+        static_cast<float>(bDebugMoveForwardHeld)
+        - static_cast<float>(bDebugMoveBackwardHeld);
+    const float TurnInput =
+        static_cast<float>(bDebugTurnRightHeld)
+        - static_cast<float>(bDebugTurnLeftHeld);
+    if (!FMath::IsNearlyZero(ForwardInput)
+        || !FMath::IsNearlyZero(TurnInput))
+    {
+        ServerApplyCheatDebugMovement(ForwardInput, TurnInput);
+    }
+#endif
 }
 
 void ACMPlayerController::HandleSharedChimeraChanged()
@@ -356,22 +442,62 @@ void ACMPlayerController::HandleSharedChimeraChanged()
 }
 
 // 로컬 로비 UI의 시작 요청을 서버 RPC로 전달
-void ACMPlayerController::RequestStartCampaign()
+void ACMPlayerController::RequestStartStageRoute()
 {
     if (IsLocalController())
     {
-        ServerRequestStartCampaign();
+        ServerRequestStartStageRoute();
+    }
+}
+
+// 로컬 로비 UI의 테스트 시작 요청을 서버 RPC로 전달
+void ACMPlayerController::RequestStartTestStageRoute()
+{
+    if (IsLocalController())
+    {
+        ServerRequestStartTestStageRoute();
+    }
+}
+
+// 로컬 Ready UI 입력을 서버 로비 정책으로 전달
+void ACMPlayerController::RequestSetReady(bool bReady)
+{
+    if (IsLocalController())
+    {
+        ServerSetReady(bReady);
     }
 }
 
 // 서버 LobbyGameMode가 준비 상태와 캠페인 설정을 최종 검증
-void ACMPlayerController::ServerRequestStartCampaign_Implementation()
+void ACMPlayerController::ServerRequestStartStageRoute_Implementation()
 {
     ACMLobbyGameMode* LobbyGameMode = GetWorld()
         ? GetWorld()->GetAuthGameMode<ACMLobbyGameMode>() : nullptr;
     if (LobbyGameMode)
     {
-        LobbyGameMode->TryStartCampaign(this);
+        LobbyGameMode->TryStartStageRoute(this);
+    }
+}
+
+// 서버 LobbyGameMode가 준비 상태와 TestRoute 설정을 최종 검증
+void ACMPlayerController::ServerRequestStartTestStageRoute_Implementation()
+{
+    ACMLobbyGameMode* LobbyGameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMLobbyGameMode>() : nullptr;
+    if (LobbyGameMode)
+    {
+        LobbyGameMode->TryStartTestStageRoute(this);
+    }
+}
+
+// 서버 LobbyGameMode가 요청자와 현재 로비 Phase를 검증
+void ACMPlayerController::ServerSetReady_Implementation(bool bReady)
+{
+    ACMLobbyGameMode* LobbyGameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMLobbyGameMode>() : nullptr;
+    if (LobbyGameMode)
+    {
+        LobbyGameMode->TrySetPlayerReady(this, bReady);
     }
 }
 
@@ -444,6 +570,46 @@ void ACMPlayerController::DetachModifierPressed()
 void ACMPlayerController::DetachModifierReleased()
 {
     bDetachModifierHeld = false;
+}
+
+void ACMPlayerController::DebugMoveForwardPressed()
+{
+    bDebugMoveForwardHeld = true;
+}
+
+void ACMPlayerController::DebugMoveForwardReleased()
+{
+    bDebugMoveForwardHeld = false;
+}
+
+void ACMPlayerController::DebugMoveBackwardPressed()
+{
+    bDebugMoveBackwardHeld = true;
+}
+
+void ACMPlayerController::DebugMoveBackwardReleased()
+{
+    bDebugMoveBackwardHeld = false;
+}
+
+void ACMPlayerController::DebugTurnLeftPressed()
+{
+    bDebugTurnLeftHeld = true;
+}
+
+void ACMPlayerController::DebugTurnLeftReleased()
+{
+    bDebugTurnLeftHeld = false;
+}
+
+void ACMPlayerController::DebugTurnRightPressed()
+{
+    bDebugTurnRightHeld = true;
+}
+
+void ACMPlayerController::DebugTurnRightReleased()
+{
+    bDebugTurnRightHeld = false;
 }
 
 void ACMPlayerController::SetControlSlotPressed(

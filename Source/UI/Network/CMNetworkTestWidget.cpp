@@ -1,6 +1,7 @@
 #include "CMNetworkTestWidget.h"
 
 #include "GameMode/CMGameState.h"
+#include "GameMode/Lobby/CMLobbyGameState.h"
 #include "Player/CMPlayerState.h"
 #include "Player/CMPlayerController.h"
 #include "CMLobbyPlayerRowWidget.h"
@@ -81,6 +82,20 @@ void UCMNetworkTestWidget::NativeConstruct()
         Btn_StartGame->OnClicked.AddUniqueDynamic(
             this,
             &UCMNetworkTestWidget::HandleStartGameClicked
+        );
+    }
+    if (Btn_StartTestGame)
+    {
+        Btn_StartTestGame->OnClicked.AddUniqueDynamic(
+            this,
+            &UCMNetworkTestWidget::HandleStartTestGameClicked
+        );
+    }
+    if (Btn_Ready)
+    {
+        Btn_Ready->OnClicked.AddUniqueDynamic(
+            this,
+            &UCMNetworkTestWidget::HandleReadyClicked
         );
     }
     if (Btn_Leave)
@@ -366,6 +381,10 @@ void UCMNetworkTestWidget::ApplyConnectionUI(
     const bool bInGame =
         ConnectionState == EListenServerConnectionState::InGame;
     const bool bHost = Role == EListenServerRole::Host;
+    const ACMLobbyGameState* LobbyState = GetWorld()
+        ? GetWorld()->GetGameState<ACMLobbyGameState>()
+        : nullptr;
+    const bool bCanStartGame = LobbyState && LobbyState->CanStartGame();
     const bool bIdle = !NetworkSubsystem
         || NetworkSubsystem->GetCurrentOperation()
             == EListenServerOperation::None;
@@ -421,7 +440,22 @@ void UCMNetworkTestWidget::ApplyConnectionUI(
                 ? ESlateVisibility::Visible
                 : ESlateVisibility::Collapsed
         );
-        Btn_StartGame->SetIsEnabled(bLobby && bHost && bIdle);
+        Btn_StartGame->SetIsEnabled(
+            bLobby && bHost && bIdle && bCanStartGame);
+    }
+    if (Btn_StartTestGame)
+    {
+        Btn_StartTestGame->SetVisibility(
+            bLobby && bHost
+                ? ESlateVisibility::Visible
+                : ESlateVisibility::Collapsed
+        );
+        Btn_StartTestGame->SetIsEnabled(
+            bLobby && bHost && bIdle && bCanStartGame);
+    }
+    if (Btn_Ready)
+    {
+        Btn_Ready->SetIsEnabled(bLobby && bIdle);
     }
     if (Btn_Retry)
     {
@@ -511,6 +545,12 @@ void UCMNetworkTestWidget::HandleNetworkStateChanged(
 void UCMNetworkTestWidget::HandleLobbyRosterChanged()
 {
     RefreshLobbyRoster();
+    if (NetworkSubsystem)
+    {
+        ApplyConnectionUI(
+            NetworkSubsystem->GetConnectionState(),
+            NetworkSubsystem->GetCurrentRole());
+    }
 }
 
 void UCMNetworkTestWidget::HandleOperationCompleted(
@@ -604,19 +644,34 @@ void UCMNetworkTestWidget::HandleInviteClicked()
 
 void UCMNetworkTestWidget::HandleStartGameClicked()
 {
-    if (NetworkSubsystem)
+    if (ACMPlayerController* PlayerController =
+        Cast<ACMPlayerController>(GetOwningPlayer()))
     {
-        const bool bStarted =
-            NetworkSubsystem->HostTravelToDefaultGameMap();
-        UE_LOG(
-            LogChimeraUI,
-            Log,
-            TEXT("Start Game clicked. Accepted=%d Role=%d State=%d Operation=%d"),
-            bStarted,
-            static_cast<int32>(NetworkSubsystem->GetCurrentRole()),
-            static_cast<int32>(NetworkSubsystem->GetConnectionState()),
-            static_cast<int32>(NetworkSubsystem->GetCurrentOperation())
-        );
+        PlayerController->RequestStartStageRoute();
+    }
+}
+
+// 테스트 시작 버튼을 서버의 TestRoute 검증 흐름으로 전달
+void UCMNetworkTestWidget::HandleStartTestGameClicked()
+{
+    if (ACMPlayerController* PlayerController =
+        Cast<ACMPlayerController>(GetOwningPlayer()))
+    {
+        PlayerController->RequestStartTestStageRoute();
+    }
+}
+
+// 현재 로컬 플레이어의 Ready 상태를 반전해 서버에 요청
+void UCMNetworkTestWidget::HandleReadyClicked()
+{
+    ACMPlayerController* PlayerController =
+        Cast<ACMPlayerController>(GetOwningPlayer());
+    const ACMPlayerState* PlayerState = PlayerController
+        ? PlayerController->GetPlayerState<ACMPlayerState>()
+        : nullptr;
+    if (PlayerController && PlayerState)
+    {
+        PlayerController->RequestSetReady(!PlayerState->IsReady());
     }
 }
 

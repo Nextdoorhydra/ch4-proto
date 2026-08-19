@@ -49,7 +49,7 @@ public:
 
 	// Session을 포함한 모든 로드 상태와 캐시를 새 캠페인 기준으로 초기화
 	UFUNCTION(BlueprintCallable, Category = "Chimera|Loading")
-	void ResetCampaignLoading();
+	void ResetStageRouteLoading();
 
 	// TimingTag에 속한 그룹을 LoadOrder 순서로 하나씩 로드
 	UFUNCTION(BlueprintCallable, Category = "Chimera|Loading")

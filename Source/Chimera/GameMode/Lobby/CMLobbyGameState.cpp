@@ -1,5 +1,6 @@
 #include "GameMode/Lobby/CMLobbyGameState.h"
 
+#include "AsyncLoad/CMStageLoadCoordinatorSubsystem.h"
 #include "Net/UnrealNetwork.h"
 
 // 로비 Phase·Ready 인원·시작 가능 여부를 복제 대상으로 등록
@@ -55,4 +56,17 @@ void ACMLobbyGameState::SetLobbySummary(
 void ACMLobbyGameState::OnRep_LobbyState()
 {
     OnLobbyStateChanged.Broadcast();
+}
+
+// 새 Route가 이전 Route의 로드 핸들과 준비 상태를 재사용하지 않도록 초기화
+void ACMLobbyGameState::MulticastResetStageRouteLoading_Implementation()
+{
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMStageLoadCoordinatorSubsystem* Coordinator =
+            GameInstance->GetSubsystem<UCMStageLoadCoordinatorSubsystem>())
+        {
+            Coordinator->ResetStageRouteLoading();
+        }
+    }
 }
