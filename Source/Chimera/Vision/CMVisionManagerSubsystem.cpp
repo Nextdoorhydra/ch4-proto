@@ -61,6 +61,7 @@ void UCMVisionManagerSubsystem::Deinitialize()
     BaseVisibilityMask = nullptr;
     MaskDrawTexture = nullptr;
     VisionSources.Reset();
+    CachedVisionMaskData.Reset();
     Super::Deinitialize();
 }
 
@@ -99,6 +100,7 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
     TArray<UCMVisionComponent*> ActiveSources;
     GetActiveVisionSources(ActiveSources);
     UpdateVisibilityMaskBounds(ActiveSources);
+    BuildVisionRayCache(ActiveSources);
 
     if (PostProcessMaterialInstance)
     {
@@ -362,6 +364,85 @@ void UCMVisionManagerSubsystem::UpdateVisibilityMaskBounds(
         RenderConfig->MaskBoundsPadding,
         1.0f
     );
+}
+
+void UCMVisionManagerSubsystem::BuildVisionRayCache(
+    const TArray<UCMVisionComponent*>& ActiveSources
+)
+{
+    CachedVisionMaskData.Reset(ActiveSources.Num());
+
+    const int32 ArcSegmentCount = FMath::Max(
+        RenderConfig->ArcSegmentCount,
+        3
+    );
+    const float RevealDistance = FMath::Max(
+        RenderConfig->OccluderSurfaceRevealDistance,
+        0.0f
+    );
+
+    for (const UCMVisionComponent* VisionSource : ActiveSources)
+    {
+        FCMVisionSourceMaskData& SourceData =
+            CachedVisionMaskData.AddDefaulted_GetRef();
+        SourceData.Origin = VisionSource->GetVisionOrigin();
+        SourceData.Rays.Reserve(ArcSegmentCount + 1);
+
+        const FVector Direction = VisionSource->GetAimDirection();
+        const float Distance = VisionSource->GetVisionDistance();
+        const float HalfAngleRadians = FMath::DegreesToRadians(
+            VisionSource->GetVisionAngleDegrees() * 0.5f
+        );
+        const float CenterAngle = FMath::Atan2(
+            Direction.Y,
+            Direction.X
+        );
+
+        for (int32 RayIndex = 0;
+            RayIndex <= ArcSegmentCount;
+            ++RayIndex)
+        {
+            const float Alpha =
+                static_cast<float>(RayIndex) / ArcSegmentCount;
+            const float Angle = FMath::Lerp(
+                CenterAngle - HalfAngleRadians,
+                CenterAngle + HalfAngleRadians,
+                Alpha
+            );
+            const FVector DesiredEnd = SourceData.Origin + FVector(
+                FMath::Cos(Angle) * Distance,
+                FMath::Sin(Angle) * Distance,
+                0.0f
+            );
+
+            FHitResult Hit;
+            FCMVisionRaySample& Ray =
+                SourceData.Rays.AddDefaulted_GetRef();
+            Ray.BaseEnd = ClipVisionRayToOccluder(
+                *VisionSource,
+                SourceData.Origin,
+                DesiredEnd,
+                0.0f,
+                &Hit
+            );
+            Ray.RevealedEnd = Ray.BaseEnd;
+            Ray.HitComponent = Hit.GetComponent();
+
+            if (Hit.bBlockingHit && RevealDistance > 0.0f)
+            {
+                const FVector RayDirection =
+                    (DesiredEnd - SourceData.Origin).GetSafeNormal2D();
+                const float RemainingDistance = FVector::Dist2D(
+                    Ray.BaseEnd,
+                    DesiredEnd
+                );
+                Ray.RevealedEnd += RayDirection * FMath::Min(
+                    RevealDistance,
+                    RemainingDistance
+                );
+            }
+        }
+    }
 }
 
 void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
@@ -632,12 +713,12 @@ void UCMVisionManagerSubsystem::DrawOccluderVisibilityMask(
 )
 {
     TSet<UPrimitiveComponent*> CurrentOccluders;
-    DrawVisionMask(
+    DrawCachedVisionMask(
         Canvas,
         Width,
         Height,
         &CurrentOccluders,
-        RenderConfig ? RenderConfig->OccluderSurfaceRevealDistance : 0.0f
+        true
     );
     UpdateOccluderRenderStates(CurrentOccluders);
 }
@@ -648,45 +729,38 @@ void UCMVisionManagerSubsystem::DrawBaseVisibilityMask(
     int32 Height
 )
 {
-    DrawVisionMask(Canvas, Width, Height, nullptr, 0.0f);
+    DrawCachedVisionMask(Canvas, Width, Height, nullptr, false);
 }
 
-void UCMVisionManagerSubsystem::DrawVisionMask(
+void UCMVisionManagerSubsystem::DrawCachedVisionMask(
     UCanvas* Canvas,
     int32 Width,
     int32 Height,
     TSet<UPrimitiveComponent*>* OutOccluders,
-    float RevealDistance
+    bool bUseRevealedEnds
 )
 {
-    if (!Canvas || !RenderConfig || !MaskDrawTexture
+    if (!Canvas || !MaskDrawTexture
         || !MaskDrawTexture->GetResource())
     {
         return;
     }
 
-    TArray<UCMVisionComponent*> ActiveSources;
-    GetActiveVisionSources(ActiveSources);
-    for (const UCMVisionComponent* VisionSource : ActiveSources)
+    for (const FCMVisionSourceMaskData& SourceData : CachedVisionMaskData)
     {
-        const FVector Origin = VisionSource->GetVisionOrigin();
-        const FVector Direction = VisionSource->GetAimDirection();
-        const float Distance = VisionSource->GetVisionDistance();
-        const float HalfAngleRadians = FMath::DegreesToRadians(
-            VisionSource->GetVisionAngleDegrees() * 0.5f
-        );
-        const float CenterAngle = FMath::Atan2(Direction.Y, Direction.X);
+        if (SourceData.Rays.Num() < 2)
+        {
+            continue;
+        }
+
         const FVector2D OriginPixel = WorldToMaskPixel(
-            Origin,
+            SourceData.Origin,
             Width,
             Height
         );
 
         TArray<FCanvasUVTri> Triangles;
-        const int32 ArcSegmentCount = FMath::Max(
-            RenderConfig->ArcSegmentCount,
-            3
-        );
+        const int32 ArcSegmentCount = SourceData.Rays.Num() - 1;
         Triangles.Reserve(ArcSegmentCount);
         const auto AddMaskTriangle = [&Triangles](
             const FVector2D& A,
@@ -708,67 +782,39 @@ void UCMVisionManagerSubsystem::DrawVisionMask(
             ArcIndex < ArcSegmentCount;
             ++ArcIndex)
         {
-            const float AlphaA =
-                static_cast<float>(ArcIndex) / ArcSegmentCount;
-            const float AlphaB =
-                static_cast<float>(ArcIndex + 1) / ArcSegmentCount;
-            const float AngleA = FMath::Lerp(
-                CenterAngle - HalfAngleRadians,
-                CenterAngle + HalfAngleRadians,
-                AlphaA
-            );
-            const float AngleB = FMath::Lerp(
-                CenterAngle - HalfAngleRadians,
-                CenterAngle + HalfAngleRadians,
-                AlphaB
-            );
-
-            const FVector DesiredPointA = Origin + FVector(
-                FMath::Cos(AngleA) * Distance,
-                FMath::Sin(AngleA) * Distance,
-                0.0f
-            );
-            const FVector DesiredPointB = Origin + FVector(
-                FMath::Cos(AngleB) * Distance,
-                FMath::Sin(AngleB) * Distance,
-                0.0f
-            );
-            FHitResult HitA;
-            FHitResult HitB;
-            const FVector ClippedPointA = ClipVisionRayToOccluder(
-                *VisionSource,
-                Origin,
-                DesiredPointA,
-                RevealDistance,
-                &HitA
-            );
-            const FVector ClippedPointB = ClipVisionRayToOccluder(
-                *VisionSource,
-                Origin,
-                DesiredPointB,
-                RevealDistance,
-                &HitB
-            );
+            const FCMVisionRaySample& RayA =
+                SourceData.Rays[ArcIndex];
+            const FCMVisionRaySample& RayB =
+                SourceData.Rays[ArcIndex + 1];
 
             if (OutOccluders)
             {
-                if (UPrimitiveComponent* Component = HitA.GetComponent())
+                if (UPrimitiveComponent* Component =
+                    RayA.HitComponent.Get())
                 {
                     OutOccluders->Add(Component);
                 }
-                if (UPrimitiveComponent* Component = HitB.GetComponent())
+                if (UPrimitiveComponent* Component =
+                    RayB.HitComponent.Get())
                 {
                     OutOccluders->Add(Component);
                 }
             }
 
+            const FVector& PointA = bUseRevealedEnds
+                ? RayA.RevealedEnd
+                : RayA.BaseEnd;
+            const FVector& PointB = bUseRevealedEnds
+                ? RayB.RevealedEnd
+                : RayB.BaseEnd;
+
             const FVector2D PointAPixel = WorldToMaskPixel(
-                ClippedPointA,
+                PointA,
                 Width,
                 Height
             );
             const FVector2D PointBPixel = WorldToMaskPixel(
-                ClippedPointB,
+                PointB,
                 Width,
                 Height
             );

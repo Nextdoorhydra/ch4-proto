@@ -23,6 +23,19 @@ struct FCMVisionOccluderRenderState
     int32 CustomDepthStencilValue = 0;
 };
 
+struct FCMVisionRaySample
+{
+    FVector BaseEnd = FVector::ZeroVector;
+    FVector RevealedEnd = FVector::ZeroVector;
+    TWeakObjectPtr<UPrimitiveComponent> HitComponent;
+};
+
+struct FCMVisionSourceMaskData
+{
+    FVector Origin = FVector::ZeroVector;
+    TArray<FCMVisionRaySample> Rays;
+};
+
 /** Local registry and union query for all replicated shared-vision sources. */
 UCLASS()
 class CHIMERA_API UCMVisionManagerSubsystem : public UTickableWorldSubsystem
@@ -60,6 +73,9 @@ private:
     void UpdateVisibilityMaskBounds(
         const TArray<UCMVisionComponent*>& ActiveSources
     );
+    void BuildVisionRayCache(
+        const TArray<UCMVisionComponent*>& ActiveSources
+    );
     void EnsurePostProcessBinding();
     UCameraComponent* FindViewCamera() const;
     void RemovePostProcessBinding();
@@ -83,12 +99,12 @@ private:
         int32 Width,
         int32 Height
     ) const;
-    void DrawVisionMask(
+    void DrawCachedVisionMask(
         UCanvas* Canvas,
         int32 Width,
         int32 Height,
         TSet<UPrimitiveComponent*>* OutOccluders,
-        float RevealDistance
+        bool bUseRevealedEnds
     );
 
     UFUNCTION()
@@ -123,6 +139,7 @@ private:
     TObjectPtr<UTexture2D> MaskDrawTexture;
 
     TWeakObjectPtr<UCameraComponent> BoundCamera;
+    TArray<FCMVisionSourceMaskData> CachedVisionMaskData;
     TArray<FCMVisionOccluderRenderState> OccluderRenderStates;
     FVector2D MaskWorldCenter = FVector2D::ZeroVector;
     float MaskWorldHalfExtent = 1000.0f;
