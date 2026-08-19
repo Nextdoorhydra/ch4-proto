@@ -87,6 +87,12 @@ protected:
     TObjectPtr<UButton> Btn_StartGame;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UButton> Btn_StartTestGame;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UButton> Btn_Ready;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UButton> Btn_Leave;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -165,6 +171,12 @@ private:
 
     UFUNCTION()
     void HandleStartGameClicked();
+
+    UFUNCTION()
+    void HandleStartTestGameClicked();
+
+    UFUNCTION()
+    void HandleReadyClicked();
 
     UFUNCTION()
     void HandleLeaveClicked();

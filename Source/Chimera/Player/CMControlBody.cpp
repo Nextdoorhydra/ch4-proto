@@ -1,7 +1,7 @@
 #include "Player/CMControlBody.h"
 
 #include "Components/SceneComponent.h"
-#include "Game/CMGameState.h"
+#include "GameMode/CMGameState.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
@@ -330,6 +330,11 @@ void ACMControlBody::SetOwnedSegmentIndex(int32 NewSegmentIndex)
     ClearPressedControlSlots();
     OwnedSegmentIndex = NewSegmentIndex;
     bControlInputEnabled = true;
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetParticipationState(
+            ECMPlayerParticipationState::Active);
+    }
     OnRep_ControlState();
     ForceNetUpdate();
 
@@ -360,6 +365,11 @@ void ACMControlBody::HandleSegmentDestroyed(int32 DestroyedSegmentIndex)
 
     ClearPressedControlSlots();
     bControlInputEnabled = false;
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetParticipationState(
+            ECMPlayerParticipationState::Defeated);
+    }
     OnRep_ControlState();
     ForceNetUpdate();
 

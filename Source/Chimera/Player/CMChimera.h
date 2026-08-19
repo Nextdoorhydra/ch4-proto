@@ -18,6 +18,7 @@ class UAbilitySystemComponent;
 class UCMChimeraAttributeSet;
 class UCMLineBodyMovementCoordinator;
 class UCMPartSlotComponent;
+class UPrimitiveComponent;
 class UDataTable;
 class UPhysicalMaterial;
 class ACMPlayerState;
@@ -118,6 +119,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera")
     int32 GetActiveSegmentCount() const;
 
+    // 지정 Volume과 모든 활성 몸통 물리 컴포넌트가 겹치는지 확인
+    bool AreAllActiveBodySegmentsOverlapping(
+        const UPrimitiveComponent* Volume) const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
     UCMPartSlotComponent* GetPartSlotComponent(
         const FCMPartSlotAddress& PartSlotAddress
@@ -207,6 +212,9 @@ protected:
 
 public:
     virtual void Tick(float DeltaTime) override;
+
+    // Non-Shipping 화살표 치트 입력을 공용 몸통 물리 힘과 회전력으로 적용
+    void ApplyDebugMovementInput(float ForwardInput, float TurnInput);
 
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -298,6 +306,14 @@ protected:
     Category = "Chimera|Movement|SpringArm",
     meta = (ClampMin = "0.0"))
     float SpringArmMaxSpeed = 4000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",
+        meta = (ClampMin = "0.0"))
+    float DebugMovementForce = 35000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",
+        meta = (ClampMin = "0.0"))
+    float DebugTurnTorque = 250000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Leg|Cooperation", meta = (ClampMin = "0.01"))

@@ -29,6 +29,12 @@ protected:
     TObjectPtr<UButton> Btn_StartGame;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UButton> Btn_StartTestGame;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UButton> Btn_Ready;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UButton> Btn_Invite;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -45,6 +51,9 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> Txt_Result;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UTextBlock> Txt_ReadyState;
 
 private:
     void BindCurrentGameState();
@@ -71,6 +80,12 @@ private:
 
     UFUNCTION()
     void HandleStartGameClicked();
+
+    UFUNCTION()
+    void HandleStartTestGameClicked();
+
+    UFUNCTION()
+    void HandleReadyClicked();
 
     UFUNCTION()
     void HandleInviteClicked();

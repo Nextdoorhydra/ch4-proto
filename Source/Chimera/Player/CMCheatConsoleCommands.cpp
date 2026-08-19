@@ -78,6 +78,17 @@ void ClearLegParts(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+// CM.DebugMove.Enable 1 또는 0으로 로컬 화살표 이동을 전환
+void SetDebugMovementEnabled(const TArray<FString>& Args, UWorld* World)
+{
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        const bool bEnabled = !Args.IsEmpty()
+            && FCString::Atoi(*Args[0]) != 0;
+        Controller->SetCheatDebugMovementEnabled(bEnabled);
+    }
+}
+
 FAutoConsoleCommandWithWorldAndArgs KillAllSegmentsCommand(
     TEXT("CM.AllDead"),
     TEXT("Kills every living Chimera body segment on the server."),
@@ -116,6 +127,13 @@ FAutoConsoleCommandWithWorldAndArgs ClearLegPartsCommand(
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &ClearLegParts
     )
+);
+
+FAutoConsoleCommandWithWorldAndArgs DebugMovementEnableCommand(
+    TEXT("CM.DebugMove.Enable"),
+    TEXT("Enables arrow-key Chimera movement. Usage: CM.DebugMove.Enable 1|0"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &SetDebugMovementEnabled)
 );
 
 #define CM_REGISTER_SEGMENT_DEATH_COMMAND(Index) \
