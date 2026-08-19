@@ -22,6 +22,7 @@ public class CMGore : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
+				"DeveloperSettings",
 				"GameplayMessageRuntime",
 				"Niagara",
 			}

@@ -2,8 +2,8 @@
 
 
 #include "CMGoreMessageTestActor.h"
-#include "CMGoreGameplayTags.h"
-#include "CMGoreMessages.h"
+#include "Tags/CMGoreGameplayTags.h"
+#include "Messaging/CMGoreMessages.h"
 #include "GameplayMessageRuntime/Public/GameFramework/GameplayMessageSubsystem.h"
 
 
@@ -20,22 +20,16 @@ void ACMGoreMessageTestActor::BeginPlay()
 {
 	Super::BeginPlay();
 	
-	FCMBloodImpactMessage Message;
+	FCMBloodBurstMessage Message;
 
 	Message.Source = this;
-
 	Message.Location = GetActorLocation();
-
-	Message.SurfaceNormal = FVector::UpVector;
-
-	Message.Direction = FVector::ForwardVector;
-
-	Message.Intensity = 2.5f;
-
-	Message.BloodDefinitionId = TEXT("TestBlood");
+	Message.Direction = GetActorForwardVector();
+	Message.Amount = 3.0f;
+	Message.BloodDefinitionId = TEXT("Human.Red");
 
 	UGameplayMessageSubsystem::Get(this).BroadcastMessage(
-		CMGoreGameplayTags::Message::Blood::Impact,
+		CMGoreGameplayTags::Message::Blood::Burst,
 		Message
 	);
 }

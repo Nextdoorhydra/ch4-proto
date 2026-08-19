@@ -7,6 +7,9 @@
 
 #include "CMBloodSubsystem.generated.h"
 
+class UCMBloodDefinition;
+class UCMBloodDefinitionRegistry;
+
 struct FCMBloodImpactMessage;
 struct FCMBloodBurstMessage;
 struct FCMBleedStateMessage;
@@ -92,7 +95,24 @@ private:
 	void ProcessBloodEvent(
 		const FCMBloodEvent& Event
 	);
+	
+	void LoadDefinitionRegistry();
 
+	const UCMBloodDefinition* ResolveBloodDefinition(
+		FName RequestedDefinitionId
+	) const;
+	
 private:
 	TArray<FGameplayMessageListenerHandle> MessageListenerHandles;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCMBloodDefinitionRegistry> LoadedDefinitionRegistry;
+
+	UPROPERTY(Transient)
+	TMap<
+		FName,
+		TObjectPtr<UCMBloodDefinition>
+	> BloodDefinitions;
+
+	FName DefaultDefinitionId = NAME_None;
 };

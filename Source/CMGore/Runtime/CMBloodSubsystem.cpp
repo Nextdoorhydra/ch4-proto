@@ -1,8 +1,12 @@
 ﻿#include "CMBloodSubsystem.h"
 
 #include "CMBloodEvent.h"
-#include "CMGoreGameplayTags.h"
-#include "CMGoreMessages.h"
+#include "Tags/CMGoreGameplayTags.h"
+#include "Messaging/CMGoreMessages.h"
+#include "Data/CMBloodDefinition.h"
+#include "Data/CMBloodDefinitionRegistry.h"
+#include "Settings/CMBloodSettings.h"
+#include "VFX/CMBloodVFXExecutor.h"
 
 #include "Engine/World.h"
 
@@ -106,6 +110,7 @@ void UCMBloodSubsystem::Initialize(
 {
 	Super::Initialize(Collection);
 
+	LoadDefinitionRegistry();
 	RegisterMessageListeners();
 
 	UE_LOG(
@@ -115,10 +120,13 @@ void UCMBloodSubsystem::Initialize(
 	);
 }
 
-
 void UCMBloodSubsystem::Deinitialize()
 {
 	UnregisterMessageListeners();
+
+	BloodDefinitions.Reset();
+	LoadedDefinitionRegistry = nullptr;
+	DefaultDefinitionId = NAME_None;
 
 	UE_LOG(
 		LogCMBloodSubsystem,
@@ -480,10 +488,9 @@ void UCMBloodSubsystem::ProcessBloodEvent(
 	const FCMBloodEvent& Event
 )
 {
-	// Phase2에서는 로그만 띄움
 	UE_LOG(
 		LogCMBloodSubsystem,
-		Log,
+		Verbose,
 		TEXT(
 			"Blood Event | "
 			"Type=%s | "
@@ -500,4 +507,201 @@ void UCMBloodSubsystem::ProcessBloodEvent(
 			? *Event.Source->GetName()
 			: TEXT("None")
 	);
+
+	switch (Event.Type)
+	{
+	case ECMBloodEventType::Impact:
+	case ECMBloodEventType::Burst:
+		break;
+
+	default:
+		// Bleed / Pool은 이후 Phase에서 처리.
+		return;
+	}
+
+	const UCMBloodDefinition* Definition =
+		ResolveBloodDefinition(
+			Event.BloodDefinitionId
+		);
+
+	if (!IsValid(Definition))
+	{
+		UE_LOG(
+			LogCMBloodSubsystem,
+			Warning,
+			TEXT(
+				"Unable to resolve Blood Definition '%s'."
+			),
+			*Event.BloodDefinitionId.ToString()
+		);
+
+		return;
+	}
+
+	if (!FCMBloodVFXExecutor::ExecuteInstant(
+		this,
+		Event,
+		*Definition
+	))
+	{
+		UE_LOG(
+			LogCMBloodSubsystem,
+			Verbose,
+			TEXT(
+				"No instant Blood VFX was spawned "
+				"for Definition '%s'."
+			),
+			*Definition->DefinitionId.ToString()
+		);
+	}
+}
+
+void UCMBloodSubsystem::LoadDefinitionRegistry()
+{
+	BloodDefinitions.Reset();
+	LoadedDefinitionRegistry = nullptr;
+	DefaultDefinitionId = NAME_None;
+
+	const UCMBloodSettings* Settings =
+		GetDefault<UCMBloodSettings>();
+
+	if (!Settings)
+	{
+		UE_LOG(
+			LogCMBloodSubsystem,
+			Error,
+			TEXT("Failed to get CM Blood settings.")
+		);
+
+		return;
+	}
+
+	DefaultDefinitionId =
+		Settings->DefaultDefinitionId;
+
+	UCMBloodDefinitionRegistry* Registry =
+		Settings->DefinitionRegistry.LoadSynchronous();
+
+	if (!IsValid(Registry))
+	{
+		UE_LOG(
+			LogCMBloodSubsystem,
+			Warning,
+			TEXT(
+				"CMGore has no valid Blood Definition Registry. "
+				"Configure it in Project Settings > CM Gore."
+			)
+		);
+
+		return;
+	}
+
+	LoadedDefinitionRegistry = Registry;
+
+	for (UCMBloodDefinition* Definition : Registry->Definitions)
+	{
+		if (!IsValid(Definition))
+		{
+			UE_LOG(
+				LogCMBloodSubsystem,
+				Warning,
+				TEXT(
+					"Blood Definition Registry contains "
+					"a null definition."
+				)
+			);
+
+			continue;
+		}
+
+		if (Definition->DefinitionId.IsNone())
+		{
+			UE_LOG(
+				LogCMBloodSubsystem,
+				Error,
+				TEXT(
+					"Blood Definition '%s' has no DefinitionId."
+				),
+				*Definition->GetName()
+			);
+
+			continue;
+		}
+
+		if (BloodDefinitions.Contains(Definition->DefinitionId))
+		{
+			UE_LOG(
+				LogCMBloodSubsystem,
+				Error,
+				TEXT(
+					"Duplicate Blood DefinitionId '%s'. "
+					"Definition '%s' was ignored."
+				),
+				*Definition->DefinitionId.ToString(),
+				*Definition->GetName()
+			);
+
+			continue;
+		}
+
+		BloodDefinitions.Add(
+			Definition->DefinitionId,
+			Definition
+		);
+	}
+
+	UE_LOG(
+		LogCMBloodSubsystem,
+		Log,
+		TEXT(
+			"Loaded %d Blood Definitions. Default='%s'"
+		),
+		BloodDefinitions.Num(),
+		*DefaultDefinitionId.ToString()
+	);
+}
+
+const UCMBloodDefinition*
+UCMBloodSubsystem::ResolveBloodDefinition(
+	FName RequestedDefinitionId
+) const
+{
+	FName EffectiveId = RequestedDefinitionId;
+
+	if (EffectiveId.IsNone())
+	{
+		EffectiveId = DefaultDefinitionId;
+	}
+
+	if (const TObjectPtr<UCMBloodDefinition>* Found =
+		BloodDefinitions.Find(EffectiveId))
+	{
+		return Found->Get();
+	}
+
+	// 요청 ID가 잘못됐으면 Default Definition으로 fallback.
+	if (
+		!DefaultDefinitionId.IsNone() &&
+		EffectiveId != DefaultDefinitionId
+	)
+	{
+		if (const TObjectPtr<UCMBloodDefinition>* DefaultDefinition =
+			BloodDefinitions.Find(DefaultDefinitionId))
+		{
+			UE_LOG(
+				LogCMBloodSubsystem,
+				Warning,
+				TEXT(
+					"Unknown BloodDefinitionId '%s'. "
+					"Using default '%s'."
+				),
+				*EffectiveId.ToString(),
+				*DefaultDefinitionId.ToString()
+			);
+
+			return DefaultDefinition->Get();
+		}
+	}
+
+	return nullptr;
 }
