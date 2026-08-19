@@ -23,7 +23,8 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     ACMChimera& Chimera,
     int32 SegmentIndex,
     USceneComponent* FootPoint,
-    ACMPlayerState* ContributingPlayerState
+    ACMPlayerState* ContributingPlayerState,
+    float MovementImpulseMultiplier
 )
 {
     if (!Chimera.HasAuthority()
@@ -38,7 +39,33 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
         Chimera,
         Chimera.BodySegments[SegmentIndex],
         FootPoint,
-        ContributingPlayerState
+        ContributingPlayerState,
+        MovementImpulseMultiplier
+    );
+}
+
+bool UCMLineBodyMovementCoordinator::TryActivateArm(
+    ACMChimera& Chimera,
+    int32 SegmentIndex,
+    USceneComponent* ImpulsePoint,
+    ACMPlayerState* ContributingPlayerState,
+    float MovementImpulseMultiplier
+)
+{
+    if (!Chimera.HasAuthority()
+        || SegmentIndex < 0
+        || SegmentIndex >= Chimera.ActiveSegmentCount
+        || !Chimera.BodySegments.IsValidIndex(SegmentIndex))
+    {
+        return false;
+    }
+
+    return ApplyArmImpulse(
+        Chimera,
+        Chimera.BodySegments[SegmentIndex],
+        ImpulsePoint,
+        ContributingPlayerState,
+        MovementImpulseMultiplier
     );
 }
 
@@ -46,7 +73,8 @@ bool UCMLineBodyMovementCoordinator::ApplyLegImpulse(
     ACMChimera& Chimera,
     UStaticMeshComponent* SegmentBody,
     USceneComponent* FootPoint,
-    ACMPlayerState* ContributingPlayerState
+    ACMPlayerState* ContributingPlayerState,
+    float MovementImpulseMultiplier
 )
 {
     if (!SegmentBody || !FootPoint)
@@ -66,8 +94,9 @@ bool UCMLineBodyMovementCoordinator::ApplyLegImpulse(
 
     const FVector Impulse =
         ForwardDirection
-        * Chimera.LegImpulse
-        * GetPerControlImpulseMultiplier(Chimera);
+        * Chimera.BaseMovementImpulse
+        * GetPerControlImpulseMultiplier(Chimera)
+        * FMath::Max(MovementImpulseMultiplier, 0.0f);
 
     const float TranslationFraction = FMath::Clamp(
         Chimera.IndividualPlanarTranslationFraction,
@@ -99,6 +128,70 @@ bool UCMLineBodyMovementCoordinator::ApplyLegImpulse(
         IntendedYawAngularImpulse
     );
 
+    return true;
+}
+
+bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
+    ACMChimera& Chimera,
+    UStaticMeshComponent* SegmentBody,
+    USceneComponent* ImpulsePoint,
+    ACMPlayerState* ContributingPlayerState,
+    float MovementImpulseMultiplier
+)
+{
+    if (!SegmentBody || !ImpulsePoint
+        || MovementImpulseMultiplier <= 0.0f)
+    {
+        return false;
+    }
+
+    FVector ForwardDirection = SegmentBody->GetForwardVector();
+    ForwardDirection.Z = 0.0f;
+    if (!ForwardDirection.Normalize())
+    {
+        return false;
+    }
+
+    const FVector Impulse = ForwardDirection
+        * Chimera.BaseMovementImpulse
+        * GetPerControlImpulseMultiplier(Chimera)
+        * MovementImpulseMultiplier;
+    const float TranslationFraction = FMath::Clamp(
+        Chimera.IndividualPlanarTranslationFraction,
+        0.0f,
+        1.0f
+    );
+    const float RotationFraction = FMath::Clamp(
+        Chimera.IndividualYawRotationFraction,
+        0.0f,
+        1.0f
+    );
+    const FVector ImpulseLocation = ImpulsePoint->GetComponentLocation();
+    SegmentBody->AddImpulseAtLocation(
+        Impulse * RotationFraction,
+        ImpulseLocation
+    );
+    SegmentBody->AddImpulse(
+        Impulse * (TranslationFraction - RotationFraction)
+    );
+
+    const FVector LeverArm =
+        ImpulseLocation - SegmentBody->GetCenterOfMass();
+    const float IntendedYawAngularImpulse =
+        FVector::CrossProduct(LeverArm, Impulse).Z;
+    RegisterCooperativeInput(
+        Chimera,
+        ContributingPlayerState,
+        Impulse,
+        IntendedYawAngularImpulse
+    );
+
+    UE_LOG(LogChimeraMovement, Log,
+        TEXT("[Arm Impulse] Segment=%d Scale=%.2f Base=%.1f Final=%.1f"),
+        Chimera.BodySegments.IndexOfByKey(SegmentBody),
+        MovementImpulseMultiplier,
+        Chimera.BaseMovementImpulse,
+        Impulse.Size());
     return true;
 }
 

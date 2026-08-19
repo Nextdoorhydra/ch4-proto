@@ -74,6 +74,22 @@ void ACMPlayerController::RequestCheatClearRandomParts()
     }
 }
 
+void ACMPlayerController::RequestCheatSpawnLegParts()
+{
+    if (IsLocalController())
+    {
+        ServerCheatSpawnLegParts();
+    }
+}
+
+void ACMPlayerController::RequestCheatClearLegParts()
+{
+    if (IsLocalController())
+    {
+        ServerCheatClearLegParts();
+    }
+}
+
 void ACMPlayerController::ServerRequestRetryGame_Implementation()
 {
     ACMGameMode* GameMode = GetWorld()
@@ -223,6 +239,32 @@ void ACMPlayerController::ServerCheatClearRandomParts_Implementation()
             TEXT("[Cheat] CM.ClearRandomParts requested by %s."),
             *GetName());
         SharedChimera->ClearRandomDebugParts();
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatSpawnLegParts_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.LegParts requested by %s."),
+            *GetName());
+        SharedChimera->SpawnTestLegParts();
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatClearLegParts_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.ClearLegParts requested by %s."),
+            *GetName());
+        SharedChimera->ClearTestLegParts();
     }
 #endif
 }

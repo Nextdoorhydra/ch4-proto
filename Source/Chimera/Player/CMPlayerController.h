@@ -32,6 +32,8 @@ public:
 
     void RequestCheatSpawnRandomParts();
     void RequestCheatClearRandomParts();
+    void RequestCheatSpawnLegParts();
+    void RequestCheatClearLegParts();
 
 protected:
     virtual void BeginPlay() override;
@@ -93,6 +95,12 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatClearRandomParts();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatSpawnLegParts();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatClearLegParts();
 
     UPROPERTY(Transient)
     TObjectPtr<ACMChimera> CachedSharedChimera;

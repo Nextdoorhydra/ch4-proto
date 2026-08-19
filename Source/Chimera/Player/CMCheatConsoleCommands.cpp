@@ -62,6 +62,22 @@ void ClearRandomParts(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+void SpawnLegParts(const TArray<FString>& Args, UWorld* World)
+{
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatSpawnLegParts();
+    }
+}
+
+void ClearLegParts(const TArray<FString>& Args, UWorld* World)
+{
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatClearLegParts();
+    }
+}
+
 FAutoConsoleCommandWithWorldAndArgs KillAllSegmentsCommand(
     TEXT("CM.AllDead"),
     TEXT("Kills every living Chimera body segment on the server."),
@@ -72,7 +88,7 @@ FAutoConsoleCommandWithWorldAndArgs KillAllSegmentsCommand(
 
 FAutoConsoleCommandWithWorldAndArgs SpawnRandomPartsCommand(
     TEXT("CM.RandomParts"),
-    TEXT("Attaches random Head/Arm/Leg diagnostic Parts to empty active slots."),
+    TEXT("Attaches random registered production Part Blueprints to empty active slots."),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &SpawnRandomParts
     )
@@ -80,9 +96,25 @@ FAutoConsoleCommandWithWorldAndArgs SpawnRandomPartsCommand(
 
 FAutoConsoleCommandWithWorldAndArgs ClearRandomPartsCommand(
     TEXT("CM.ClearRandomParts"),
-    TEXT("Detaches and destroys diagnostic Parts only."),
+    TEXT("Detaches and destroys only Parts created by CM.RandomParts."),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &ClearRandomParts
+    )
+);
+
+FAutoConsoleCommandWithWorldAndArgs SpawnLegPartsCommand(
+    TEXT("CM.LegParts"),
+    TEXT("Spawns and attaches production Leg Parts to every empty active slot."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &SpawnLegParts
+    )
+);
+
+FAutoConsoleCommandWithWorldAndArgs ClearLegPartsCommand(
+    TEXT("CM.ClearLegParts"),
+    TEXT("Detaches and destroys only Leg Parts created by CM.LegParts."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &ClearLegParts
     )
 );
 
