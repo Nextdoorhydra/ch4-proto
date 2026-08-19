@@ -359,7 +359,10 @@ void UCMVisionManagerSubsystem::UpdateVisibilityMaskBounds(
             FMath::Max(
                 FMath::Abs(Location.X - MaskWorldCenter.X),
                 FMath::Abs(Location.Y - MaskWorldCenter.Y)
-            ) + VisionSource->GetVisionDistance()
+            ) + FMath::Max(
+                VisionSource->GetVisionDistance(),
+                VisionSource->GetNearVisionRadius()
+            )
         );
     }
     MaskWorldHalfExtent = RequiredHalfExtent * FMath::Max(
@@ -378,6 +381,10 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
         RenderConfig->ArcSegmentCount,
         3
     );
+    const int32 NearVisionCircleSegmentCount = FMath::Max(
+        RenderConfig->NearVisionCircleSegmentCount,
+        8
+    );
     const float RevealDistance = FMath::Max(
         RenderConfig->OccluderSurfaceRevealDistance,
         0.0f
@@ -389,6 +396,40 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
             CachedVisionMaskData.AddDefaulted_GetRef();
         SourceData.Origin = VisionSource->GetVisionOrigin();
         SourceData.Rays.Reserve(ArcSegmentCount + 1);
+
+        const auto AddClippedRay = [
+            this,
+            VisionSource,
+            &SourceData,
+            RevealDistance
+        ](TArray<FCMVisionRaySample>& Rays, const FVector& DesiredEnd)
+        {
+            FHitResult Hit;
+            FCMVisionRaySample& Ray = Rays.AddDefaulted_GetRef();
+            Ray.BaseEnd = ClipVisionRayToOccluder(
+                *VisionSource,
+                SourceData.Origin,
+                DesiredEnd,
+                0.0f,
+                &Hit
+            );
+            Ray.RevealedEnd = Ray.BaseEnd;
+            Ray.HitComponent = Hit.GetComponent();
+
+            if (Hit.bBlockingHit && RevealDistance > 0.0f)
+            {
+                const FVector RayDirection =
+                    (DesiredEnd - SourceData.Origin).GetSafeNormal2D();
+                const float RemainingDistance = FVector::Dist2D(
+                    Ray.BaseEnd,
+                    DesiredEnd
+                );
+                Ray.RevealedEnd += RayDirection * FMath::Min(
+                    RevealDistance,
+                    RemainingDistance
+                );
+            }
+        };
 
         const FVector Direction = VisionSource->GetRenderedAimDirection();
         const float Distance = VisionSource->GetVisionDistance();
@@ -417,31 +458,29 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
                 0.0f
             );
 
-            FHitResult Hit;
-            FCMVisionRaySample& Ray =
-                SourceData.Rays.AddDefaulted_GetRef();
-            Ray.BaseEnd = ClipVisionRayToOccluder(
-                *VisionSource,
-                SourceData.Origin,
-                DesiredEnd,
-                0.0f,
-                &Hit
-            );
-            Ray.RevealedEnd = Ray.BaseEnd;
-            Ray.HitComponent = Hit.GetComponent();
+            AddClippedRay(SourceData.Rays, DesiredEnd);
+        }
 
-            if (Hit.bBlockingHit && RevealDistance > 0.0f)
+        const float NearVisionRadius =
+            VisionSource->GetNearVisionRadius();
+        if (NearVisionRadius > 0.0f)
+        {
+            SourceData.NearVisionRays.Reserve(
+                NearVisionCircleSegmentCount
+            );
+            for (int32 RayIndex = 0;
+                RayIndex < NearVisionCircleSegmentCount;
+                ++RayIndex)
             {
-                const FVector RayDirection =
-                    (DesiredEnd - SourceData.Origin).GetSafeNormal2D();
-                const float RemainingDistance = FVector::Dist2D(
-                    Ray.BaseEnd,
-                    DesiredEnd
+                const float Angle = UE_TWO_PI
+                    * static_cast<float>(RayIndex)
+                    / NearVisionCircleSegmentCount;
+                const FVector DesiredEnd = SourceData.Origin + FVector(
+                    FMath::Cos(Angle) * NearVisionRadius,
+                    FMath::Sin(Angle) * NearVisionRadius,
+                    0.0f
                 );
-                Ray.RevealedEnd += RayDirection * FMath::Min(
-                    RevealDistance,
-                    RemainingDistance
-                );
+                AddClippedRay(SourceData.NearVisionRays, DesiredEnd);
             }
         }
     }
@@ -750,7 +789,8 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
 
     for (const FCMVisionSourceMaskData& SourceData : CachedVisionMaskData)
     {
-        if (SourceData.Rays.Num() < 2)
+        if (SourceData.Rays.Num() < 2
+            && SourceData.NearVisionRays.Num() < 3)
         {
             continue;
         }
@@ -763,7 +803,10 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
 
         TArray<FCanvasUVTri> Triangles;
         const int32 ArcSegmentCount = SourceData.Rays.Num() - 1;
-        Triangles.Reserve(ArcSegmentCount);
+        Triangles.Reserve(
+            FMath::Max(ArcSegmentCount, 0)
+            + SourceData.NearVisionRays.Num()
+        );
         const auto AddMaskTriangle = [&Triangles](
             const FVector2D& A,
             const FVector2D& B,
@@ -780,15 +823,17 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             Triangle.V1_Color = FLinearColor::White;
             Triangle.V2_Color = FLinearColor::White;
         };
-        for (int32 ArcIndex = 0;
-            ArcIndex < ArcSegmentCount;
-            ++ArcIndex)
+        const auto AddRayTriangle = [
+            this,
+            &AddMaskTriangle,
+            OriginPixel,
+            Width,
+            Height,
+            OutOccluders,
+            bUseRevealedEnds
+        ](const FCMVisionRaySample& RayA,
+            const FCMVisionRaySample& RayB)
         {
-            const FCMVisionRaySample& RayA =
-                SourceData.Rays[ArcIndex];
-            const FCMVisionRaySample& RayB =
-                SourceData.Rays[ArcIndex + 1];
-
             if (OutOccluders)
             {
                 if (UPrimitiveComponent* Component =
@@ -822,6 +867,28 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             );
 
             AddMaskTriangle(OriginPixel, PointAPixel, PointBPixel);
+        };
+
+        for (int32 ArcIndex = 0;
+            ArcIndex < ArcSegmentCount;
+            ++ArcIndex)
+        {
+            AddRayTriangle(
+                SourceData.Rays[ArcIndex],
+                SourceData.Rays[ArcIndex + 1]
+            );
+        }
+
+        for (int32 RayIndex = 0;
+            RayIndex < SourceData.NearVisionRays.Num();
+            ++RayIndex)
+        {
+            const int32 NextRayIndex =
+                (RayIndex + 1) % SourceData.NearVisionRays.Num();
+            AddRayTriangle(
+                SourceData.NearVisionRays[RayIndex],
+                SourceData.NearVisionRays[NextRayIndex]
+            );
         }
 
         FCanvasTriangleItem TriangleItem(

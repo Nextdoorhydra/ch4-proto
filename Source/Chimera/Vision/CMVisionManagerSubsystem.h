@@ -34,6 +34,7 @@ struct FCMVisionSourceMaskData
 {
     FVector Origin = FVector::ZeroVector;
     TArray<FCMVisionRaySample> Rays;
+    TArray<FCMVisionRaySample> NearVisionRays;
 };
 
 /** Local registry and union query for all replicated shared-vision sources. */

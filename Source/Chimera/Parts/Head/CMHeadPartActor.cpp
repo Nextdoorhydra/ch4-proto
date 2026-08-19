@@ -58,7 +58,8 @@ void ACMHeadPartActor::ApplyHeadData()
     {
         VisionComponent->ConfigureVision(
             HeadData->VisionAngle,
-            HeadData->VisionRange
+            HeadData->VisionRange,
+            HeadData->NearVisionRadius
         );
     }
 }

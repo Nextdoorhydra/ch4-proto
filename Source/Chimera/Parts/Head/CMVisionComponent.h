@@ -6,7 +6,7 @@
 
 #include "CMVisionComponent.generated.h"
 
-/** One replicated cone-shaped source contributing to shared Chimera vision. */
+/** One replicated Head source contributing cone and near vision. */
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
 class CHIMERA_API UCMVisionComponent : public USceneComponent
 {
@@ -27,7 +27,11 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Vision")
-    void ConfigureVision(float InAngleDegrees, float InDistance);
+    void ConfigureVision(
+        float InAngleDegrees,
+        float InDistance,
+        float InNearVisionRadius
+    );
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Vision")
@@ -45,6 +49,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     float GetVisionDistance() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    float GetNearVisionRadius() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     FVector GetAimDirection() const;
@@ -91,6 +98,11 @@ private:
         Category = "Chimera|Vision",
         meta = (AllowPrivateAccess = "true"))
     float VisionDistance = 1200.0f;
+
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision",
+        meta = (AllowPrivateAccess = "true"))
+    float NearVisionRadius = 150.0f;
 
     UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Vision",

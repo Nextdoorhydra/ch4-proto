@@ -25,6 +25,11 @@ public:
         meta = (ClampMin = "3", ClampMax = "128"))
     int32 ArcSegmentCount = 24;
 
+    /** Ray count used to keep the near-vision circle blocked by walls. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
+        meta = (ClampMin = "8", ClampMax = "64"))
+    int32 NearVisionCircleSegmentCount = 24;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
         meta = (ClampMin = "0.01"))
     float MaskUpdateInterval = 0.05f;

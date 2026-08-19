@@ -20,6 +20,7 @@ void UCMVisionComponent::GetLifetimeReplicatedProps(
     DOREPLIFETIME(UCMVisionComponent, bVisionActive);
     DOREPLIFETIME(UCMVisionComponent, VisionAngleDegrees);
     DOREPLIFETIME(UCMVisionComponent, VisionDistance);
+    DOREPLIFETIME(UCMVisionComponent, NearVisionRadius);
     DOREPLIFETIME(UCMVisionComponent, AimDirection);
 }
 
@@ -66,7 +67,8 @@ void UCMVisionComponent::TickComponent(
 
 void UCMVisionComponent::ConfigureVision(
     float InAngleDegrees,
-    float InDistance
+    float InDistance,
+    float InNearVisionRadius
 )
 {
     if (!GetOwner() || !GetOwner()->HasAuthority())
@@ -76,6 +78,7 @@ void UCMVisionComponent::ConfigureVision(
 
     VisionAngleDegrees = FMath::Clamp(InAngleDegrees, 0.0f, 360.0f);
     VisionDistance = FMath::Max(InDistance, 0.0f);
+    NearVisionRadius = FMath::Max(InNearVisionRadius, 0.0f);
     GetOwner()->ForceNetUpdate();
 }
 
@@ -120,6 +123,11 @@ float UCMVisionComponent::GetVisionAngleDegrees() const
 float UCMVisionComponent::GetVisionDistance() const
 {
     return VisionDistance;
+}
+
+float UCMVisionComponent::GetNearVisionRadius() const
+{
+    return NearVisionRadius;
 }
 
 FVector UCMVisionComponent::GetAimDirection() const
@@ -176,8 +184,18 @@ bool UCMVisionComponent::IsLocationVisible(
     const FVector& WorldLocation
 ) const
 {
-    if (!bVisionActive || VisionDistance <= 0.0f
-        || VisionAngleDegrees <= 0.0f)
+    if (!bVisionActive)
+    {
+        return false;
+    }
+
+    if (FVector::DistSquared2D(GetVisionOrigin(), WorldLocation)
+        <= FMath::Square(NearVisionRadius))
+    {
+        return true;
+    }
+
+    if (VisionDistance <= 0.0f || VisionAngleDegrees <= 0.0f)
     {
         return false;
     }
