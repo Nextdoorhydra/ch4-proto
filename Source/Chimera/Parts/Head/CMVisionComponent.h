@@ -19,6 +19,12 @@ public:
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
 
+    virtual void TickComponent(
+        float DeltaTime,
+        ELevelTick TickType,
+        FActorComponentTickFunction* ThisTickFunction
+    ) override;
+
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Vision")
     void ConfigureVision(float InAngleDegrees, float InDistance);
@@ -42,6 +48,14 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     FVector GetAimDirection() const;
+
+    /** Visual-only direction: immediate for the owning client, smoothed remotely. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    FVector GetRenderedAimDirection() const;
+
+    /** Local visual prediction only. Never changes the authoritative aim. */
+    void SetLocalPredictedAimDirection(const FVector& InAimDirection);
+    void ClearLocalAimPrediction();
 
     /** Uses the authored Part Slot transform while this Head is attached. */
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
@@ -82,4 +96,19 @@ private:
         Category = "Chimera|Vision",
         meta = (AllowPrivateAccess = "true"))
     FVector_NetQuantizeNormal AimDirection = FVector::ForwardVector;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision|Smoothing",
+        meta = (ClampMin = "0.0", AllowPrivateAccess = "true"))
+    float RemoteAimInterpolationSpeedDegrees = 720.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision|Smoothing",
+        meta = (ClampMin = "0.1", AllowPrivateAccess = "true"))
+    float LocalPredictionTimeout = 0.5f;
+
+    FVector RenderedAimDirection = FVector::ForwardVector;
+    FVector LocalPredictedAimDirection = FVector::ForwardVector;
+    float LastLocalPredictionTime = 0.0f;
+    bool bHasLocalAimPrediction = false;
 };

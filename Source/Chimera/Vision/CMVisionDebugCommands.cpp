@@ -7,6 +7,7 @@
 #include "Player/CMControlTypes.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerController.h"
+#include "Player/CMPlayerState.h"
 
 #if !UE_BUILD_SHIPPING
 
@@ -17,13 +18,19 @@ namespace CMVisionDebugCommands
 const TCHAR* HeadPartClassPath =
     TEXT("/Game/Chimera/Character/Part/Head/BP_CMHead01HeadPart.BP_CMHead01HeadPart_C");
 
-ACMPlayerController* FindLocalPlayerController(UWorld* World)
+ACMPlayerController* FindPlayerController(
+    UWorld* World,
+    int32 RequestedPlayerSlotId,
+    int32& OutPlayerSlotId
+)
 {
+    OutPlayerSlotId = INDEX_NONE;
     if (!World)
     {
         return nullptr;
     }
 
+    TArray<ACMPlayerController*> PlayerControllers;
     for (FConstPlayerControllerIterator It =
             World->GetPlayerControllerIterator();
         It;
@@ -31,9 +38,41 @@ ACMPlayerController* FindLocalPlayerController(UWorld* World)
     {
         ACMPlayerController* PlayerController =
             Cast<ACMPlayerController>(It->Get());
-        if (PlayerController && PlayerController->IsLocalController())
+        if (PlayerController)
         {
-            return PlayerController;
+            PlayerControllers.Add(PlayerController);
+        }
+    }
+
+    if (RequestedPlayerSlotId != INDEX_NONE)
+    {
+        for (ACMPlayerController* PlayerController : PlayerControllers)
+        {
+            const ACMPlayerState* PlayerState =
+                PlayerController->GetPlayerState<ACMPlayerState>();
+            if (PlayerState
+                && PlayerState->GetPlayerSlotId() == RequestedPlayerSlotId)
+            {
+                OutPlayerSlotId = RequestedPlayerSlotId;
+                return PlayerController;
+            }
+        }
+        return nullptr;
+    }
+
+    for (int32 PlayerIndex = 0;
+        PlayerIndex < PlayerControllers.Num();
+        ++PlayerIndex)
+    {
+        if (PlayerControllers[PlayerIndex]->IsLocalController())
+        {
+            const ACMPlayerState* PlayerState =
+                PlayerControllers[PlayerIndex]
+                    ->GetPlayerState<ACMPlayerState>();
+            OutPlayerSlotId = PlayerState
+                ? PlayerState->GetPlayerSlotId()
+                : INDEX_NONE;
+            return PlayerControllers[PlayerIndex];
         }
     }
 
@@ -43,22 +82,34 @@ ACMPlayerController* FindLocalPlayerController(UWorld* World)
 void AttachHead(const TArray<FString>& Args, UWorld* World)
 {
     int32 ControlSlotIndex = INDEX_NONE;
-    if (Args.Num() != 1
+    int32 RequestedPlayerSlotId = INDEX_NONE;
+    if (Args.Num() < 1
+        || Args.Num() > 2
         || !LexTryParseString(ControlSlotIndex, *Args[0])
         || ControlSlotIndex < 0
-        || ControlSlotIndex >= CMControl::MaxKeysPerPlayer)
+        || ControlSlotIndex >= CMControl::MaxKeysPerPlayer
+        || (Args.Num() == 2
+            && (!LexTryParseString(RequestedPlayerSlotId, *Args[1])
+                || RequestedPlayerSlotId < 0
+                || RequestedPlayerSlotId >= CMControl::MaxPlayers)))
     {
         UE_LOG(LogChimeraVisionDebug, Warning,
-            TEXT("Usage: CM.AttachHead <ControlSlotIndex 0-3>"));
+            TEXT("Usage: CM.AttachHead <ControlSlotIndex 0-3> [PlayerSlotId 0-3]"));
         return;
     }
 
+    int32 ResolvedPlayerSlotId = INDEX_NONE;
     ACMPlayerController* PlayerController =
-        FindLocalPlayerController(World);
+        FindPlayerController(
+            World,
+            RequestedPlayerSlotId,
+            ResolvedPlayerSlotId
+        );
     if (!PlayerController)
     {
         UE_LOG(LogChimeraVisionDebug, Warning,
-            TEXT("[Attach Head Failed] No local CMPlayerController."));
+            TEXT("[Attach Head Failed] PlayerSlotId %d was not found. Run on the listen-server host after players are assigned."),
+            RequestedPlayerSlotId);
         return;
     }
 
@@ -139,7 +190,10 @@ void AttachHead(const TArray<FString>& Args, UWorld* World)
     }
 
     UE_LOG(LogChimeraVisionDebug, Warning,
-        TEXT("[Attach Head] ControlSlot=%d Slot=(%d,%d) Head=%s"),
+        TEXT("[Attach Head] PlayerSlotId=%d Controller=%s ControlBody=%s ControlSlot=%d Slot=(%d,%d) Head=%s"),
+        ResolvedPlayerSlotId,
+        *GetNameSafe(PlayerController),
+        *GetNameSafe(ControlBody),
         ControlSlotIndex,
         SlotAddress.SegmentIndex,
         SlotAddress.PartSlotIndex,
@@ -148,7 +202,7 @@ void AttachHead(const TArray<FString>& Args, UWorld* World)
 
 FAutoConsoleCommandWithWorldAndArgs AttachHeadCommand(
     TEXT("CM.AttachHead"),
-    TEXT("Spawns BP_CMHead01HeadPart and attaches it to one controlled slot. Usage: CM.AttachHead <0-3>"),
+    TEXT("Spawns BP_CMHead01HeadPart for a player control slot. Usage: CM.AttachHead <ControlSlot 0-3> [PlayerSlotId 0-3]"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&AttachHead)
 );
 }

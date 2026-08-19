@@ -146,7 +146,7 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
             DrawDebugLine(
                 World,
                 Origin,
-                Origin + VisionSource->GetAimDirection()
+                Origin + VisionSource->GetRenderedAimDirection()
                     * VisionSource->GetVisionDistance(),
                 FColor::Cyan,
                 false,
@@ -388,7 +388,7 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
         SourceData.Origin = VisionSource->GetVisionOrigin();
         SourceData.Rays.Reserve(ArcSegmentCount + 1);
 
-        const FVector Direction = VisionSource->GetAimDirection();
+        const FVector Direction = VisionSource->GetRenderedAimDirection();
         const float Distance = VisionSource->GetVisionDistance();
         const float HalfAngleRadians = FMath::DegreesToRadians(
             VisionSource->GetVisionAngleDegrees() * 0.5f

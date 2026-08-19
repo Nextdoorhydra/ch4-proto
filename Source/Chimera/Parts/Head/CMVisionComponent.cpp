@@ -7,7 +7,8 @@
 
 UCMVisionComponent::UCMVisionComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
     SetIsReplicatedByDefault(true);
 }
 
@@ -20,6 +21,47 @@ void UCMVisionComponent::GetLifetimeReplicatedProps(
     DOREPLIFETIME(UCMVisionComponent, VisionAngleDegrees);
     DOREPLIFETIME(UCMVisionComponent, VisionDistance);
     DOREPLIFETIME(UCMVisionComponent, AimDirection);
+}
+
+void UCMVisionComponent::TickComponent(
+    float DeltaTime,
+    ELevelTick TickType,
+    FActorComponentTickFunction* ThisTickFunction
+)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    const UWorld* World = GetWorld();
+    const bool bPredictionIsCurrent = bHasLocalAimPrediction
+        && World
+        && World->GetTimeSeconds() - LastLocalPredictionTime
+            <= LocalPredictionTimeout;
+
+    if (bHasLocalAimPrediction && !bPredictionIsCurrent)
+    {
+        bHasLocalAimPrediction = false;
+    }
+
+    if (bPredictionIsCurrent)
+    {
+        // The owning player must see cursor motion without waiting for an RPC.
+        RenderedAimDirection = LocalPredictedAimDirection;
+        return;
+    }
+
+    const FVector TargetDirection = FVector(AimDirection).GetSafeNormal2D();
+    if (RemoteAimInterpolationSpeedDegrees <= 0.0f)
+    {
+        RenderedAimDirection = TargetDirection;
+        return;
+    }
+
+    RenderedAimDirection = FMath::VInterpNormalRotationTo(
+        RenderedAimDirection.GetSafeNormal2D(),
+        TargetDirection,
+        DeltaTime,
+        RemoteAimInterpolationSpeedDegrees
+    ).GetSafeNormal2D();
 }
 
 void UCMVisionComponent::ConfigureVision(
@@ -58,10 +100,10 @@ void UCMVisionComponent::SetAimDirection(const FVector& InAimDirection)
 
     FVector PlanarDirection = InAimDirection;
     PlanarDirection.Z = 0.0f;
-    if (PlanarDirection.Normalize())
+    if (PlanarDirection.Normalize()
+        && !PlanarDirection.Equals(FVector(AimDirection), 0.001f))
     {
         AimDirection = PlanarDirection;
-        GetOwner()->ForceNetUpdate();
     }
 }
 
@@ -83,6 +125,36 @@ float UCMVisionComponent::GetVisionDistance() const
 FVector UCMVisionComponent::GetAimDirection() const
 {
     return AimDirection;
+}
+
+FVector UCMVisionComponent::GetRenderedAimDirection() const
+{
+    return RenderedAimDirection;
+}
+
+void UCMVisionComponent::SetLocalPredictedAimDirection(
+    const FVector& InAimDirection
+)
+{
+    FVector PlanarDirection = InAimDirection;
+    PlanarDirection.Z = 0.0f;
+    if (!PlanarDirection.Normalize())
+    {
+        return;
+    }
+
+    LocalPredictedAimDirection = PlanarDirection;
+    RenderedAimDirection = PlanarDirection;
+    bHasLocalAimPrediction = true;
+    if (const UWorld* World = GetWorld())
+    {
+        LastLocalPredictionTime = World->GetTimeSeconds();
+    }
+}
+
+void UCMVisionComponent::ClearLocalAimPrediction()
+{
+    bHasLocalAimPrediction = false;
 }
 
 FVector UCMVisionComponent::GetVisionOrigin() const
@@ -154,8 +226,15 @@ void UCMVisionComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    RenderedAimDirection = FVector(AimDirection).GetSafeNormal2D();
+
     if (UWorld* World = GetWorld())
     {
+        if (World->GetNetMode() == NM_DedicatedServer)
+        {
+            SetComponentTickEnabled(false);
+        }
+
         if (UCMVisionManagerSubsystem* VisionManager =
             World->GetSubsystem<UCMVisionManagerSubsystem>())
         {
