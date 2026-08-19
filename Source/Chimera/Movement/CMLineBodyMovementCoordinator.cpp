@@ -69,6 +69,80 @@ bool UCMLineBodyMovementCoordinator::TryActivateArm(
     );
 }
 
+bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
+    ACMChimera& Chimera,
+    int32 SegmentIndex,
+    const FVector& AnchorLocation,
+    float PullImpulse,
+    float StopDistance
+)
+{
+    if (!Chimera.HasAuthority()
+        || PullImpulse <= 0.0f
+        || SegmentIndex < 0
+        || SegmentIndex >= Chimera.ActiveSegmentCount
+        || !Chimera.BodySegments.IsValidIndex(SegmentIndex))
+    {
+        return false;
+    }
+
+    float TotalMass = 0.0f;
+    FVector WeightedBodyCenter = FVector::ZeroVector;
+    TArray<UStaticMeshComponent*> SimulatedSegments;
+    for (int32 Index = 0; Index < Chimera.ActiveSegmentCount; ++Index)
+    {
+        UStaticMeshComponent* BodySegment =
+            Chimera.BodySegments.IsValidIndex(Index)
+            ? Chimera.BodySegments[Index]
+            : nullptr;
+        if (!BodySegment || !BodySegment->IsSimulatingPhysics())
+        {
+            continue;
+        }
+
+        const float SegmentMass = FMath::Max(BodySegment->GetMass(), 0.01f);
+        TotalMass += SegmentMass;
+        WeightedBodyCenter += BodySegment->GetCenterOfMass() * SegmentMass;
+        SimulatedSegments.Add(BodySegment);
+    }
+    if (SimulatedSegments.IsEmpty() || TotalMass <= UE_SMALL_NUMBER)
+    {
+        return false;
+    }
+
+    const FVector BodyCenter = WeightedBodyCenter / TotalMass;
+    const FVector AnchorOffset = AnchorLocation - BodyCenter;
+    if (AnchorOffset.Size() <= FMath::Max(StopDistance, 0.0f))
+    {
+        return false;
+    }
+
+    const FVector PullDirection = AnchorOffset.GetSafeNormal();
+    if (PullDirection.IsNearlyZero())
+    {
+        return false;
+    }
+
+    // Distribute one total impulse by mass. Every segment receives the same
+    // velocity change, so the constraint chain translates without an
+    // artificial yaw torque from pulling only one segment.
+    for (UStaticMeshComponent* BodySegment : SimulatedSegments)
+    {
+        const float MassFraction = BodySegment->GetMass() / TotalMass;
+        BodySegment->AddImpulse(
+            PullDirection * PullImpulse * MassFraction
+        );
+    }
+
+    UE_LOG(LogChimeraMovement, Verbose,
+        TEXT("[SpringArm Body Pull] SourceSegment=%d SegmentCount=%d Anchor=%s TotalImpulse=%.1f"),
+        SegmentIndex,
+        SimulatedSegments.Num(),
+        *AnchorLocation.ToCompactString(),
+        PullImpulse);
+    return true;
+}
+
 bool UCMLineBodyMovementCoordinator::ApplyLegImpulse(
     ACMChimera& Chimera,
     UStaticMeshComponent* SegmentBody,
@@ -394,7 +468,9 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
     FVector Velocity = Chimera.BodyMesh->GetPhysicsLinearVelocity();
     const FVector HorizontalVelocity(Velocity.X, Velocity.Y, 0.0f);
     const float EffectiveMaxSpeed =
-        Chimera.MaxSpeed * GetPlayerCountSpeedMultiplier(Chimera);
+    Chimera.IsSpringArmPulling()
+        ? Chimera.SpringArmMaxSpeed
+        : Chimera.MaxSpeed * GetPlayerCountSpeedMultiplier(Chimera);
 
     if (HorizontalVelocity.Size() > EffectiveMaxSpeed)
     {

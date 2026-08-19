@@ -2,6 +2,7 @@
 
 #include "Movement/CMLineBodyMovementCoordinator.h"
 #include "Parts/Arm/CMArmPart.h"
+#include "Parts/Arm/CMSpringArmPart.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Leg/CMLegPart.h"
 #include "Player/CMControlBody.h"
@@ -150,6 +151,84 @@ bool ACMChimera::TryActivateArmPart(
     return true;
 }
 
+bool ACMChimera::ApplySpringArmPull(
+    const FCMPartSlotAddress& PartSlotAddress,
+    const FVector& AnchorLocation,
+    float PullImpulse,
+    float StopDistance
+)
+{
+    if (!HasAuthority()
+        || !CMControl::IsValidPartSlot(
+            PartSlotAddress,
+            ActiveSegmentCount))
+    {
+        return false;
+    }
+
+    return MovementCoordinator
+        && MovementCoordinator->ApplyAnchorPull(
+            *this,
+            PartSlotAddress.SegmentIndex,
+            AnchorLocation,
+            PullImpulse,
+            StopDistance
+        );
+}
+
+bool ACMChimera::RequestSpringArmPull(ACMSpringArmPart* SpringArm)
+{
+    if (!HasAuthority() || !IsValid(SpringArm))
+    {
+        return false;
+    }
+
+    ACMSpringArmPart* CurrentPull = ActiveSpringArmPull.Get();
+
+    if (CurrentPull && CurrentPull != SpringArm)
+    {
+        CurrentPull->CancelBodyPullFromOverride();
+    }
+
+    ActiveSpringArmPull = SpringArm;
+
+    UE_LOG(
+        LogChimeraLineBody,
+        Log,
+        TEXT("[SpringArm Pull Owner] New=%s"),
+        *GetNameSafe(SpringArm)
+    );
+
+    return true;
+}
+
+void ACMChimera::ReleaseSpringArmPull(ACMSpringArmPart* SpringArm)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (ActiveSpringArmPull.Get() != SpringArm)
+    {
+        return;
+    }
+
+    UE_LOG(
+        LogChimeraLineBody,
+        Log,
+        TEXT("[SpringArm Pull Owner] Released=%s"),
+        *GetNameSafe(SpringArm)
+    );
+
+    ActiveSpringArmPull.Reset();
+}
+
+bool ACMChimera::IsSpringArmPulling() const
+{
+    return ActiveSpringArmPull.IsValid();
+}
+
 #if !UE_BUILD_SHIPPING
 void ACMChimera::ActivateDebugLegPart(
     const FCMPartSlotAddress& PartSlotAddress,
@@ -235,6 +314,16 @@ UClass* LoadTestArmPartClass()
     );
     return TestArmPartClass.LoadSynchronous();
 }
+
+UClass* LoadTestSpringArmPartClass()
+{
+    static TSoftClassPtr<ACMSpringArmPart> TestSpringArmPartClass(
+        FSoftObjectPath(
+            TEXT("/Game/Chimera/Character/Part/BP_CMSpringArmPart.BP_CMSpringArmPart_C")
+        )
+    );
+    return TestSpringArmPartClass.LoadSynchronous();
+}
 }
 
 void ACMChimera::SpawnRandomDebugParts()
@@ -254,6 +343,10 @@ void ACMChimera::SpawnRandomDebugParts()
     if (UClass* ArmPartClass = LoadTestArmPartClass())
     {
         RegisteredPartClasses.Add(ArmPartClass);
+    }
+    if (UClass* SpringArmPartClass = LoadTestSpringArmPartClass())
+    {
+        RegisteredPartClasses.Add(SpringArmPartClass);
     }
 
     if (RegisteredPartClasses.IsEmpty())

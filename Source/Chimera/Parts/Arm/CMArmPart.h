@@ -41,7 +41,7 @@ public:
     float GetStaminaCost() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
-    float GetSwingDuration() const;
+    virtual float GetSwingDuration() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
     float GetAttackRange() const;
@@ -56,8 +56,8 @@ public:
     FGuid GetCurrentSwingAttackId() const;
 
     /** Called by the authoritative Arm GA at the start of one swing. */
-    bool BeginSwing();
-    void EndSwing();
+    virtual bool BeginSwing();
+    virtual void EndSwing();
 
     /**
      * Server animation trace/overlap bridge. Reusing CurrentSwingAttackId

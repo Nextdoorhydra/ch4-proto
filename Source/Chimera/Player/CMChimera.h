@@ -22,6 +22,7 @@ class UDataTable;
 class UPhysicalMaterial;
 class ACMPlayerState;
 class ACMArmPart;
+class ACMSpringArmPart;
 class AActor;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogChimeraLineBody, Log, All);
@@ -153,6 +154,23 @@ public:
         ACMPlayerState* ContributingPlayerState
     );
 
+    /** Pulls one simulated body segment toward a SpringArm hook anchor. */
+    bool ApplySpringArmPull(
+        const FCMPartSlotAddress& PartSlotAddress,
+        const FVector& AnchorLocation,
+        float PullImpulse,
+        float StopDistance
+    );
+
+    /** Gives this SpringArm exclusive ownership of the Chimera pull. */
+    bool RequestSpringArmPull(ACMSpringArmPart* SpringArm);
+
+    /** Releases pull ownership only when this SpringArm currently owns it. */
+    void ReleaseSpringArmPull(ACMSpringArmPart* SpringArm);
+
+    /** True while one SpringArm owns the Chimera pull. */
+    bool IsSpringArmPulling() const;
+    
 #if !UE_BUILD_SHIPPING
     /** Attaches registered production Part Blueprints to empty active slots. */
     void SpawnRandomDebugParts();
@@ -275,6 +293,11 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Leg")
     float MaxSpeed = 600.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+    Category = "Chimera|Movement|SpringArm",
+    meta = (ClampMin = "0.0"))
+    float SpringArmMaxSpeed = 4000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Leg|Cooperation", meta = (ClampMin = "0.01"))
@@ -496,6 +519,8 @@ private:
     bool bHasReceivedSegmentStates = false;
     bool bAllSegmentsDeathNotified = false;
     float ConfiguredSegmentMaxHealth = 0.0f;
+    
+    TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
 
     // The coordinator reads the existing editor/CSV tuning fields without
     // moving them and invalidating Blueprint defaults.

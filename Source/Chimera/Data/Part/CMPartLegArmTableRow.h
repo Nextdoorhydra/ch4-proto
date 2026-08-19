@@ -45,4 +45,18 @@ struct CHIMERA_API FCMPartLegArmTableRow : public FTableRowBase
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float AttackRadius = 0.0f;
+
+    // SpringArm-only values. Ordinary Arm and Leg rows explicitly store zero.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ExtensionSpeed = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PullImpulse = 0.0f;
+
+    // SpringArm idle aiming sweep. Ordinary Arm and Leg rows store zero.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SweepHalfAngle = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SweepSpeed = 0.0f;
 };

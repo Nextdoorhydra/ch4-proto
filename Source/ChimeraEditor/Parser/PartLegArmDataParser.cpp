@@ -21,6 +21,10 @@ namespace PartColumns
         TEXT("MovementImpulseMultiplier");
     const FString AttackRange = TEXT("AttackRange");
     const FString AttackRadius = TEXT("AttackRadius");
+    const FString ExtensionSpeed = TEXT("ExtensionSpeed");
+    const FString PullImpulse = TEXT("PullImpulse");
+    const FString SweepHalfAngle = TEXT("SweepHalfAngle");
+    const FString SweepSpeed = TEXT("SweepSpeed");
 
     const TArray<FString> RequiredHeaders =
     {
@@ -35,6 +39,10 @@ namespace PartColumns
         MovementImpulseMultiplier,
         AttackRange,
         AttackRadius,
+        ExtensionSpeed,
+        PullImpulse,
+        SweepHalfAngle,
+        SweepSpeed,
     };
 
     bool ReadRequiredFloat(
@@ -150,6 +158,18 @@ bool UPartLegArmDataParser::OnParseComplete(FString& OutError)
             Report, Index, ParsedRowName, true);
         bHasValidNumbers &= PartColumns::ReadRequiredFloat(
             Row, PartColumns::AttackRadius, NewRow.AttackRadius,
+            Report, Index, ParsedRowName, true);
+        bHasValidNumbers &= PartColumns::ReadRequiredFloat(
+            Row, PartColumns::ExtensionSpeed, NewRow.ExtensionSpeed,
+            Report, Index, ParsedRowName, true);
+        bHasValidNumbers &= PartColumns::ReadRequiredFloat(
+            Row, PartColumns::PullImpulse, NewRow.PullImpulse,
+            Report, Index, ParsedRowName, true);
+        bHasValidNumbers &= PartColumns::ReadRequiredFloat(
+            Row, PartColumns::SweepHalfAngle, NewRow.SweepHalfAngle,
+            Report, Index, ParsedRowName, true);
+        bHasValidNumbers &= PartColumns::ReadRequiredFloat(
+            Row, PartColumns::SweepSpeed, NewRow.SweepSpeed,
             Report, Index, ParsedRowName, true);
 
         const bool bKnownPartType = NewRow.PartType == TEXT("Arm")

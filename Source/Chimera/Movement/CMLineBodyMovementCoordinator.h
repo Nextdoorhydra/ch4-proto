@@ -44,6 +44,15 @@ public:
         float MovementImpulseMultiplier
     );
 
+    /** Applies one server-authoritative impulse toward a fixed hook anchor. */
+    bool ApplyAnchorPull(
+        ACMChimera& Chimera,
+        int32 SegmentIndex,
+        const FVector& AnchorLocation,
+        float PullImpulse,
+        float StopDistance
+    );
+
     /** Applies the existing horizontal speed cap during the server physics Tick. */
     void UpdateServerMovement(ACMChimera& Chimera) const;
 
