@@ -294,6 +294,7 @@ void UCMVisionManagerSubsystem::EnsureVisibilityMask()
     );
     if (OccluderVisibilityMask)
     {
+        OccluderVisibilityMask->Filter = TF_Bilinear;
         OccluderVisibilityMask->AddressX = TA_Clamp;
         OccluderVisibilityMask->AddressY = TA_Clamp;
         OccluderVisibilityMask->ClearColor = FLinearColor::Black;
@@ -312,6 +313,7 @@ void UCMVisionManagerSubsystem::EnsureVisibilityMask()
     );
     if (BaseVisibilityMask)
     {
+        BaseVisibilityMask->Filter = TF_Bilinear;
         BaseVisibilityMask->AddressX = TA_Clamp;
         BaseVisibilityMask->AddressY = TA_Clamp;
         BaseVisibilityMask->ClearColor = FLinearColor::Black;

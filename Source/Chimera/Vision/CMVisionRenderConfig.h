@@ -19,7 +19,7 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
         meta = (ClampMin = "64", ClampMax = "2048"))
-    int32 MaskResolution = 512;
+    int32 MaskResolution = 2048;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
         meta = (ClampMin = "3", ClampMax = "128"))
