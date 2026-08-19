@@ -136,6 +136,7 @@ bool ACMLobbyGameMode::TryStartRouteDefinition(
     UCMStageRouteSubsystem* StageRoute = GetGameInstance()
         ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
     if (!HasAuthority() || bStageRouteStartInProgress || !IsValid(RequestingPlayer)
+        || !RequestingPlayer->IsLocalController()
         || !LobbyState || LobbyState->GetLobbyPhase() != ECMLobbyPhase::Waiting
         || !LobbyState->CanStartGame() || !StageRoute || !RouteDefinition)
     {

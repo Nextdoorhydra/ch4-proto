@@ -283,9 +283,10 @@ void UCMNetworkTestWidget::RefreshLobbyRoster()
                 : nullptr;
         if (PlayerRow)
         {
-            PlayerRow->SetPlayerDisplayName(
+            PlayerRow->SetPlayerLobbyState(
                 CMPlayerState->GetPlayerName(),
-                CMPlayerState->GetPlayerColor()
+                CMPlayerState->GetPlayerColor(),
+                CMPlayerState->IsReady()
             );
             if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(
                 SB_LobbyPlayers->AddChild(PlayerRow)

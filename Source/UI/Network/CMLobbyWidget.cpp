@@ -198,9 +198,10 @@ void UCMLobbyWidget::RefreshLobbyRoster()
             continue;
         }
 
-        PlayerRow->SetPlayerDisplayName(
+        PlayerRow->SetPlayerLobbyState(
             CMPlayerState->GetPlayerName(),
-            CMPlayerState->GetPlayerColor()
+            CMPlayerState->GetPlayerColor(),
+            CMPlayerState->IsReady()
         );
         if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(
             SB_LobbyPlayers->AddChild(PlayerRow)
@@ -257,11 +258,15 @@ void UCMLobbyWidget::UpdateControls()
     }
     if (Txt_ReadyState)
     {
+        const bool bLocalPlayerReady =
+            LocalPlayerState && LocalPlayerState->IsReady();
         Txt_ReadyState->SetText(
-            LocalPlayerState && LocalPlayerState->IsReady()
+            bLocalPlayerReady
                 ? NSLOCTEXT("ChimeraUI", "CancelReady", "Unready")
                 : NSLOCTEXT("ChimeraUI", "Ready", "Ready")
         );
+        Txt_ReadyState->SetColorAndOpacity(
+            bLocalPlayerReady ? FLinearColor::Green : FLinearColor::Red);
     }
     if (Btn_Invite)
     {
