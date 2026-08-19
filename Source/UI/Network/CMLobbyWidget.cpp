@@ -6,8 +6,10 @@
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
 #include "Components/TextBlock.h"
-#include "Game/CMGameState.h"
+#include "GameMode/CMGameState.h"
+#include "GameMode/Lobby/CMLobbyGameState.h"
 #include "ListenServerSessionSubsystem.h"
+#include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraLobbyUI, Log, All);
@@ -36,6 +38,20 @@ void UCMLobbyWidget::NativeConstruct()
         Btn_StartGame->OnClicked.AddUniqueDynamic(
             this,
             &UCMLobbyWidget::HandleStartGameClicked
+        );
+    }
+    if (Btn_StartTestGame)
+    {
+        Btn_StartTestGame->OnClicked.AddUniqueDynamic(
+            this,
+            &UCMLobbyWidget::HandleStartTestGameClicked
+        );
+    }
+    if (Btn_Ready)
+    {
+        Btn_Ready->OnClicked.AddUniqueDynamic(
+            this,
+            &UCMLobbyWidget::HandleReadyClicked
         );
     }
     if (Btn_Invite)
@@ -182,9 +198,10 @@ void UCMLobbyWidget::RefreshLobbyRoster()
             continue;
         }
 
-        PlayerRow->SetPlayerDisplayName(
+        PlayerRow->SetPlayerLobbyState(
             CMPlayerState->GetPlayerName(),
-            CMPlayerState->GetPlayerColor()
+            CMPlayerState->GetPlayerColor(),
+            CMPlayerState->IsReady()
         );
         if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(
             SB_LobbyPlayers->AddChild(PlayerRow)
@@ -211,13 +228,45 @@ void UCMLobbyWidget::UpdateControls()
         && NetworkSubsystem->GetCurrentOperation()
             == EListenServerOperation::None;
     const bool bHost = Role == EListenServerRole::Host;
+    const ACMLobbyGameState* LobbyState = GetWorld()
+        ? GetWorld()->GetGameState<ACMLobbyGameState>()
+        : nullptr;
+    const bool bCanStartGame = LobbyState && LobbyState->CanStartGame();
+    const ACMPlayerState* LocalPlayerState = GetOwningPlayer()
+        ? GetOwningPlayer()->GetPlayerState<ACMPlayerState>()
+        : nullptr;
 
     if (Btn_StartGame)
     {
         Btn_StartGame->SetVisibility(
             bHost ? ESlateVisibility::Visible : ESlateVisibility::Collapsed
         );
-        Btn_StartGame->SetIsEnabled(bLobby && bHost && bIdle);
+        Btn_StartGame->SetIsEnabled(
+            bLobby && bHost && bIdle && bCanStartGame);
+    }
+    if (Btn_StartTestGame)
+    {
+        Btn_StartTestGame->SetVisibility(
+            bHost ? ESlateVisibility::Visible : ESlateVisibility::Collapsed
+        );
+        Btn_StartTestGame->SetIsEnabled(
+            bLobby && bHost && bIdle && bCanStartGame);
+    }
+    if (Btn_Ready)
+    {
+        Btn_Ready->SetIsEnabled(bLobby && bIdle && LocalPlayerState);
+    }
+    if (Txt_ReadyState)
+    {
+        const bool bLocalPlayerReady =
+            LocalPlayerState && LocalPlayerState->IsReady();
+        Txt_ReadyState->SetText(
+            bLocalPlayerReady
+                ? NSLOCTEXT("ChimeraUI", "CancelReady", "Unready")
+                : NSLOCTEXT("ChimeraUI", "Ready", "Ready")
+        );
+        Txt_ReadyState->SetColorAndOpacity(
+            bLocalPlayerReady ? FLinearColor::Green : FLinearColor::Red);
     }
     if (Btn_Invite)
     {
@@ -261,13 +310,40 @@ void UCMLobbyWidget::HandleOperationCompleted(
 void UCMLobbyWidget::HandleLobbyRosterChanged()
 {
     RefreshLobbyRoster();
+    UpdateControls();
 }
 
+// 정식 시작 버튼을 서버의 StageRoute 검증 흐름으로 전달
 void UCMLobbyWidget::HandleStartGameClicked()
 {
-    if (NetworkSubsystem)
+    if (ACMPlayerController* PlayerController =
+        Cast<ACMPlayerController>(GetOwningPlayer()))
     {
-        NetworkSubsystem->HostTravelToDefaultGameMap();
+        PlayerController->RequestStartStageRoute();
+    }
+}
+
+// 테스트 시작 버튼을 서버의 TestRoute 검증 흐름으로 전달
+void UCMLobbyWidget::HandleStartTestGameClicked()
+{
+    if (ACMPlayerController* PlayerController =
+        Cast<ACMPlayerController>(GetOwningPlayer()))
+    {
+        PlayerController->RequestStartTestStageRoute();
+    }
+}
+
+// 현재 로컬 플레이어의 Ready 상태를 반전해 서버에 요청
+void UCMLobbyWidget::HandleReadyClicked()
+{
+    ACMPlayerController* PlayerController =
+        Cast<ACMPlayerController>(GetOwningPlayer());
+    const ACMPlayerState* PlayerState = PlayerController
+        ? PlayerController->GetPlayerState<ACMPlayerState>()
+        : nullptr;
+    if (PlayerController && PlayerState)
+    {
+        PlayerController->RequestSetReady(!PlayerState->IsReady());
     }
 }
 

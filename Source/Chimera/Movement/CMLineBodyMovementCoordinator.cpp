@@ -2,7 +2,7 @@
 
 #include "Player/CMControlTypes.h"
 #include "DrawDebugHelpers.h"
-#include "Game/CMGameState.h"
+#include "GameMode/CMGameState.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMPlayerState.h"
