@@ -121,6 +121,10 @@ public:
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;
 
+    // Test Area 이동을 위해 활성 몸통 마디의 상대 배치를 유지하며 전체 물리 조립체 이동
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Testing")
+    bool TeleportAssembly(const FTransform& DestinationTransform);
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
     UCMPartSlotComponent* GetPartSlotComponent(
         const FCMPartSlotAddress& PartSlotAddress
@@ -172,7 +176,7 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Non-Shipping 화살표 치트 입력을 공용 몸통 물리 힘과 회전력으로 적용
+    // Non-Shipping 화살표 치트 입력을 마디 수와 질량에 무관한 가속도로 적용
     void ApplyDebugMovementInput(float ForwardInput, float TurnInput);
 
 protected:
@@ -266,6 +270,7 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",
         meta = (ClampMin = "0.0"))
+    // 모든 활성 마디에 적용하는 질량 독립적인 디버그 가속도
     float DebugMovementForce = 35000.0f;
 
     UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",

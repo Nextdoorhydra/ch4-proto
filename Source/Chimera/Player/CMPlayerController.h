@@ -3,10 +3,12 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Player/CMControlTypes.h"
+#include "Stage/Test/CMTestAreaTypes.h"
 
 #include "CMPlayerController.generated.h"
 
 class ACMChimera;
+class ACMTestAreaManager;
 class UInputAction;
 class UInputMappingContext;
 class UCMClientStageLoadComponent;
@@ -48,6 +50,18 @@ public:
     void RequestCheatClearRandomParts();
     // 콘솔 명령으로 현재 로컬 플레이어의 화살표 디버그 이동 활성화
     void SetCheatDebugMovementEnabled(bool bEnabled);
+
+    // 호스트 또는 Standalone 개발 실행에서만 Test Area 이동 UI 허용
+    UFUNCTION(BlueprintPure, Category = "Chimera|Testing")
+    bool CanControlTestAreas() const;
+
+    // Test Area 선택 UI가 표시할 현재 월드 시작점 목록 반환
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Testing")
+    TArray<FCMTestAreaInfo> GetAvailableTestAreas() const;
+
+    // 선택한 Test Area 시작점으로 공용 키메라 이동 요청
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Testing")
+    void RequestTeleportToTestArea(FName AreaId);
 
 protected:
     virtual void BeginPlay() override;
@@ -99,6 +113,7 @@ private:
     void DebugTurnRightReleased();
 
     ACMChimera* GetSharedChimera() const;
+    ACMTestAreaManager* FindTestAreaManager() const;
 
     /** SharedChimera가 복제된 순간에만 로컬 ViewTarget을 연결한다. */
     UFUNCTION()
@@ -133,6 +148,9 @@ private:
 
     UFUNCTION(Server, Unreliable)
     void ServerApplyCheatDebugMovement(float ForwardInput, float TurnInput);
+
+    UFUNCTION(Server, Reliable)
+    void ServerRequestTeleportToTestArea(FName AreaId);
 
     UPROPERTY(Transient)
     TObjectPtr<ACMChimera> CachedSharedChimera;
