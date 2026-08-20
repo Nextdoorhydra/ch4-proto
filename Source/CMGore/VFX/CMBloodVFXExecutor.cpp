@@ -2,6 +2,7 @@
 
 #include "Data/CMBloodDefinition.h"
 #include "Runtime/CMBloodEvent.h"
+#include "Runtime/Surface/CMBloodSurfaceSubsystem.h"
 
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
@@ -123,5 +124,52 @@ bool FCMBloodVFXExecutor::ExecuteInstant(
 
 	NiagaraComponent->Activate(true);
 
+	if (Definition.Surface.bEnabled &&
+	IsValid(Definition.Surface.DecalMaterial))
+	{
+		if (UWorld* World = WorldContextObject->GetWorld())
+		{
+			if (UCMBloodSurfaceSubsystem* SurfaceSubsystem =
+				World->GetSubsystem<UCMBloodSurfaceSubsystem>())
+			{
+				FCMBloodSurfaceBurstRequest SurfaceRequest;
+
+				SurfaceRequest.Origin =
+					Event.Location;
+
+				SurfaceRequest.Direction =
+					EffectDirection;
+
+				SurfaceRequest.DecalMaterial =
+					Definition.Surface.DecalMaterial;
+
+				SurfaceRequest.SampleCount =
+					Definition.Surface.SampleCount;
+
+				SurfaceRequest.TraceDistance =
+					Definition.Surface.TraceDistance;
+
+				SurfaceRequest.ConeHalfAngleDegrees =
+					Definition.Surface.ConeHalfAngleDegrees;
+
+				SurfaceRequest.DecalExtentRange =
+					Definition.Surface.DecalExtentRange;
+
+				SurfaceRequest.DecalDepth =
+					Definition.Surface.DecalDepth;
+
+				SurfaceRequest.LifetimeSeconds =
+					Definition.Surface.LifetimeSeconds;
+
+				SurfaceRequest.FadeDurationSeconds =
+					Definition.Surface.FadeDurationSeconds;
+
+				SurfaceSubsystem->SpawnSurfaceBurst(
+					SurfaceRequest);
+			}
+		}
+	}
+
+	
 	return true;
 }

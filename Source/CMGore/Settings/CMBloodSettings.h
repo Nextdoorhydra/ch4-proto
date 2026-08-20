@@ -41,4 +41,39 @@ public:
 		Category = "Blood Definitions"
 	)
 	FName DefaultDefinitionId = NAME_None;
+
+	// ---------------------------------------------------------------------
+	// Persistent Blood Surface
+	// ---------------------------------------------------------------------
+
+	UPROPERTY(
+		Config,
+		EditAnywhere,
+		Category = "Blood Surface",
+		meta = (ClampMin = "0"))
+	int32 InitialBloodDecalPoolSize = 32;
+
+	/**
+	 * 하나의 Blood Event가 생성 가능한 최대 surface trace 수.
+	 *
+	 * Niagara particle collision 수와 무관하다.
+	 */
+	UPROPERTY(
+		Config,
+		EditAnywhere,
+		Category = "Blood Surface",
+		meta = (ClampMin = "0"))
+	int32 MaxSurfaceSamplesPerEvent = 4;
+
+	/**
+	 * 하나의 World에 유지할 수 있는 logical Blood Mark 최대 개수.
+	 *
+	 * 초과 시 oldest mark부터 recycle.
+	 */
+	UPROPERTY(
+		Config,
+		EditAnywhere,
+		Category = "Blood Surface",
+		meta = (ClampMin = "0"))
+	int32 MaxActiveBloodMarks = 256;
 };

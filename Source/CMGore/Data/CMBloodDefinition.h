@@ -27,6 +27,42 @@ struct CMGORE_API FCMBloodInstantVFXDefinition
 	FVector Scale = FVector::OneVector;
 };
 
+USTRUCT(BlueprintType)
+struct CMGORE_API FCMBloodSurfaceDefinition
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
+	bool bEnabled = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
+	TObjectPtr<UMaterialInterface> DecalMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface",
+		meta = (ClampMin = "0"))
+	int32 SampleCount = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface",
+		meta = (ClampMin = "0.0"))
+	float TraceDistance = 150.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface",
+		meta = (ClampMin = "0.0", ClampMax = "180.0"))
+	float ConeHalfAngleDegrees = 50.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
+	FVector2D DecalExtentRange = FVector2D(18.0f, 36.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
+	float DecalDepth = 8.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
+	float LifetimeSeconds = 45.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
+	float FadeDurationSeconds = 5.0f;
+};
 
 /**
  * 하나의 혈액 종류에 대한 표현 Definition.
@@ -50,6 +86,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Definition")
 	FName DefinitionId = NAME_None;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood")
+	FCMBloodSurfaceDefinition Surface;
+	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instant VFX")
 	FCMBloodInstantVFXDefinition Impact;
 
