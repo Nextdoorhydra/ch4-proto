@@ -3,6 +3,52 @@
 #include "Components/StaticMeshComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 
+// 활성 몸통 마디의 현재 상대 배치를 유지하고 속도를 제거한 뒤 서버에서 일괄 이동
+bool ACMChimera::TeleportAssembly(const FTransform& DestinationTransform)
+{
+    if (!HasAuthority() || !BodyMesh || ActiveSegmentCount <= 0)
+    {
+        return false;
+    }
+
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    const FTransform SourceTransform = BodyMesh->GetComponentTransform();
+    TArray<FTransform> DestinationTransforms;
+    DestinationTransforms.Reserve(SegmentCount);
+
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        if (!IsValid(SegmentBody))
+        {
+            return false;
+        }
+        const FTransform RelativeTransform =
+            SegmentBody->GetComponentTransform().GetRelativeTransform(SourceTransform);
+        DestinationTransforms.Add(RelativeTransform * DestinationTransform);
+    }
+
+    ClearPressedControlParts();
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        SegmentBody->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        SegmentBody->SetWorldTransform(
+            DestinationTransforms[Index],
+            false,
+            nullptr,
+            ETeleportType::TeleportPhysics);
+        SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        SegmentBody->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        SegmentBody->WakeAllRigidBodies();
+    }
+
+    UpdateReplicatedSegmentStates();
+    ForceNetUpdate();
+    return true;
+}
+
 void ACMChimera::ConfigureSegments()
 {
     ApplyBlueprintSettings();
@@ -115,18 +161,40 @@ void ACMChimera::ConfigureSegments()
         Constraint->SetLinearXLimit(ELinearConstraintMotion::LCM_Locked, 0.0f);
         Constraint->SetLinearYLimit(ELinearConstraintMotion::LCM_Locked, 0.0f);
         Constraint->SetLinearZLimit(ELinearConstraintMotion::LCM_Locked, 0.0f);
+        // Constraint의 기준 전방축은 X입니다.
+        // Swing1은 Z축 회전(Yaw)이므로 몸통의 좌우 굽힘 각도를 담당합니다.
         Constraint->SetAngularSwing1Limit(
             EAngularConstraintMotion::ACM_Limited,
-            SwingLimitDegrees
+            HorizontalBendLimitDegrees
         );
+
+        // Swing2는 Y축 회전(Pitch)이므로 언덕을 오를 때 필요한 위아래 굽힘 각도를 담당합니다.
         Constraint->SetAngularSwing2Limit(
             EAngularConstraintMotion::ACM_Limited,
-            SwingLimitDegrees
+            TerrainPitchLimitDegrees
         );
         Constraint->SetAngularTwistLimit(
             EAngularConstraintMotion::ACM_Limited,
             TwistLimitDegrees
         );
+        // A velocity-only Swing drive behaves like a viscous joint. It slows
+        // relative Pitch/Yaw motion but does not restore the chain to a
+        // straight pose, so hills and curled body shapes remain possible.
+        Constraint->SetAngularDriveMode(
+            EAngularDriveMode::TwistAndSwing
+        );
+        Constraint->SetOrientationDriveTwistAndSwing(false, false);
+        Constraint->SetAngularVelocityDriveTwistAndSwing(
+            false,
+            SwingVelocityDamping > 0.0f
+        );
+        Constraint->SetAngularVelocityTarget(FVector::ZeroVector);
+        Constraint->SetAngularDriveParams(
+            0.0f,
+            SwingVelocityDamping,
+            SwingDampingForceLimit
+        );
+        Constraint->SetAngularDriveAccelerationMode(true);
         Constraint->SetDisableCollision(
             bDisableCollisionBetweenSegments
         );
@@ -135,11 +203,16 @@ void ACMChimera::ConfigureSegments()
         SegmentConstraints.Add(Constraint);
 
         UE_LOG(LogChimeraLineBody, Log,
-            TEXT("[Constraint Ready] Segment pair %d-%d Front=%s Rear=%s"),
+            TEXT("[Constraint Ready] Segment pair %d-%d Front=%s Rear=%s Pitch=%.1f Horizontal=%.1f Twist=%.1f SwingDamping=%.1f ForceLimit=%.1f"),
             Index,
             Index + 1,
             *GetNameSafe(FrontBody),
-            *GetNameSafe(RearBody));
+            *GetNameSafe(RearBody),
+            TerrainPitchLimitDegrees,
+            HorizontalBendLimitDegrees,
+            TwistLimitDegrees,
+            SwingVelocityDamping,
+            SwingDampingForceLimit);
     }
 }
 
@@ -153,8 +226,10 @@ void ACMChimera::ConfigureBodyRotationLock(
     }
 
     FBodyInstance& BodyInstance = SegmentBody->BodyInstance;
-    BodyInstance.bLockXRotation = bLockBodyUpright;
-    BodyInstance.bLockYRotation = bLockBodyUpright;
+    // Segments are chained along local X: X is Roll, Y is Pitch, Z is Yaw.
+    // Lock only Roll so the body can follow slopes and bend horizontally.
+    BodyInstance.bLockXRotation = bLockBodyRoll;
+    BodyInstance.bLockYRotation = false;
     BodyInstance.bLockZRotation = false;
     BodyInstance.SetDOFLock(EDOFMode::SixDOF);
 }

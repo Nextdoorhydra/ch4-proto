@@ -66,7 +66,7 @@ bool FChimeraControlAssignmentCountTest::RunTest(
 
         FCMControlAssignmentPolicy::Rebalance(
             ExistingAssignments,
-            PlayerCount,
+            PlayerCount * CMControl::SegmentsPerPlayer,
             RandomStream,
             NewAssignments
         );
@@ -104,7 +104,7 @@ bool FChimeraControlAssignmentCountTest::RunTest(
                 PlayerCount
             ),
             TotalAssignedPartSlots,
-            PlayerCount * CMControl::PartSlotsPerSegment
+            PlayerCount * CMControl::MaxKeysPerPlayer
         );
         TestTrue(
             FString::Printf(
@@ -113,7 +113,7 @@ bool FChimeraControlAssignmentCountTest::RunTest(
             ),
             HasUniqueValidPartSlots(
                 NewAssignments,
-                PlayerCount
+                PlayerCount * CMControl::SegmentsPerPlayer
             )
         );
     }
@@ -133,20 +133,17 @@ bool FChimeraControlAssignmentFullShuffleTest::RunTest(
 )
 {
     constexpr int32 PlayerCount = 3;
+    constexpr int32 ActiveSegmentCount =
+        PlayerCount * CMControl::SegmentsPerPlayer;
     TArray<TArray<FCMPartSlotAddress>> FirstExistingAssignments = {
-        {
-            MakeAddress(0, 0),
-            MakeAddress(1, 1),
-            MakeAddress(2, 2),
-            MakeAddress(0, 3)
-        },
-        { MakeAddress(1, 0) },
+        { MakeAddress(0, 0), MakeAddress(1, 1) },
+        { MakeAddress(2, 0) },
         {}
     };
     TArray<TArray<FCMPartSlotAddress>> SecondExistingAssignments = {
         {},
-        { MakeAddress(2, 3), MakeAddress(0, 1) },
-        { MakeAddress(1, 2) }
+        { MakeAddress(3, 1), MakeAddress(4, 0) },
+        { MakeAddress(5, 1) }
     };
     TArray<TArray<FCMPartSlotAddress>> FirstResult;
     TArray<TArray<FCMPartSlotAddress>> SecondResult;
@@ -157,19 +154,19 @@ bool FChimeraControlAssignmentFullShuffleTest::RunTest(
 
     FCMControlAssignmentPolicy::Rebalance(
         FirstExistingAssignments,
-        PlayerCount,
+        ActiveSegmentCount,
         FirstRandomStream,
         FirstResult
     );
     FCMControlAssignmentPolicy::Rebalance(
         SecondExistingAssignments,
-        PlayerCount,
+        ActiveSegmentCount,
         SecondRandomStream,
         SecondResult
     );
     FCMControlAssignmentPolicy::Rebalance(
         FirstExistingAssignments,
-        PlayerCount,
+        ActiveSegmentCount,
         DifferentRandomStream,
         DifferentSeedResult
     );
@@ -184,7 +181,7 @@ bool FChimeraControlAssignmentFullShuffleTest::RunTest(
     );
     TestTrue(
         TEXT("Fully shuffled assignments remain unique"),
-        HasUniqueValidPartSlots(FirstResult, PlayerCount)
+        HasUniqueValidPartSlots(FirstResult, ActiveSegmentCount)
     );
 
     return true;

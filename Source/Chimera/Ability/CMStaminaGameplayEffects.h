@@ -6,11 +6,11 @@
 #include "CMStaminaGameplayEffects.generated.h"
 
 /**
- * Instant GAS effect used when a LineBody leg action succeeds.
- * The actual negative value is supplied by ACMChimera through SetByCaller,
- * so one effect class can support different part costs later.
+ * Instant GAS effect used by attached Part Gameplay Abilities.
+ * Each GA supplies its Part's negative cost through SetByCaller, so the same
+ * effect base class supports data-driven Arm and Leg costs.
  */
-UCLASS()
+UCLASS(Blueprintable)
 class CHIMERA_API UCMStaminaCostGameplayEffect : public UGameplayEffect
 {
     GENERATED_BODY()

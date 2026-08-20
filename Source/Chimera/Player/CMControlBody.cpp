@@ -1,7 +1,7 @@
 #include "Player/CMControlBody.h"
 
 #include "Components/SceneComponent.h"
-#include "Game/CMGameState.h"
+#include "GameMode/CMGameState.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
@@ -39,6 +39,7 @@ void ACMControlBody::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMControlBody, ControlSlots);
     DOREPLIFETIME(ACMControlBody, OwnedSegmentIndex);
     DOREPLIFETIME(ACMControlBody, bControlInputEnabled);
+    DOREPLIFETIME(ACMControlBody, DisabledControlSlotMask);
 }
 
 void ACMControlBody::BeginPlay()
@@ -93,7 +94,7 @@ void ACMControlBody::SetControlSlotPressed(
 )
 {
     if (!IsLocallyControlled()
-        || !bControlInputEnabled
+        || !IsControlSlotEnabled(SlotIndex)
         || SlotIndex < 0
         || SlotIndex >= CMControl::MaxKeysPerPlayer)
     {
@@ -109,7 +110,7 @@ void ACMControlBody::RequestAttachPartToControlSlot(
 )
 {
     if (!IsLocallyControlled()
-        || !bControlInputEnabled
+        || !IsControlSlotEnabled(SlotIndex)
         || SlotIndex < 0
         || SlotIndex >= CMControl::MaxKeysPerPlayer
         || !IsValid(PartActor))
@@ -123,7 +124,7 @@ void ACMControlBody::RequestAttachPartToControlSlot(
 void ACMControlBody::RequestDetachPartFromControlSlot(int32 SlotIndex)
 {
     if (!IsLocallyControlled()
-        || !bControlInputEnabled
+        || !IsControlSlotEnabled(SlotIndex)
         || SlotIndex < 0
         || SlotIndex >= CMControl::MaxKeysPerPlayer)
     {
@@ -138,7 +139,7 @@ void ACMControlBody::ServerRequestAttachPartToControlSlot_Implementation(
     AActor* PartActor
 )
 {
-    if (!bControlInputEnabled || !IsValid(PartActor))
+    if (!IsControlSlotEnabled(SlotIndex) || !IsValid(PartActor))
     {
         return;
     }
@@ -195,7 +196,7 @@ void ACMControlBody::ServerRequestDetachPartFromControlSlot_Implementation(
     int32 SlotIndex
 )
 {
-    if (!bControlInputEnabled)
+    if (!IsControlSlotEnabled(SlotIndex))
     {
         return;
     }
@@ -236,7 +237,7 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
     bool bPressed
 )
 {
-    if (!bControlInputEnabled
+    if (!IsControlSlotEnabled(SlotIndex)
         || SlotIndex < 0
         || SlotIndex >= CMControl::MaxKeysPerPlayer)
     {
@@ -297,7 +298,25 @@ void ACMControlBody::SetControlSlots(
     // 재할당 전에 이전 슬롯의 눌림 상태부터 Shared Chimera에서 제거한다.
     ClearPressedControlSlots();
     ControlSlots = NewControlSlots;
+
+    DisabledControlSlotMask = 0;
+    bControlInputEnabled = true;
+    if (const ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        if (OwnedSegmentIndex >= 0
+            && !SharedChimera->IsSegmentAlive(OwnedSegmentIndex))
+        {
+            DisabledControlSlotMask |= 0x03; // Q/W
+        }
+        if (OwnedSegmentIndex >= 0
+            && !SharedChimera->IsSegmentAlive(OwnedSegmentIndex + 1))
+        {
+            DisabledControlSlotMask |= 0x0C; // E/R
+        }
+    }
+    bControlInputEnabled = GetEnabledControlCount() > 0;
     OnRep_ControlSlots();
+    OnRep_ControlState();
     ForceNetUpdate();
 }
 
@@ -315,6 +334,30 @@ int32 ACMControlBody::GetAssignedControlCount() const
     return ControlSlots.Num();
 }
 
+int32 ACMControlBody::GetEnabledControlCount() const
+{
+    int32 EnabledCount = 0;
+    for (int32 SlotIndex = 0;
+        SlotIndex < ControlSlots.Num()
+            && SlotIndex < CMControl::MaxKeysPerPlayer;
+        ++SlotIndex)
+    {
+        if (IsControlSlotEnabled(SlotIndex))
+        {
+            ++EnabledCount;
+        }
+    }
+    return EnabledCount;
+}
+
+bool ACMControlBody::IsControlSlotEnabled(int32 SlotIndex) const
+{
+    return bControlInputEnabled
+        && ControlSlots.IsValidIndex(SlotIndex)
+        && SlotIndex < CMControl::MaxKeysPerPlayer
+        && (DisabledControlSlotMask & (1u << SlotIndex)) == 0;
+}
+
 const TArray<FCMPartSlotAddress>& ACMControlBody::GetControlSlots() const
 {
     return ControlSlots;
@@ -329,7 +372,13 @@ void ACMControlBody::SetOwnedSegmentIndex(int32 NewSegmentIndex)
 
     ClearPressedControlSlots();
     OwnedSegmentIndex = NewSegmentIndex;
+    DisabledControlSlotMask = 0;
     bControlInputEnabled = true;
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetParticipationState(
+            ECMPlayerParticipationState::Active);
+    }
     OnRep_ControlState();
     ForceNetUpdate();
 
@@ -351,22 +400,74 @@ bool ACMControlBody::IsControlInputEnabled() const
 
 void ACMControlBody::HandleSegmentDestroyed(int32 DestroyedSegmentIndex)
 {
-    if (!HasAuthority()
-        || !bControlInputEnabled
-        || OwnedSegmentIndex != DestroyedSegmentIndex)
+    if (!HasAuthority() || DestroyedSegmentIndex < 0)
     {
         return;
     }
 
-    ClearPressedControlSlots();
-    bControlInputEnabled = false;
+    uint8 NewlyDisabledMask = 0;
+    if (DestroyedSegmentIndex == OwnedSegmentIndex)
+    {
+        NewlyDisabledMask = 0x03; // Q/W
+    }
+    else if (DestroyedSegmentIndex == OwnedSegmentIndex + 1)
+    {
+        NewlyDisabledMask = 0x0C; // E/R
+    }
+    NewlyDisabledMask &= ~DisabledControlSlotMask;
+    if (NewlyDisabledMask == 0)
+    {
+        return;
+    }
+
+    ACMChimera* SharedChimera = GetSharedChimera();
+    for (int32 SlotIndex = 0;
+        SlotIndex < CMControl::MaxKeysPerPlayer;
+        ++SlotIndex)
+    {
+        if ((NewlyDisabledMask & (1u << SlotIndex)) == 0)
+        {
+            continue;
+        }
+
+        FCMPartSlotAddress& PressedPartSlot = PressedPartSlots[SlotIndex];
+        if (SharedChimera && CMControl::IsValidPartSlot(PressedPartSlot))
+        {
+            SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
+        }
+        PressedPartSlot = FCMPartSlotAddress();
+    }
+
+    DisabledControlSlotMask |= NewlyDisabledMask;
+    bControlInputEnabled = GetEnabledControlCount() > 0;
+    if (!bControlInputEnabled)
+    {
+        if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+        {
+            CMPlayerState->SetParticipationState(
+                ECMPlayerParticipationState::Defeated);
+        }
+    }
     OnRep_ControlState();
     ForceNetUpdate();
 
-    UE_LOG(LogChimeraControlBody, Warning,
-        TEXT("[Player Control Defeated] ControlBody=%s OwnedSegment=%d; all Q/W/E/R input is disabled."),
-        *GetName(),
-        OwnedSegmentIndex);
+    if (bControlInputEnabled)
+    {
+        UE_LOG(LogChimeraControlBody, Log,
+            TEXT("[Segment Controls Lost] ControlBody=%s Segment=%d DisabledMask=0x%02X RemainingControls=%d"),
+            *GetName(),
+            DestroyedSegmentIndex,
+            DisabledControlSlotMask,
+            GetEnabledControlCount());
+    }
+    else
+    {
+        UE_LOG(LogChimeraControlBody, Warning,
+            TEXT("[Player Control Defeated] ControlBody=%s Segment=%d DisabledMask=0x%02X; all Q/W/E/R input is disabled."),
+            *GetName(),
+            DestroyedSegmentIndex,
+            DisabledControlSlotMask);
+    }
 }
 
 void ACMControlBody::ClearPressedControlSlots()
@@ -406,8 +507,12 @@ void ACMControlBody::OnRep_ControlState()
     OnControlSlotsChanged.Broadcast();
 
     UE_LOG(LogChimeraControlBody, Log,
-        TEXT("[Control State] ControlBody=%s OwnedSegment=%d InputEnabled=%s"),
+        TEXT("[Control State] ControlBody=%s OwnedSegments=%d,%d DisabledMask=0x%02X InputEnabled=%s"),
         *GetName(),
         OwnedSegmentIndex,
+        OwnedSegmentIndex >= 0
+            ? OwnedSegmentIndex + 1
+            : INDEX_NONE,
+        DisabledControlSlotMask,
         bControlInputEnabled ? TEXT("true") : TEXT("false"));
 }

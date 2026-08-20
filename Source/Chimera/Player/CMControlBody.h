@@ -62,9 +62,15 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Control Body")
     int32 GetAssignedControlCount() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Control Body")
+    int32 GetEnabledControlCount() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Control Body")
+    bool IsControlSlotEnabled(int32 SlotIndex) const;
+
     const TArray<FCMPartSlotAddress>& GetControlSlots() const;
 
-    /** The Segment whose destruction defeats this ControlBody's player. */
+    /** First of the two consecutive Segments assigned to this player. */
     void SetOwnedSegmentIndex(int32 NewSegmentIndex);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Control Body")
@@ -128,6 +134,12 @@ protected:
         Category = "Chimera|Control Body",
         meta = (AllowPrivateAccess = "true"))
     bool bControlInputEnabled = true;
+
+    /** Q/W/E/R bits disabled because their physical Segment is dead. */
+    UPROPERTY(ReplicatedUsing = OnRep_ControlState, BlueprintReadOnly,
+        Category = "Chimera|Control Body",
+        meta = (AllowPrivateAccess = "true"))
+    uint8 DisabledControlSlotMask = 0;
 
     /** Temporary slot-based validation until the Head pickup rule exists. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,

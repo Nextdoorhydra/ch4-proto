@@ -2,13 +2,36 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "GameplayTagContainer.h"
 #include "Player/CMPartInterface.h"
 
 #include "CMPartActorBase.generated.h"
 
 class UGameplayAbility;
+class UCMBattleComponent;
 class USceneComponent;
 class UStaticMeshComponent;
+class UDataTable;
+class ACMPlayerState;
+struct FCMPartLegArmTableRow;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+    FCMPartHealthChangedSignature,
+    float,
+    PreviousHealth,
+    float,
+    CurrentHealth,
+    float,
+    MaxHealth
+);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMPartDiedSignature);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+    FCMPartDisabledChangedSignature,
+    bool,
+    bDisabled
+);
 
 /**
  * Common base for replicated Parts that can be attached to a Chimera slot.
@@ -49,12 +72,70 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     FCMPartSlotAddress GetAttachedSlotAddress() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    UCMBattleComponent* GetBattleComponent() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    float GetHealth() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    float GetMaxHealth() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    float GetStrength() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    float GetMovementImpulseMultiplier() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    bool IsAlive() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    bool IsDisabled() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    bool IsAttached() const;
+
+    /** True only while this Part can respond to its assigned control input. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    bool IsOperational() const;
+
+    /** Server-owned HP change used after BattleComponent resolves a hit. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Part")
+    bool ApplyPartDamage(float Damage);
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Part")
+    void SetPartDisabled(bool bNewDisabled);
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Part")
+    FCMPartHealthChangedSignature OnHealthChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Part")
+    FCMPartDiedSignature OnPartDied;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Part")
+    FCMPartDisabledChangedSignature OnDisabledChanged;
+
+    /** One-shot server context consumed by the Part GA activated from a shared ASC. */
+    void SetContributingPlayerState(ACMPlayerState* PlayerState);
+    ACMPlayerState* ConsumeContributingPlayerState();
+
 protected:
+    virtual void BeginPlay() override;
+
+    /** Lets Arm and Leg consume their type-specific columns after common data. */
+    virtual void ApplyPartData(const FCMPartLegArmTableRow& PartRow);
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<USceneComponent> SceneRoot;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UStaticMeshComponent> PartMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UCMBattleComponent> BattleComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Part")
     ECMPartSlotType PartType = ECMPartSlotType::Any;
@@ -62,11 +143,75 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Part")
     TSubclassOf<UGameplayAbility> GrantedAbilityClass;
 
+    UPROPERTY(EditDefaultsOnly, ReplicatedUsing = OnRep_MaxHealth,
+        BlueprintReadOnly, Category = "Chimera|Part",
+        meta = (ClampMin = "1.0"))
+    float MaxHealth = 100.0f;
+
+    UPROPERTY(EditDefaultsOnly, Replicated, BlueprintReadOnly,
+        Category = "Chimera|Part", meta = (ClampMin = "0.0"))
+    float Strength = 10.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Part", meta = (ClampMin = "0.0"))
+    float MovementImpulseMultiplier = 0.0f;
+
+    // Google Sheet Loader/DataForge가 갱신하는 공용 Arm/Leg DataTable이다.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Part Data")
+    TSoftObjectPtr<UDataTable> PartDataTable;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Part Data")
+    FName PartRowName = NAME_None;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Part Data")
+    FName PartDataID = NAME_None;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Part Data")
+    FName Species = NAME_None;
+
+    UPROPERTY(EditDefaultsOnly, Replicated, BlueprintReadOnly,
+        Category = "Chimera|Part")
+    FGameplayTagContainer PartStateTags;
+
 private:
+    bool InitializeFromPartData();
+
+    UFUNCTION()
+    void OnRep_MaxHealth();
+
+    UFUNCTION()
+    void OnRep_Health(float PreviousHealth);
+
+    UFUNCTION()
+    void OnRep_Dead();
+
+    UFUNCTION()
+    void OnRep_Disabled();
+
     UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Part",
         meta = (AllowPrivateAccess = "true"))
     FCMPartSlotAddress AttachedSlotAddress;
 
+    UPROPERTY(ReplicatedUsing = OnRep_Health,
+        VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Part",
+        meta = (AllowPrivateAccess = "true"))
+    float Health = 0.0f;
+
+    UPROPERTY(ReplicatedUsing = OnRep_Dead,
+        VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Part",
+        meta = (AllowPrivateAccess = "true"))
+    bool bDead = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_Disabled,
+        VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Part",
+        meta = (AllowPrivateAccess = "true"))
+    bool bDisabled = false;
+
     TWeakObjectPtr<UCMPartSlotComponent> AttachedPartSlot;
+    TWeakObjectPtr<ACMPlayerState> PendingContributingPlayerState;
 };
