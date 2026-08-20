@@ -8,6 +8,11 @@
 
 class ACMStageDirector;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+    FCMStageCommandReceivedSignature,
+    FGameplayTag, CommandTag,
+    UObject*, CommandInstigator);
+
 UENUM(BlueprintType)
 enum class ECMStageCommandExecutionPolicy : uint8
 {
@@ -36,9 +41,20 @@ public:
     UFUNCTION(BlueprintNativeEvent, Category = "Chimera|Stage")
     void ExecuteStageCommand(FGameplayTag CommandTag, UObject* CommandInstigator);
 
+    // StageDirector에서 전달된 명령을 소유 액터와 블루프린트에 알림
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Stage")
+    FCMStageCommandReceivedSignature OnStageCommandReceived;
+
     // 장애물 동작 완료 신호를 현재 StageDirector에 전달
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Stage")
     void BroadcastStageEvent(FGameplayTag EventTag);
+
+    // 같은 StageDirector에 등록된 PlacementId 또는 GroupTag 대상으로 명령 전달
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Stage")
+    void RequestStageCommand(
+        FName TargetPlacementId,
+        FGameplayTag TargetGroup,
+        FGameplayTag CommandTag);
 
     bool CanExecuteOnCurrentMachine() const;
 

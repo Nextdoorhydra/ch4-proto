@@ -377,8 +377,22 @@ void ACMChimera::ApplyDebugMovementInput(
 
     if (!FMath::IsNearlyZero(ForwardInput))
     {
-        BodyMesh->AddForce(
-            ForwardDirection * ForwardInput * DebugMovementForce);
+        const FVector DebugAcceleration =
+            ForwardDirection * ForwardInput * DebugMovementForce;
+        const int32 SegmentCount = FMath::Min(
+            ActiveSegmentCount, BodySegments.Num());
+        for (int32 Index = 0; Index < SegmentCount; ++Index)
+        {
+            UStaticMeshComponent* SegmentBody = BodySegments[Index];
+            if (SegmentBody && SegmentBody->IsSimulatingPhysics())
+            {
+                // 디버그 이동은 마디 수와 질량에 따른 협동 Force 분산을 무시
+                SegmentBody->AddForce(
+                    DebugAcceleration,
+                    NAME_None,
+                    true);
+            }
+        }
     }
     if (!FMath::IsNearlyZero(TurnInput))
     {

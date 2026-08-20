@@ -9,6 +9,7 @@
 #include "Player/CMPlayerController.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerStart.h"
+#include "Stage/Test/CMTestAreaManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "ListenServerNetworkSettings.h"
 #include "Misc/PackageName.h"
@@ -335,11 +336,45 @@ ACMChimera* ACMGameMode::EnsureSharedChimera()
     if (!SharedChimera)
     {
         FTransform SpawnTransform = FTransform::Identity;
-        // 공용 키메라는 레벨에 배치된 첫 PlayerStart에서 생성한다.
+        APlayerStart* FallbackPlayerStart = nullptr;
+        APlayerStart* TaggedPlayerStart = nullptr;
+        // 태그가 설정된 경우 일치하는 PlayerStart를 우선하고 기존 맵은 첫 시작점을 사용
         for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
         {
-            SpawnTransform = It->GetActorTransform();
-            break;
+            if (!FallbackPlayerStart)
+            {
+                FallbackPlayerStart = *It;
+            }
+            if (!SharedChimeraPlayerStartTag.IsNone()
+                && It->PlayerStartTag == SharedChimeraPlayerStartTag)
+            {
+                TaggedPlayerStart = *It;
+                break;
+            }
+        }
+
+        APlayerStart* TestAreaPlayerStart = nullptr;
+        if (SharedChimeraPlayerStartTag.IsNone())
+        {
+            for (TActorIterator<ACMTestAreaManager> It(GetWorld()); It; ++It)
+            {
+                TestAreaPlayerStart = It->GetInitialPlayerStart();
+                break;
+            }
+        }
+
+        APlayerStart* SelectedPlayerStart = TaggedPlayerStart
+            ? TaggedPlayerStart
+            : (TestAreaPlayerStart ? TestAreaPlayerStart : FallbackPlayerStart);
+        if (SelectedPlayerStart)
+        {
+            SpawnTransform = SelectedPlayerStart->GetActorTransform();
+        }
+        if (!SharedChimeraPlayerStartTag.IsNone() && !TaggedPlayerStart)
+        {
+            UE_LOG(LogChimeraMultiplayer, Warning,
+                TEXT("공용 키메라 PlayerStartTag를 찾지 못해 첫 시작점을 사용합니다. Tag=%s"),
+                *SharedChimeraPlayerStartTag.ToString());
         }
 
         UClass* SharedPawnClass = DefaultPawnClass;

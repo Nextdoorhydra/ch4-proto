@@ -3,6 +3,52 @@
 #include "Components/StaticMeshComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 
+// 활성 몸통 마디의 현재 상대 배치를 유지하고 속도를 제거한 뒤 서버에서 일괄 이동
+bool ACMChimera::TeleportAssembly(const FTransform& DestinationTransform)
+{
+    if (!HasAuthority() || !BodyMesh || ActiveSegmentCount <= 0)
+    {
+        return false;
+    }
+
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    const FTransform SourceTransform = BodyMesh->GetComponentTransform();
+    TArray<FTransform> DestinationTransforms;
+    DestinationTransforms.Reserve(SegmentCount);
+
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        if (!IsValid(SegmentBody))
+        {
+            return false;
+        }
+        const FTransform RelativeTransform =
+            SegmentBody->GetComponentTransform().GetRelativeTransform(SourceTransform);
+        DestinationTransforms.Add(RelativeTransform * DestinationTransform);
+    }
+
+    ClearPressedControlParts();
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        SegmentBody->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        SegmentBody->SetWorldTransform(
+            DestinationTransforms[Index],
+            false,
+            nullptr,
+            ETeleportType::TeleportPhysics);
+        SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        SegmentBody->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        SegmentBody->WakeAllRigidBodies();
+    }
+
+    UpdateReplicatedSegmentStates();
+    ForceNetUpdate();
+    return true;
+}
+
 void ACMChimera::ConfigureSegments()
 {
     ApplyBlueprintSettings();

@@ -62,4 +62,21 @@ void UCMStageElementComponent::ExecuteStageCommand_Implementation(
     FGameplayTag CommandTag,
     UObject* CommandInstigator)
 {
+    OnStageCommandReceived.Broadcast(CommandTag, CommandInstigator);
+}
+
+// 등록된 StageDirector를 통해 다른 스테이지 요소에 명령 전달
+void UCMStageElementComponent::RequestStageCommand(
+    FName TargetPlacementId,
+    FGameplayTag TargetGroup,
+    FGameplayTag CommandTag)
+{
+    if (RegisteredDirector.IsValid() && GetOwner() && GetOwner()->HasAuthority())
+    {
+        RegisteredDirector->ExecuteStageCommand(
+            TargetPlacementId,
+            TargetGroup,
+            CommandTag,
+            GetOwner());
+    }
 }
