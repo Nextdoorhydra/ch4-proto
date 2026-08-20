@@ -51,19 +51,34 @@ bool ACMChimera::InitializeFromBodyData()
     BodyLinearDamping = BodyRow->LinearDamping;
     BodyAngularDamping = BodyRow->AngularDamping;
     MaxSpeed = BodyRow->MaxVelocity;
+    // A legacy DT that has not been reimported yet contains zero for the new
+    // column. Keep the C++ default so opening PIE before reimport does not
+    // silently disable every movement Part.
+    if (BodyRow->BaseMovementImpulse > 0.0f)
+    {
+        BaseMovementImpulse = BodyRow->BaseMovementImpulse;
+    }
+    else
+    {
+        UE_LOG(LogChimeraLineBody, Warning,
+            TEXT("[CSV -> Physics] Row=%s has no valid BaseMovementImpulse; keeping fallback %.1f. Reimport the Body table."),
+            *BodyRowName.ToString(),
+            BaseMovementImpulse);
+    }
 
     RuntimeBodyPhysicalMaterial = NewObject<UPhysicalMaterial>(this);
     RuntimeBodyPhysicalMaterial->Friction = BodyGroundFriction;
 
     UE_LOG(LogChimeraLineBody, Log,
-        TEXT("[CSV -> Physics] Row=%s Type=%s Mass=%.1f Friction=%.2f LinearDamping=%.2f AngularDamping=%.2f MaxVelocity=%.1f"),
+        TEXT("[CSV -> Physics] Row=%s Type=%s Mass=%.1f Friction=%.2f LinearDamping=%.2f AngularDamping=%.2f MaxVelocity=%.1f BaseImpulse=%.1f"),
         *BodyRowName.ToString(),
         *BodyRow->BodyType.ToString(),
         BodySegmentMass,
         BodyGroundFriction,
         BodyLinearDamping,
         BodyAngularDamping,
-        MaxSpeed);
+        MaxSpeed,
+        BaseMovementImpulse);
 
     if (HasAuthority())
     {
@@ -86,7 +101,6 @@ bool ACMChimera::InitializeFromBodyData()
 
     return true;
 }
-
 void ACMChimera::InitializeSharedAttributes(
     float MaxStamina,
     float StaminaRegen
@@ -144,43 +158,4 @@ void ACMChimera::StartStaminaRegeneration()
     UE_LOG(LogChimeraLineBody, Log,
         TEXT("[GAS Stamina] Periodic regeneration started. AmountPerSecond=%.1f"),
         AttributeSet->GetStaminaRegen());
-}
-
-void ACMChimera::ApplyStaminaCost(float Cost)
-{
-    if (!HasAuthority()
-        || !AbilitySystemComponent
-        || !AttributeSet
-        || Cost <= 0.0f)
-    {
-        return;
-    }
-
-    const float OldStamina = AttributeSet->GetStamina();
-    const FGameplayEffectSpecHandle CostSpec =
-        AbilitySystemComponent->MakeOutgoingSpec(
-            UCMStaminaCostGameplayEffect::StaticClass(),
-            1.0f,
-            AbilitySystemComponent->MakeEffectContext()
-        );
-    if (!CostSpec.IsValid())
-    {
-        UE_LOG(LogChimeraLineBody, Error,
-            TEXT("[GAS Stamina] Failed to create the action-cost GameplayEffect spec."));
-        return;
-    }
-
-    CostSpec.Data->SetSetByCallerMagnitude(
-        UCMStaminaCostGameplayEffect::StaminaCostDataName,
-        -Cost
-    );
-    AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(
-        *CostSpec.Data.Get()
-    );
-
-    UE_LOG(LogChimeraLineBody, Log,
-        TEXT("[GAS Stamina Cost] Cost=%.1f Stamina=%.1f -> %.1f"),
-        Cost,
-        OldStamina,
-        AttributeSet->GetStamina());
 }

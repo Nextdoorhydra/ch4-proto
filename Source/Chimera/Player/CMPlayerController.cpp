@@ -85,6 +85,22 @@ void ACMPlayerController::RequestCheatClearRandomParts()
     }
 }
 
+void ACMPlayerController::RequestCheatSpawnLegParts()
+{
+    if (IsLocalController())
+    {
+        ServerCheatSpawnLegParts();
+    }
+}
+
+void ACMPlayerController::RequestCheatClearLegParts()
+{
+    if (IsLocalController())
+    {
+        ServerCheatClearLegParts();
+    }
+}
+
 // Non-Shipping 콘솔 명령이 화살표 디버그 이동을 켜거나 끄는 진입점
 void ACMPlayerController::SetCheatDebugMovementEnabled(bool bEnabled)
 {
@@ -280,6 +296,32 @@ void ACMPlayerController::ServerApplyCheatDebugMovement_Implementation(
         SharedChimera->ApplyDebugMovementInput(
             FMath::Clamp(ForwardInput, -1.0f, 1.0f),
             FMath::Clamp(TurnInput, -1.0f, 1.0f));
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatSpawnLegParts_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.LegParts requested by %s."),
+            *GetName());
+        SharedChimera->SpawnTestLegParts();
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatClearLegParts_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.ClearLegParts requested by %s."),
+            *GetName());
+        SharedChimera->ClearTestLegParts();
     }
 #endif
 }
