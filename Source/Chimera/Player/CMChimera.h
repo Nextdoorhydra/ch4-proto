@@ -268,7 +268,7 @@ protected:
         Category = "Chimera")
     TArray<TObjectPtr<USceneComponent>> RightFootPoints;
 
-    /** Flattened as SegmentIndex * 4 + PartSlotIndex. */
+    /** Flattened as SegmentIndex * PartSlotsPerSegment + PartSlotIndex. */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera|Part Slots")
     TArray<TObjectPtr<UCMPartSlotComponent>> PartSlotPoints;

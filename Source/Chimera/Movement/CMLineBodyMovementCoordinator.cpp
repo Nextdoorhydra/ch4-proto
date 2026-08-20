@@ -561,7 +561,7 @@ float UCMLineBodyMovementCoordinator::GetPerControlImpulseMultiplier(
                 && ControlBody->IsControlInputEnabled())
             {
                 AssignedControlCount +=
-                    ControlBody->GetAssignedControlCount();
+                    ControlBody->GetEnabledControlCount();
             }
         }
     }

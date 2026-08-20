@@ -23,10 +23,8 @@ DEFINE_LOG_CATEGORY(LogChimeraLineBody);
 ACMChimera::ACMChimera()
 {
     constexpr int32 MaxSegmentCount = CMControl::MaxSegments;
-    const FVector RearLeftSlotLocation(-40.0f, -60.0f, -30.0f);
-    const FVector RearRightSlotLocation(-40.0f, 60.0f, -30.0f);
-    const FVector FrontLeftSlotLocation(40.0f, -60.0f, -30.0f);
-    const FVector FrontRightSlotLocation(40.0f, 60.0f, -30.0f);
+    const FVector LeftSlotLocation(0.0f, -60.0f, -30.0f);
+    const FVector RightSlotLocation(0.0f, 60.0f, -30.0f);
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> MarkerMeshAsset(
         TEXT("/Engine/BasicShapes/Cylinder.Cylinder")
@@ -85,31 +83,15 @@ ACMChimera::ACMChimera()
         TEXT("LeftFootPoint")
     );
     LeftFootPoint->SetupAttachment(BodyMesh);
-    LeftFootPoint->SetRelativeLocation(RearLeftSlotLocation);
-    LeftFootPoint->InitializeSlotAddress(0, 2);
+    LeftFootPoint->SetRelativeLocation(LeftSlotLocation);
+    LeftFootPoint->InitializeSlotAddress(0, 0);
 
     RightFootPoint = CreateDefaultSubobject<UCMPartSlotComponent>(
         TEXT("RightFootPoint")
     );
     RightFootPoint->SetupAttachment(BodyMesh);
-    RightFootPoint->SetRelativeLocation(RearRightSlotLocation);
-    RightFootPoint->InitializeSlotAddress(0, 3);
-
-    UCMPartSlotComponent* FirstLeftUpperPartSlot =
-        CreateDefaultSubobject<UCMPartSlotComponent>(
-            TEXT("PartSlot_0_2")
-        );
-    FirstLeftUpperPartSlot->SetupAttachment(BodyMesh);
-    FirstLeftUpperPartSlot->SetRelativeLocation(FrontLeftSlotLocation);
-    FirstLeftUpperPartSlot->InitializeSlotAddress(0, 0);
-
-    UCMPartSlotComponent* FirstRightUpperPartSlot =
-        CreateDefaultSubobject<UCMPartSlotComponent>(
-            TEXT("PartSlot_0_3")
-        );
-    FirstRightUpperPartSlot->SetupAttachment(BodyMesh);
-    FirstRightUpperPartSlot->SetRelativeLocation(FrontRightSlotLocation);
-    FirstRightUpperPartSlot->InitializeSlotAddress(0, 1);
+    RightFootPoint->SetRelativeLocation(RightSlotLocation);
+    RightFootPoint->InitializeSlotAddress(0, 1);
 
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(
         TEXT("CameraBoom")
@@ -149,8 +131,6 @@ ACMChimera::ACMChimera()
     BodySegments.Add(BodyMesh);
     LeftFootPoints.Add(LeftFootPoint);
     RightFootPoints.Add(RightFootPoint);
-    PartSlotPoints.Add(FirstLeftUpperPartSlot);
-    PartSlotPoints.Add(FirstRightUpperPartSlot);
     PartSlotPoints.Add(LeftFootPoint);
     PartSlotPoints.Add(RightFootPoint);
 
@@ -178,44 +158,20 @@ ACMChimera::ACMChimera()
                 *FString::Printf(TEXT("LeftFootPoint_%d"), Index + 1)
             );
         SegmentLeftFoot->SetupAttachment(SegmentBody);
-        SegmentLeftFoot->SetRelativeLocation(RearLeftSlotLocation);
-        SegmentLeftFoot->InitializeSlotAddress(Index, 2);
+        SegmentLeftFoot->SetRelativeLocation(LeftSlotLocation);
+        SegmentLeftFoot->InitializeSlotAddress(Index, 0);
 
         UCMPartSlotComponent* SegmentRightFoot =
             CreateDefaultSubobject<UCMPartSlotComponent>(
                 *FString::Printf(TEXT("RightFootPoint_%d"), Index + 1)
             );
         SegmentRightFoot->SetupAttachment(SegmentBody);
-        SegmentRightFoot->SetRelativeLocation(RearRightSlotLocation);
-        SegmentRightFoot->InitializeSlotAddress(Index, 3);
-
-        UCMPartSlotComponent* SegmentLeftUpperPartSlot =
-            CreateDefaultSubobject<UCMPartSlotComponent>(
-                *FString::Printf(
-                    TEXT("PartSlot_%d_2"),
-                    Index
-                )
-            );
-        SegmentLeftUpperPartSlot->SetupAttachment(SegmentBody);
-        SegmentLeftUpperPartSlot->SetRelativeLocation(FrontLeftSlotLocation);
-        SegmentLeftUpperPartSlot->InitializeSlotAddress(Index, 0);
-
-        UCMPartSlotComponent* SegmentRightUpperPartSlot =
-            CreateDefaultSubobject<UCMPartSlotComponent>(
-                *FString::Printf(
-                    TEXT("PartSlot_%d_3"),
-                    Index
-                )
-            );
-        SegmentRightUpperPartSlot->SetupAttachment(SegmentBody);
-        SegmentRightUpperPartSlot->SetRelativeLocation(FrontRightSlotLocation);
-        SegmentRightUpperPartSlot->InitializeSlotAddress(Index, 1);
+        SegmentRightFoot->SetRelativeLocation(RightSlotLocation);
+        SegmentRightFoot->InitializeSlotAddress(Index, 1);
 
         BodySegments.Add(SegmentBody);
         LeftFootPoints.Add(SegmentLeftFoot);
         RightFootPoints.Add(SegmentRightFoot);
-        PartSlotPoints.Add(SegmentLeftUpperPartSlot);
-        PartSlotPoints.Add(SegmentRightUpperPartSlot);
         PartSlotPoints.Add(SegmentLeftFoot);
         PartSlotPoints.Add(SegmentRightFoot);
     }
@@ -413,7 +369,7 @@ void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
     }
 
     const int32 NewSegmentCount = FMath::Clamp(
-        PlayerCount,
+        PlayerCount * CMControl::SegmentsPerPlayer,
         1,
         CMControl::MaxSegments
     );

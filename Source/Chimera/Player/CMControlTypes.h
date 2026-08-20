@@ -6,8 +6,8 @@
 
 /**
  * Stable address of one physical attachment slot on the shared body.
- * ControlBody owns four of these addresses, while the addressed slot may
- * belong to any Segment in the Chimera.
+ * ControlBody owns four randomly assigned addresses, independently from
+ * the two body Segments that determine that player's defeat state.
  */
 USTRUCT(BlueprintType)
 struct CHIMERA_API FCMPartSlotAddress
@@ -42,10 +42,11 @@ FORCEINLINE uint32 GetTypeHash(const FCMPartSlotAddress& Address)
 
 namespace CMControl
 {
-    constexpr int32 PartSlotsPerSegment = 4;
+    constexpr int32 PartSlotsPerSegment = 2;
+    constexpr int32 SegmentsPerPlayer = 2;
     constexpr int32 MaxKeysPerPlayer = 4;
     constexpr int32 MaxPlayers = 8;
-    constexpr int32 MaxSegments = MaxPlayers;
+    constexpr int32 MaxSegments = MaxPlayers * SegmentsPerPlayer;
     constexpr int32 MaxPartSlots =
         MaxSegments * PartSlotsPerSegment;
 
@@ -81,28 +82,25 @@ namespace CMControl
         return Address;
     }
 
-    // The prototype rear foot components use local slots 2/3 after the
-    // visual order was normalized to front 0/1, rear 2/3.
+    // Each Segment exposes one left slot and one right slot.
     inline bool IsPrototypeLegSlot(const FCMPartSlotAddress& Address)
     {
-        return Address.PartSlotIndex == 2
-            || Address.PartSlotIndex == 3;
+        return Address.PartSlotIndex == 0
+            || Address.PartSlotIndex == 1;
     }
 
     inline bool IsPrototypeRightLeg(const FCMPartSlotAddress& Address)
     {
-        return Address.PartSlotIndex == 3;
+        return Address.PartSlotIndex == 1;
     }
 
     inline bool IsLeftPartSlot(const FCMPartSlotAddress& Address)
     {
-        return Address.PartSlotIndex == 0
-            || Address.PartSlotIndex == 2;
+        return Address.PartSlotIndex == 0;
     }
 
     inline bool IsRightPartSlot(const FCMPartSlotAddress& Address)
     {
-        return Address.PartSlotIndex == 1
-            || Address.PartSlotIndex == 3;
+        return Address.PartSlotIndex == 1;
     }
 }
