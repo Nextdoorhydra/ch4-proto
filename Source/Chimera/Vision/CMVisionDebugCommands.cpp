@@ -2,12 +2,14 @@
 
 #include "HAL/IConsoleManager.h"
 #include "Parts/Head/CMHeadPartActor.h"
+#include "Parts/Head/CMVisionComponent.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMControlTypes.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
+#include "Vision/CMVisionManagerSubsystem.h"
 
 #if !UE_BUILD_SHIPPING
 
@@ -200,10 +202,190 @@ void AttachHead(const TArray<FString>& Args, UWorld* World)
         *GetNameSafe(HeadPart));
 }
 
+void SetPlayerVisionDebugColor(
+    const TArray<FString>& Args,
+    UWorld* World
+)
+{
+    int32 RequestedPlayerSlotId = INDEX_NONE;
+    int32 Red = 0;
+    int32 Green = 0;
+    int32 Blue = 0;
+    float Strength = 0.65f;
+    const bool bClear = Args.Num() == 2
+        && Args[1].Equals(TEXT("clear"), ESearchCase::IgnoreCase);
+    if ((Args.Num() != 4 && Args.Num() != 5 && !bClear)
+        || !LexTryParseString(RequestedPlayerSlotId, *Args[0])
+        || RequestedPlayerSlotId < 0
+        || RequestedPlayerSlotId >= CMControl::MaxPlayers
+        || (!bClear && (!LexTryParseString(Red, *Args[1])
+            || !LexTryParseString(Green, *Args[2])
+            || !LexTryParseString(Blue, *Args[3])
+            || Red < 0 || Red > 255
+            || Green < 0 || Green > 255
+            || Blue < 0 || Blue > 255
+            || (Args.Num() == 5
+                && (!LexTryParseString(Strength, *Args[4])
+                    || Strength < 0.0f || Strength > 1.0f)))))
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("Usage: CM.Vision.DebugColor <PlayerSlotId 0-3> <R 0-255> <G 0-255> <B 0-255> [Strength 0-1], or CM.Vision.DebugColor <PlayerSlotId> clear"));
+        return;
+    }
+
+    int32 ResolvedPlayerSlotId = INDEX_NONE;
+    ACMPlayerController* PlayerController = FindPlayerController(
+        World,
+        RequestedPlayerSlotId,
+        ResolvedPlayerSlotId
+    );
+    if (!PlayerController || !PlayerController->HasAuthority())
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("[Vision Debug Color Failed] Run the command on the listen-server host after PlayerSlotId %d is assigned."),
+            RequestedPlayerSlotId);
+        return;
+    }
+
+    ACMControlBody* ControlBody =
+        PlayerController->GetPawn<ACMControlBody>();
+    ACMChimera* SharedChimera = ControlBody
+        ? ControlBody->GetSharedChimera()
+        : nullptr;
+    if (!ControlBody || !SharedChimera)
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("[Vision Debug Color Failed] ControlBody or SharedChimera is not ready."));
+        return;
+    }
+
+    TArray<ACMHeadPartActor*> Heads;
+    for (const FCMPartSlotAddress& SlotAddress
+        : ControlBody->GetControlSlots())
+    {
+        const UCMPartSlotComponent* PartSlot =
+            SharedChimera->GetPartSlotComponent(SlotAddress);
+        if (ACMHeadPartActor* Head = PartSlot
+            ? Cast<ACMHeadPartActor>(PartSlot->GetAttachedPart())
+            : nullptr)
+        {
+            Heads.AddUnique(Head);
+        }
+    }
+
+    if (Heads.IsEmpty())
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("[Vision Debug Color Failed] PlayerSlotId %d has no Head in an assigned control slot."),
+            ResolvedPlayerSlotId);
+        return;
+    }
+
+    const FLinearColor Color(
+        Red / 255.0f,
+        Green / 255.0f,
+        Blue / 255.0f
+    );
+    for (ACMHeadPartActor* Head : Heads)
+    {
+        if (UCMVisionComponent* Vision = Head->GetVisionComponent())
+        {
+            Vision->SetVisionTint(Color, bClear ? 0.0f : Strength);
+        }
+    }
+
+    UE_LOG(LogChimeraVisionDebug, Warning,
+        TEXT("[Vision Debug Color] PlayerSlotId=%d Heads=%d Color=(%d,%d,%d) Strength=%.2f"),
+        ResolvedPlayerSlotId,
+        Heads.Num(),
+        Red,
+        Green,
+        Blue,
+        bClear ? 0.0f : Strength);
+}
+
+void EnableVisionSystemDebug(
+    const TArray<FString>& Args,
+    UWorld* World
+)
+{
+    if (!Args.IsEmpty())
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("Usage: CM.Vision.DebugEnable"));
+        return;
+    }
+
+    UCMVisionManagerSubsystem* VisionManager = World
+        ? World->GetSubsystem<UCMVisionManagerSubsystem>()
+        : nullptr;
+    if (!VisionManager)
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("[Vision Debug Enable Failed] Vision Manager is unavailable."));
+        return;
+    }
+
+    VisionManager->EnableVisionSystem();
+    UE_LOG(LogChimeraVisionDebug, Warning,
+        TEXT("[Vision Debug] Vision system enabled."));
+}
+
+void DisableVisionSystemDebug(
+    const TArray<FString>& Args,
+    UWorld* World
+)
+{
+    if (!Args.IsEmpty())
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("Usage: CM.Vision.DebugDisable"));
+        return;
+    }
+
+    UCMVisionManagerSubsystem* VisionManager = World
+        ? World->GetSubsystem<UCMVisionManagerSubsystem>()
+        : nullptr;
+    if (!VisionManager)
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("[Vision Debug Disable Failed] Vision Manager is unavailable."));
+        return;
+    }
+
+    VisionManager->DisableVisionSystem();
+    UE_LOG(LogChimeraVisionDebug, Warning,
+        TEXT("[Vision Debug] Vision system disabled; full screen is visible."));
+}
+
 FAutoConsoleCommandWithWorldAndArgs AttachHeadCommand(
     TEXT("CM.AttachHead"),
     TEXT("Spawns BP_CMHead01HeadPart for a player control slot. Usage: CM.AttachHead <ControlSlot 0-3> [PlayerSlotId 0-3]"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&AttachHead)
+);
+
+FAutoConsoleCommandWithWorldAndArgs VisionDebugColorCommand(
+    TEXT("CM.Vision.DebugColor"),
+    TEXT("Colors a player's replicated Head vision. Usage: CM.Vision.DebugColor <PlayerSlotId 0-3> <R 0-255> <G 0-255> <B 0-255> [Strength 0-1], or <PlayerSlotId> clear"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &SetPlayerVisionDebugColor
+    )
+);
+
+FAutoConsoleCommandWithWorldAndArgs VisionDebugEnableCommand(
+    TEXT("CM.Vision.DebugEnable"),
+    TEXT("Enables the local Vision system."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &EnableVisionSystemDebug
+    )
+);
+
+FAutoConsoleCommandWithWorldAndArgs VisionDebugDisableCommand(
+    TEXT("CM.Vision.DebugDisable"),
+    TEXT("Disables the local Vision system so the full screen is visible."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &DisableVisionSystemDebug
+    )
 );
 }
 

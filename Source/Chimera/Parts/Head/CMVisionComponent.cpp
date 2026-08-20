@@ -21,6 +21,7 @@ void UCMVisionComponent::GetLifetimeReplicatedProps(
     DOREPLIFETIME(UCMVisionComponent, VisionAngleDegrees);
     DOREPLIFETIME(UCMVisionComponent, VisionDistance);
     DOREPLIFETIME(UCMVisionComponent, NearVisionRadius);
+    DOREPLIFETIME(UCMVisionComponent, VisionTint);
     DOREPLIFETIME(UCMVisionComponent, AimDirection);
 }
 
@@ -128,6 +129,30 @@ float UCMVisionComponent::GetVisionDistance() const
 float UCMVisionComponent::GetNearVisionRadius() const
 {
     return NearVisionRadius;
+}
+
+void UCMVisionComponent::SetVisionTint(
+    const FLinearColor& InColor,
+    float InStrength
+)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority())
+    {
+        return;
+    }
+
+    VisionTint = FLinearColor(
+        FMath::Clamp(InColor.R, 0.0f, 1.0f),
+        FMath::Clamp(InColor.G, 0.0f, 1.0f),
+        FMath::Clamp(InColor.B, 0.0f, 1.0f),
+        FMath::Clamp(InStrength, 0.0f, 1.0f)
+    );
+    GetOwner()->ForceNetUpdate();
+}
+
+FLinearColor UCMVisionComponent::GetVisionTint() const
+{
+    return VisionTint;
 }
 
 FVector UCMVisionComponent::GetAimDirection() const

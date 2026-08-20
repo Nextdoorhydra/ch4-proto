@@ -53,6 +53,13 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     float GetNearVisionRadius() const;
 
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Vision")
+    void SetVisionTint(const FLinearColor& InColor, float InStrength);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    FLinearColor GetVisionTint() const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     FVector GetAimDirection() const;
 
@@ -103,6 +110,11 @@ private:
         Category = "Chimera|Vision",
         meta = (AllowPrivateAccess = "true"))
     float NearVisionRadius = 150.0f;
+
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision",
+        meta = (AllowPrivateAccess = "true"))
+    FLinearColor VisionTint = FLinearColor::Transparent;
 
     UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Vision",
