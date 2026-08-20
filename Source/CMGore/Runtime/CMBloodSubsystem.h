@@ -43,6 +43,8 @@ public:
 
 	virtual void Deinitialize() override;
 
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
 	virtual bool ShouldCreateSubsystem(
 		UObject* Outer
 	) const override;

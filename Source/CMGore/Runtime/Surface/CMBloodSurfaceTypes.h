@@ -6,6 +6,7 @@
 #include "CMBloodSurfaceTypes.generated.h"
 
 class AActor;
+class ACMBloodDecalActor;
 class UMaterialInterface;
 class UPrimitiveComponent;
 
@@ -158,6 +159,12 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Surface")
 	TObjectPtr<UMaterialInterface> DecalMaterial = nullptr;
+
+	/**
+	 * Presentation 방식. 비어 있으면 C++ 기본 ACMBloodDecalActor를 사용한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Surface")
+	TSubclassOf<ACMBloodDecalActor> DecalActorClass;
 
 	/**
 	 * Decal Y/Z extent random range.

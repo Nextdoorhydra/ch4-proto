@@ -22,4 +22,12 @@ protected:
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+
+private:
+	void RunPhase4SmokeTest();
+	void FinishPhase4SmokeTest();
+	void RecordPhase4SmokeTestResult(bool bCondition, const TCHAR* FailureMessage);
+
+private:
+	bool bPhase4SmokeTestPassed = true;
 };

@@ -5,6 +5,8 @@
 
 #include "CMBloodDefinition.generated.h"
 
+class ACMBloodDecalActor;
+class UMaterialInterface;
 class UNiagaraSystem;
 
 
@@ -32,9 +34,12 @@ struct CMGORE_API FCMBloodSurfaceDefinition
 {
 	GENERATED_BODY()
 
-public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
 	bool bEnabled = false;
+
+	/** Decal의 표현 방식과 Blueprint 확장 지점을 선택한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
+	TSubclassOf<ACMBloodDecalActor> DecalActorClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Surface")
 	TObjectPtr<UMaterialInterface> DecalMaterial = nullptr;

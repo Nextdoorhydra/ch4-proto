@@ -53,14 +53,6 @@ bool FCMBloodVFXExecutor::ExecuteInstant(
 		return false;
 	}
 
-	UNiagaraSystem* NiagaraSystem =
-		VFXDefinition->NiagaraSystem.Get();
-
-	if (!IsValid(NiagaraSystem))
-	{
-		return false;
-	}
-
 	FVector EffectDirection = Event.Direction.GetSafeNormal();
 
 	// Direction이 없는 Impact의 경우 SurfaceNormal을 fallback으로 사용한다.
@@ -74,55 +66,57 @@ bool FCMBloodVFXExecutor::ExecuteInstant(
 		EffectDirection = FVector::UpVector;
 	}
 
-	const FRotator Rotation =
-		EffectDirection.Rotation();
+	bool bExecutedAnyPresentation = false;
 
-	/**
-	 * User Parameter를 설정한 뒤 첫 Activation이 일어나도록
-	 * AutoActivate = false로 Spawn한다.
-	 */
-	UNiagaraComponent* NiagaraComponent =
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-			WorldContextObject,
-			NiagaraSystem,
-			Event.Location,
-			Rotation,
-			VFXDefinition->Scale,
-
-			// Auto Destroy
-			true,
-
-			// Auto Activate
-			false,
-
-			// Phase 3에서는 별도 Pooling 정책을 적용하지 않는다.
-			ENCPoolMethod::None,
-
-			// Pre Cull Check
-			true
-		);
-
-	if (!IsValid(NiagaraComponent))
+	if (UNiagaraSystem* NiagaraSystem = VFXDefinition->NiagaraSystem.Get();
+		IsValid(NiagaraSystem))
 	{
-		return false;
+		/**
+		 * User Parameter를 설정한 뒤 첫 Activation이 일어나도록
+		 * AutoActivate = false로 Spawn한다.
+		 */
+		UNiagaraComponent* NiagaraComponent =
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+				WorldContextObject,
+				NiagaraSystem,
+				Event.Location,
+				EffectDirection.Rotation(),
+				VFXDefinition->Scale,
+
+				// Auto Destroy
+				true,
+
+				// Auto Activate
+				false,
+
+				// Phase 3에서는 별도 Pooling 정책을 적용하지 않는다.
+				ENCPoolMethod::None,
+
+				// Pre Cull Check
+				true
+			);
+
+		if (IsValid(NiagaraComponent))
+		{
+			NiagaraComponent->SetVariableFloat(
+				CMBloodVFXParameters::Magnitude,
+				Event.Magnitude
+			);
+
+			NiagaraComponent->SetVariableVec3(
+				CMBloodVFXParameters::Direction,
+				Event.Direction
+			);
+
+			NiagaraComponent->SetVariableVec3(
+				CMBloodVFXParameters::SurfaceNormal,
+				Event.SurfaceNormal
+			);
+
+			NiagaraComponent->Activate(true);
+			bExecutedAnyPresentation = true;
+		}
 	}
-
-	NiagaraComponent->SetVariableFloat(
-		CMBloodVFXParameters::Magnitude,
-		Event.Magnitude
-	);
-
-	NiagaraComponent->SetVariableVec3(
-		CMBloodVFXParameters::Direction,
-		Event.Direction
-	);
-
-	NiagaraComponent->SetVariableVec3(
-		CMBloodVFXParameters::SurfaceNormal,
-		Event.SurfaceNormal
-	);
-
-	NiagaraComponent->Activate(true);
 
 	if (Definition.Surface.bEnabled &&
 	IsValid(Definition.Surface.DecalMaterial))
@@ -142,6 +136,9 @@ bool FCMBloodVFXExecutor::ExecuteInstant(
 
 				SurfaceRequest.DecalMaterial =
 					Definition.Surface.DecalMaterial;
+
+				SurfaceRequest.DecalActorClass =
+					Definition.Surface.DecalActorClass;
 
 				SurfaceRequest.SampleCount =
 					Definition.Surface.SampleCount;
@@ -164,12 +161,13 @@ bool FCMBloodVFXExecutor::ExecuteInstant(
 				SurfaceRequest.FadeDurationSeconds =
 					Definition.Surface.FadeDurationSeconds;
 
-				SurfaceSubsystem->SpawnSurfaceBurst(
-					SurfaceRequest);
+				const TArray<FCMBloodResidueHandle> SpawnedMarks =
+					SurfaceSubsystem->SpawnSurfaceBurst(SurfaceRequest);
+
+				bExecutedAnyPresentation |= !SpawnedMarks.IsEmpty();
 			}
 		}
 	}
 
-	
-	return true;
+	return bExecutedAnyPresentation;
 }

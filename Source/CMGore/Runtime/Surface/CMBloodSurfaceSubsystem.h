@@ -7,7 +7,7 @@
 
 #include "CMBloodSurfaceSubsystem.generated.h"
 
-class UDecalComponent;
+class ACMBloodDecalActor;
 
 UCLASS()
 class CMGORE_API UCMBloodSurfaceSubsystem : public UWorldSubsystem
@@ -15,7 +15,6 @@ class CMGORE_API UCMBloodSurfaceSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
 public:
@@ -66,10 +65,9 @@ public:
 private:
 	struct FRuntimeBloodMarkState
 	{
-		TWeakObjectPtr<UDecalComponent> DecalComponent;
+		TWeakObjectPtr<ACMBloodDecalActor> PresentationActor;
 		FTimerHandle ExpirationTimer;
 	};
-
 private:
 	FCMBloodResidueHandle SpawnBloodMarkFromHit(
 		const FHitResult& Hit,
@@ -81,9 +79,14 @@ private:
 	void EvictOldestBloodMarkIfNeeded();
 
 private:
-	UDecalComponent* AcquireDecalComponent();
-	UDecalComponent* CreateDecalComponent();
-	void ReleaseDecalComponent(UDecalComponent* DecalComponent);
+	ACMBloodDecalActor* AcquirePresentationActor(
+		TSubclassOf<ACMBloodDecalActor> PresentationClass);
+
+	ACMBloodDecalActor* CreatePresentationActor(
+		TSubclassOf<ACMBloodDecalActor> PresentationClass);
+
+	void ReleasePresentationActor(
+		ACMBloodDecalActor* PresentationActor);
 
 private:
 	/**
@@ -105,14 +108,13 @@ private:
 	 */
 	TArray<FCMBloodResidueHandle> BloodMarkSpawnOrder;
 
-	/**
-	 * GC가 pooled decal component를 제거하지 않도록 subsystem이 strong reference 보유.
-	 */
+	/** GC 및 actor lifetime을 subsystem이 명시적으로 소유한다. */
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<UDecalComponent>> OwnedDecalComponents;
+	TArray<TObjectPtr<ACMBloodDecalActor>> OwnedPresentationActors;
 
-	/**
-	 * 사용 가능 pool.
-	 */
-	TArray<TWeakObjectPtr<UDecalComponent>> AvailableDecalComponents;
+	/** Presentation class가 서로 다른 Actor를 섞지 않는 lazy pool. */
+	TMap<
+		TSubclassOf<ACMBloodDecalActor>,
+		TArray<TWeakObjectPtr<ACMBloodDecalActor>>
+	> AvailablePresentationActors;
 };

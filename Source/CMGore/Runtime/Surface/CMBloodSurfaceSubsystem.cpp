@@ -1,98 +1,28 @@
 ﻿#include "Runtime/Surface/CMBloodSurfaceSubsystem.h"
 
-#include "Components/DecalComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/WorldSettings.h"
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
 
+#include "Runtime/Surface/Presentation/CMBloodDecalActor.h"
 #include "Settings/CMBloodSettings.h"
-
-
-void UCMBloodSurfaceSubsystem::Initialize(
-	FSubsystemCollectionBase& Collection)
-{
-	Super::Initialize(Collection);
-
-	const UCMBloodSettings* Settings =
-		GetDefault<UCMBloodSettings>();
-
-	if (!Settings)
-	{
-		return;
-	}
-
-	const int32 PrewarmCount =
-		FMath::Max(
-			0,
-			Settings->InitialBloodDecalPoolSize
-		);
-
-	OwnedDecalComponents.Reserve(
-		PrewarmCount
-	);
-
-	AvailableDecalComponents.Reserve(
-		PrewarmCount
-	);
-
-	/*
-	 * Prewarm 단계에서는 UObject만 생성한다.
-	 *
-	 * Render State는 실제 Decal이 사용될 때
-	 * Material / Transform / Size 설정 후 생성한다.
-	 */
-	for (int32 Index = 0;
-		 Index < PrewarmCount;
-		 ++Index)
-	{
-		if (UDecalComponent* DecalComponent =
-			CreateDecalComponent())
-		{
-			AvailableDecalComponents.Add(
-				DecalComponent
-			);
-		}
-	}
-}
 
 
 void UCMBloodSurfaceSubsystem::Deinitialize()
 {
-	UWorld* World =
-		GetWorld();
+	ClearBloodMarks();
+	AvailablePresentationActors.Reset();
 
-	if (World)
+	for (ACMBloodDecalActor* PresentationActor
+		: OwnedPresentationActors)
 	{
-		FTimerManager& TimerManager =
-			World->GetTimerManager();
-
-		for (TPair<
-			FCMBloodResidueHandle,
-			FRuntimeBloodMarkState>& Pair
-			: RuntimeBloodMarkStates)
+		if (IsValid(PresentationActor))
 		{
-			TimerManager.ClearTimer(
-				Pair.Value.ExpirationTimer
-			);
+			PresentationActor->Destroy();
 		}
 	}
 
-	ActiveBloodMarks.Reset();
-	RuntimeBloodMarkStates.Reset();
-	BloodMarkSpawnOrder.Reset();
-	AvailableDecalComponents.Reset();
-
-	for (UDecalComponent* DecalComponent
-		: OwnedDecalComponents)
-	{
-		if (IsValid(DecalComponent))
-		{
-			DecalComponent->DestroyComponent();
-		}
-	}
-
-	OwnedDecalComponents.Reset();
+	OwnedPresentationActors.Reset();
 
 	Super::Deinitialize();
 }
@@ -268,33 +198,11 @@ UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 
 	EvictOldestBloodMarkIfNeeded();
 
-	UDecalComponent* DecalComponent =
-		AcquireDecalComponent();
-
-	if (!IsValid(DecalComponent))
-	{
-		return InvalidHandle;
-	}
-
-	/*
-	 * Pool의 inactive Decal은 항상 unregistered 상태여야 한다.
-	 *
-	 * 예외적으로 등록되어 있다면 먼저 render state를 제거한다.
-	 */
-	if (DecalComponent->IsRegistered())
-	{
-		DecalComponent->UnregisterComponent();
-	}
-
 	const FVector SurfaceNormal =
 		Hit.ImpactNormal.GetSafeNormal();
 
 	if (SurfaceNormal.IsNearlyZero())
 	{
-		ReleaseDecalComponent(
-			DecalComponent
-		);
-
 		return InvalidHandle;
 	}
 
@@ -351,64 +259,7 @@ UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 		SurfaceExtent
 	);
 
-	/*
-	 * ---------------------------------------------------------
-	 * 중요:
-	 *
-	 * Render State 생성 전에 Decal의 완전한 상태를 구성한다.
-	 * ---------------------------------------------------------
-	 */
-
-	DecalComponent->SetDecalMaterial(
-		Request.DecalMaterial
-	);
-
-	DecalComponent->DecalSize =
-		DecalSize;
-
-	DecalComponent->SetWorldLocationAndRotation(
-		DecalLocation,
-		DecalRotation
-	);
-
-	DecalComponent->SetHiddenInGame(
-		false
-	);
-
-	DecalComponent->SetVisibility(
-		true
-	);
-
-	/*
-	 * 이전 사용에서 남은 Fade state 초기화.
-	 */
-	DecalComponent->SetFadeOut(
-		0.0f,
-		0.0f,
-		false
-	);
-
-	/*
-	 * Material / Size / Transform / Visibility가 준비된 뒤
-	 * 처음으로 World에 등록한다.
-	 *
-	 * 이 시점에 Decal Render State가 생성된다.
-	 */
-	DecalComponent->RegisterComponentWithWorld(
-		World
-	);
-
-	if (!DecalComponent->IsRegistered())
-	{
-		ReleaseDecalComponent(
-			DecalComponent
-		);
-
-		return InvalidHandle;
-	}
-
-	const float Lifetime =
-		Request.LifetimeSeconds;
+	const float Lifetime = FMath::Max(0.0f, Request.LifetimeSeconds);
 
 	const float FadeDuration =
 		Lifetime > 0.0f
@@ -419,21 +270,41 @@ UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 			)
 			: 0.0f;
 
-	if (Lifetime > 0.0f &&
-		FadeDuration > 0.0f)
-	{
-		const float FadeStartDelay =
-			FMath::Max(
-				0.0f,
-				Lifetime -
-				FadeDuration
-			);
+	TSubclassOf<ACMBloodDecalActor> PresentationClass =
+		Request.DecalActorClass;
 
-		DecalComponent->SetFadeOut(
-			FadeStartDelay,
-			FadeDuration,
-			false
-		);
+	if (!PresentationClass)
+	{
+		PresentationClass = ACMBloodDecalActor::StaticClass();
+	}
+
+	ACMBloodDecalActor* PresentationActor =
+		AcquirePresentationActor(PresentationClass);
+
+	if (!IsValid(PresentationActor))
+	{
+		return InvalidHandle;
+	}
+
+	FCMBloodDecalSpawnContext PresentationContext;
+	PresentationContext.WorldTransform =
+		FTransform(DecalRotation, DecalLocation);
+	PresentationContext.SurfaceNormal = SurfaceNormal;
+	PresentationContext.DecalSize = DecalSize;
+	PresentationContext.LifetimeSeconds = Lifetime;
+	PresentationContext.FadeDurationSeconds = FadeDuration;
+	PresentationContext.RandomSeed = RandomStream.GetCurrentSeed();
+	PresentationContext.SurfaceActor = Hit.GetActor();
+	PresentationContext.SurfaceComponent = Hit.GetComponent();
+
+	PresentationActor->ActivatePresentation(
+		PresentationContext,
+		Request.DecalMaterial);
+
+	if (!PresentationActor->IsPresentationActive())
+	{
+		ReleasePresentationActor(PresentationActor);
+		return InvalidHandle;
 	}
 
 	const FCMBloodResidueHandle Handle =
@@ -444,11 +315,7 @@ UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 	BloodMark.Handle =
 		Handle;
 
-	BloodMark.WorldTransform =
-		FTransform(
-			DecalRotation,
-			DecalLocation
-		);
+	BloodMark.WorldTransform = PresentationContext.WorldTransform;
 
 	BloodMark.SurfaceNormal =
 		SurfaceNormal;
@@ -479,8 +346,7 @@ UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 
 	FRuntimeBloodMarkState RuntimeState;
 
-	RuntimeState.DecalComponent =
-		DecalComponent;
+	RuntimeState.PresentationActor = PresentationActor;
 
 	if (Lifetime > 0.0f)
 	{
@@ -539,12 +405,12 @@ bool UCMBloodSurfaceSubsystem::RemoveBloodMark(
 		}
 
 		if (RuntimeState
-			->DecalComponent
+			->PresentationActor
 			.IsValid())
 		{
-			ReleaseDecalComponent(
+			ReleasePresentationActor(
 				RuntimeState
-					->DecalComponent
+					->PresentationActor
 					.Get()
 			);
 		}
@@ -690,136 +556,83 @@ void UCMBloodSurfaceSubsystem::EvictOldestBloodMarkIfNeeded()
 }
 
 
-UDecalComponent*
-UCMBloodSurfaceSubsystem::AcquireDecalComponent()
+ACMBloodDecalActor*
+UCMBloodSurfaceSubsystem::AcquirePresentationActor(
+	TSubclassOf<ACMBloodDecalActor> PresentationClass)
 {
-	while (!AvailableDecalComponents.IsEmpty())
+	if (!PresentationClass)
 	{
-		const TWeakObjectPtr<UDecalComponent> WeakDecal =
-			AvailableDecalComponents.Pop();
+		return nullptr;
+	}
 
-		if (WeakDecal.IsValid())
+	TArray<TWeakObjectPtr<ACMBloodDecalActor>>& AvailableActors =
+		AvailablePresentationActors.FindOrAdd(PresentationClass);
+
+	while (!AvailableActors.IsEmpty())
+	{
+		const TWeakObjectPtr<ACMBloodDecalActor> WeakActor =
+			AvailableActors.Pop();
+
+		if (WeakActor.IsValid())
 		{
-			UDecalComponent* DecalComponent =
-				WeakDecal.Get();
-
-			/*
-			 * Pool invariant:
-			 * inactive Decal은 scene에 등록되어 있지 않는다.
-			 */
-			if (DecalComponent->IsRegistered())
-			{
-				DecalComponent->UnregisterComponent();
-			}
-
-			return DecalComponent;
+			ACMBloodDecalActor* PresentationActor = WeakActor.Get();
+			PresentationActor->DeactivatePresentation();
+			return PresentationActor;
 		}
 	}
 
-	return CreateDecalComponent();
+	return CreatePresentationActor(PresentationClass);
 }
 
 
-UDecalComponent*
-UCMBloodSurfaceSubsystem::CreateDecalComponent()
+ACMBloodDecalActor*
+UCMBloodSurfaceSubsystem::CreatePresentationActor(
+	TSubclassOf<ACMBloodDecalActor> PresentationClass)
 {
-	UWorld* World =
-		GetWorld();
+	UWorld* World = GetWorld();
 
-	if (!World)
+	if (!World || !PresentationClass)
 	{
 		return nullptr;
 	}
 
-	AWorldSettings* WorldSettings =
-		World->GetWorldSettings();
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.ObjectFlags |= RF_Transient;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	if (!IsValid(WorldSettings))
+	ACMBloodDecalActor* PresentationActor =
+		World->SpawnActor<ACMBloodDecalActor>(
+			PresentationClass,
+			FTransform::Identity,
+			SpawnParameters);
+
+	if (!IsValid(PresentationActor))
 	{
 		return nullptr;
 	}
 
-	UDecalComponent* DecalComponent =
-		NewObject<UDecalComponent>(
-			WorldSettings,
-			NAME_None,
-			RF_Transient
-		);
+	PresentationActor->DeactivatePresentation();
+	OwnedPresentationActors.Add(PresentationActor);
 
-	if (!IsValid(DecalComponent))
-	{
-		return nullptr;
-	}
-
-	/*
-	 * Subsystem이 world-space transform을 직접 관리한다.
-	 */
-	DecalComponent->SetAbsolute(
-		true,
-		true,
-		true
-	);
-
-	/*
-	 * Prewarm에서는 Render State를 만들지 않는다.
-	 *
-	 * RegisterComponentWithWorld()는
-	 * SpawnBloodMarkFromHit()에서 모든 상태가 준비된 후 호출한다.
-	 */
-	DecalComponent->SetHiddenInGame(
-		true
-	);
-
-	DecalComponent->SetVisibility(
-		false
-	);
-
-	OwnedDecalComponents.Add(
-		DecalComponent
-	);
-
-	return DecalComponent;
+	return PresentationActor;
 }
 
 
-void UCMBloodSurfaceSubsystem::ReleaseDecalComponent(
-	UDecalComponent* DecalComponent)
+void UCMBloodSurfaceSubsystem::ReleasePresentationActor(
+	ACMBloodDecalActor* PresentationActor)
 {
-	if (!IsValid(DecalComponent))
+	if (!IsValid(PresentationActor))
 	{
 		return;
 	}
 
-	/*
-	 * 가장 먼저 Scene에서 제거한다.
-	 *
-	 * Render State가 제거된 뒤 아래 데이터를
-	 * 안전하게 다음 사용을 위해 초기화한다.
-	 */
-	if (DecalComponent->IsRegistered())
-	{
-		DecalComponent->UnregisterComponent();
-	}
+	PresentationActor->DeactivatePresentation();
 
-	DecalComponent->SetFadeOut(
-		0.0f,
-		0.0f,
-		false
-	);
+	TSubclassOf<ACMBloodDecalActor> PresentationClass =
+		PresentationActor->GetClass();
 
-	DecalComponent->SetHiddenInGame(
-		true
-	);
-
-	DecalComponent->SetVisibility(
-		false
-	);
-
-	DecalComponent->SetDecalMaterial(
-		nullptr
-	);
-
-	AvailableDecalComponents.Add(
-		DecalComponent
-	);
+	AvailablePresentationActors
+		.FindOrAdd(PresentationClass)
+		.AddUnique(PresentationActor);
 }

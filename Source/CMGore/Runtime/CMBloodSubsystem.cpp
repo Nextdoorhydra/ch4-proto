@@ -111,13 +111,19 @@ void UCMBloodSubsystem::Initialize(
 	Super::Initialize(Collection);
 
 	LoadDefinitionRegistry();
-	RegisterMessageListeners();
 
 	UE_LOG(
 		LogCMBloodSubsystem,
 		Log,
 		TEXT("UCMBloodSubsystem initialized.")
 	);
+}
+
+void UCMBloodSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	RegisterMessageListeners();
 }
 
 void UCMBloodSubsystem::Deinitialize()
@@ -140,6 +146,21 @@ void UCMBloodSubsystem::Deinitialize()
 
 void UCMBloodSubsystem::RegisterMessageListeners()
 {
+	if (!MessageListenerHandles.IsEmpty())
+	{
+		return;
+	}
+
+	if (!UGameplayMessageSubsystem::HasInstance(this))
+	{
+		UE_LOG(
+			LogCMBloodSubsystem,
+			Warning,
+			TEXT("Gameplay Message Subsystem is unavailable at World BeginPlay.")
+		);
+		return;
+	}
+
 	UGameplayMessageSubsystem& MessageSubsystem =
 		UGameplayMessageSubsystem::Get(this);
 
