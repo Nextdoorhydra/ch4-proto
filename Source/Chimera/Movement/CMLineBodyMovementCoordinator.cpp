@@ -395,13 +395,6 @@ void UCMLineBodyMovementCoordinator::ApplyCooperativeForwardImpulse(
         return;
     }
 
-    FVector ForwardDirection = Chimera.BodyMesh->GetForwardVector();
-    ForwardDirection.Z = 0.0f;
-    if (!ForwardDirection.Normalize())
-    {
-        return;
-    }
-
     float TotalMass = 0.0f;
     TArray<UStaticMeshComponent*> SimulatedSegments;
     for (int32 Index = 0; Index < Chimera.ActiveSegmentCount; ++Index)
@@ -440,8 +433,21 @@ void UCMLineBodyMovementCoordinator::ApplyCooperativeForwardImpulse(
     {
         const float MassFraction =
             FMath::Max(BodySegment->GetMass(), 0.01f) / TotalMass;
+
+        // 각 마디가 자신의 접선 방향으로 밀어 지네처럼 움직이게 한다.
+        // 몸이 굽어 있으면 각 전방 벡터의 합력이 전체 이동 방향을 만들고,
+        // 서로 다른 힘의 방향은 Constraint를 통해 몸통 형태도 변화시킨다.
+        FVector SegmentForwardDirection = BodySegment->GetForwardVector();
+        SegmentForwardDirection.Z = 0.0f;
+        if (!SegmentForwardDirection.Normalize())
+        {
+            continue;
+        }
+
         BodySegment->AddImpulse(
-            ForwardDirection * ForwardImpulseMagnitude * MassFraction
+            SegmentForwardDirection
+            * ForwardImpulseMagnitude
+            * MassFraction
         );
     }
 }
