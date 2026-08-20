@@ -2,11 +2,13 @@
 
 
 #include "CMGoreMessageTestActor.h"
+#include "CMGoreMessageTestActor.h"
+
 #include "Tags/CMGoreGameplayTags.h"
 #include "Messaging/CMGoreMessages.h"
+#include "Runtime/Surface/CMBloodSurfaceSubsystem.h"
+
 #include "GameplayMessageRuntime/Public/GameFramework/GameplayMessageSubsystem.h"
-
-
 
 // Sets default values
 ACMGoreMessageTestActor::ACMGoreMessageTestActor()
@@ -19,18 +21,34 @@ ACMGoreMessageTestActor::ACMGoreMessageTestActor()
 void ACMGoreMessageTestActor::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
 	FCMBloodBurstMessage Message;
 
 	Message.Source = this;
 	Message.Location = GetActorLocation();
-	Message.Direction = GetActorForwardVector();
+	Message.Direction = FVector::DownVector;
 	Message.Amount = 3.0f;
 	Message.BloodDefinitionId = TEXT("Human.Red");
 
 	UGameplayMessageSubsystem::Get(this).BroadcastMessage(
 		CMGoreGameplayTags::Message::Blood::Burst,
 		Message
+	);
+
+	// -----------------------------------------------------------------
+	// Phase 4 Test : Blood Mark Registry
+	// -----------------------------------------------------------------
+
+	UCMBloodSurfaceSubsystem* SurfaceSubsystem =
+		GetWorld()->GetSubsystem<UCMBloodSurfaceSubsystem>();
+
+	check(SurfaceSubsystem);
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("Blood Marks: %d"),
+		SurfaceSubsystem->GetActiveBloodMarkCount()
 	);
 }
 
