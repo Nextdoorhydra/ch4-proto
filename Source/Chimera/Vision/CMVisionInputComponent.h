@@ -6,6 +6,7 @@
 #include "CMVisionInputComponent.generated.h"
 
 class ACMHeadPartActor;
+class UCMVisionComponent;
 
 /**
  * Player-owned cursor input bridge for shared Head vision.
@@ -21,6 +22,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     virtual void TickComponent(
         float DeltaTime,
@@ -30,8 +32,15 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Vision|Input",
-        meta = (ClampMin = "0.01"))
+        meta = (ClampMin = "0.01",
+            ToolTip = "Minimum interval between aim RPCs. Local prediction still updates every frame."))
     float AimUpdateInterval = 0.05f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision|Input",
+        meta = (ClampMin = "0.1",
+            ToolTip = "Resends unchanged aim so a lost final unreliable RPC is repaired."))
+    float AimHeartbeatInterval = 0.25f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Vision|Input",
@@ -50,6 +59,13 @@ private:
         TArray<ACMHeadPartActor*>& OutHeadParts
     ) const;
 
+    void ReplaceLocalAimPredictions(
+        const TSet<UCMVisionComponent*>& CurrentPredictions
+    );
+    void ClearLocalAimPredictions();
+
     FVector LastSentWorldTarget = FVector::ZeroVector;
+    float TimeSinceLastAimSend = 0.0f;
     bool bHasSentWorldTarget = false;
+    TSet<TWeakObjectPtr<UCMVisionComponent>> LocallyPredictedVisions;
 };

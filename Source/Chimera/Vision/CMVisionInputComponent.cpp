@@ -10,7 +10,7 @@
 UCMVisionInputComponent::UCMVisionInputComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = AimUpdateInterval;
+    PrimaryComponentTick.TickInterval = 0.0f;
     SetIsReplicatedByDefault(true);
 }
 
@@ -29,10 +29,14 @@ void UCMVisionInputComponent::BeginPlay()
         PlayerController->bShowMouseCursor = true;
     }
 
-    PrimaryComponentTick.TickInterval = FMath::Max(
-        AimUpdateInterval,
-        0.01f
-    );
+}
+
+void UCMVisionInputComponent::EndPlay(
+    const EEndPlayReason::Type EndPlayReason
+)
+{
+    ClearLocalAimPredictions();
+    Super::EndPlay(EndPlayReason);
 }
 
 void UCMVisionInputComponent::TickComponent(
@@ -47,13 +51,19 @@ void UCMVisionInputComponent::TickComponent(
         Cast<ACMPlayerController>(GetOwner());
     if (!PlayerController || !PlayerController->IsLocalController())
     {
+        ClearLocalAimPredictions();
         return;
     }
+
+    TimeSinceLastAimSend += DeltaTime;
 
     TArray<ACMHeadPartActor*> ControlledHeads;
     GetControlledHeadParts(ControlledHeads);
     if (ControlledHeads.IsEmpty())
     {
+        ClearLocalAimPredictions();
+        bHasSentWorldTarget = false;
+        TimeSinceLastAimSend = 0.0f;
         return;
     }
 
@@ -71,6 +81,9 @@ void UCMVisionInputComponent::TickComponent(
     }
     if (!ReferenceVision)
     {
+        ClearLocalAimPredictions();
+        bHasSentWorldTarget = false;
+        TimeSinceLastAimSend = 0.0f;
         return;
     }
 
@@ -94,15 +107,46 @@ void UCMVisionInputComponent::TickComponent(
 
     const FVector WorldTarget = MouseRayOrigin
         + MouseRayDirection * IntersectionDistance;
-    if (bHasSentWorldTarget
-        && FVector::DistSquared2D(WorldTarget, LastSentWorldTarget)
-            < FMath::Square(MinimumTargetMovement))
+
+    TSet<UCMVisionComponent*> CurrentPredictions;
+    for (const ACMHeadPartActor* HeadPart : ControlledHeads)
+    {
+        UCMVisionComponent* VisionComponent = HeadPart
+            ? HeadPart->GetVisionComponent()
+            : nullptr;
+        if (!VisionComponent || !VisionComponent->IsVisionActive())
+        {
+            continue;
+        }
+
+        FVector PredictedDirection =
+            WorldTarget - VisionComponent->GetVisionOrigin();
+        PredictedDirection.Z = 0.0f;
+        VisionComponent->SetLocalPredictedAimDirection(PredictedDirection);
+        CurrentPredictions.Add(VisionComponent);
+    }
+    ReplaceLocalAimPredictions(CurrentPredictions);
+
+    const float SendInterval = FMath::Max(AimUpdateInterval, 0.01f);
+    const float HeartbeatInterval = FMath::Max(
+        AimHeartbeatInterval,
+        SendInterval
+    );
+    const bool bTargetMoved = !bHasSentWorldTarget
+        || FVector::DistSquared2D(WorldTarget, LastSentWorldTarget)
+            >= FMath::Square(MinimumTargetMovement);
+    const bool bHeartbeatDue = bHasSentWorldTarget
+        && TimeSinceLastAimSend >= HeartbeatInterval;
+    const bool bSendIntervalElapsed = !bHasSentWorldTarget
+        || TimeSinceLastAimSend >= SendInterval;
+    if (!bSendIntervalElapsed || (!bTargetMoved && !bHeartbeatDue))
     {
         return;
     }
 
     LastSentWorldTarget = WorldTarget;
     bHasSentWorldTarget = true;
+    TimeSinceLastAimSend = 0.0f;
     ServerUpdateVisionTarget(WorldTarget);
 }
 
@@ -166,4 +210,38 @@ void UCMVisionInputComponent::GetControlledHeadParts(
             OutHeadParts.AddUnique(HeadPart);
         }
     }
+}
+
+void UCMVisionInputComponent::ReplaceLocalAimPredictions(
+    const TSet<UCMVisionComponent*>& CurrentPredictions
+)
+{
+    for (const TWeakObjectPtr<UCMVisionComponent>& PreviousVision
+        : LocallyPredictedVisions)
+    {
+        UCMVisionComponent* VisionComponent = PreviousVision.Get();
+        if (VisionComponent && !CurrentPredictions.Contains(VisionComponent))
+        {
+            VisionComponent->ClearLocalAimPrediction();
+        }
+    }
+
+    LocallyPredictedVisions.Reset();
+    for (UCMVisionComponent* VisionComponent : CurrentPredictions)
+    {
+        LocallyPredictedVisions.Add(VisionComponent);
+    }
+}
+
+void UCMVisionInputComponent::ClearLocalAimPredictions()
+{
+    for (const TWeakObjectPtr<UCMVisionComponent>& PredictedVision
+        : LocallyPredictedVisions)
+    {
+        if (UCMVisionComponent* VisionComponent = PredictedVision.Get())
+        {
+            VisionComponent->ClearLocalAimPrediction();
+        }
+    }
+    LocallyPredictedVisions.Reset();
 }

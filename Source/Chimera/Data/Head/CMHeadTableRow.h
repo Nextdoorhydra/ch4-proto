@@ -22,4 +22,9 @@ struct CHIMERA_API FCMHeadTableRow : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
         meta = (ClampMin = "0.0"))
     float VisionRange = 1200.0f;
+
+    /** Omnidirectional visible radius around the equipped Head slot. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+        meta = (ClampMin = "0.0"))
+    float NearVisionRadius = 150.0f;
 };

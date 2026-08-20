@@ -21,6 +21,9 @@ namespace
         TEXT("OccluderVisionMask")
     );
     const FName BaseVisionMaskParameterName(TEXT("BaseVisionMask"));
+    const FName VisionTintMaskParameterName(
+        TEXT("VisionTintMask")
+    );
     const FName VisionMaskWorldCenterParameterName(
         TEXT("VisionMaskWorldCenter")
     );
@@ -29,6 +32,10 @@ namespace
     );
     const FName OccluderStencilValueParameterName(
         TEXT("OccluderStencilValue")
+    );
+    const FName VisionTintColorParameterName(TEXT("VisionTintColor"));
+    const FName VisionTintStrengthParameterName(
+        TEXT("VisionTintStrength")
     );
 
 #if !UE_BUILD_SHIPPING
@@ -59,6 +66,7 @@ void UCMVisionManagerSubsystem::Deinitialize()
     RenderConfig = nullptr;
     OccluderVisibilityMask = nullptr;
     BaseVisibilityMask = nullptr;
+    VisionTintMask = nullptr;
     MaskDrawTexture = nullptr;
     VisionSources.Reset();
     CachedVisionMaskData.Reset();
@@ -70,6 +78,13 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
     UWorld* World = GetWorld();
     if (!World || World->GetNetMode() == NM_DedicatedServer)
     {
+        return;
+    }
+
+    if (!bVisionSystemEnabled)
+    {
+        RemovePostProcessBinding();
+        RestoreOccluderRenderStates();
         return;
     }
 
@@ -86,7 +101,7 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
 
     EnsureVisibilityMask();
     EnsurePostProcessBinding();
-    if (!OccluderVisibilityMask || !BaseVisibilityMask)
+    if (!OccluderVisibilityMask || !BaseVisibilityMask || !VisionTintMask)
     {
         return;
     }
@@ -146,7 +161,7 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
             DrawDebugLine(
                 World,
                 Origin,
-                Origin + VisionSource->GetAimDirection()
+                Origin + VisionSource->GetRenderedAimDirection()
                     * VisionSource->GetVisionDistance(),
                 FColor::Cyan,
                 false,
@@ -160,6 +175,7 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
 
     BaseVisibilityMask->UpdateResource();
     OccluderVisibilityMask->UpdateResource();
+    VisionTintMask->UpdateResource();
     TimeUntilMaskUpdate = FMath::Max(
         RenderConfig->MaskUpdateInterval,
         0.01f
@@ -225,6 +241,11 @@ bool UCMVisionManagerSubsystem::IsLocationVisible(
     const FVector& WorldLocation
 ) const
 {
+    if (!bVisionSystemEnabled)
+    {
+        return true;
+    }
+
     for (const TWeakObjectPtr<UCMVisionComponent>& VisionSource
         : VisionSources)
     {
@@ -239,6 +260,34 @@ bool UCMVisionManagerSubsystem::IsLocationVisible(
     }
 
     return false;
+}
+
+void UCMVisionManagerSubsystem::DisableVisionSystem()
+{
+    if (!bVisionSystemEnabled)
+    {
+        return;
+    }
+
+    bVisionSystemEnabled = false;
+    RemovePostProcessBinding();
+    RestoreOccluderRenderStates();
+}
+
+void UCMVisionManagerSubsystem::EnableVisionSystem()
+{
+    if (bVisionSystemEnabled)
+    {
+        return;
+    }
+
+    bVisionSystemEnabled = true;
+    TimeUntilMaskUpdate = 0.0f;
+}
+
+bool UCMVisionManagerSubsystem::IsVisionSystemEnabled() const
+{
+    return bVisionSystemEnabled;
 }
 
 void UCMVisionManagerSubsystem::GetActiveVisionSources(
@@ -275,7 +324,8 @@ float UCMVisionManagerSubsystem::GetVisibilityMaskWorldHalfExtent() const
 
 void UCMVisionManagerSubsystem::EnsureVisibilityMask()
 {
-    if ((OccluderVisibilityMask && BaseVisibilityMask) || !RenderConfig)
+    if ((OccluderVisibilityMask && BaseVisibilityMask && VisionTintMask)
+        || !RenderConfig)
     {
         return;
     }
@@ -294,6 +344,7 @@ void UCMVisionManagerSubsystem::EnsureVisibilityMask()
     );
     if (OccluderVisibilityMask)
     {
+        OccluderVisibilityMask->Filter = TF_Bilinear;
         OccluderVisibilityMask->AddressX = TA_Clamp;
         OccluderVisibilityMask->AddressY = TA_Clamp;
         OccluderVisibilityMask->ClearColor = FLinearColor::Black;
@@ -312,6 +363,7 @@ void UCMVisionManagerSubsystem::EnsureVisibilityMask()
     );
     if (BaseVisibilityMask)
     {
+        BaseVisibilityMask->Filter = TF_Bilinear;
         BaseVisibilityMask->AddressX = TA_Clamp;
         BaseVisibilityMask->AddressY = TA_Clamp;
         BaseVisibilityMask->ClearColor = FLinearColor::Black;
@@ -319,6 +371,25 @@ void UCMVisionManagerSubsystem::EnsureVisibilityMask()
         BaseVisibilityMask->OnCanvasRenderTargetUpdate.AddDynamic(
             this,
             &UCMVisionManagerSubsystem::DrawBaseVisibilityMask
+        );
+    }
+
+    VisionTintMask = UCanvasRenderTarget2D::CreateCanvasRenderTarget2D(
+        this,
+        UCanvasRenderTarget2D::StaticClass(),
+        SafeResolution,
+        SafeResolution
+    );
+    if (VisionTintMask)
+    {
+        VisionTintMask->Filter = TF_Bilinear;
+        VisionTintMask->AddressX = TA_Clamp;
+        VisionTintMask->AddressY = TA_Clamp;
+        VisionTintMask->ClearColor = FLinearColor::Transparent;
+        VisionTintMask->SetShouldClearRenderTargetOnReceiveUpdate(true);
+        VisionTintMask->OnCanvasRenderTargetUpdate.AddDynamic(
+            this,
+            &UCMVisionManagerSubsystem::DrawVisionTintMask
         );
     }
 
@@ -357,7 +428,10 @@ void UCMVisionManagerSubsystem::UpdateVisibilityMaskBounds(
             FMath::Max(
                 FMath::Abs(Location.X - MaskWorldCenter.X),
                 FMath::Abs(Location.Y - MaskWorldCenter.Y)
-            ) + VisionSource->GetVisionDistance()
+            ) + FMath::Max(
+                VisionSource->GetVisionDistance(),
+                VisionSource->GetNearVisionRadius()
+            )
         );
     }
     MaskWorldHalfExtent = RequiredHalfExtent * FMath::Max(
@@ -376,6 +450,10 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
         RenderConfig->ArcSegmentCount,
         3
     );
+    const int32 NearVisionCircleSegmentCount = FMath::Max(
+        RenderConfig->NearVisionCircleSegmentCount,
+        8
+    );
     const float RevealDistance = FMath::Max(
         RenderConfig->OccluderSurfaceRevealDistance,
         0.0f
@@ -386,9 +464,44 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
         FCMVisionSourceMaskData& SourceData =
             CachedVisionMaskData.AddDefaulted_GetRef();
         SourceData.Origin = VisionSource->GetVisionOrigin();
+        SourceData.VisionTint = VisionSource->GetVisionTint();
         SourceData.Rays.Reserve(ArcSegmentCount + 1);
 
-        const FVector Direction = VisionSource->GetAimDirection();
+        const auto AddClippedRay = [
+            this,
+            VisionSource,
+            &SourceData,
+            RevealDistance
+        ](TArray<FCMVisionRaySample>& Rays, const FVector& DesiredEnd)
+        {
+            FHitResult Hit;
+            FCMVisionRaySample& Ray = Rays.AddDefaulted_GetRef();
+            Ray.BaseEnd = ClipVisionRayToOccluder(
+                *VisionSource,
+                SourceData.Origin,
+                DesiredEnd,
+                0.0f,
+                &Hit
+            );
+            Ray.RevealedEnd = Ray.BaseEnd;
+            Ray.HitComponent = Hit.GetComponent();
+
+            if (Hit.bBlockingHit && RevealDistance > 0.0f)
+            {
+                const FVector RayDirection =
+                    (DesiredEnd - SourceData.Origin).GetSafeNormal2D();
+                const float RemainingDistance = FVector::Dist2D(
+                    Ray.BaseEnd,
+                    DesiredEnd
+                );
+                Ray.RevealedEnd += RayDirection * FMath::Min(
+                    RevealDistance,
+                    RemainingDistance
+                );
+            }
+        };
+
+        const FVector Direction = VisionSource->GetRenderedAimDirection();
         const float Distance = VisionSource->GetVisionDistance();
         const float HalfAngleRadians = FMath::DegreesToRadians(
             VisionSource->GetVisionAngleDegrees() * 0.5f
@@ -415,31 +528,29 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
                 0.0f
             );
 
-            FHitResult Hit;
-            FCMVisionRaySample& Ray =
-                SourceData.Rays.AddDefaulted_GetRef();
-            Ray.BaseEnd = ClipVisionRayToOccluder(
-                *VisionSource,
-                SourceData.Origin,
-                DesiredEnd,
-                0.0f,
-                &Hit
-            );
-            Ray.RevealedEnd = Ray.BaseEnd;
-            Ray.HitComponent = Hit.GetComponent();
+            AddClippedRay(SourceData.Rays, DesiredEnd);
+        }
 
-            if (Hit.bBlockingHit && RevealDistance > 0.0f)
+        const float NearVisionRadius =
+            VisionSource->GetNearVisionRadius();
+        if (NearVisionRadius > 0.0f)
+        {
+            SourceData.NearVisionRays.Reserve(
+                NearVisionCircleSegmentCount
+            );
+            for (int32 RayIndex = 0;
+                RayIndex < NearVisionCircleSegmentCount;
+                ++RayIndex)
             {
-                const FVector RayDirection =
-                    (DesiredEnd - SourceData.Origin).GetSafeNormal2D();
-                const float RemainingDistance = FVector::Dist2D(
-                    Ray.BaseEnd,
-                    DesiredEnd
+                const float Angle = UE_TWO_PI
+                    * static_cast<float>(RayIndex)
+                    / NearVisionCircleSegmentCount;
+                const FVector DesiredEnd = SourceData.Origin + FVector(
+                    FMath::Cos(Angle) * NearVisionRadius,
+                    FMath::Sin(Angle) * NearVisionRadius,
+                    0.0f
                 );
-                Ray.RevealedEnd += RayDirection * FMath::Min(
-                    RevealDistance,
-                    RemainingDistance
-                );
+                AddClippedRay(SourceData.NearVisionRays, DesiredEnd);
             }
         }
     }
@@ -459,7 +570,7 @@ void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
     }
 
     if (!Camera || !PostProcessMaterialAsset || !OccluderVisibilityMask
-        || !BaseVisibilityMask)
+        || !BaseVisibilityMask || !VisionTintMask)
     {
         return;
     }
@@ -481,9 +592,21 @@ void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
         BaseVisionMaskParameterName,
         BaseVisibilityMask
     );
+    PostProcessMaterialInstance->SetTextureParameterValue(
+        VisionTintMaskParameterName,
+        VisionTintMask
+    );
     PostProcessMaterialInstance->SetScalarParameterValue(
         OccluderStencilValueParameterName,
         RenderConfig->OccluderStencilValue
+    );
+    PostProcessMaterialInstance->SetVectorParameterValue(
+        VisionTintColorParameterName,
+        RenderConfig->VisionTintColor
+    );
+    PostProcessMaterialInstance->SetScalarParameterValue(
+        VisionTintStrengthParameterName,
+        RenderConfig->VisionTintStrength
     );
 
     Camera->PostProcessSettings.AddBlendable(
@@ -732,12 +855,22 @@ void UCMVisionManagerSubsystem::DrawBaseVisibilityMask(
     DrawCachedVisionMask(Canvas, Width, Height, nullptr, false);
 }
 
+void UCMVisionManagerSubsystem::DrawVisionTintMask(
+    UCanvas* Canvas,
+    int32 Width,
+    int32 Height
+)
+{
+    DrawCachedVisionMask(Canvas, Width, Height, nullptr, true, true);
+}
+
 void UCMVisionManagerSubsystem::DrawCachedVisionMask(
     UCanvas* Canvas,
     int32 Width,
     int32 Height,
     TSet<UPrimitiveComponent*>* OutOccluders,
-    bool bUseRevealedEnds
+    bool bUseRevealedEnds,
+    bool bDrawVisionTint
 )
 {
     if (!Canvas || !MaskDrawTexture
@@ -748,7 +881,13 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
 
     for (const FCMVisionSourceMaskData& SourceData : CachedVisionMaskData)
     {
-        if (SourceData.Rays.Num() < 2)
+        if (bDrawVisionTint && SourceData.VisionTint.A <= 0.0f)
+        {
+            continue;
+        }
+
+        if (SourceData.Rays.Num() < 2
+            && SourceData.NearVisionRays.Num() < 3)
         {
             continue;
         }
@@ -761,8 +900,14 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
 
         TArray<FCanvasUVTri> Triangles;
         const int32 ArcSegmentCount = SourceData.Rays.Num() - 1;
-        Triangles.Reserve(ArcSegmentCount);
-        const auto AddMaskTriangle = [&Triangles](
+        Triangles.Reserve(
+            FMath::Max(ArcSegmentCount, 0)
+            + SourceData.NearVisionRays.Num()
+        );
+        const FLinearColor DrawColor = bDrawVisionTint
+            ? SourceData.VisionTint
+            : FLinearColor::White;
+        const auto AddMaskTriangle = [&Triangles, DrawColor](
             const FVector2D& A,
             const FVector2D& B,
             const FVector2D& C)
@@ -774,19 +919,21 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             Triangle.V0_UV = FVector2D::ZeroVector;
             Triangle.V1_UV = FVector2D::ZeroVector;
             Triangle.V2_UV = FVector2D::ZeroVector;
-            Triangle.V0_Color = FLinearColor::White;
-            Triangle.V1_Color = FLinearColor::White;
-            Triangle.V2_Color = FLinearColor::White;
+            Triangle.V0_Color = DrawColor;
+            Triangle.V1_Color = DrawColor;
+            Triangle.V2_Color = DrawColor;
         };
-        for (int32 ArcIndex = 0;
-            ArcIndex < ArcSegmentCount;
-            ++ArcIndex)
+        const auto AddRayTriangle = [
+            this,
+            &AddMaskTriangle,
+            OriginPixel,
+            Width,
+            Height,
+            OutOccluders,
+            bUseRevealedEnds
+        ](const FCMVisionRaySample& RayA,
+            const FCMVisionRaySample& RayB)
         {
-            const FCMVisionRaySample& RayA =
-                SourceData.Rays[ArcIndex];
-            const FCMVisionRaySample& RayB =
-                SourceData.Rays[ArcIndex + 1];
-
             if (OutOccluders)
             {
                 if (UPrimitiveComponent* Component =
@@ -820,13 +967,35 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             );
 
             AddMaskTriangle(OriginPixel, PointAPixel, PointBPixel);
+        };
+
+        for (int32 ArcIndex = 0;
+            ArcIndex < ArcSegmentCount;
+            ++ArcIndex)
+        {
+            AddRayTriangle(
+                SourceData.Rays[ArcIndex],
+                SourceData.Rays[ArcIndex + 1]
+            );
+        }
+
+        for (int32 RayIndex = 0;
+            RayIndex < SourceData.NearVisionRays.Num();
+            ++RayIndex)
+        {
+            const int32 NextRayIndex =
+                (RayIndex + 1) % SourceData.NearVisionRays.Num();
+            AddRayTriangle(
+                SourceData.NearVisionRays[RayIndex],
+                SourceData.NearVisionRays[NextRayIndex]
+            );
         }
 
         FCanvasTriangleItem TriangleItem(
             Triangles,
             MaskDrawTexture->GetResource()
         );
-        TriangleItem.BlendMode = SE_BLEND_Additive;
+        TriangleItem.BlendMode = SE_BLEND_Opaque;
         Canvas->DrawItem(TriangleItem);
     }
 }

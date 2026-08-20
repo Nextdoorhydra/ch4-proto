@@ -17,13 +17,26 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering")
     TSoftObjectPtr<UMaterialInterface> PostProcessMaterial;
 
+    /** Multiplicative color applied only inside the visible mask. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|Tint")
+    FLinearColor VisionTintColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|Tint",
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VisionTintStrength = 0.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
         meta = (ClampMin = "64", ClampMax = "2048"))
-    int32 MaskResolution = 512;
+    int32 MaskResolution = 2048;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
         meta = (ClampMin = "3", ClampMax = "128"))
     int32 ArcSegmentCount = 24;
+
+    /** Ray count used to keep the near-vision circle blocked by walls. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
+        meta = (ClampMin = "8", ClampMax = "64"))
+    int32 NearVisionCircleSegmentCount = 24;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
         meta = (ClampMin = "0.01"))

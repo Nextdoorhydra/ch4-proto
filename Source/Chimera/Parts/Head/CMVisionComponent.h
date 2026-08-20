@@ -6,7 +6,7 @@
 
 #include "CMVisionComponent.generated.h"
 
-/** One replicated cone-shaped source contributing to shared Chimera vision. */
+/** One replicated Head source contributing cone and near vision. */
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
 class CHIMERA_API UCMVisionComponent : public USceneComponent
 {
@@ -19,9 +19,19 @@ public:
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
 
+    virtual void TickComponent(
+        float DeltaTime,
+        ELevelTick TickType,
+        FActorComponentTickFunction* ThisTickFunction
+    ) override;
+
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Vision")
-    void ConfigureVision(float InAngleDegrees, float InDistance);
+    void ConfigureVision(
+        float InAngleDegrees,
+        float InDistance,
+        float InNearVisionRadius
+    );
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Vision")
@@ -41,7 +51,25 @@ public:
     float GetVisionDistance() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    float GetNearVisionRadius() const;
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Vision")
+    void SetVisionTint(const FLinearColor& InColor, float InStrength);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    FLinearColor GetVisionTint() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     FVector GetAimDirection() const;
+
+    /** Visual-only direction: immediate for the owning client, smoothed remotely. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    FVector GetRenderedAimDirection() const;
+
+    /** Local visual prediction only. Never changes the authoritative aim. */
+    void SetLocalPredictedAimDirection(const FVector& InAimDirection);
+    void ClearLocalAimPrediction();
 
     /** Uses the authored Part Slot transform while this Head is attached. */
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
@@ -81,5 +109,30 @@ private:
     UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Vision",
         meta = (AllowPrivateAccess = "true"))
+    float NearVisionRadius = 150.0f;
+
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision",
+        meta = (AllowPrivateAccess = "true"))
+    FLinearColor VisionTint = FLinearColor::Transparent;
+
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision",
+        meta = (AllowPrivateAccess = "true"))
     FVector_NetQuantizeNormal AimDirection = FVector::ForwardVector;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision|Smoothing",
+        meta = (ClampMin = "0.0", AllowPrivateAccess = "true"))
+    float RemoteAimInterpolationSpeedDegrees = 720.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision|Smoothing",
+        meta = (ClampMin = "0.1", AllowPrivateAccess = "true"))
+    float LocalPredictionTimeout = 0.5f;
+
+    FVector RenderedAimDirection = FVector::ForwardVector;
+    FVector LocalPredictedAimDirection = FVector::ForwardVector;
+    float LastLocalPredictionTime = 0.0f;
+    bool bHasLocalAimPrediction = false;
 };

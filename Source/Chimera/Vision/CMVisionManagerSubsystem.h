@@ -34,6 +34,8 @@ struct FCMVisionSourceMaskData
 {
     FVector Origin = FVector::ZeroVector;
     TArray<FCMVisionRaySample> Rays;
+    TArray<FCMVisionRaySample> NearVisionRays;
+    FLinearColor VisionTint = FLinearColor::Transparent;
 };
 
 /** Local registry and union query for all replicated shared-vision sources. */
@@ -53,6 +55,15 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     bool IsLocationVisible(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Vision")
+    void DisableVisionSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Vision")
+    void EnableVisionSystem();
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    bool IsVisionSystemEnabled() const;
 
     void GetActiveVisionSources(
         TArray<UCMVisionComponent*>& OutVisionSources
@@ -104,7 +115,8 @@ private:
         int32 Width,
         int32 Height,
         TSet<UPrimitiveComponent*>* OutOccluders,
-        bool bUseRevealedEnds
+        bool bUseRevealedEnds,
+        bool bDrawVisionTint = false
     );
 
     UFUNCTION()
@@ -117,6 +129,9 @@ private:
     UFUNCTION()
     void DrawBaseVisibilityMask(UCanvas* Canvas, int32 Width, int32 Height);
 
+    UFUNCTION()
+    void DrawVisionTintMask(UCanvas* Canvas, int32 Width, int32 Height);
+
     UPROPERTY(Transient)
     TArray<TWeakObjectPtr<UCMVisionComponent>> VisionSources;
 
@@ -125,6 +140,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UCanvasRenderTarget2D> BaseVisibilityMask;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCanvasRenderTarget2D> VisionTintMask;
 
     UPROPERTY(Transient)
     TObjectPtr<UCMVisionRenderConfig> RenderConfig;
@@ -144,5 +162,6 @@ private:
     FVector2D MaskWorldCenter = FVector2D::ZeroVector;
     float MaskWorldHalfExtent = 1000.0f;
     float TimeUntilMaskUpdate = 0.0f;
+    bool bVisionSystemEnabled = true;
     bool bConfigurationFailureLogged = false;
 };
