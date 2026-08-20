@@ -183,6 +183,9 @@ public:
     /** Replaces one one-based debug slot with the requested production Part. */
     bool SpawnDebugPartAtSlot(int32 FlatSlotIndex, FName PartName);
 
+    /** Replaces every active slot with the requested production Part. */
+    void FillAllDebugSlotsWithPart(FName PartName);
+
     /** Removes only production Parts created by SpawnRandomDebugParts. */
     void ClearRandomDebugParts();
 

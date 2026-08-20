@@ -88,6 +88,14 @@ void ACMPlayerController::RequestCheatAttachPart(
     }
 }
 
+void ACMPlayerController::RequestCheatFillAllSlotsWithPart(FName PartName)
+{
+    if (IsLocalController())
+    {
+        ServerCheatFillAllSlotsWithPart(PartName);
+    }
+}
+
 void ACMPlayerController::RequestCheatClearRandomParts()
 {
     if (IsLocalController())
@@ -300,6 +308,22 @@ void ACMPlayerController::ServerCheatAttachPart_Implementation(
             OneBasedSlotIndex - 1,
             PartName
         );
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatFillAllSlotsWithPart_Implementation(
+    FName PartName
+)
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] Fill every active slot with Part=%s requested by %s."),
+            *PartName.ToString(),
+            *GetName());
+        SharedChimera->FillAllDebugSlotsWithPart(PartName);
     }
 #endif
 }

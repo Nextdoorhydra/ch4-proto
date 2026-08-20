@@ -421,6 +421,21 @@ void UCMLineBodyMovementCoordinator::ApplyCooperativeForwardImpulse(
         return;
     }
 
+    // MaximumCooperativePlanarImpulse는 마디 하나가 받을 수 있는 협동 전진
+    // 임펄스의 기준 상한이다. 몸통이 길어져 총질량이 늘어날 때 가속력이
+    // 지나치게 약해지지 않도록 실제 전체 상한은 활성 물리 마디 수에 비례한다.
+    const float TotalImpulseLimit =
+        FMath::Max(Chimera.MaximumCooperativePlanarImpulse, 0.0f)
+        * SimulatedSegments.Num();
+    ForwardImpulseMagnitude = FMath::Min(
+        ForwardImpulseMagnitude,
+        TotalImpulseLimit
+    );
+    if (ForwardImpulseMagnitude <= UE_SMALL_NUMBER)
+    {
+        return;
+    }
+
     for (UStaticMeshComponent* BodySegment : SimulatedSegments)
     {
         const float MassFraction =
@@ -575,20 +590,64 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
         return;
     }
 
-    FVector Velocity = Chimera.BodyMesh->GetPhysicsLinearVelocity();
-    const FVector HorizontalVelocity(Velocity.X, Velocity.Y, 0.0f);
-    const float EffectiveMaxSpeed =
-    Chimera.IsSpringArmPulling()
-        ? Chimera.SpringArmMaxSpeed
-        : Chimera.MaxSpeed * GetPlayerCountSpeedMultiplier(Chimera);
-
-    if (HorizontalVelocity.Size() > EffectiveMaxSpeed)
+    TArray<UStaticMeshComponent*> SimulatedSegments;
+    float TotalMass = 0.0f;
+    FVector MassWeightedHorizontalVelocity = FVector::ZeroVector;
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < Chimera.ActiveSegmentCount;
+        ++SegmentIndex)
     {
-        const FVector LimitedHorizontalVelocity =
-            HorizontalVelocity.GetSafeNormal() * EffectiveMaxSpeed;
-        Velocity.X = LimitedHorizontalVelocity.X;
-        Velocity.Y = LimitedHorizontalVelocity.Y;
-        Chimera.BodyMesh->SetPhysicsLinearVelocity(Velocity);
+        UStaticMeshComponent* BodySegment =
+            Chimera.BodySegments.IsValidIndex(SegmentIndex)
+                ? Chimera.BodySegments[SegmentIndex]
+                : nullptr;
+        if (!BodySegment || !BodySegment->IsSimulatingPhysics())
+        {
+            continue;
+        }
+
+        const float SegmentMass = FMath::Max(BodySegment->GetMass(), 0.01f);
+        const FVector SegmentVelocity = BodySegment->GetPhysicsLinearVelocity();
+        MassWeightedHorizontalVelocity += FVector(
+            SegmentVelocity.X,
+            SegmentVelocity.Y,
+            0.0f
+        ) * SegmentMass;
+        TotalMass += SegmentMass;
+        SimulatedSegments.Add(BodySegment);
+    }
+
+    if (TotalMass <= UE_SMALL_NUMBER || SimulatedSegments.IsEmpty())
+    {
+        return;
+    }
+
+    const FVector CenterOfMassHorizontalVelocity =
+        MassWeightedHorizontalVelocity / TotalMass;
+    const float EffectiveMaxSpeed =
+        Chimera.IsSpringArmPulling()
+            ? Chimera.SpringArmMaxSpeed
+            : Chimera.MaxSpeed;
+
+    if (EffectiveMaxSpeed <= 0.0f
+        || CenterOfMassHorizontalVelocity.Size() <= EffectiveMaxSpeed)
+    {
+        return;
+    }
+
+    // 질량중심의 초과 속도만 모든 마디에서 동일하게 제거한다. 각 마디를
+    // 개별 Clamp하지 않으므로 굽힘과 흔들림에 필요한 상대 속도는 유지된다.
+    const FVector LimitedCenterOfMassVelocity =
+        CenterOfMassHorizontalVelocity.GetSafeNormal() * EffectiveMaxSpeed;
+    const FVector HorizontalVelocityCorrection =
+        LimitedCenterOfMassVelocity - CenterOfMassHorizontalVelocity;
+
+    for (UStaticMeshComponent* BodySegment : SimulatedSegments)
+    {
+        FVector SegmentVelocity = BodySegment->GetPhysicsLinearVelocity();
+        SegmentVelocity.X += HorizontalVelocityCorrection.X;
+        SegmentVelocity.Y += HorizontalVelocityCorrection.Y;
+        BodySegment->SetPhysicsLinearVelocity(SegmentVelocity);
     }
 }
 

@@ -72,6 +72,14 @@ void AttachPart(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+void FillAllSlotsWithPart(UWorld* World, FName PartName)
+{
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatFillAllSlotsWithPart(PartName);
+    }
+}
+
 void ClearRandomParts(const TArray<FString>& Args, UWorld* World)
 {
     if (ACMPlayerController* Controller = FindLocalController(World))
@@ -130,6 +138,24 @@ FAutoConsoleCommandWithWorldAndArgs AttachPartCommand(
         &AttachPart
     )
 );
+
+#define CM_REGISTER_FILL_ALL_LEG_TIER_COMMAND(Tier) \
+    FAutoConsoleCommandWithWorldAndArgs FillAllLegTier##Tier##Command( \
+        TEXT("CM.AllLegTier" #Tier), \
+        TEXT("Replaces every active slot with a production Tier " #Tier " Leg Part."), \
+        FConsoleCommandWithWorldAndArgsDelegate::CreateLambda( \
+            [](const TArray<FString>& Args, UWorld* World) \
+            { \
+                FillAllSlotsWithPart(World, FName(TEXT("LegTier" #Tier))); \
+            } \
+        ) \
+    )
+
+CM_REGISTER_FILL_ALL_LEG_TIER_COMMAND(3);
+CM_REGISTER_FILL_ALL_LEG_TIER_COMMAND(4);
+CM_REGISTER_FILL_ALL_LEG_TIER_COMMAND(5);
+
+#undef CM_REGISTER_FILL_ALL_LEG_TIER_COMMAND
 
 FAutoConsoleCommandWithWorldAndArgs ClearRandomPartsCommand(
     TEXT("CM.ClearRandomParts"),

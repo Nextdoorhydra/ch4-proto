@@ -531,6 +531,32 @@ bool ACMChimera::SpawnDebugPartAtSlot(
     return true;
 }
 
+void ACMChimera::FillAllDebugSlotsWithPart(FName PartName)
+{
+    if (!HasAuthority() || !GetWorld())
+    {
+        return;
+    }
+
+    const int32 ActiveSlotCount =
+        ActiveSegmentCount * CMControl::PartSlotsPerSegment;
+    int32 AttachedCount = 0;
+    for (int32 FlatSlotIndex = 0;
+        FlatSlotIndex < ActiveSlotCount;
+        ++FlatSlotIndex)
+    {
+        AttachedCount += SpawnDebugPartAtSlot(FlatSlotIndex, PartName)
+            ? 1
+            : 0;
+    }
+
+    UE_LOG(LogChimeraLineBody, Warning,
+        TEXT("[Fill All Slots Ready] Part=%s Attached=%d/%d"),
+        *PartName.ToString(),
+        AttachedCount,
+        ActiveSlotCount);
+}
+
 void ACMChimera::ClearRandomDebugParts()
 {
     if (!HasAuthority() || !GetWorld())
