@@ -12,6 +12,7 @@ class USceneComponent;
 class UPhysicsConstraintComponent;
 class USpringArmComponent;
 class UCameraComponent;
+class UCMCameraOcclusionComponent;
 class UMaterialInstanceDynamic;
 class UTextRenderComponent;
 class UAbilitySystemComponent;
@@ -190,6 +191,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     TObjectPtr<UCameraComponent> FollowCamera;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+    TObjectPtr<UCMCameraOcclusionComponent> CameraOcclusionComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Abilities")

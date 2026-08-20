@@ -38,6 +38,16 @@ public:
         meta = (ClampMin = "8", ClampMax = "64"))
     int32 NearVisionCircleSegmentCount = 24;
 
+    /** Extra binary-search rays added only around occlusion silhouettes. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
+        meta = (ClampMin = "0", ClampMax = "8"))
+    int32 OcclusionEdgeRefinementSteps = 5;
+
+    /** Hit-distance jump that is treated as an occlusion silhouette. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
+        meta = (ClampMin = "1.0"))
+    float OcclusionEdgeRefinementDistance = 50.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
         meta = (ClampMin = "0.01"))
     float MaskUpdateInterval = 0.05f;
@@ -51,16 +61,21 @@ public:
         meta = (ClampMin = "1.0"))
     float MaskBoundsPadding = 1.05f;
 
+    /** High surfaces flatter than this are treated as ceilings. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CeilingSurfaceNormalZThreshold = 0.5f;
+
+    /** Small allowance around the logical eye height to avoid edge flicker. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
+        meta = (ClampMin = "0.0"))
+    float VisionHeightTolerance = 2.0f;
+
     /** Object types treated as walls. WorldStatic excludes Pawns and Parts. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion")
     TArray<TEnumAsByte<ECollisionChannel>> OccluderObjectTypes = {
         ECC_WorldStatic
     };
-
-    /** Raises only the collision ray; the rendered origin stays on the slot. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion",
-        meta = (ClampMin = "0.0"))
-    float OcclusionTraceHeight = 50.0f;
 
     /** Wall-only depth allowance; the base world mask remains fully occluded. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion",

@@ -37,6 +37,18 @@ namespace
     const FName VisionTintStrengthParameterName(
         TEXT("VisionTintStrength")
     );
+    const FName VisionMaskWorldMinHeightParameterName(
+        TEXT("VisionMaskWorldMinHeight")
+    );
+    const FName VisionMaskWorldHeightRangeParameterName(
+        TEXT("VisionMaskWorldHeightRange")
+    );
+    const FName CeilingSurfaceNormalZThresholdParameterName(
+        TEXT("CeilingSurfaceNormalZThreshold")
+    );
+    const FName VisionHeightToleranceParameterName(
+        TEXT("VisionHeightTolerance")
+    );
 
 #if !UE_BUILD_SHIPPING
     TAutoConsoleVariable<int32> CVarVisionDebugDraw(
@@ -131,6 +143,14 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
         PostProcessMaterialInstance->SetScalarParameterValue(
             VisionMaskWorldSizeParameterName,
             MaskWorldHalfExtent * 2.0f
+        );
+        PostProcessMaterialInstance->SetScalarParameterValue(
+            VisionMaskWorldMinHeightParameterName,
+            MaskWorldMinHeight
+        );
+        PostProcessMaterialInstance->SetScalarParameterValue(
+            VisionMaskWorldHeightRangeParameterName,
+            MaskWorldHeightRange
         );
     }
 
@@ -251,7 +271,9 @@ bool UCMVisionManagerSubsystem::IsLocationVisible(
     {
         if (const UCMVisionComponent* VisionComponent = VisionSource.Get())
         {
-            if (VisionComponent->IsLocationVisible(WorldLocation)
+            if (VisionComponent->GetVisionContribution()
+                    == ECMVisionContribution::RevealAndTint
+                && VisionComponent->IsLocationVisible(WorldLocation)
                 && HasLineOfSight(*VisionComponent, WorldLocation))
             {
                 return true;
@@ -416,6 +438,31 @@ void UCMVisionManagerSubsystem::UpdateVisibilityMaskBounds(
     }
     MaskWorldCenter = CenterSum / ActiveSources.Num();
 
+    float MinimumRevealHeight = TNumericLimits<float>::Max();
+    float MaximumRevealHeight = TNumericLimits<float>::Lowest();
+    for (const UCMVisionComponent* VisionSource : ActiveSources)
+    {
+        if (VisionSource->GetVisionContribution()
+            != ECMVisionContribution::RevealAndTint)
+        {
+            continue;
+        }
+
+        const float Height = VisionSource->GetVisionOrigin().Z;
+        MinimumRevealHeight = FMath::Min(MinimumRevealHeight, Height);
+        MaximumRevealHeight = FMath::Max(MaximumRevealHeight, Height);
+    }
+    if (MinimumRevealHeight <= MaximumRevealHeight)
+    {
+        constexpr float HeightEncodingMargin = 100.0f;
+        MaskWorldMinHeight = MinimumRevealHeight - HeightEncodingMargin;
+        MaskWorldHeightRange = FMath::Max(
+            MaximumRevealHeight - MinimumRevealHeight
+                + HeightEncodingMargin * 2.0f,
+            1.0f
+        );
+    }
+
     float RequiredHalfExtent = FMath::Max(
         RenderConfig->MinimumWorldHalfExtent,
         1.0f
@@ -454,6 +501,15 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
         RenderConfig->NearVisionCircleSegmentCount,
         8
     );
+    const int32 EdgeRefinementSteps = FMath::Clamp(
+        RenderConfig->OcclusionEdgeRefinementSteps,
+        0,
+        8
+    );
+    const float EdgeRefinementDistance = FMath::Max(
+        RenderConfig->OcclusionEdgeRefinementDistance,
+        1.0f
+    );
     const float RevealDistance = FMath::Max(
         RenderConfig->OccluderSurfaceRevealDistance,
         0.0f
@@ -465,17 +521,24 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
             CachedVisionMaskData.AddDefaulted_GetRef();
         SourceData.Origin = VisionSource->GetVisionOrigin();
         SourceData.VisionTint = VisionSource->GetVisionTint();
-        SourceData.Rays.Reserve(ArcSegmentCount + 1);
+        SourceData.bRevealsWorld =
+            VisionSource->GetVisionContribution()
+                == ECMVisionContribution::RevealAndTint;
 
-        const auto AddClippedRay = [
+        const auto SampleRay = [
             this,
             VisionSource,
             &SourceData,
             RevealDistance
-        ](TArray<FCMVisionRaySample>& Rays, const FVector& DesiredEnd)
+        ](float Angle, float Distance)
         {
+            const FVector DesiredEnd = SourceData.Origin + FVector(
+                FMath::Cos(Angle) * Distance,
+                FMath::Sin(Angle) * Distance,
+                0.0f
+            );
             FHitResult Hit;
-            FCMVisionRaySample& Ray = Rays.AddDefaulted_GetRef();
+            FCMVisionRaySample Ray;
             Ray.BaseEnd = ClipVisionRayToOccluder(
                 *VisionSource,
                 SourceData.Origin,
@@ -485,6 +548,7 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
             );
             Ray.RevealedEnd = Ray.BaseEnd;
             Ray.HitComponent = Hit.GetComponent();
+            Ray.bBlockingHit = Hit.bBlockingHit;
 
             if (Hit.bBlockingHit && RevealDistance > 0.0f)
             {
@@ -499,6 +563,86 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
                     RemainingDistance
                 );
             }
+
+            return Ray;
+        };
+
+        const auto IsOcclusionEdge = [
+            &SourceData,
+            EdgeRefinementDistance
+        ](const FCMVisionRaySample& A, const FCMVisionRaySample& B)
+        {
+            if (A.bBlockingHit != B.bBlockingHit)
+            {
+                return true;
+            }
+            if (!A.bBlockingHit)
+            {
+                return false;
+            }
+
+            const float DistanceA = FVector::Dist2D(
+                SourceData.Origin,
+                A.BaseEnd
+            );
+            const float DistanceB = FVector::Dist2D(
+                SourceData.Origin,
+                B.BaseEnd
+            );
+            return FMath::Abs(DistanceA - DistanceB)
+                >= EdgeRefinementDistance;
+        };
+
+        TFunction<void(
+            float,
+            const FCMVisionRaySample&,
+            float,
+            const FCMVisionRaySample&,
+            float,
+            int32,
+            TArray<FCMVisionRaySample>&)> AppendRefinedRange;
+        AppendRefinedRange = [
+            &SampleRay,
+            &IsOcclusionEdge,
+            &AppendRefinedRange
+        ](
+            float AngleA,
+            const FCMVisionRaySample& RayA,
+            float AngleB,
+            const FCMVisionRaySample& RayB,
+            float Distance,
+            int32 RemainingSteps,
+            TArray<FCMVisionRaySample>& OutRays)
+        {
+            if (RemainingSteps > 0 && IsOcclusionEdge(RayA, RayB))
+            {
+                const float MiddleAngle = (AngleA + AngleB) * 0.5f;
+                const FCMVisionRaySample MiddleRay = SampleRay(
+                    MiddleAngle,
+                    Distance
+                );
+                AppendRefinedRange(
+                    AngleA,
+                    RayA,
+                    MiddleAngle,
+                    MiddleRay,
+                    Distance,
+                    RemainingSteps - 1,
+                    OutRays
+                );
+                AppendRefinedRange(
+                    MiddleAngle,
+                    MiddleRay,
+                    AngleB,
+                    RayB,
+                    Distance,
+                    RemainingSteps - 1,
+                    OutRays
+                );
+                return;
+            }
+
+            OutRays.Add(RayB);
         };
 
         const FVector Direction = VisionSource->GetRenderedAimDirection();
@@ -511,24 +655,34 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
             Direction.X
         );
 
-        for (int32 RayIndex = 0;
+        const float StartAngle = CenterAngle - HalfAngleRadians;
+        const float EndAngle = CenterAngle + HalfAngleRadians;
+        SourceData.Rays.Reserve(ArcSegmentCount + 1);
+        float PreviousAngle = StartAngle;
+        FCMVisionRaySample PreviousRay = SampleRay(
+            PreviousAngle,
+            Distance
+        );
+        SourceData.Rays.Add(PreviousRay);
+        for (int32 RayIndex = 1;
             RayIndex <= ArcSegmentCount;
             ++RayIndex)
         {
             const float Alpha =
                 static_cast<float>(RayIndex) / ArcSegmentCount;
-            const float Angle = FMath::Lerp(
-                CenterAngle - HalfAngleRadians,
-                CenterAngle + HalfAngleRadians,
-                Alpha
+            const float Angle = FMath::Lerp(StartAngle, EndAngle, Alpha);
+            const FCMVisionRaySample Ray = SampleRay(Angle, Distance);
+            AppendRefinedRange(
+                PreviousAngle,
+                PreviousRay,
+                Angle,
+                Ray,
+                Distance,
+                EdgeRefinementSteps,
+                SourceData.Rays
             );
-            const FVector DesiredEnd = SourceData.Origin + FVector(
-                FMath::Cos(Angle) * Distance,
-                FMath::Sin(Angle) * Distance,
-                0.0f
-            );
-
-            AddClippedRay(SourceData.Rays, DesiredEnd);
+            PreviousAngle = Angle;
+            PreviousRay = Ray;
         }
 
         const float NearVisionRadius =
@@ -536,22 +690,35 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
         if (NearVisionRadius > 0.0f)
         {
             SourceData.NearVisionRays.Reserve(
-                NearVisionCircleSegmentCount
+                NearVisionCircleSegmentCount + 1
             );
-            for (int32 RayIndex = 0;
-                RayIndex < NearVisionCircleSegmentCount;
+            PreviousAngle = 0.0f;
+            PreviousRay = SampleRay(PreviousAngle, NearVisionRadius);
+            SourceData.NearVisionRays.Add(PreviousRay);
+            for (int32 RayIndex = 1;
+                RayIndex <= NearVisionCircleSegmentCount;
                 ++RayIndex)
             {
                 const float Angle = UE_TWO_PI
                     * static_cast<float>(RayIndex)
                     / NearVisionCircleSegmentCount;
-                const FVector DesiredEnd = SourceData.Origin + FVector(
-                    FMath::Cos(Angle) * NearVisionRadius,
-                    FMath::Sin(Angle) * NearVisionRadius,
-                    0.0f
+                const FCMVisionRaySample Ray = SampleRay(
+                    Angle,
+                    NearVisionRadius
                 );
-                AddClippedRay(SourceData.NearVisionRays, DesiredEnd);
+                AppendRefinedRange(
+                    PreviousAngle,
+                    PreviousRay,
+                    Angle,
+                    Ray,
+                    NearVisionRadius,
+                    EdgeRefinementSteps,
+                    SourceData.NearVisionRays
+                );
+                PreviousAngle = Angle;
+                PreviousRay = Ray;
             }
+            SourceData.NearVisionRays.Pop(EAllowShrinking::No);
         }
     }
 }
@@ -607,6 +774,14 @@ void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
     PostProcessMaterialInstance->SetScalarParameterValue(
         VisionTintStrengthParameterName,
         RenderConfig->VisionTintStrength
+    );
+    PostProcessMaterialInstance->SetScalarParameterValue(
+        CeilingSurfaceNormalZThresholdParameterName,
+        RenderConfig->CeilingSurfaceNormalZThreshold
+    );
+    PostProcessMaterialInstance->SetScalarParameterValue(
+        VisionHeightToleranceParameterName,
+        RenderConfig->VisionHeightTolerance
     );
 
     Camera->PostProcessSettings.AddBlendable(
@@ -737,12 +912,7 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
         return DesiredEnd;
     }
 
-    const FVector TraceOffset(
-        0.0f,
-        0.0f,
-        FMath::Max(RenderConfig->OcclusionTraceHeight, 0.0f)
-    );
-    const FVector TraceStart = RayOrigin + TraceOffset;
+    const FVector TraceStart = RayOrigin;
     const FVector TraceEnd(
         DesiredEnd.X,
         DesiredEnd.Y,
@@ -879,8 +1049,32 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
         return;
     }
 
+    TArray<const FCMVisionSourceMaskData*> SourcesToDraw;
+    SourcesToDraw.Reserve(CachedVisionMaskData.Num());
     for (const FCMVisionSourceMaskData& SourceData : CachedVisionMaskData)
     {
+        if (!bDrawVisionTint && !SourceData.bRevealsWorld)
+        {
+            continue;
+        }
+
+        SourcesToDraw.Add(&SourceData);
+    }
+
+    if (!bDrawVisionTint)
+    {
+        SourcesToDraw.Sort([](
+            const FCMVisionSourceMaskData& A,
+            const FCMVisionSourceMaskData& B)
+        {
+            return A.Origin.Z < B.Origin.Z;
+        });
+    }
+
+    for (const FCMVisionSourceMaskData* SourceDataPtr : SourcesToDraw)
+    {
+        const FCMVisionSourceMaskData& SourceData = *SourceDataPtr;
+
         if (bDrawVisionTint && SourceData.VisionTint.A <= 0.0f)
         {
             continue;
@@ -904,9 +1098,15 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             FMath::Max(ArcSegmentCount, 0)
             + SourceData.NearVisionRays.Num()
         );
+        const float EncodedHeight = FMath::Clamp(
+            (SourceData.Origin.Z - MaskWorldMinHeight)
+                / FMath::Max(MaskWorldHeightRange, 1.0f),
+            0.0f,
+            1.0f
+        );
         const FLinearColor DrawColor = bDrawVisionTint
             ? SourceData.VisionTint
-            : FLinearColor::White;
+            : FLinearColor(1.0f, EncodedHeight, 0.0f, 1.0f);
         const auto AddMaskTriangle = [&Triangles, DrawColor](
             const FVector2D& A,
             const FVector2D& B,

@@ -59,6 +59,22 @@ bool FCMVisionGeometryTest::RunTest(const FString& Parameters)
         )
     );
 
+    TestEqual(
+        TEXT("A completed clockwise turn is preserved"),
+        UCMVisionComponent::ResolveUnwrappedAimRotation(0.0f, 360.0f),
+        360.0f
+    );
+    TestEqual(
+        TEXT("A completed counter-clockwise turn is preserved"),
+        UCMVisionComponent::ResolveUnwrappedAimRotation(0.0f, -360.0f),
+        -360.0f
+    );
+    TestEqual(
+        TEXT("The wrapped endpoint keeps the nearest accumulated turn"),
+        UCMVisionComponent::ResolveUnwrappedAimRotation(10.0f, 730.0f),
+        730.0f
+    );
+
     return true;
 }
 

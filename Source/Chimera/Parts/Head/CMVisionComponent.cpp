@@ -18,11 +18,14 @@ void UCMVisionComponent::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(UCMVisionComponent, bVisionActive);
+    DOREPLIFETIME(UCMVisionComponent, VisionContribution);
     DOREPLIFETIME(UCMVisionComponent, VisionAngleDegrees);
     DOREPLIFETIME(UCMVisionComponent, VisionDistance);
     DOREPLIFETIME(UCMVisionComponent, NearVisionRadius);
+    DOREPLIFETIME(UCMVisionComponent, VisionEyeHeightOffset);
     DOREPLIFETIME(UCMVisionComponent, VisionTint);
     DOREPLIFETIME(UCMVisionComponent, AimDirection);
+    DOREPLIFETIME(UCMVisionComponent, AimRotationDegrees);
 }
 
 void UCMVisionComponent::TickComponent(
@@ -51,19 +54,30 @@ void UCMVisionComponent::TickComponent(
         return;
     }
 
-    const FVector TargetDirection = FVector(AimDirection).GetSafeNormal2D();
     if (RemoteAimInterpolationSpeedDegrees <= 0.0f)
     {
-        RenderedAimDirection = TargetDirection;
+        RenderedAimRotationDegrees = AimRotationDegrees;
+        RenderedAimDirection = FVector(AimDirection).GetSafeNormal2D();
         return;
     }
 
-    RenderedAimDirection = FMath::VInterpNormalRotationTo(
-        RenderedAimDirection.GetSafeNormal2D(),
-        TargetDirection,
+    RenderedAimRotationDegrees = FMath::FInterpConstantTo(
+        RenderedAimRotationDegrees,
+        AimRotationDegrees,
         DeltaTime,
-        RemoteAimInterpolationSpeedDegrees
-    ).GetSafeNormal2D();
+        FMath::Max(
+            RemoteAimInterpolationSpeedDegrees,
+            RemoteAimCatchUpSpeedDegrees
+        )
+    );
+    const float RenderedAngleRadians = FMath::DegreesToRadians(
+        RenderedAimRotationDegrees
+    );
+    RenderedAimDirection = FVector(
+        FMath::Cos(RenderedAngleRadians),
+        FMath::Sin(RenderedAngleRadians),
+        0.0f
+    );
 }
 
 void UCMVisionComponent::ConfigureVision(
@@ -95,6 +109,20 @@ void UCMVisionComponent::SetVisionActive(bool bInActive)
     GetOwner()->ForceNetUpdate();
 }
 
+void UCMVisionComponent::SetVisionContribution(
+    ECMVisionContribution InContribution
+)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority()
+        || VisionContribution == InContribution)
+    {
+        return;
+    }
+
+    VisionContribution = InContribution;
+    GetOwner()->ForceNetUpdate();
+}
+
 void UCMVisionComponent::SetAimDirection(const FVector& InAimDirection)
 {
     if (!GetOwner() || !GetOwner()->HasAuthority())
@@ -104,16 +132,89 @@ void UCMVisionComponent::SetAimDirection(const FVector& InAimDirection)
 
     FVector PlanarDirection = InAimDirection;
     PlanarDirection.Z = 0.0f;
-    if (PlanarDirection.Normalize()
-        && !PlanarDirection.Equals(FVector(AimDirection), 0.001f))
+    if (!PlanarDirection.Normalize())
     {
-        AimDirection = PlanarDirection;
+        return;
     }
+
+    const float WrappedAngleDegrees = FMath::RadiansToDegrees(
+        FMath::Atan2(PlanarDirection.Y, PlanarDirection.X)
+    );
+    AimDirection = PlanarDirection;
+    AimRotationDegrees = ResolveUnwrappedAimRotation(
+        WrappedAngleDegrees,
+        AimRotationDegrees
+    );
+    RefreshRemoteAimCatchUpSpeed();
+}
+
+void UCMVisionComponent::SetNetworkAimDirection(
+    const FVector& InAimDirection,
+    float InAimRotationDegrees
+)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority()
+        || !FMath::IsFinite(InAimRotationDegrees))
+    {
+        return;
+    }
+
+    FVector PlanarDirection = InAimDirection;
+    PlanarDirection.Z = 0.0f;
+    if (!PlanarDirection.Normalize())
+    {
+        return;
+    }
+
+    const float WrappedAngleDegrees = FMath::RadiansToDegrees(
+        FMath::Atan2(PlanarDirection.Y, PlanarDirection.X)
+    );
+    AimDirection = PlanarDirection;
+    AimRotationDegrees = ResolveUnwrappedAimRotation(
+        WrappedAngleDegrees,
+        InAimRotationDegrees
+    );
+    RefreshRemoteAimCatchUpSpeed();
+    MulticastNetworkAimDirection(AimDirection, AimRotationDegrees);
+}
+
+void UCMVisionComponent::MulticastNetworkAimDirection_Implementation(
+    FVector_NetQuantizeNormal InAimDirection,
+    float InAimRotationDegrees
+)
+{
+    if ((GetOwner() && GetOwner()->HasAuthority())
+        || FVector(InAimDirection).ContainsNaN()
+        || !FMath::IsFinite(InAimRotationDegrees))
+    {
+        return;
+    }
+
+    AimDirection = InAimDirection;
+    AimRotationDegrees = InAimRotationDegrees;
+    RefreshRemoteAimCatchUpSpeed();
+}
+
+void UCMVisionComponent::OnRep_AimRotationDegrees()
+{
+    RefreshRemoteAimCatchUpSpeed();
+}
+
+void UCMVisionComponent::RefreshRemoteAimCatchUpSpeed()
+{
+    RemoteAimCatchUpSpeedDegrees = FMath::Abs(
+        AimRotationDegrees - RenderedAimRotationDegrees
+    ) / FMath::Max(RemoteAimMaximumCatchUpTime, 0.01f);
 }
 
 bool UCMVisionComponent::IsVisionActive() const
 {
     return bVisionActive;
+}
+
+ECMVisionContribution UCMVisionComponent::GetVisionContribution() const
+{
+    return VisionContribution;
 }
 
 float UCMVisionComponent::GetVisionAngleDegrees() const
@@ -129,6 +230,28 @@ float UCMVisionComponent::GetVisionDistance() const
 float UCMVisionComponent::GetNearVisionRadius() const
 {
     return NearVisionRadius;
+}
+
+void UCMVisionComponent::SetVisionEyeHeightOffset(float InHeightOffset)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority())
+    {
+        return;
+    }
+
+    const float ClampedHeightOffset = FMath::Max(InHeightOffset, 0.0f);
+    if (FMath::IsNearlyEqual(VisionEyeHeightOffset, ClampedHeightOffset))
+    {
+        return;
+    }
+
+    VisionEyeHeightOffset = ClampedHeightOffset;
+    GetOwner()->ForceNetUpdate();
+}
+
+float UCMVisionComponent::GetVisionEyeHeightOffset() const
+{
+    return VisionEyeHeightOffset;
 }
 
 void UCMVisionComponent::SetVisionTint(
@@ -178,6 +301,13 @@ void UCMVisionComponent::SetLocalPredictedAimDirection(
 
     LocalPredictedAimDirection = PlanarDirection;
     RenderedAimDirection = PlanarDirection;
+    const float WrappedAngleDegrees = FMath::RadiansToDegrees(
+        FMath::Atan2(PlanarDirection.Y, PlanarDirection.X)
+    );
+    RenderedAimRotationDegrees = ResolveUnwrappedAimRotation(
+        WrappedAngleDegrees,
+        RenderedAimRotationDegrees
+    );
     bHasLocalAimPrediction = true;
     if (const UWorld* World = GetWorld())
     {
@@ -198,11 +328,13 @@ FVector UCMVisionComponent::GetVisionOrigin() const
         : nullptr;
 
     // The Part root is snapped to the slot when equipped. Use that replicated
-    // root transform so the rendered Head and its vision always share an
-    // origin, even while the physics-driven slot transform is between updates.
-    return PartSlot && PartOwner
+    // root transform as the stable base, then raise the logical origin to eye
+    // height because this character's rendered Head origin is embedded in the floor.
+    FVector Origin = PartSlot && PartOwner
         ? PartOwner->GetActorLocation()
         : GetComponentLocation();
+    Origin.Z += VisionEyeHeightOffset;
+    return Origin;
 }
 
 bool UCMVisionComponent::IsLocationVisible(
@@ -265,10 +397,22 @@ bool UCMVisionComponent::IsPointInsideVisionCone(
     ) >= MinimumDot;
 }
 
+float UCMVisionComponent::ResolveUnwrappedAimRotation(
+    float WrappedAngleDegrees,
+    float ReferenceRotationDegrees
+)
+{
+    return WrappedAngleDegrees
+        + 360.0f * FMath::RoundToFloat(
+            (ReferenceRotationDegrees - WrappedAngleDegrees) / 360.0f
+        );
+}
+
 void UCMVisionComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    RenderedAimRotationDegrees = AimRotationDegrees;
     RenderedAimDirection = FVector(AimDirection).GetSafeNormal2D();
 
     if (UWorld* World = GetWorld())

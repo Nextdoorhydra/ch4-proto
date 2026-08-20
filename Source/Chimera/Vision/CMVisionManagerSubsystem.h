@@ -28,6 +28,7 @@ struct FCMVisionRaySample
     FVector BaseEnd = FVector::ZeroVector;
     FVector RevealedEnd = FVector::ZeroVector;
     TWeakObjectPtr<UPrimitiveComponent> HitComponent;
+    bool bBlockingHit = false;
 };
 
 struct FCMVisionSourceMaskData
@@ -36,6 +37,7 @@ struct FCMVisionSourceMaskData
     TArray<FCMVisionRaySample> Rays;
     TArray<FCMVisionRaySample> NearVisionRays;
     FLinearColor VisionTint = FLinearColor::Transparent;
+    bool bRevealsWorld = true;
 };
 
 /** Local registry and union query for all replicated shared-vision sources. */
@@ -161,6 +163,8 @@ private:
     TArray<FCMVisionOccluderRenderState> OccluderRenderStates;
     FVector2D MaskWorldCenter = FVector2D::ZeroVector;
     float MaskWorldHalfExtent = 1000.0f;
+    float MaskWorldMinHeight = -100.0f;
+    float MaskWorldHeightRange = 200.0f;
     float TimeUntilMaskUpdate = 0.0f;
     bool bVisionSystemEnabled = true;
     bool bConfigurationFailureLogged = false;
