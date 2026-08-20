@@ -1,7 +1,9 @@
 #include "CMPlayerState.h"
 
 #include "GameMode/CMGameState.h"
+#include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
+#include "Vision/CMVisionManagerSubsystem.h"
 
 ACMPlayerState::ACMPlayerState()
 {
@@ -18,6 +20,7 @@ void ACMPlayerState::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPlayerState, bReady);
     DOREPLIFETIME(ACMPlayerState, PlayerSlotId);
     DOREPLIFETIME(ACMPlayerState, ParticipationState);
+    DOREPLIFETIME(ACMPlayerState, bVisionSystemEnabled);
 }
 
 // PlayerState가 교체되는 Travel·재접속 경계에서 플레이어 고유 상태 보존
@@ -31,7 +34,14 @@ void ACMPlayerState::CopyProperties(APlayerState* PlayerState)
         NewPlayerState->bReady = bReady;
         NewPlayerState->PlayerSlotId = PlayerSlotId;
         NewPlayerState->ParticipationState = ParticipationState;
+        NewPlayerState->bVisionSystemEnabled = bVisionSystemEnabled;
     }
+}
+
+void ACMPlayerState::ClientInitialize(AController* Controller)
+{
+    Super::ClientInitialize(Controller);
+    OnRep_VisionSystemEnabled();
 }
 
 void ACMPlayerState::SetPlayerName(const FString& NewPlayerName)
@@ -135,6 +145,18 @@ void ACMPlayerState::SetParticipationState(
     ForceNetUpdate();
 }
 
+void ACMPlayerState::SetVisionSystemEnabled(bool bEnabled)
+{
+    if (!HasAuthority() || bVisionSystemEnabled == bEnabled)
+    {
+        return;
+    }
+
+    bVisionSystemEnabled = bEnabled;
+    OnRep_VisionSystemEnabled();
+    ForceNetUpdate();
+}
+
 void ACMPlayerState::OnRep_PlayerColorIndex()
 {
     OnPlayerColorChanged.Broadcast();
@@ -177,4 +199,40 @@ void ACMPlayerState::OnRep_PlayerSlotId()
 void ACMPlayerState::OnRep_ParticipationState()
 {
     OnParticipationStateChanged.Broadcast();
+}
+
+void ACMPlayerState::OnRep_VisionSystemEnabled()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator();
+        It;
+        ++It)
+    {
+        APlayerController* PlayerController = It->Get();
+        if (!PlayerController
+            || !PlayerController->IsLocalController()
+            || PlayerController->GetPlayerState<APlayerState>() != this)
+        {
+            continue;
+        }
+
+        if (UCMVisionManagerSubsystem* VisionManager =
+            World->GetSubsystem<UCMVisionManagerSubsystem>())
+        {
+            if (bVisionSystemEnabled)
+            {
+                VisionManager->EnableVisionSystem();
+            }
+            else
+            {
+                VisionManager->DisableVisionSystem();
+            }
+        }
+        return;
+    }
 }

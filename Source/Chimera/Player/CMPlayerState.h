@@ -36,11 +36,18 @@ public:
     virtual void SetPlayerName(const FString& NewPlayerName) override;
     virtual void OnRep_PlayerName() override;
     virtual void CopyProperties(APlayerState* PlayerState) override;
+    virtual void ClientInitialize(AController* Controller) override;
 
     void SetPlayerColorIndex(int32 NewPlayerColorIndex);
     void SetReady(bool bNewReady);
     void SetPlayerSlotId(int32 NewPlayerSlotId);
     void SetParticipationState(ECMPlayerParticipationState NewState);
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Vision")
+    void SetVisionSystemEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    bool IsVisionSystemEnabled() const { return bVisionSystemEnabled; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Lobby")
     bool IsReady() const { return bReady; }
@@ -85,6 +92,9 @@ private:
     UFUNCTION()
     void OnRep_ParticipationState();
 
+    UFUNCTION()
+    void OnRep_VisionSystemEnabled();
+
     UPROPERTY(ReplicatedUsing = OnRep_PlayerColorIndex)
     int32 PlayerColorIndex = INDEX_NONE;
 
@@ -98,4 +108,7 @@ private:
     UPROPERTY(ReplicatedUsing = OnRep_ParticipationState)
     ECMPlayerParticipationState ParticipationState =
         ECMPlayerParticipationState::Lobby;
+
+    UPROPERTY(ReplicatedUsing = OnRep_VisionSystemEnabled)
+    bool bVisionSystemEnabled = true;
 };

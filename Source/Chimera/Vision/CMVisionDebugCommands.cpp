@@ -9,7 +9,6 @@
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
-#include "Vision/CMVisionManagerSubsystem.h"
 
 #if !UE_BUILD_SHIPPING
 
@@ -304,31 +303,93 @@ void SetPlayerVisionDebugColor(
         bClear ? 0.0f : Strength);
 }
 
+void SetVisionSystemDebugEnabled(
+    const TArray<FString>& Args,
+    UWorld* World,
+    bool bEnabled
+)
+{
+    const bool bAllPlayers = Args.Num() == 1
+        && Args[0].Equals(TEXT("all"), ESearchCase::IgnoreCase);
+    int32 RequestedPlayerSlotId = INDEX_NONE;
+    if (Args.Num() != 1
+        || (!bAllPlayers
+            && (!LexTryParseString(RequestedPlayerSlotId, *Args[0])
+                || RequestedPlayerSlotId < 0
+                || RequestedPlayerSlotId >= CMControl::MaxPlayers)))
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("Usage: CM.Vision.Debug%s <PlayerSlotId 0-3|all>"),
+            bEnabled ? TEXT("Enable") : TEXT("Disable"));
+        return;
+    }
+
+    if (!World || World->GetNetMode() == NM_Client)
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("[Vision Debug Failed] Run this command in Standalone or on the listen-server host."));
+        return;
+    }
+
+    int32 AffectedPlayers = 0;
+    if (bAllPlayers)
+    {
+        for (FConstPlayerControllerIterator It =
+                World->GetPlayerControllerIterator();
+            It;
+            ++It)
+        {
+            if (ACMPlayerController* PlayerController =
+                Cast<ACMPlayerController>(It->Get()))
+            {
+                if (ACMPlayerState* PlayerState =
+                    PlayerController->GetPlayerState<ACMPlayerState>())
+                {
+                    PlayerState->SetVisionSystemEnabled(bEnabled);
+                    ++AffectedPlayers;
+                }
+            }
+        }
+    }
+    else
+    {
+        int32 ResolvedPlayerSlotId = INDEX_NONE;
+        ACMPlayerController* PlayerController = FindPlayerController(
+            World,
+            RequestedPlayerSlotId,
+            ResolvedPlayerSlotId
+        );
+        if (PlayerController)
+        {
+            if (ACMPlayerState* PlayerState =
+                PlayerController->GetPlayerState<ACMPlayerState>())
+            {
+                PlayerState->SetVisionSystemEnabled(bEnabled);
+                AffectedPlayers = 1;
+            }
+        }
+    }
+
+    if (AffectedPlayers == 0)
+    {
+        UE_LOG(LogChimeraVisionDebug, Warning,
+            TEXT("[Vision Debug Failed] No matching player was found."));
+        return;
+    }
+
+    UE_LOG(LogChimeraVisionDebug, Warning,
+        TEXT("[Vision Debug] Requested vision system %s for %s (%d player(s))."),
+        bEnabled ? TEXT("enabled") : TEXT("disabled"),
+        bAllPlayers ? TEXT("all players") : *Args[0],
+        AffectedPlayers);
+}
+
 void EnableVisionSystemDebug(
     const TArray<FString>& Args,
     UWorld* World
 )
 {
-    if (!Args.IsEmpty())
-    {
-        UE_LOG(LogChimeraVisionDebug, Warning,
-            TEXT("Usage: CM.Vision.DebugEnable"));
-        return;
-    }
-
-    UCMVisionManagerSubsystem* VisionManager = World
-        ? World->GetSubsystem<UCMVisionManagerSubsystem>()
-        : nullptr;
-    if (!VisionManager)
-    {
-        UE_LOG(LogChimeraVisionDebug, Warning,
-            TEXT("[Vision Debug Enable Failed] Vision Manager is unavailable."));
-        return;
-    }
-
-    VisionManager->EnableVisionSystem();
-    UE_LOG(LogChimeraVisionDebug, Warning,
-        TEXT("[Vision Debug] Vision system enabled."));
+    SetVisionSystemDebugEnabled(Args, World, true);
 }
 
 void DisableVisionSystemDebug(
@@ -336,26 +397,7 @@ void DisableVisionSystemDebug(
     UWorld* World
 )
 {
-    if (!Args.IsEmpty())
-    {
-        UE_LOG(LogChimeraVisionDebug, Warning,
-            TEXT("Usage: CM.Vision.DebugDisable"));
-        return;
-    }
-
-    UCMVisionManagerSubsystem* VisionManager = World
-        ? World->GetSubsystem<UCMVisionManagerSubsystem>()
-        : nullptr;
-    if (!VisionManager)
-    {
-        UE_LOG(LogChimeraVisionDebug, Warning,
-            TEXT("[Vision Debug Disable Failed] Vision Manager is unavailable."));
-        return;
-    }
-
-    VisionManager->DisableVisionSystem();
-    UE_LOG(LogChimeraVisionDebug, Warning,
-        TEXT("[Vision Debug] Vision system disabled; full screen is visible."));
+    SetVisionSystemDebugEnabled(Args, World, false);
 }
 
 FAutoConsoleCommandWithWorldAndArgs AttachHeadCommand(
@@ -374,7 +416,7 @@ FAutoConsoleCommandWithWorldAndArgs VisionDebugColorCommand(
 
 FAutoConsoleCommandWithWorldAndArgs VisionDebugEnableCommand(
     TEXT("CM.Vision.DebugEnable"),
-    TEXT("Enables the local Vision system."),
+    TEXT("Enables Vision for one or all players. Usage: CM.Vision.DebugEnable <PlayerSlotId 0-3|all>"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &EnableVisionSystemDebug
     )
@@ -382,7 +424,7 @@ FAutoConsoleCommandWithWorldAndArgs VisionDebugEnableCommand(
 
 FAutoConsoleCommandWithWorldAndArgs VisionDebugDisableCommand(
     TEXT("CM.Vision.DebugDisable"),
-    TEXT("Disables the local Vision system so the full screen is visible."),
+    TEXT("Disables Vision for one or all players. Usage: CM.Vision.DebugDisable <PlayerSlotId 0-3|all>"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &DisableVisionSystemDebug
     )
