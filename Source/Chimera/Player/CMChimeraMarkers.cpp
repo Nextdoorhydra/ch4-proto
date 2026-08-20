@@ -31,8 +31,7 @@ void ACMChimera::UpdateControlAssignmentMarkers(float DeltaTime)
                 ? ControlBody->GetPlayerState<ACMPlayerState>()
                 : nullptr;
             if (!CMPlayerState
-                || CMPlayerState->IsOnlyASpectator()
-                || !ControlBody->IsControlInputEnabled())
+                || CMPlayerState->IsOnlyASpectator())
             {
                 continue;
             }
@@ -41,6 +40,11 @@ void ACMChimera::UpdateControlAssignmentMarkers(float DeltaTime)
                 SlotIndex < ControlBody->GetControlSlots().Num();
                 ++SlotIndex)
             {
+                if (!ControlBody->IsControlSlotEnabled(SlotIndex))
+                {
+                    continue;
+                }
+
                 const FCMPartSlotAddress PartSlotAddress =
                     ControlBody->GetControlSlots()[SlotIndex];
                 if (CMControl::IsValidPartSlot(
