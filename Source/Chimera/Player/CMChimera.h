@@ -23,6 +23,8 @@ class UPrimitiveComponent;
 class UDataTable;
 class UPhysicalMaterial;
 class ACMPlayerState;
+class ACMArmPart;
+class ACMSpringArmPart;
 class AActor;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogChimeraLineBody, Log, All);
@@ -122,6 +124,10 @@ public:
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;
 
+    // Test Area 이동을 위해 활성 몸통 마디의 상대 배치를 유지하며 전체 물리 조립체 이동
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Testing")
+    bool TeleportAssembly(const FTransform& DestinationTransform);
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
     UCMPartSlotComponent* GetPartSlotComponent(
         const FCMPartSlotAddress& PartSlotAddress
@@ -142,14 +148,59 @@ public:
         const FCMPartSlotAddress& PartSlotAddress
     );
 
+    /** Server-side production entry point shared by concrete Leg abilities. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Movement")
+    bool TryActivateLegPart(
+        const FCMPartSlotAddress& PartSlotAddress,
+        ACMPlayerState* ContributingPlayerState
+    );
+
+    /** Server-side production entry point shared by concrete Arm abilities. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Combat")
+    bool TryActivateArmPart(
+        ACMArmPart* ArmPart,
+        ACMPlayerState* ContributingPlayerState
+    );
+
+    /** Pulls one simulated body segment toward a SpringArm hook anchor. */
+    bool ApplySpringArmPull(
+        const FCMPartSlotAddress& PartSlotAddress,
+        const FVector& AnchorLocation,
+        float PullImpulse,
+        float StopDistance
+    );
+
+    /** Gives this SpringArm exclusive ownership of the Chimera pull. */
+    bool RequestSpringArmPull(ACMSpringArmPart* SpringArm);
+
+    /** Releases pull ownership only when this SpringArm currently owns it. */
+    void ReleaseSpringArmPull(ACMSpringArmPart* SpringArm);
+
+    /** True while one SpringArm owns the Chimera pull. */
+    bool IsSpringArmPulling() const;
+    
 #if !UE_BUILD_SHIPPING
-    /** Attaches random Head/Arm/Leg diagnostic Parts to empty active slots. */
+    /** Attaches registered production Part Blueprints to empty active slots. */
     void SpawnRandomDebugParts();
 
-    /** Detaches and destroys only diagnostic Part Actors. */
+    /** Replaces one one-based debug slot with the requested production Part. */
+    bool SpawnDebugPartAtSlot(int32 FlatSlotIndex, FName PartName);
+
+    /** Replaces every active slot with the requested production Part. */
+    void FillAllDebugSlotsWithPart(FName PartName);
+
+    /** Removes only production Parts created by SpawnRandomDebugParts. */
     void ClearRandomDebugParts();
 
-    /** Lets the diagnostic Leg GA exercise the current LineBody movement. */
+    /** Attaches production Leg Parts to every empty active slot for testing. */
+    void SpawnTestLegParts();
+
+    /** Removes only Leg Parts created by SpawnTestLegParts. */
+    void ClearTestLegParts();
+
+    /** Keeps the diagnostic Leg GA routed through the production movement API. */
     void ActivateDebugLegPart(
         const FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState
@@ -173,7 +224,7 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Non-Shipping 화살표 치트 입력을 공용 몸통 물리 힘과 회전력으로 적용
+    // Non-Shipping 화살표 치트 입력을 마디 수와 질량에 무관한 가속도로 적용
     void ApplyDebugMovementInput(float ForwardInput, float TurnInput);
 
 protected:
@@ -228,7 +279,7 @@ protected:
         Category = "Chimera")
     TArray<TObjectPtr<USceneComponent>> RightFootPoints;
 
-    /** Flattened as SegmentIndex * 4 + PartSlotIndex. */
+    /** Flattened as SegmentIndex * PartSlotsPerSegment + PartSlotIndex. */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera|Part Slots")
     TArray<TObjectPtr<UCMPartSlotComponent>> PartSlotPoints;
@@ -244,14 +295,11 @@ protected:
         Category = "Chimera|Control Markers")
     TArray<TObjectPtr<UTextRenderComponent>> ControlAssignmentMarkerTexts;
 
-    UPROPERTY(EditAnywhere, Category = "Leg")
-    float LegImpulse = 5000.0f;
-
-    // Temporary LineBody action cost. Later, each attached Part can supply
-    // its own cost while the shared ASC continues to pay it the same way.
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Stamina",
+    // Body CSV가 제공하는 공통 이동 기준 힘이다. 다리와 팔은 자신의
+    // MovementImpulseMultiplier를 곱해 서로 다른 크기의 힘을 만든다.
+    UPROPERTY(EditAnywhere, Category = "Chimera|Movement",
         meta = (ClampMin = "0.0"))
-    float LegStaminaCost = 10.0f;
+    float BaseMovementImpulse = 5000.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
@@ -267,9 +315,15 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Leg")
     float MaxSpeed = 600.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+    Category = "Chimera|Movement|SpringArm",
+    meta = (ClampMin = "0.0"))
+    float SpringArmMaxSpeed = 4000.0f;
 
     UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",
         meta = (ClampMin = "0.0"))
+    // 모든 활성 마디에 적용하는 질량 독립적인 디버그 가속도
     float DebugMovementForce = 35000.0f;
 
     UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",
@@ -294,6 +348,18 @@ protected:
         Category = "Leg|Cooperation",
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float IndividualYawRotationFraction = 0.05f;
+
+    /** Whole-body yaw velocity change contributed by a Tier-1 input. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Movement|Turning",
+        meta = (ClampMin = "0.0"))
+    float YawAssistDegreesPerInput = 40.0f;
+
+    /** Caps server yaw velocity so simultaneous inputs cannot spin the body. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Movement|Turning",
+        meta = (ClampMin = "0.0"))
+    float MaximumYawAngularSpeedDegrees = 90.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Leg|Cooperation", meta = (ClampMin = "0.0"))
@@ -354,19 +420,37 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     bool bEnableBodyGravity = true;
 
+    /** Prevents each Segment from rolling sideways while allowing hills and turns. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
-    bool bLockBodyUpright = true;
+    bool bLockBodyRoll = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     FName BodyCollisionProfile = TEXT("PhysicsActor");
 
+    // 위아래 꺾임 정도
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
         meta = (ClampMin = "0.0", ClampMax = "90.0"))
-    float SwingLimitDegrees = 25.0f;
+    float TerrainPitchLimitDegrees = 22.0f;
 
+    // 좌우 꺾임 정도
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
+        meta = (ClampMin = "0.0", ClampMax = "180.0"))
+    float HorizontalBendLimitDegrees = 50.0f;
+
+    // 비틀림 정도, 얘는 잠겨있음
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
         meta = (ClampMin = "0.0", ClampMax = "90.0"))
-    float TwistLimitDegrees = 15.0f;
+    float TwistLimitDegrees = 8.0f;
+
+    /** Damps relative Pitch/Yaw speed without pulling Segments straight. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
+        meta = (ClampMin = "0.0"))
+    float SwingVelocityDamping = 5.0f;
+
+    /** Zero means that Chaos does not cap the damping torque. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
+        meta = (ClampMin = "0.0"))
+    float SwingDampingForceLimit = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint")
     bool bDisableCollisionBetweenSegments = true;
@@ -460,7 +544,6 @@ private:
     );
     void InitializeSegmentHealth(float SegmentMaxHealth);
     void StartStaminaRegeneration();
-    void ApplyStaminaCost(float Cost);
     void ApplyBlueprintSettings();
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
@@ -497,6 +580,8 @@ private:
     bool bHasReceivedSegmentStates = false;
     bool bAllSegmentsDeathNotified = false;
     float ConfiguredSegmentMaxHealth = 0.0f;
+    
+    TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
 
     // The coordinator reads the existing editor/CSV tuning fields without
     // moving them and invalidating Blueprint defaults.

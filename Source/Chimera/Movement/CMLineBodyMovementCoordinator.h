@@ -31,7 +31,26 @@ public:
         ACMChimera& Chimera,
         int32 SegmentIndex,
         USceneComponent* FootPoint,
-        ACMPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState,
+        float MovementImpulseMultiplier
+    );
+
+    /** Applies an immediate, non-grounded impulse from an Arm slot. */
+    bool TryActivateArm(
+        ACMChimera& Chimera,
+        int32 SegmentIndex,
+        USceneComponent* ImpulsePoint,
+        ACMPlayerState* ContributingPlayerState,
+        float MovementImpulseMultiplier
+    );
+
+    /** Applies one server-authoritative impulse toward a fixed hook anchor. */
+    bool ApplyAnchorPull(
+        ACMChimera& Chimera,
+        int32 SegmentIndex,
+        const FVector& AnchorLocation,
+        float PullImpulse,
+        float StopDistance
     );
 
     /** Applies the existing horizontal speed cap during the server physics Tick. */
@@ -45,16 +64,37 @@ private:
         ACMChimera& Chimera,
         UStaticMeshComponent* SegmentBody,
         USceneComponent* FootPoint,
-        ACMPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState,
+        float MovementImpulseMultiplier
+    );
+
+    bool ApplyArmImpulse(
+        ACMChimera& Chimera,
+        UStaticMeshComponent* SegmentBody,
+        USceneComponent* ImpulsePoint,
+        ACMPlayerState* ContributingPlayerState,
+        float MovementImpulseMultiplier
     );
 
     void RegisterCooperativeInput(
         ACMChimera& Chimera,
+        const struct FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState,
-        const FVector& PlanarImpulse,
-        float YawAngularImpulse
+        const FVector& PlanarImpulse
     );
-    void FlushCooperativeInput();
+    void MatchCooperativeInputs(ACMChimera& Chimera);
+    void ApplyCooperativeForwardImpulse(
+        ACMChimera& Chimera,
+        float ForwardImpulseMagnitude
+    ) const;
+    void ApplyWholeBodyYawAssist(
+        ACMChimera& Chimera,
+        const struct FCMPartSlotAddress& PartSlotAddress,
+        float MovementImpulseMultiplier
+    ) const;
+    void PurgeExpiredCooperativeInputs(double CurrentTime);
+    void ScheduleNextCooperativeExpiry(ACMChimera& Chimera);
+    void HandleCooperativeInputExpiry();
 
     bool TraceGround(
         const ACMChimera& Chimera,
@@ -69,7 +109,15 @@ private:
         const ACMChimera& Chimera
     ) const;
 
-    TMap<int32, FVector> PendingCooperationContributions;
-    TMap<int32, float> PendingCooperationYawImpulses;
-    FTimerHandle CooperationFlushTimerHandle;
+    struct FPendingCooperativeImpulse
+    {
+        int32 FlatSlotIndex = INDEX_NONE;
+        float RemainingImpulse = 0.0f;
+        double ExpireTime = 0.0;
+    };
+
+    // Each remaining input keeps its original expiry even after partial use.
+    TArray<FPendingCooperativeImpulse> PendingLeftInputs;
+    TArray<FPendingCooperativeImpulse> PendingRightInputs;
+    FTimerHandle CooperationExpiryTimerHandle;
 };

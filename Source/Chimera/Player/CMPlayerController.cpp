@@ -13,6 +13,8 @@
 #include "InputCoreTypes.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "EngineUtils.h"
+#include "Stage/Test/CMTestAreaManager.h"
 #include "Vision/CMVisionInputComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPlayerController, Log, All);
@@ -77,11 +79,46 @@ void ACMPlayerController::RequestCheatSpawnRandomParts()
     }
 }
 
+void ACMPlayerController::RequestCheatAttachPart(
+    int32 OneBasedSlotIndex,
+    FName PartName
+)
+{
+    if (IsLocalController())
+    {
+        ServerCheatAttachPart(OneBasedSlotIndex, PartName);
+    }
+}
+
+void ACMPlayerController::RequestCheatFillAllSlotsWithPart(FName PartName)
+{
+    if (IsLocalController())
+    {
+        ServerCheatFillAllSlotsWithPart(PartName);
+    }
+}
+
 void ACMPlayerController::RequestCheatClearRandomParts()
 {
     if (IsLocalController())
     {
         ServerCheatClearRandomParts();
+    }
+}
+
+void ACMPlayerController::RequestCheatSpawnLegParts()
+{
+    if (IsLocalController())
+    {
+        ServerCheatSpawnLegParts();
+    }
+}
+
+void ACMPlayerController::RequestCheatClearLegParts()
+{
+    if (IsLocalController())
+    {
+        ServerCheatClearLegParts();
     }
 }
 
@@ -107,6 +144,72 @@ void ACMPlayerController::SetCheatDebugMovementEnabled(bool bEnabled)
         TEXT("[Cheat] Arrow-key debug movement %s for %s."),
         bEnabled ? TEXT("enabled") : TEXT("disabled"),
         *GetName());
+#endif
+}
+
+// 공용 키메라를 독점 이동할 수 있는 로컬 호스트인지 확인
+bool ACMPlayerController::CanControlTestAreas() const
+{
+#if !UE_BUILD_SHIPPING
+    return IsLocalController()
+        && HasAuthority()
+        && (GetNetMode() == NM_ListenServer || GetNetMode() == NM_Standalone)
+        && IsValid(FindTestAreaManager());
+#else
+    return false;
+#endif
+}
+
+// Test Area Manager가 수집한 UI 목록 반환
+TArray<FCMTestAreaInfo> ACMPlayerController::GetAvailableTestAreas() const
+{
+#if !UE_BUILD_SHIPPING
+    if (const ACMTestAreaManager* Manager = FindTestAreaManager())
+    {
+        return Manager->GetAvailableAreas();
+    }
+#endif
+    return {};
+}
+
+// 로컬 UI 선택을 서버의 호스트 검증 RPC로 전달
+void ACMPlayerController::RequestTeleportToTestArea(FName AreaId)
+{
+#if !UE_BUILD_SHIPPING
+    if (IsLocalController() && !AreaId.IsNone())
+    {
+        ServerRequestTeleportToTestArea(AreaId);
+    }
+#endif
+}
+
+// 현재 월드의 유일한 TestAreaManager 검색
+ACMTestAreaManager* ACMPlayerController::FindTestAreaManager() const
+{
+    for (TActorIterator<ACMTestAreaManager> It(GetWorld()); It; ++It)
+    {
+        return *It;
+    }
+    return nullptr;
+}
+
+// 원격 참가자의 공용 몸통 이동을 거부하고 호스트 요청만 처리
+void ACMPlayerController::ServerRequestTeleportToTestArea_Implementation(FName AreaId)
+{
+#if !UE_BUILD_SHIPPING
+    if (!IsLocalController()
+        || (GetNetMode() != NM_ListenServer && GetNetMode() != NM_Standalone))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("Test Area 이동 요청을 거부했습니다. Controller=%s AreaId=%s"),
+            *GetName(), *AreaId.ToString());
+        return;
+    }
+
+    if (ACMTestAreaManager* Manager = FindTestAreaManager())
+    {
+        Manager->TeleportToArea(AreaId);
+    }
 #endif
 }
 
@@ -256,6 +359,43 @@ void ACMPlayerController::ServerCheatSpawnRandomParts_Implementation()
 #endif
 }
 
+void ACMPlayerController::ServerCheatAttachPart_Implementation(
+    int32 OneBasedSlotIndex,
+    FName PartName
+)
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.AttachPart Slot=%d Part=%s requested by %s."),
+            OneBasedSlotIndex,
+            *PartName.ToString(),
+            *GetName());
+        SharedChimera->SpawnDebugPartAtSlot(
+            OneBasedSlotIndex - 1,
+            PartName
+        );
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatFillAllSlotsWithPart_Implementation(
+    FName PartName
+)
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] Fill every active slot with Part=%s requested by %s."),
+            *PartName.ToString(),
+            *GetName());
+        SharedChimera->FillAllDebugSlotsWithPart(PartName);
+    }
+#endif
+}
+
 void ACMPlayerController::ServerCheatClearRandomParts_Implementation()
 {
 #if !UE_BUILD_SHIPPING
@@ -280,6 +420,32 @@ void ACMPlayerController::ServerApplyCheatDebugMovement_Implementation(
         SharedChimera->ApplyDebugMovementInput(
             FMath::Clamp(ForwardInput, -1.0f, 1.0f),
             FMath::Clamp(TurnInput, -1.0f, 1.0f));
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatSpawnLegParts_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.LegParts requested by %s."),
+            *GetName());
+        SharedChimera->SpawnTestLegParts();
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatClearLegParts_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.ClearLegParts requested by %s."),
+            *GetName());
+        SharedChimera->ClearTestLegParts();
     }
 #endif
 }

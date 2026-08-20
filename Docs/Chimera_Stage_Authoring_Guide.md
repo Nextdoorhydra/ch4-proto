@@ -1,5 +1,9 @@
 # Chimera 스테이지 제작 가이드
 
+> Persistent Test Level과 개발자별 Always Loaded Sublevel 구성은
+> [테스트 구역 제작 가이드](Chimera_Test_Area_Authoring_Guide.md)를 따른다.
+> 테스트 구역에서는 일반 `CMStageDestination` 대신 `CMTestAreaDestination`을 사용한다.
+
 ## 1. 목적
 
 여러 개발자가 스테이지를 하나씩 맡아도 같은 규칙으로 레벨, 기믹, 데이터와 비동기 로드를 구성하기 위한 실무 기준이다. 런타임 책임과 상태 전환은 [게임 흐름·스테이지 런타임 구조](Chimera_GameFlow_Stage_Architecture.md)를 따른다.
@@ -218,6 +222,8 @@ Row Struct는 `FCMStageSequenceRow`다.
 
 ## 10. Load Schedule PDA
 
+파츠·장애물·시야 등 개별 런타임 콘텐츠를 Definition PDA와 Asset Bundle로 연결하는 구현 규칙은 [비동기 로드 개발 가이드](Chimera_Async_Load_Developer_Guide.md)를 따른다.
+
 스테이지마다 `CMStageLoadSchedule` 하나를 만든다. LoadGroupId는 `<StageId>.<AreaOrPurpose>`를 권장한다.
 
 ```text
@@ -244,6 +250,39 @@ Schedule 시작 시 BeforeStageStart와 Sequential은 자동 큐에 들어간다
 - Catalog에 PDA를 GroupId로 배정하고 `RefreshAndRebuildCatalog`를 실행한다.
 - 분기 탈락 후 해제할 그룹만 `ReleaseWhenBranchRejected`를 쓴다.
 - 프로파일 근거 없이 작은 오브젝트마다 그룹을 만들지 않는다.
+
+### 장애물 Definition PDA
+
+단순 장애물은 BP에 에셋을 직접 지정할 수 있다. 일반 장애물을 비동기 준비하려면 `CMStageObstacleBase` Shell BP를 레벨에 직접 배치하고 `/Game/Chimera/Environment/Obstacle/Data`의 `CMObstacleDefinition` PDA를 Soft Reference로 지정한다.
+
+```text
+Shell BP 인스턴스
+├─ Transform
+├─ PlacementId·GroupTags
+├─ MotionAxis·Speed·MoveDistance
+└─ ObstacleDefinition
+   ├─ Definition = PDA_CMObstacle_MovingBlade
+   └─ LoadGroupId = S01.Area02.Hazards
+
+PDA_CMObstacle_MovingBlade
+├─ PrimaryMesh
+├─ Materials
+├─ NiagaraSystem
+├─ LoopSound
+├─ GameplayEffectClass
+└─ Hazard 설정
+```
+
+PDA 방식 Shell BP는 부모의 `PrimaryMesh`, `PrimaryEffect`, `LoopAudio`를 사용하고 같은 런타임 에셋을 BP 기본값에 중복 지정하지 않는다. Schedule Catalog에서 PDA의 GroupId와 Shell 인스턴스의 LoadGroupId를 동일하게 설정한다. 로드 전과 실패 시 장애물은 보이지 않는 판정을 만들지 않도록 비활성 상태를 유지한다.
+
+```text
+S01.Entry           BeforeStageStart
+S01.Area02.Hazards  Sequential 10
+S01.Area03.Hazards  Sequential 20
+S01.BranchA.Hazards OnDemand
+```
+
+위치와 이동 설정은 레벨 인스턴스가 관리하고 재사용할 외형·이펙트·사운드·GE만 Definition이 관리한다. 전체 제작 절차와 컴포넌트 책임은 `Chimera_Obstacle_Mechanism_Architecture.md`를 따른다.
 
 ## 11. DataForge와 Sheet
 

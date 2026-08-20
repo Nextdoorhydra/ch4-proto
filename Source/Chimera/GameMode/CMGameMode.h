@@ -45,6 +45,10 @@ protected:
         const ACMPlayerState* ExcludedPlayerState = nullptr
     );
 
+    // 공용 키메라 최초 생성에 사용할 PlayerStartTag이며 비어 있으면 기존 첫 시작점 사용
+    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Spawn")
+    FName SharedChimeraPlayerStartTag;
+
 private:
     bool bRetryInProgress = false;
 };
