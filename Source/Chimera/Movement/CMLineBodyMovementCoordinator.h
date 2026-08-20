@@ -78,11 +78,18 @@ private:
 
     void RegisterCooperativeInput(
         ACMChimera& Chimera,
+        const struct FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState,
-        const FVector& PlanarImpulse,
-        float YawAngularImpulse
+        const FVector& PlanarImpulse
     );
-    void FlushCooperativeInput();
+    void MatchCooperativeInputs(ACMChimera& Chimera);
+    void ApplyCooperativeForwardImpulse(
+        ACMChimera& Chimera,
+        float ForwardImpulseMagnitude
+    ) const;
+    void PurgeExpiredCooperativeInputs(double CurrentTime);
+    void ScheduleNextCooperativeExpiry(ACMChimera& Chimera);
+    void HandleCooperativeInputExpiry();
 
     bool TraceGround(
         const ACMChimera& Chimera,
@@ -97,7 +104,15 @@ private:
         const ACMChimera& Chimera
     ) const;
 
-    TMap<int32, FVector> PendingCooperationContributions;
-    TMap<int32, float> PendingCooperationYawImpulses;
-    FTimerHandle CooperationFlushTimerHandle;
+    struct FPendingCooperativeImpulse
+    {
+        int32 FlatSlotIndex = INDEX_NONE;
+        float RemainingImpulse = 0.0f;
+        double ExpireTime = 0.0;
+    };
+
+    // Each remaining input keeps its original expiry even after partial use.
+    TArray<FPendingCooperativeImpulse> PendingLeftInputs;
+    TArray<FPendingCooperativeImpulse> PendingRightInputs;
+    FTimerHandle CooperationExpiryTimerHandle;
 };

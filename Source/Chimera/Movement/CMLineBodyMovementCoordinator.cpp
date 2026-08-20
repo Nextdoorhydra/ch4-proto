@@ -5,6 +5,7 @@
 #include "GameMode/CMGameState.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
+#include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -191,16 +192,24 @@ bool UCMLineBodyMovementCoordinator::ApplyLegImpulse(
         Impulse * (TranslationFraction - RotationFraction)
     );
 
-    const FVector LeverArm =
-        GroundHit.ImpactPoint - SegmentBody->GetCenterOfMass();
-    const float IntendedYawAngularImpulse =
-        FVector::CrossProduct(LeverArm, Impulse).Z;
-    RegisterCooperativeInput(
-        Chimera,
-        ContributingPlayerState,
-        Impulse,
-        IntendedYawAngularImpulse
-    );
+    if (const UCMPartSlotComponent* PartSlot =
+            Cast<UCMPartSlotComponent>(FootPoint))
+    {
+        RegisterCooperativeInput(
+            Chimera,
+            PartSlot->GetSlotAddress(),
+            ContributingPlayerState,
+            Impulse
+        );
+    }
+
+    UE_LOG(LogChimeraMovement, Log,
+        TEXT("[Leg Impulse] Segment=%d Scale=%.2f Base=%.1f Raw=%.1f ImmediateTranslation=%.1f"),
+        Chimera.BodySegments.IndexOfByKey(SegmentBody),
+        MovementImpulseMultiplier,
+        Chimera.BaseMovementImpulse,
+        Impulse.Size(),
+        Impulse.Size() * TranslationFraction);
 
     return true;
 }
@@ -249,16 +258,16 @@ bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
         Impulse * (TranslationFraction - RotationFraction)
     );
 
-    const FVector LeverArm =
-        ImpulseLocation - SegmentBody->GetCenterOfMass();
-    const float IntendedYawAngularImpulse =
-        FVector::CrossProduct(LeverArm, Impulse).Z;
-    RegisterCooperativeInput(
-        Chimera,
-        ContributingPlayerState,
-        Impulse,
-        IntendedYawAngularImpulse
-    );
+    if (const UCMPartSlotComponent* PartSlot =
+            Cast<UCMPartSlotComponent>(ImpulsePoint))
+    {
+        RegisterCooperativeInput(
+            Chimera,
+            PartSlot->GetSlotAddress(),
+            ContributingPlayerState,
+            Impulse
+        );
+    }
 
     UE_LOG(LogChimeraMovement, Log,
         TEXT("[Arm Impulse] Segment=%d Scale=%.2f Base=%.1f Final=%.1f"),
@@ -271,189 +280,205 @@ bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
 
 void UCMLineBodyMovementCoordinator::RegisterCooperativeInput(
     ACMChimera& Chimera,
+    const FCMPartSlotAddress& PartSlotAddress,
     ACMPlayerState* ContributingPlayerState,
-    const FVector& PlanarImpulse,
-    float YawAngularImpulse
+    const FVector& PlanarImpulse
 )
 {
     if (!Chimera.HasAuthority()
         || !IsValid(ContributingPlayerState)
+        || !CMControl::IsValidPartSlot(
+            PartSlotAddress,
+            Chimera.ActiveSegmentCount)
         || PlanarImpulse.IsNearlyZero())
     {
         return;
     }
 
-    if (PendingCooperationContributions.IsEmpty())
+    const bool bIsLeft = CMControl::IsLeftPartSlot(PartSlotAddress);
+    const bool bIsRight = CMControl::IsRightPartSlot(PartSlotAddress);
+    if (!bIsLeft && !bIsRight)
     {
-        Chimera.GetWorldTimerManager().SetTimer(
-            CooperationFlushTimerHandle,
-            this,
-            &UCMLineBodyMovementCoordinator::FlushCooperativeInput,
-            FMath::Max(Chimera.CooperationInputWindow, 0.01f),
-            false
-        );
+        return;
     }
 
-    const int32 ContributorId = ContributingPlayerState->GetUniqueID();
-    if (!PendingCooperationContributions.Contains(ContributorId))
+    const double CurrentTime = Chimera.GetWorld()->GetTimeSeconds();
+    PurgeExpiredCooperativeInputs(CurrentTime);
+
+    const int32 FlatSlotIndex =
+        CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    const auto IsSamePendingSlot = [FlatSlotIndex](
+        const FPendingCooperativeImpulse& PendingInput)
     {
-        FVector HorizontalImpulse = PlanarImpulse;
-        HorizontalImpulse.Z = 0.0f;
-        PendingCooperationContributions.Add(
-            ContributorId,
-            HorizontalImpulse
+        return PendingInput.FlatSlotIndex == FlatSlotIndex;
+    };
+    if (PendingLeftInputs.ContainsByPredicate(IsSamePendingSlot)
+        || PendingRightInputs.ContainsByPredicate(IsSamePendingSlot))
+    {
+        return;
+    }
+
+    FPendingCooperativeImpulse PendingInput;
+    PendingInput.FlatSlotIndex = FlatSlotIndex;
+    PendingInput.RemainingImpulse = PlanarImpulse.Size2D();
+    PendingInput.ExpireTime = CurrentTime
+        + FMath::Max(Chimera.CooperationInputWindow, 0.01f);
+
+    (bIsLeft ? PendingLeftInputs : PendingRightInputs).Add(PendingInput);
+    MatchCooperativeInputs(Chimera);
+    ScheduleNextCooperativeExpiry(Chimera);
+}
+
+void UCMLineBodyMovementCoordinator::MatchCooperativeInputs(
+    ACMChimera& Chimera
+)
+{
+    while (!PendingLeftInputs.IsEmpty() && !PendingRightInputs.IsEmpty())
+    {
+        FPendingCooperativeImpulse& LeftInput = PendingLeftInputs[0];
+        FPendingCooperativeImpulse& RightInput = PendingRightInputs[0];
+        const float MatchedImpulse = FMath::Min(
+            LeftInput.RemainingImpulse,
+            RightInput.RemainingImpulse
         );
-        PendingCooperationYawImpulses.Add(
-            ContributorId,
-            YawAngularImpulse
+        if (MatchedImpulse <= UE_SMALL_NUMBER)
+        {
+            break;
+        }
+
+        const float ForwardImpulseMagnitude = MatchedImpulse * 2.0f;
+        ApplyCooperativeForwardImpulse(
+            Chimera,
+            ForwardImpulseMagnitude
+        );
+        UE_LOG(LogChimeraMovement, Log,
+            TEXT("[Cooperative Rolling Match] LeftSlot=%d RightSlot=%d Matched=%.1f Forward=%.1f LeftRemaining=%.1f RightRemaining=%.1f"),
+            LeftInput.FlatSlotIndex + 1,
+            RightInput.FlatSlotIndex + 1,
+            MatchedImpulse,
+            ForwardImpulseMagnitude,
+            LeftInput.RemainingImpulse - MatchedImpulse,
+            RightInput.RemainingImpulse - MatchedImpulse);
+
+        LeftInput.RemainingImpulse -= MatchedImpulse;
+        RightInput.RemainingImpulse -= MatchedImpulse;
+        if (LeftInput.RemainingImpulse <= UE_SMALL_NUMBER)
+        {
+            PendingLeftInputs.RemoveAt(0, EAllowShrinking::No);
+        }
+        if (RightInput.RemainingImpulse <= UE_SMALL_NUMBER)
+        {
+            PendingRightInputs.RemoveAt(0, EAllowShrinking::No);
+        }
+    }
+}
+
+void UCMLineBodyMovementCoordinator::ApplyCooperativeForwardImpulse(
+    ACMChimera& Chimera,
+    float ForwardImpulseMagnitude
+) const
+{
+    if (!Chimera.HasAuthority()
+        || !Chimera.BodyMesh
+        || ForwardImpulseMagnitude <= 0.0f)
+    {
+        return;
+    }
+
+    FVector ForwardDirection = Chimera.BodyMesh->GetForwardVector();
+    ForwardDirection.Z = 0.0f;
+    if (!ForwardDirection.Normalize())
+    {
+        return;
+    }
+
+    float TotalMass = 0.0f;
+    TArray<UStaticMeshComponent*> SimulatedSegments;
+    for (int32 Index = 0; Index < Chimera.ActiveSegmentCount; ++Index)
+    {
+        UStaticMeshComponent* BodySegment =
+            Chimera.BodySegments.IsValidIndex(Index)
+            ? Chimera.BodySegments[Index]
+            : nullptr;
+        if (BodySegment && BodySegment->IsSimulatingPhysics())
+        {
+            TotalMass += FMath::Max(BodySegment->GetMass(), 0.01f);
+            SimulatedSegments.Add(BodySegment);
+        }
+    }
+    if (TotalMass <= UE_SMALL_NUMBER)
+    {
+        return;
+    }
+
+    for (UStaticMeshComponent* BodySegment : SimulatedSegments)
+    {
+        const float MassFraction =
+            FMath::Max(BodySegment->GetMass(), 0.01f) / TotalMass;
+        BodySegment->AddImpulse(
+            ForwardDirection * ForwardImpulseMagnitude * MassFraction
         );
     }
 }
 
-void UCMLineBodyMovementCoordinator::FlushCooperativeInput()
+void UCMLineBodyMovementCoordinator::PurgeExpiredCooperativeInputs(
+    double CurrentTime
+)
 {
-    ACMChimera* Chimera = Cast<ACMChimera>(GetOwner());
-    const int32 ContributorCount =
-        PendingCooperationContributions.Num();
-    const ACMGameState* GameState = Chimera && Chimera->GetWorld()
-        ? Chimera->GetWorld()->GetGameState<ACMGameState>()
-        : nullptr;
-    const int32 ActivePlayerCount = FMath::Clamp(
-        GameState ? GameState->GetLobbyPlayerCount() : 1,
-        1,
-        CMControl::MaxPlayers
-    );
-
-    if (!Chimera
-        || !Chimera->HasAuthority()
-        || !Chimera->BodyMesh
-        || ContributorCount <= 0)
+    const auto IsExpired = [CurrentTime](
+        const FPendingCooperativeImpulse& PendingInput)
     {
-        PendingCooperationContributions.Reset();
-        PendingCooperationYawImpulses.Reset();
-        if (Chimera)
-        {
-            Chimera->GetWorldTimerManager().ClearTimer(
-                CooperationFlushTimerHandle
-            );
-        }
+        return PendingInput.ExpireTime <= CurrentTime;
+    };
+    PendingLeftInputs.RemoveAll(IsExpired);
+    PendingRightInputs.RemoveAll(IsExpired);
+}
+
+void UCMLineBodyMovementCoordinator::ScheduleNextCooperativeExpiry(
+    ACMChimera& Chimera
+)
+{
+    Chimera.GetWorldTimerManager().ClearTimer(CooperationExpiryTimerHandle);
+    if (PendingLeftInputs.IsEmpty() && PendingRightInputs.IsEmpty())
+    {
         return;
     }
 
-    const float ParticipationRatio = FMath::Clamp(
-        static_cast<float>(ContributorCount) / ActivePlayerCount,
-        0.0f,
-        1.0f
+    double NextExpireTime = TNumericLimits<double>::Max();
+    for (const FPendingCooperativeImpulse& Input : PendingLeftInputs)
+    {
+        NextExpireTime = FMath::Min(NextExpireTime, Input.ExpireTime);
+    }
+    for (const FPendingCooperativeImpulse& Input : PendingRightInputs)
+    {
+        NextExpireTime = FMath::Min(NextExpireTime, Input.ExpireTime);
+    }
+
+    const double CurrentTime = Chimera.GetWorld()->GetTimeSeconds();
+    Chimera.GetWorldTimerManager().SetTimer(
+        CooperationExpiryTimerHandle,
+        this,
+        &UCMLineBodyMovementCoordinator::HandleCooperativeInputExpiry,
+        static_cast<float>(FMath::Max(
+            NextExpireTime - CurrentTime,
+            0.001
+        )),
+        false
     );
+}
 
-    FVector DirectionSum = FVector::ZeroVector;
-    for (const TPair<int32, FVector>& Contribution
-        : PendingCooperationContributions)
+void UCMLineBodyMovementCoordinator::HandleCooperativeInputExpiry()
+{
+    ACMChimera* Chimera = Cast<ACMChimera>(GetOwner());
+    if (!Chimera || !Chimera->HasAuthority() || !Chimera->GetWorld())
     {
-        DirectionSum += Contribution.Value.GetSafeNormal2D();
+        PendingLeftInputs.Reset();
+        PendingRightInputs.Reset();
+        return;
     }
 
-    const float DirectionCoherence =
-        DirectionSum.Size2D() / ContributorCount;
-    if (DirectionCoherence >= Chimera->CooperationDirectionThreshold)
-    {
-        const FVector CoherentDirection =
-            DirectionSum.GetSafeNormal2D();
-        float AlignedImpulseMagnitude = 0.0f;
-        for (const TPair<int32, FVector>& Contribution
-            : PendingCooperationContributions)
-        {
-            AlignedImpulseMagnitude += FMath::Max(
-                0.0f,
-                FVector::DotProduct(
-                    Contribution.Value,
-                    CoherentDirection
-                )
-            );
-        }
-
-        const float TranslationFraction = FMath::Clamp(
-            Chimera->IndividualPlanarTranslationFraction,
-            0.0f,
-            1.0f
-        );
-        const float RetainedIndividualImpulse =
-            AlignedImpulseMagnitude * TranslationFraction;
-        const float MaximumFinalImpulse = FMath::Max(
-            Chimera->MaximumCooperativePlanarImpulse,
-            0.0f
-        );
-        const float TargetFinalImpulse =
-            MaximumFinalImpulse
-            * ParticipationRatio
-            * DirectionCoherence;
-        const float BonusImpulseMagnitude = FMath::Max(
-            TargetFinalImpulse - RetainedIndividualImpulse,
-            0.0f
-        );
-        Chimera->BodyMesh->AddImpulse(
-            CoherentDirection * BonusImpulseMagnitude
-        );
-    }
-
-    float YawDirectionSum = 0.0f;
-    for (const TPair<int32, float>& Contribution
-        : PendingCooperationYawImpulses)
-    {
-        if (!FMath::IsNearlyZero(Contribution.Value))
-        {
-            YawDirectionSum += FMath::Sign(Contribution.Value);
-        }
-    }
-
-    const float YawDirectionCoherence =
-        FMath::Abs(YawDirectionSum) / ContributorCount;
-    if (YawDirectionCoherence >= Chimera->CooperationDirectionThreshold)
-    {
-        const float YawDirection = FMath::Sign(YawDirectionSum);
-        float AlignedYawAngularImpulse = 0.0f;
-        for (const TPair<int32, float>& Contribution
-            : PendingCooperationYawImpulses)
-        {
-            if (FMath::Sign(Contribution.Value) == YawDirection)
-            {
-                AlignedYawAngularImpulse += FMath::Abs(
-                    Contribution.Value
-                );
-            }
-        }
-
-        const float RotationFraction = FMath::Clamp(
-            Chimera->IndividualYawRotationFraction,
-            0.0f,
-            1.0f
-        );
-        const float RetainedIndividualYawImpulse =
-            AlignedYawAngularImpulse * RotationFraction;
-        const float MaximumFinalYawImpulse = FMath::Max(
-            Chimera->MaximumCooperativeYawAngularImpulse,
-            0.0f
-        );
-        const float TargetFinalYawImpulse =
-            MaximumFinalYawImpulse
-            * ParticipationRatio
-            * YawDirectionCoherence;
-        const float YawBonusImpulseMagnitude = FMath::Max(
-            TargetFinalYawImpulse - RetainedIndividualYawImpulse,
-            0.0f
-        );
-        Chimera->BodyMesh->AddAngularImpulseInRadians(FVector(
-            0.0f,
-            0.0f,
-            YawDirection * YawBonusImpulseMagnitude
-        ));
-    }
-
-    PendingCooperationContributions.Reset();
-    PendingCooperationYawImpulses.Reset();
-    Chimera->GetWorldTimerManager().ClearTimer(
-        CooperationFlushTimerHandle
-    );
+    PurgeExpiredCooperativeInputs(Chimera->GetWorld()->GetTimeSeconds());
+    ScheduleNextCooperativeExpiry(*Chimera);
 }
 
 void UCMLineBodyMovementCoordinator::UpdateServerMovement(
@@ -612,11 +637,11 @@ void UCMLineBodyMovementCoordinator::EndPlay(
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(
-            CooperationFlushTimerHandle
+            CooperationExpiryTimerHandle
         );
     }
-    PendingCooperationContributions.Reset();
-    PendingCooperationYawImpulses.Reset();
+    PendingLeftInputs.Reset();
+    PendingRightInputs.Reset();
 
     Super::EndPlay(EndPlayReason);
 }

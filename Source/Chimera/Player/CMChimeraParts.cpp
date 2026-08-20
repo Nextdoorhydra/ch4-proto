@@ -305,6 +305,40 @@ UClass* LoadTestLegPartClass()
     return TestLegPartClass.LoadSynchronous();
 }
 
+UClass* LoadTestLegTierPartClass(int32 Tier)
+{
+    static const TSoftClassPtr<ACMLegPart> TestLegTierPartClasses[] =
+    {
+        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
+            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier1Part.BP_CMLegTier1Part_C"))),
+        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
+            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier2Part.BP_CMLegTier2Part_C"))),
+        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
+            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier3Part.BP_CMLegTier3Part_C"))),
+        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
+            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier4Part.BP_CMLegTier4Part_C"))),
+        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
+            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier5Part.BP_CMLegTier5Part_C")))
+    };
+
+    const int32 TierIndex = Tier - 1;
+    return TierIndex >= 0
+        && TierIndex < UE_ARRAY_COUNT(TestLegTierPartClasses)
+        ? TestLegTierPartClasses[TierIndex].LoadSynchronous()
+        : nullptr;
+}
+
+void AddTestLegTierPartClasses(TArray<UClass*>& OutPartClasses)
+{
+    for (int32 Tier = 1; Tier <= 5; ++Tier)
+    {
+        if (UClass* LoadedClass = LoadTestLegTierPartClass(Tier))
+        {
+            OutPartClasses.Add(LoadedClass);
+        }
+    }
+}
+
 UClass* LoadTestArmPartClass()
 {
     static TSoftClassPtr<ACMArmPart> TestArmPartClass(
@@ -324,6 +358,29 @@ UClass* LoadTestSpringArmPartClass()
     );
     return TestSpringArmPartClass.LoadSynchronous();
 }
+
+UClass* LoadNamedDebugPartClass(FName PartName)
+{
+    if (PartName == TEXT("Arm"))
+    {
+        return LoadTestArmPartClass();
+    }
+    if (PartName == TEXT("SpringArm"))
+    {
+        return LoadTestSpringArmPartClass();
+    }
+
+    const FString PartString = PartName.ToString();
+    constexpr TCHAR LegTierPrefix[] = TEXT("LegTier");
+    if (PartString.StartsWith(LegTierPrefix, ESearchCase::IgnoreCase))
+    {
+        return LoadTestLegTierPartClass(
+            FCString::Atoi(*PartString.RightChop(UE_ARRAY_COUNT(LegTierPrefix) - 1))
+        );
+    }
+
+    return nullptr;
+}
 }
 
 void ACMChimera::SpawnRandomDebugParts()
@@ -336,10 +393,7 @@ void ACMChimera::SpawnRandomDebugParts()
     ClearRandomDebugParts();
 
     TArray<UClass*> RegisteredPartClasses;
-    if (UClass* LegPartClass = LoadTestLegPartClass())
-    {
-        RegisteredPartClasses.Add(LegPartClass);
-    }
+    AddTestLegTierPartClasses(RegisteredPartClasses);
     if (UClass* ArmPartClass = LoadTestArmPartClass())
     {
         RegisteredPartClasses.Add(ArmPartClass);
@@ -406,6 +460,75 @@ void ACMChimera::SpawnRandomDebugParts()
         TEXT("[Random Parts Ready] Attached %d production Parts from %d registered Blueprint class(es)."),
         AttachedCount,
         RegisteredPartClasses.Num());
+}
+
+bool ACMChimera::SpawnDebugPartAtSlot(
+    int32 FlatSlotIndex,
+    FName PartName
+)
+{
+    const int32 ActiveSlotCount =
+        ActiveSegmentCount * CMControl::PartSlotsPerSegment;
+    if (!HasAuthority()
+        || !GetWorld()
+        || FlatSlotIndex < 0
+        || FlatSlotIndex >= ActiveSlotCount
+        || !PartSlotPoints.IsValidIndex(FlatSlotIndex)
+        || !PartSlotPoints[FlatSlotIndex])
+    {
+        UE_LOG(LogChimeraLineBody, Warning,
+            TEXT("[Attach Part Failed] Slot must be between 1 and %d."),
+            ActiveSlotCount);
+        return false;
+    }
+
+    UClass* PartClass = LoadNamedDebugPartClass(PartName);
+    if (!PartClass)
+    {
+        UE_LOG(LogChimeraLineBody, Warning,
+            TEXT("[Attach Part Failed] Unknown Part=%s. Use Arm, SpringArm, or LegTier1..5."),
+            *PartName.ToString());
+        return false;
+    }
+
+    UCMPartSlotComponent* PartSlot = PartSlotPoints[FlatSlotIndex];
+    if (AActor* ExistingPart = PartSlot->DetachPart())
+    {
+        ExistingPart->Destroy();
+    }
+
+    FActorSpawnParameters SpawnParameters;
+    SpawnParameters.Owner = this;
+    SpawnParameters.SpawnCollisionHandlingOverride =
+        ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    ACMPartActorBase* PartActor =
+        GetWorld()->SpawnActor<ACMPartActorBase>(
+            PartClass,
+            GetActorLocation(),
+            FRotator::ZeroRotator,
+            SpawnParameters
+        );
+    if (!PartActor)
+    {
+        return false;
+    }
+
+    PartActor->Tags.AddUnique(CheatSpawnedRandomPartTag);
+    if (!PartSlot->AttachPart(PartActor))
+    {
+        PartActor->Destroy();
+        return false;
+    }
+
+    const FCMPartSlotAddress SlotAddress = PartSlot->GetSlotAddress();
+    UE_LOG(LogChimeraLineBody, Warning,
+        TEXT("[Attach Part Ready] Slot=%d Address=(%d,%d) Part=%s Class=%s"),
+        FlatSlotIndex + 1,
+        SlotAddress.SegmentIndex,
+        SlotAddress.PartSlotIndex,
+        *PartName.ToString(),
+        *GetNameSafe(PartClass));
+    return true;
 }
 
 void ACMChimera::ClearRandomDebugParts()

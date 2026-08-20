@@ -180,6 +180,9 @@ public:
     /** Attaches registered production Part Blueprints to empty active slots. */
     void SpawnRandomDebugParts();
 
+    /** Replaces one one-based debug slot with the requested production Part. */
+    bool SpawnDebugPartAtSlot(int32 FlatSlotIndex, FName PartName);
+
     /** Removes only production Parts created by SpawnRandomDebugParts. */
     void ClearRandomDebugParts();
 

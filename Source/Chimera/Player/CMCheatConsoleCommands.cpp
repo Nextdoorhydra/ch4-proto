@@ -54,6 +54,24 @@ void SpawnRandomParts(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+void AttachPart(const TArray<FString>& Args, UWorld* World)
+{
+    if (Args.Num() < 2)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[Cheat Usage] CM.AttachPart <SlotNumber> <Arm|SpringArm|LegTier1..5>"));
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatAttachPart(
+            FCString::Atoi(*Args[0]),
+            FName(*Args[1])
+        );
+    }
+}
+
 void ClearRandomParts(const TArray<FString>& Args, UWorld* World)
 {
     if (ACMPlayerController* Controller = FindLocalController(World))
@@ -102,6 +120,14 @@ FAutoConsoleCommandWithWorldAndArgs SpawnRandomPartsCommand(
     TEXT("Attaches random registered production Part Blueprints to empty active slots."),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &SpawnRandomParts
+    )
+);
+
+FAutoConsoleCommandWithWorldAndArgs AttachPartCommand(
+    TEXT("CM.AttachPart"),
+    TEXT("Replaces a one-based slot Part. Usage: CM.AttachPart <SlotNumber> <Arm|SpringArm|LegTier1..5>"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &AttachPart
     )
 );
 

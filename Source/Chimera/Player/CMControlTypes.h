@@ -81,16 +81,28 @@ namespace CMControl
         return Address;
     }
 
-    // LineBody currently has prototype leg actions only in local slots 0/1.
-    // Slots 2/3 remain valid attachment/control addresses for future Parts.
+    // The prototype rear foot components use local slots 2/3 after the
+    // visual order was normalized to front 0/1, rear 2/3.
     inline bool IsPrototypeLegSlot(const FCMPartSlotAddress& Address)
     {
-        return Address.PartSlotIndex == 0
-            || Address.PartSlotIndex == 1;
+        return Address.PartSlotIndex == 2
+            || Address.PartSlotIndex == 3;
     }
 
     inline bool IsPrototypeRightLeg(const FCMPartSlotAddress& Address)
     {
-        return Address.PartSlotIndex == 1;
+        return Address.PartSlotIndex == 3;
+    }
+
+    inline bool IsLeftPartSlot(const FCMPartSlotAddress& Address)
+    {
+        return Address.PartSlotIndex == 0
+            || Address.PartSlotIndex == 2;
+    }
+
+    inline bool IsRightPartSlot(const FCMPartSlotAddress& Address)
+    {
+        return Address.PartSlotIndex == 1
+            || Address.PartSlotIndex == 3;
     }
 }

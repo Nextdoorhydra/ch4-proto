@@ -86,14 +86,14 @@ ACMChimera::ACMChimera()
     );
     LeftFootPoint->SetupAttachment(BodyMesh);
     LeftFootPoint->SetRelativeLocation(RearLeftSlotLocation);
-    LeftFootPoint->InitializeSlotAddress(0, 0);
+    LeftFootPoint->InitializeSlotAddress(0, 2);
 
     RightFootPoint = CreateDefaultSubobject<UCMPartSlotComponent>(
         TEXT("RightFootPoint")
     );
     RightFootPoint->SetupAttachment(BodyMesh);
     RightFootPoint->SetRelativeLocation(RearRightSlotLocation);
-    RightFootPoint->InitializeSlotAddress(0, 1);
+    RightFootPoint->InitializeSlotAddress(0, 3);
 
     UCMPartSlotComponent* FirstLeftUpperPartSlot =
         CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -101,7 +101,7 @@ ACMChimera::ACMChimera()
         );
     FirstLeftUpperPartSlot->SetupAttachment(BodyMesh);
     FirstLeftUpperPartSlot->SetRelativeLocation(FrontLeftSlotLocation);
-    FirstLeftUpperPartSlot->InitializeSlotAddress(0, 2);
+    FirstLeftUpperPartSlot->InitializeSlotAddress(0, 0);
 
     UCMPartSlotComponent* FirstRightUpperPartSlot =
         CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -109,7 +109,7 @@ ACMChimera::ACMChimera()
         );
     FirstRightUpperPartSlot->SetupAttachment(BodyMesh);
     FirstRightUpperPartSlot->SetRelativeLocation(FrontRightSlotLocation);
-    FirstRightUpperPartSlot->InitializeSlotAddress(0, 3);
+    FirstRightUpperPartSlot->InitializeSlotAddress(0, 1);
 
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(
         TEXT("CameraBoom")
@@ -149,10 +149,10 @@ ACMChimera::ACMChimera()
     BodySegments.Add(BodyMesh);
     LeftFootPoints.Add(LeftFootPoint);
     RightFootPoints.Add(RightFootPoint);
-    PartSlotPoints.Add(LeftFootPoint);
-    PartSlotPoints.Add(RightFootPoint);
     PartSlotPoints.Add(FirstLeftUpperPartSlot);
     PartSlotPoints.Add(FirstRightUpperPartSlot);
+    PartSlotPoints.Add(LeftFootPoint);
+    PartSlotPoints.Add(RightFootPoint);
 
     for (int32 Index = 1; Index < MaxSegmentCount; ++Index)
     {
@@ -179,7 +179,7 @@ ACMChimera::ACMChimera()
             );
         SegmentLeftFoot->SetupAttachment(SegmentBody);
         SegmentLeftFoot->SetRelativeLocation(RearLeftSlotLocation);
-        SegmentLeftFoot->InitializeSlotAddress(Index, 0);
+        SegmentLeftFoot->InitializeSlotAddress(Index, 2);
 
         UCMPartSlotComponent* SegmentRightFoot =
             CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -187,7 +187,7 @@ ACMChimera::ACMChimera()
             );
         SegmentRightFoot->SetupAttachment(SegmentBody);
         SegmentRightFoot->SetRelativeLocation(RearRightSlotLocation);
-        SegmentRightFoot->InitializeSlotAddress(Index, 1);
+        SegmentRightFoot->InitializeSlotAddress(Index, 3);
 
         UCMPartSlotComponent* SegmentLeftUpperPartSlot =
             CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -198,7 +198,7 @@ ACMChimera::ACMChimera()
             );
         SegmentLeftUpperPartSlot->SetupAttachment(SegmentBody);
         SegmentLeftUpperPartSlot->SetRelativeLocation(FrontLeftSlotLocation);
-        SegmentLeftUpperPartSlot->InitializeSlotAddress(Index, 2);
+        SegmentLeftUpperPartSlot->InitializeSlotAddress(Index, 0);
 
         UCMPartSlotComponent* SegmentRightUpperPartSlot =
             CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -209,15 +209,15 @@ ACMChimera::ACMChimera()
             );
         SegmentRightUpperPartSlot->SetupAttachment(SegmentBody);
         SegmentRightUpperPartSlot->SetRelativeLocation(FrontRightSlotLocation);
-        SegmentRightUpperPartSlot->InitializeSlotAddress(Index, 3);
+        SegmentRightUpperPartSlot->InitializeSlotAddress(Index, 1);
 
         BodySegments.Add(SegmentBody);
         LeftFootPoints.Add(SegmentLeftFoot);
         RightFootPoints.Add(SegmentRightFoot);
-        PartSlotPoints.Add(SegmentLeftFoot);
-        PartSlotPoints.Add(SegmentRightFoot);
         PartSlotPoints.Add(SegmentLeftUpperPartSlot);
         PartSlotPoints.Add(SegmentRightUpperPartSlot);
+        PartSlotPoints.Add(SegmentLeftFoot);
+        PartSlotPoints.Add(SegmentRightFoot);
     }
 
     for (int32 PartSlotFlatIndex = 0;

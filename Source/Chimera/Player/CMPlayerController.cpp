@@ -77,6 +77,17 @@ void ACMPlayerController::RequestCheatSpawnRandomParts()
     }
 }
 
+void ACMPlayerController::RequestCheatAttachPart(
+    int32 OneBasedSlotIndex,
+    FName PartName
+)
+{
+    if (IsLocalController())
+    {
+        ServerCheatAttachPart(OneBasedSlotIndex, PartName);
+    }
+}
+
 void ACMPlayerController::RequestCheatClearRandomParts()
 {
     if (IsLocalController())
@@ -268,6 +279,27 @@ void ACMPlayerController::ServerCheatSpawnRandomParts_Implementation()
             TEXT("[Cheat] CM.RandomParts requested by %s."),
             *GetName());
         SharedChimera->SpawnRandomDebugParts();
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatAttachPart_Implementation(
+    int32 OneBasedSlotIndex,
+    FName PartName
+)
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.AttachPart Slot=%d Part=%s requested by %s."),
+            OneBasedSlotIndex,
+            *PartName.ToString(),
+            *GetName());
+        SharedChimera->SpawnDebugPartAtSlot(
+            OneBasedSlotIndex - 1,
+            PartName
+        );
     }
 #endif
 }
