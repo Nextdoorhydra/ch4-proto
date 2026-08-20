@@ -22,6 +22,8 @@ class UPrimitiveComponent;
 class UDataTable;
 class UPhysicalMaterial;
 class ACMPlayerState;
+class ACMArmPart;
+class ACMSpringArmPart;
 class AActor;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogChimeraLineBody, Log, All);
@@ -145,14 +147,53 @@ public:
         const FCMPartSlotAddress& PartSlotAddress
     );
 
+    /** Server-side production entry point shared by concrete Leg abilities. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Movement")
+    bool TryActivateLegPart(
+        const FCMPartSlotAddress& PartSlotAddress,
+        ACMPlayerState* ContributingPlayerState
+    );
+
+    /** Server-side production entry point shared by concrete Arm abilities. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Combat")
+    bool TryActivateArmPart(
+        ACMArmPart* ArmPart,
+        ACMPlayerState* ContributingPlayerState
+    );
+
+    /** Pulls one simulated body segment toward a SpringArm hook anchor. */
+    bool ApplySpringArmPull(
+        const FCMPartSlotAddress& PartSlotAddress,
+        const FVector& AnchorLocation,
+        float PullImpulse,
+        float StopDistance
+    );
+
+    /** Gives this SpringArm exclusive ownership of the Chimera pull. */
+    bool RequestSpringArmPull(ACMSpringArmPart* SpringArm);
+
+    /** Releases pull ownership only when this SpringArm currently owns it. */
+    void ReleaseSpringArmPull(ACMSpringArmPart* SpringArm);
+
+    /** True while one SpringArm owns the Chimera pull. */
+    bool IsSpringArmPulling() const;
+    
 #if !UE_BUILD_SHIPPING
-    /** Attaches random Head/Arm/Leg diagnostic Parts to empty active slots. */
+    /** Attaches registered production Part Blueprints to empty active slots. */
     void SpawnRandomDebugParts();
 
-    /** Detaches and destroys only diagnostic Part Actors. */
+    /** Removes only production Parts created by SpawnRandomDebugParts. */
     void ClearRandomDebugParts();
 
-    /** Lets the diagnostic Leg GA exercise the current LineBody movement. */
+    /** Attaches production Leg Parts to every empty active slot for testing. */
+    void SpawnTestLegParts();
+
+    /** Removes only Leg Parts created by SpawnTestLegParts. */
+    void ClearTestLegParts();
+
+    /** Keeps the diagnostic Leg GA routed through the production movement API. */
     void ActivateDebugLegPart(
         const FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState
@@ -244,14 +285,11 @@ protected:
         Category = "Chimera|Control Markers")
     TArray<TObjectPtr<UTextRenderComponent>> ControlAssignmentMarkerTexts;
 
-    UPROPERTY(EditAnywhere, Category = "Leg")
-    float LegImpulse = 5000.0f;
-
-    // Temporary LineBody action cost. Later, each attached Part can supply
-    // its own cost while the shared ASC continues to pay it the same way.
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Stamina",
+    // Body CSV가 제공하는 공통 이동 기준 힘이다. 다리와 팔은 자신의
+    // MovementImpulseMultiplier를 곱해 서로 다른 크기의 힘을 만든다.
+    UPROPERTY(EditAnywhere, Category = "Chimera|Movement",
         meta = (ClampMin = "0.0"))
-    float LegStaminaCost = 10.0f;
+    float BaseMovementImpulse = 5000.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
@@ -267,6 +305,11 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Leg")
     float MaxSpeed = 600.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+    Category = "Chimera|Movement|SpringArm",
+    meta = (ClampMin = "0.0"))
+    float SpringArmMaxSpeed = 4000.0f;
 
     UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",
         meta = (ClampMin = "0.0"))
@@ -461,7 +504,6 @@ private:
     );
     void InitializeSegmentHealth(float SegmentMaxHealth);
     void StartStaminaRegeneration();
-    void ApplyStaminaCost(float Cost);
     void ApplyBlueprintSettings();
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
@@ -498,6 +540,8 @@ private:
     bool bHasReceivedSegmentStates = false;
     bool bAllSegmentsDeathNotified = false;
     float ConfiguredSegmentMaxHealth = 0.0f;
+    
+    TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
 
     // The coordinator reads the existing editor/CSV tuning fields without
     // moving them and invalidating Blueprint defaults.

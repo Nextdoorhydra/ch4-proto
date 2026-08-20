@@ -15,6 +15,7 @@
 #include "InputMappingContext.h"
 #include "EngineUtils.h"
 #include "Stage/Test/CMTestAreaManager.h"
+#include "Vision/CMVisionInputComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPlayerController, Log, All);
 
@@ -27,6 +28,9 @@ ACMPlayerController::ACMPlayerController()
         TEXT("ClientStageLoadComponent"));
     bAutoManageActiveCameraTarget = false;
 
+    VisionInputComponent = CreateDefaultSubobject<UCMVisionInputComponent>(
+        TEXT("VisionInputComponent")
+    );
 }
 
 bool ACMPlayerController::CanRequestRetryGame() const
@@ -80,6 +84,22 @@ void ACMPlayerController::RequestCheatClearRandomParts()
     if (IsLocalController())
     {
         ServerCheatClearRandomParts();
+    }
+}
+
+void ACMPlayerController::RequestCheatSpawnLegParts()
+{
+    if (IsLocalController())
+    {
+        ServerCheatSpawnLegParts();
+    }
+}
+
+void ACMPlayerController::RequestCheatClearLegParts()
+{
+    if (IsLocalController())
+    {
+        ServerCheatClearLegParts();
     }
 }
 
@@ -193,6 +213,12 @@ void ACMPlayerController::BeginPlay()
     {
         return;
     }
+
+    bShowMouseCursor = true;
+    FInputModeGameAndUI InputMode;
+    InputMode.SetHideCursorDuringCapture(false);
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    SetInputMode(InputMode);
 
     // 서버에서 Shared Chimera를 만들거나 클라이언트가 그 참조를 복제받으면
     // GameState가 이 이벤트를 한 번 발생시킨다. 매 프레임 포인터를 찾지 않는다.
@@ -338,6 +364,32 @@ void ACMPlayerController::ServerApplyCheatDebugMovement_Implementation(
         SharedChimera->ApplyDebugMovementInput(
             FMath::Clamp(ForwardInput, -1.0f, 1.0f),
             FMath::Clamp(TurnInput, -1.0f, 1.0f));
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatSpawnLegParts_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.LegParts requested by %s."),
+            *GetName());
+        SharedChimera->SpawnTestLegParts();
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatClearLegParts_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    if (ACMChimera* SharedChimera = GetSharedChimera())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat] CM.ClearLegParts requested by %s."),
+            *GetName());
+        SharedChimera->ClearTestLegParts();
     }
 #endif
 }

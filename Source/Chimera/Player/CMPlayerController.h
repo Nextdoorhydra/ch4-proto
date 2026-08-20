@@ -9,6 +9,7 @@
 
 class ACMChimera;
 class ACMTestAreaManager;
+class UCMVisionInputComponent;
 class UInputAction;
 class UInputMappingContext;
 class UCMClientStageLoadComponent;
@@ -48,6 +49,8 @@ public:
 
     void RequestCheatSpawnRandomParts();
     void RequestCheatClearRandomParts();
+    void RequestCheatSpawnLegParts();
+    void RequestCheatClearLegParts();
     // 콘솔 명령으로 현재 로컬 플레이어의 화살표 디버그 이동 활성화
     void SetCheatDebugMovementEnabled(bool bEnabled);
 
@@ -68,6 +71,9 @@ protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void SetupInputComponent() override;
     virtual void PlayerTick(float DeltaTime) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Vision")
+    TObjectPtr<UCMVisionInputComponent> VisionInputComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputMappingContext> DefaultMappingContext;
@@ -145,6 +151,12 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatClearRandomParts();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatSpawnLegParts();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatClearLegParts();
 
     UFUNCTION(Server, Unreliable)
     void ServerApplyCheatDebugMovement(float ForwardInput, float TurnInput);

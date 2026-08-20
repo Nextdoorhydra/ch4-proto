@@ -24,6 +24,7 @@ namespace BodyColumns
     const FString LinearDamping = TEXT("LinearDamping");
     const FString AngularDamping = TEXT("AngularDamping");
     const FString MaxVelocity = TEXT("MaxVelocity");
+    const FString BaseMovementImpulse = TEXT("BaseMovementImpulse");
 
     const TArray<FString> RequiredHeaders =
     {
@@ -38,6 +39,7 @@ namespace BodyColumns
         LinearDamping,
         AngularDamping,
         MaxVelocity,
+        BaseMovementImpulse,
     };
 
     bool ReadRequiredFloat(
@@ -138,6 +140,7 @@ bool UBodyDataParser::OnParseComplete(FString& OutError)
         bHasValidNumbers &= BodyColumns::ReadRequiredFloat(Row, BodyColumns::LinearDamping, NewRow.LinearDamping, Report, Index, ParsedRowName, true);
         bHasValidNumbers &= BodyColumns::ReadRequiredFloat(Row, BodyColumns::AngularDamping, NewRow.AngularDamping, Report, Index, ParsedRowName, true);
         bHasValidNumbers &= BodyColumns::ReadRequiredFloat(Row, BodyColumns::MaxVelocity, NewRow.MaxVelocity, Report, Index, ParsedRowName);
+        bHasValidNumbers &= BodyColumns::ReadRequiredFloat(Row, BodyColumns::BaseMovementImpulse, NewRow.BaseMovementImpulse, Report, Index, ParsedRowName);
 
         if (!Row.IsValid() || !bHasValidNumbers)
         {
@@ -149,12 +152,13 @@ bool UBodyDataParser::OnParseComplete(FString& OutError)
         Report.AddSuccess();
 
         UE_LOG(LogChimeraBodyDataParser, Verbose,
-            TEXT("[CSV -> DataTable] Row=%s ID=%s Type=%s SegmentHP=%.1f MaxStamina=%.1f"),
+            TEXT("[CSV -> DataTable] Row=%s ID=%s Type=%s SegmentHP=%.1f MaxStamina=%.1f BaseImpulse=%.1f"),
             *ParsedRowName.ToString(),
             *NewRow.ID.ToString(),
             *NewRow.BodyType.ToString(),
             NewRow.SegmentMaxHP,
-            NewRow.MaxStamina);
+            NewRow.MaxStamina,
+            NewRow.BaseMovementImpulse);
     }
 
     return FinalizeParseReport(ParserName, Report, OutError);

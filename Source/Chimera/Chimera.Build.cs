@@ -14,6 +14,7 @@ public class Chimera : ModuleRules
 			"AsyncPDALoader",
 			"Core",
 			"CoreUObject",
+			"DeveloperSettings",
 			"Engine",
 			"GameplayAbilities",
 			"GameplayMessageRuntime",

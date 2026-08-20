@@ -31,7 +31,26 @@ public:
         ACMChimera& Chimera,
         int32 SegmentIndex,
         USceneComponent* FootPoint,
-        ACMPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState,
+        float MovementImpulseMultiplier
+    );
+
+    /** Applies an immediate, non-grounded impulse from an Arm slot. */
+    bool TryActivateArm(
+        ACMChimera& Chimera,
+        int32 SegmentIndex,
+        USceneComponent* ImpulsePoint,
+        ACMPlayerState* ContributingPlayerState,
+        float MovementImpulseMultiplier
+    );
+
+    /** Applies one server-authoritative impulse toward a fixed hook anchor. */
+    bool ApplyAnchorPull(
+        ACMChimera& Chimera,
+        int32 SegmentIndex,
+        const FVector& AnchorLocation,
+        float PullImpulse,
+        float StopDistance
     );
 
     /** Applies the existing horizontal speed cap during the server physics Tick. */
@@ -45,7 +64,16 @@ private:
         ACMChimera& Chimera,
         UStaticMeshComponent* SegmentBody,
         USceneComponent* FootPoint,
-        ACMPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState,
+        float MovementImpulseMultiplier
+    );
+
+    bool ApplyArmImpulse(
+        ACMChimera& Chimera,
+        UStaticMeshComponent* SegmentBody,
+        USceneComponent* ImpulsePoint,
+        ACMPlayerState* ContributingPlayerState,
+        float MovementImpulseMultiplier
     );
 
     void RegisterCooperativeInput(
