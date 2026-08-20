@@ -337,6 +337,18 @@ protected:
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float IndividualYawRotationFraction = 0.05f;
 
+    /** Whole-body yaw velocity change contributed by a Tier-1 input. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Movement|Turning",
+        meta = (ClampMin = "0.0"))
+    float YawAssistDegreesPerInput = 40.0f;
+
+    /** Caps server yaw velocity so simultaneous inputs cannot spin the body. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Movement|Turning",
+        meta = (ClampMin = "0.0"))
+    float MaximumYawAngularSpeedDegrees = 90.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Leg|Cooperation", meta = (ClampMin = "0.0"))
     float MaximumCooperativePlanarImpulse = 10000.0f;
@@ -396,19 +408,37 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     bool bEnableBodyGravity = true;
 
+    /** Prevents each Segment from rolling sideways while allowing hills and turns. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
-    bool bLockBodyUpright = true;
+    bool bLockBodyRoll = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     FName BodyCollisionProfile = TEXT("PhysicsActor");
 
+    // 위아래 꺾임 정도
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
         meta = (ClampMin = "0.0", ClampMax = "90.0"))
-    float SwingLimitDegrees = 25.0f;
+    float TerrainPitchLimitDegrees = 22.0f;
 
+    // 좌우 꺾임 정도
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
+        meta = (ClampMin = "0.0", ClampMax = "180.0"))
+    float HorizontalBendLimitDegrees = 50.0f;
+
+    // 비틀림 정도, 얘는 잠겨있음
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
         meta = (ClampMin = "0.0", ClampMax = "90.0"))
-    float TwistLimitDegrees = 15.0f;
+    float TwistLimitDegrees = 8.0f;
+
+    /** Damps relative Pitch/Yaw speed without pulling Segments straight. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
+        meta = (ClampMin = "0.0"))
+    float SwingVelocityDamping = 5.0f;
+
+    /** Zero means that Chaos does not cap the damping torque. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
+        meta = (ClampMin = "0.0"))
+    float SwingDampingForceLimit = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint")
     bool bDisableCollisionBetweenSegments = true;

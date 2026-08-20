@@ -87,6 +87,11 @@ private:
         ACMChimera& Chimera,
         float ForwardImpulseMagnitude
     ) const;
+    void ApplyWholeBodyYawAssist(
+        ACMChimera& Chimera,
+        const struct FCMPartSlotAddress& PartSlotAddress,
+        float MovementImpulseMultiplier
+    ) const;
     void PurgeExpiredCooperativeInputs(double CurrentTime);
     void ScheduleNextCooperativeExpiry(ACMChimera& Chimera);
     void HandleCooperativeInputExpiry();

@@ -195,6 +195,11 @@ bool UCMLineBodyMovementCoordinator::ApplyLegImpulse(
     if (const UCMPartSlotComponent* PartSlot =
             Cast<UCMPartSlotComponent>(FootPoint))
     {
+        ApplyWholeBodyYawAssist(
+            Chimera,
+            PartSlot->GetSlotAddress(),
+            MovementImpulseMultiplier
+        );
         RegisterCooperativeInput(
             Chimera,
             PartSlot->GetSlotAddress(),
@@ -261,6 +266,11 @@ bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
     if (const UCMPartSlotComponent* PartSlot =
             Cast<UCMPartSlotComponent>(ImpulsePoint))
     {
+        ApplyWholeBodyYawAssist(
+            Chimera,
+            PartSlot->GetSlotAddress(),
+            MovementImpulseMultiplier
+        );
         RegisterCooperativeInput(
             Chimera,
             PartSlot->GetSlotAddress(),
@@ -419,6 +429,81 @@ void UCMLineBodyMovementCoordinator::ApplyCooperativeForwardImpulse(
             ForwardDirection * ForwardImpulseMagnitude * MassFraction
         );
     }
+}
+
+void UCMLineBodyMovementCoordinator::ApplyWholeBodyYawAssist(
+    ACMChimera& Chimera,
+    const FCMPartSlotAddress& PartSlotAddress,
+    float MovementImpulseMultiplier
+) const
+{
+    if (!Chimera.HasAuthority()
+        || MovementImpulseMultiplier <= 0.0f
+        || !CMControl::IsValidPartSlot(
+            PartSlotAddress,
+            Chimera.ActiveSegmentCount))
+    {
+        return;
+    }
+
+    const bool bIsLeft = CMControl::IsLeftPartSlot(PartSlotAddress);
+    const bool bIsRight = CMControl::IsRightPartSlot(PartSlotAddress);
+    if (!bIsLeft && !bIsRight)
+    {
+        return;
+    }
+
+    const float SideSign = bIsLeft ? 1.0f : -1.0f;
+    const float PowerScale = FMath::Sqrt(MovementImpulseMultiplier);
+    const float YawDeltaRadians = FMath::DegreesToRadians(
+        Chimera.YawAssistDegreesPerInput * PowerScale
+    ) * SideSign;
+    const float MaximumYawSpeedRadians = FMath::DegreesToRadians(
+        FMath::Max(Chimera.MaximumYawAngularSpeedDegrees, 0.0f)
+    );
+    if (FMath::IsNearlyZero(YawDeltaRadians)
+        || MaximumYawSpeedRadians <= 0.0f)
+    {
+        return;
+    }
+
+    int32 AssistedSegmentCount = 0;
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < Chimera.ActiveSegmentCount;
+        ++SegmentIndex)
+    {
+        UStaticMeshComponent* BodySegment =
+            Chimera.BodySegments.IsValidIndex(SegmentIndex)
+                ? Chimera.BodySegments[SegmentIndex]
+                : nullptr;
+        if (!BodySegment || !BodySegment->IsSimulatingPhysics())
+        {
+            continue;
+        }
+
+        FVector AngularVelocity =
+            BodySegment->GetPhysicsAngularVelocityInRadians();
+        AngularVelocity.Z = FMath::Clamp(
+            AngularVelocity.Z + YawDeltaRadians,
+            -MaximumYawSpeedRadians,
+            MaximumYawSpeedRadians
+        );
+        BodySegment->SetPhysicsAngularVelocityInRadians(
+            AngularVelocity,
+            false
+        );
+        ++AssistedSegmentCount;
+    }
+
+    UE_LOG(LogChimeraMovement, Log,
+        TEXT("[Whole Body Yaw Assist] Side=%s Slot=(%d,%d) Scale=%.2f DeltaDegrees=%.2f MaxDegreesPerSecond=%.1f Segments=%d"),
+        bIsLeft ? TEXT("Left") : TEXT("Right"),
+        PartSlotAddress.SegmentIndex,
+        PartSlotAddress.PartSlotIndex,
+        MovementImpulseMultiplier,
+        FMath::RadiansToDegrees(YawDeltaRadians),
+        Chimera.MaximumYawAngularSpeedDegrees,
+        AssistedSegmentCount);
 }
 
 void UCMLineBodyMovementCoordinator::PurgeExpiredCooperativeInputs(
