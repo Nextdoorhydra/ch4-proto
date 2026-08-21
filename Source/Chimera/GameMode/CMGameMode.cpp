@@ -464,43 +464,60 @@ void ACMGameMode::RebalanceControlAssignments(
         }
     }
 
-    const int32 RequestedSegmentCount = ExcludedPlayerState
+    const int32 RequestedPlayerCount = ExcludedPlayerState
         ? CMGameState->SharedChimera->GetActiveSegmentCount()
+            / CMControl::SegmentsPerPlayer
         : Players.Num();
     CMGameState->SharedChimera->SetActiveSegmentCountForPlayers(
-        RequestedSegmentCount
+        RequestedPlayerCount
     );
 
-    // OwnedSegmentIndex controls player life only. Preserve existing
-    // ownership and give a newly joined player the first unused Segment.
+    // OwnedSegmentIndex is the first of the player's two consecutive
+    // Segments. Preserve existing pairs and give a new player an unused pair.
     TSet<int32> ClaimedSegmentIndices;
+    const int32 ActiveSegmentCount =
+        CMGameState->SharedChimera->GetActiveSegmentCount();
     for (const ACMControlBody* ControlBody : ControlBodies)
     {
         if (ControlBody
-            && ControlBody->GetOwnedSegmentIndex() >= 0)
+            && ControlBody->GetOwnedSegmentIndex() >= 0
+            && ControlBody->GetOwnedSegmentIndex()
+                % CMControl::SegmentsPerPlayer == 0
+            && ControlBody->GetOwnedSegmentIndex() + 1
+                < ActiveSegmentCount)
         {
             ClaimedSegmentIndices.Add(
                 ControlBody->GetOwnedSegmentIndex()
+            );
+            ClaimedSegmentIndices.Add(
+                ControlBody->GetOwnedSegmentIndex() + 1
             );
         }
     }
     for (ACMControlBody* ControlBody : ControlBodies)
     {
-        if (!ControlBody
-            || ControlBody->GetOwnedSegmentIndex() >= 0)
+        const bool bHasValidOwnedPair = ControlBody
+            && ControlBody->GetOwnedSegmentIndex() >= 0
+            && ControlBody->GetOwnedSegmentIndex()
+                % CMControl::SegmentsPerPlayer == 0
+            && ControlBody->GetOwnedSegmentIndex() + 1
+                < ActiveSegmentCount;
+        if (!ControlBody || bHasValidOwnedPair)
         {
             continue;
         }
 
         for (int32 SegmentIndex = 0;
-            SegmentIndex
-                < CMGameState->SharedChimera->GetActiveSegmentCount();
-            ++SegmentIndex)
+            SegmentIndex + 1
+                < ActiveSegmentCount;
+            SegmentIndex += CMControl::SegmentsPerPlayer)
         {
-            if (!ClaimedSegmentIndices.Contains(SegmentIndex))
+            if (!ClaimedSegmentIndices.Contains(SegmentIndex)
+                && !ClaimedSegmentIndices.Contains(SegmentIndex + 1))
             {
                 ControlBody->SetOwnedSegmentIndex(SegmentIndex);
                 ClaimedSegmentIndices.Add(SegmentIndex);
+                ClaimedSegmentIndices.Add(SegmentIndex + 1);
                 break;
             }
         }
@@ -533,10 +550,11 @@ void ACMGameMode::RebalanceControlAssignments(
         UE_LOG(
             LogChimeraMultiplayer,
             Log,
-            TEXT("Assigned %d mixed PartSlot(s) to %s. OwnedSegment=%d"),
+            TEXT("Assigned %d mixed PartSlot(s) to %s. OwnedSegments=%d,%d"),
             NewAssignments[PlayerIndex].Num(),
             *Players[PlayerIndex]->GetPlayerName(),
-            ControlBodies[PlayerIndex]->GetOwnedSegmentIndex()
+            ControlBodies[PlayerIndex]->GetOwnedSegmentIndex(),
+            ControlBodies[PlayerIndex]->GetOwnedSegmentIndex() + 1
         );
     }
 }

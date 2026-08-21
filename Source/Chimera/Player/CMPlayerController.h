@@ -48,6 +48,8 @@ public:
     void RequestCheatKillSegment(int32 SegmentIndex);
 
     void RequestCheatSpawnRandomParts();
+    void RequestCheatAttachPart(int32 OneBasedSlotIndex, FName PartName);
+    void RequestCheatFillAllSlotsWithPart(FName PartName);
     void RequestCheatClearRandomParts();
     void RequestCheatSpawnLegParts();
     void RequestCheatClearLegParts();
@@ -148,6 +150,12 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatSpawnRandomParts();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatAttachPart(int32 OneBasedSlotIndex, FName PartName);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatFillAllSlotsWithPart(FName PartName);
 
     UFUNCTION(Server, Reliable)
     void ServerCheatClearRandomParts();
