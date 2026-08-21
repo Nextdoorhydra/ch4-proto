@@ -57,5 +57,11 @@ private:
     UFUNCTION()
     void FinishAction();
 
+    UFUNCTION()
+    void HandleActiveLegDied();
+
+    UFUNCTION()
+    void HandleActiveLegDisabledChanged(bool bDisabled);
+
     TWeakObjectPtr<ACMLegPart> ActiveLegPart;
 };

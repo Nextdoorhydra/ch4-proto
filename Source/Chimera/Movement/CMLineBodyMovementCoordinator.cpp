@@ -3,6 +3,7 @@
 #include "Player/CMControlTypes.h"
 #include "DrawDebugHelpers.h"
 #include "GameMode/CMGameState.h"
+#include "Parts/Leg/CMLegPart.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMPartSlotComponent.h"
@@ -22,27 +23,220 @@ UCMLineBodyMovementCoordinator::UCMLineBodyMovementCoordinator()
 
 bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     ACMChimera& Chimera,
-    int32 SegmentIndex,
-    USceneComponent* FootPoint,
+    ACMLegPart& LegPart,
     ACMPlayerState* ContributingPlayerState,
     float MovementImpulseMultiplier
 )
 {
+    UCMPartSlotComponent* PartSlot = LegPart.GetAttachedPartSlot();
+    const FCMPartSlotAddress SlotAddress = LegPart.GetAttachedSlotAddress();
+    const int32 SegmentIndex = SlotAddress.SegmentIndex;
     if (!Chimera.HasAuthority()
+        || !LegPart.IsOperational()
+        || !PartSlot
+        || PartSlot->GetOwner() != &Chimera
+        || MovementImpulseMultiplier <= 0.0f
         || SegmentIndex < 0
         || SegmentIndex >= Chimera.ActiveSegmentCount
-        || !Chimera.BodySegments.IsValidIndex(SegmentIndex))
+        || !Chimera.BodySegments.IsValidIndex(SegmentIndex)
+        || !Chimera.IsSegmentAlive(SegmentIndex))
     {
+        UE_LOG(LogChimeraMovement, Warning,
+            TEXT("[Leg Step Rejected] Preconditions Part=%s Authority=%s Operational=%s Slot=%s SlotOwner=%s Scale=%.2f Segment=%d ActiveSegments=%d Alive=%s"),
+            *GetNameSafe(&LegPart),
+            Chimera.HasAuthority() ? TEXT("true") : TEXT("false"),
+            LegPart.IsOperational() ? TEXT("true") : TEXT("false"),
+            *GetNameSafe(PartSlot),
+            *GetNameSafe(PartSlot ? PartSlot->GetOwner() : nullptr),
+            MovementImpulseMultiplier,
+            SegmentIndex,
+            Chimera.ActiveSegmentCount,
+            Chimera.IsSegmentAlive(SegmentIndex)
+                ? TEXT("true")
+                : TEXT("false"));
         return false;
     }
 
-    return ApplyLegImpulse(
-        Chimera,
-        Chimera.BodySegments[SegmentIndex],
-        FootPoint,
-        ContributingPlayerState,
-        MovementImpulseMultiplier
+    const bool bAlreadyActive = ActiveLegSteps.ContainsByPredicate(
+        [&LegPart](const FActiveLegStep& Step)
+        {
+            return Step.LegPart.Get() == &LegPart;
+        }
     );
+    UStaticMeshComponent* SegmentBody = Chimera.BodySegments[SegmentIndex];
+    if (bAlreadyActive || !SegmentBody
+        || !SegmentBody->IsSimulatingPhysics())
+    {
+        UE_LOG(LogChimeraMovement, Warning,
+            TEXT("[Leg Step Rejected] Physics Part=%s Segment=%d AlreadyActive=%s Body=%s Simulating=%s"),
+            *GetNameSafe(&LegPart),
+            SegmentIndex,
+            bAlreadyActive ? TEXT("true") : TEXT("false"),
+            *GetNameSafe(SegmentBody),
+            SegmentBody && SegmentBody->IsSimulatingPhysics()
+                ? TEXT("true")
+                : TEXT("false"));
+        return false;
+    }
+
+    FVector ForwardDirection = PartSlot->GetForwardVector();
+    ForwardDirection.Z = 0.0f;
+    if (!ForwardDirection.Normalize())
+    {
+        UE_LOG(LogChimeraMovement, Warning,
+            TEXT("[Leg Step Rejected] Invalid slot Forward Part=%s Slot=%s"),
+            *GetNameSafe(&LegPart),
+            *GetNameSafe(PartSlot));
+        return false;
+    }
+
+    const FVector VirtualFootPoint =
+        PartSlot->GetComponentLocation()
+        + ForwardDirection * Chimera.LegStepLength;
+    FHitResult GroundHit;
+    if (!TraceGroundAtPoint(
+        Chimera,
+        VirtualFootPoint,
+        &LegPart,
+        GroundHit))
+    {
+        UE_LOG(LogChimeraMovement, Warning,
+            TEXT("[Leg Step Rejected] No ground Part=%s VirtualFoot=%s TraceHeight=%.1f TraceDepth=%.1f Radius=%.1f Channel=%d MinimumNormalZ=%.2f"),
+            *GetNameSafe(&LegPart),
+            *VirtualFootPoint.ToCompactString(),
+            Chimera.LegStepTraceHeight,
+            Chimera.LegStepTraceDepth,
+            Chimera.GroundCheckRadius,
+            static_cast<int32>(Chimera.GroundTraceChannel.GetValue()),
+            Chimera.MinimumGroundNormalZ);
+        return false;
+    }
+
+    // GroundNormal에 투영한 접선 방향은 경사면에서 큰 위쪽 Force 성분을
+    // 만들어 좌우 다리를 함께 누를 때 몸 전체를 띄웠다. 추진력은 수평으로
+    // 유지하고, 실제 높이 변화는 몸통과 경사면의 충돌 반응에 맡긴다.
+    const FVector PushDirection = ForwardDirection;
+    const float PushDuration = FMath::Max(
+        LegPart.GetActionDuration(),
+        0.01f
+    );
+    const float PushForceMagnitude =
+        Chimera.BaseMovementImpulse
+        * GetPerControlImpulseMultiplier(Chimera)
+        * MovementImpulseMultiplier
+        * FMath::Max(Chimera.LegStepForceScale, 0.0f)
+        / PushDuration;
+    if (PushDirection.IsNearlyZero()
+        || PushForceMagnitude <= UE_SMALL_NUMBER)
+    {
+        UE_LOG(LogChimeraMovement, Warning,
+            TEXT("[Leg Step Rejected] Invalid force Part=%s Direction=%s Base=%.1f PerControl=%.3f Scale=%.2f StepScale=%.3f Duration=%.3f Final=%.1f"),
+            *GetNameSafe(&LegPart),
+            *PushDirection.ToCompactString(),
+            Chimera.BaseMovementImpulse,
+            GetPerControlImpulseMultiplier(Chimera),
+            MovementImpulseMultiplier,
+            Chimera.LegStepForceScale,
+            PushDuration,
+            PushForceMagnitude);
+        return false;
+    }
+
+    FActiveLegStep& Step = ActiveLegSteps.AddDefaulted_GetRef();
+    Step.LegPart = &LegPart;
+    Step.SegmentBody = SegmentBody;
+    Step.SegmentIndex = SegmentIndex;
+    Step.VirtualFootPoint = VirtualFootPoint;
+    Step.GroundPoint = GroundHit.ImpactPoint;
+    Step.GroundNormal = GroundHit.ImpactNormal;
+    Step.PushForce = PushDirection * PushForceMagnitude;
+    Step.EndTime = Chimera.GetWorld()->GetTimeSeconds() + PushDuration;
+
+    // 개별 Step Force는 해당 마디의 회전과 접지 이동을 담당한다.
+    // 같은 시간창에 좌우 다리가 함께 눌렸을 때만 기존 Rolling Match가
+    // 전진 보정을 만들도록, 이번 Step의 총 평면 충격량을 등록한다.
+    FVector EquivalentPlanarImpulse = Step.PushForce * PushDuration;
+    EquivalentPlanarImpulse.Z = 0.0f;
+    RegisterCooperativeInput(
+        Chimera,
+        SlotAddress,
+        ContributingPlayerState,
+        EquivalentPlanarImpulse
+    );
+
+#if ENABLE_DRAW_DEBUG
+    if (Chimera.bDrawGroundContactDebug)
+    {
+        DrawDebugSphere(
+            Chimera.GetWorld(),
+            VirtualFootPoint,
+            Chimera.GroundCheckRadius,
+            12,
+            FColor::Cyan,
+            false,
+            PushDuration,
+            0,
+            1.5f
+        );
+        DrawDebugSphere(
+            Chimera.GetWorld(),
+            GroundHit.ImpactPoint,
+            Chimera.GroundCheckRadius,
+            12,
+            FColor::Green,
+            false,
+            PushDuration,
+            0,
+            2.0f
+        );
+        DrawDebugDirectionalArrow(
+            Chimera.GetWorld(),
+            GroundHit.ImpactPoint,
+            GroundHit.ImpactPoint + PushDirection * 100.0f,
+            20.0f,
+            FColor::Red,
+            false,
+            PushDuration,
+            0,
+            2.0f
+        );
+    }
+#endif
+
+    UE_LOG(LogChimeraMovement, Log,
+        TEXT("[Leg Step Started] PlayerState=%s Part=%s Segment=%d Slot=(%d,%d) Duration=%.3f Force=%.1f Ground=%s"),
+        *GetNameSafe(ContributingPlayerState),
+        *GetNameSafe(&LegPart),
+        SegmentIndex,
+        SlotAddress.SegmentIndex,
+        SlotAddress.PartSlotIndex,
+        PushDuration,
+        PushForceMagnitude,
+        *GroundHit.ImpactPoint.ToCompactString());
+    return true;
+}
+
+void UCMLineBodyMovementCoordinator::CancelLegStep(
+    const ACMLegPart* LegPart
+)
+{
+    if (!LegPart)
+    {
+        return;
+    }
+
+    const int32 RemovedCount = ActiveLegSteps.RemoveAll(
+        [LegPart](const FActiveLegStep& Step)
+        {
+            return Step.LegPart.Get() == LegPart;
+        }
+    );
+    if (RemovedCount > 0)
+    {
+        UE_LOG(LogChimeraMovement, Log,
+            TEXT("[Leg Step Cancelled] Part=%s"),
+            *GetNameSafe(LegPart));
+    }
 }
 
 bool UCMLineBodyMovementCoordinator::TryActivateArm(
@@ -141,81 +335,6 @@ bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
         SimulatedSegments.Num(),
         *AnchorLocation.ToCompactString(),
         PullImpulse);
-    return true;
-}
-
-bool UCMLineBodyMovementCoordinator::ApplyLegImpulse(
-    ACMChimera& Chimera,
-    UStaticMeshComponent* SegmentBody,
-    USceneComponent* FootPoint,
-    ACMPlayerState* ContributingPlayerState,
-    float MovementImpulseMultiplier
-)
-{
-    if (!SegmentBody || !FootPoint)
-    {
-        return false;
-    }
-
-    FHitResult GroundHit;
-    if (!TraceGround(Chimera, FootPoint, GroundHit))
-    {
-        return false;
-    }
-
-    FVector ForwardDirection = SegmentBody->GetForwardVector();
-    ForwardDirection.Z = 0.0f;
-    ForwardDirection.Normalize();
-
-    const FVector Impulse =
-        ForwardDirection
-        * Chimera.BaseMovementImpulse
-        * GetPerControlImpulseMultiplier(Chimera)
-        * FMath::Max(MovementImpulseMultiplier, 0.0f);
-
-    const float TranslationFraction = FMath::Clamp(
-        Chimera.IndividualPlanarTranslationFraction,
-        0.0f,
-        1.0f
-    );
-    const float RotationFraction = FMath::Clamp(
-        Chimera.IndividualYawRotationFraction,
-        0.0f,
-        1.0f
-    );
-    const FVector RotationalImpulse = Impulse * RotationFraction;
-    SegmentBody->AddImpulseAtLocation(
-        RotationalImpulse,
-        GroundHit.ImpactPoint
-    );
-    SegmentBody->AddImpulse(
-        Impulse * (TranslationFraction - RotationFraction)
-    );
-
-    if (const UCMPartSlotComponent* PartSlot =
-            Cast<UCMPartSlotComponent>(FootPoint))
-    {
-        ApplyWholeBodyYawAssist(
-            Chimera,
-            PartSlot->GetSlotAddress(),
-            MovementImpulseMultiplier
-        );
-        RegisterCooperativeInput(
-            Chimera,
-            PartSlot->GetSlotAddress(),
-            ContributingPlayerState,
-            Impulse
-        );
-    }
-
-    UE_LOG(LogChimeraMovement, Log,
-        TEXT("[Leg Impulse] Segment=%d Scale=%.2f Base=%.1f Raw=%.1f ImmediateTranslation=%.1f"),
-        Chimera.BodySegments.IndexOfByKey(SegmentBody),
-        MovementImpulseMultiplier,
-        Chimera.BaseMovementImpulse,
-        Impulse.Size(),
-        Impulse.Size() * TranslationFraction);
-
     return true;
 }
 
@@ -589,12 +708,16 @@ void UCMLineBodyMovementCoordinator::HandleCooperativeInputExpiry()
 
 void UCMLineBodyMovementCoordinator::UpdateServerMovement(
     ACMChimera& Chimera
-) const
+)
 {
     if (!Chimera.HasAuthority() || !Chimera.BodyMesh)
     {
         return;
     }
+
+    // A Step is a sustained ground reaction, so its Force is supplied every
+    // server physics frame before the existing whole-body speed cap runs.
+    ApplyActiveLegSteps(Chimera);
 
     TArray<UStaticMeshComponent*> SimulatedSegments;
     float TotalMass = 0.0f;
@@ -722,23 +845,100 @@ float UCMLineBodyMovementCoordinator::GetPerControlImpulseMultiplier(
         / FMath::Max(static_cast<float>(AssignedControlCount), 1.0f);
 }
 
-bool UCMLineBodyMovementCoordinator::TraceGround(
+void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
+    ACMChimera& Chimera
+)
+{
+    const double CurrentTime = Chimera.GetWorld()->GetTimeSeconds();
+    for (int32 StepIndex = ActiveLegSteps.Num() - 1;
+        StepIndex >= 0;
+        --StepIndex)
+    {
+        FActiveLegStep& Step = ActiveLegSteps[StepIndex];
+        ACMLegPart* LegPart = Step.LegPart.Get();
+        UStaticMeshComponent* SegmentBody = Step.SegmentBody.Get();
+        const bool bCanContinue = CurrentTime < Step.EndTime
+            && IsValid(LegPart)
+            && LegPart->IsOperational()
+            && IsValid(SegmentBody)
+            && SegmentBody->IsSimulatingPhysics()
+            && Chimera.IsSegmentAlive(Step.SegmentIndex);
+        if (!bCanContinue)
+        {
+            UE_LOG(LogChimeraMovement, Verbose,
+                TEXT("[Leg Step Stopped] Part=%s Segment=%d Operational=%s"),
+                *GetNameSafe(LegPart),
+                Step.SegmentIndex,
+                LegPart && LegPart->IsOperational()
+                    ? TEXT("true")
+                    : TEXT("false"));
+            ActiveLegSteps.RemoveAtSwap(
+                StepIndex,
+                EAllowShrinking::No
+            );
+            continue;
+        }
+
+        // 접지점의 XY 오프셋은 좌우 다리의 자연스러운 Yaw를 만들지만,
+        // 지면 높이에서 강한 수평 Force를 가하면 무게중심과의 Z 레버 암이
+        // Pitch/Roll 토크를 만들어 몸통을 띄운다. 적용 높이만 COM에 맞춰
+        // 평면 회전은 유지하고 불필요한 부양 토크를 제거한다.
+        FVector ForceApplicationPoint = Step.GroundPoint;
+        ForceApplicationPoint.Z = SegmentBody->GetCenterOfMass().Z;
+        SegmentBody->AddForceAtLocation(
+            Step.PushForce,
+            ForceApplicationPoint
+        );
+    }
+}
+
+bool UCMLineBodyMovementCoordinator::TraceGroundAtPoint(
     const ACMChimera& Chimera,
-    USceneComponent* FootPoint,
+    const FVector& DesiredFootPoint,
+    const AActor* IgnoredPart,
     FHitResult& OutHit
 ) const
 {
-    if (!FootPoint || !Chimera.GetWorld())
+    if (!Chimera.GetWorld())
     {
         return false;
     }
 
-    const FVector Start = FootPoint->GetComponentLocation();
-    const FVector End =
-        Start - FVector::UpVector * Chimera.GroundContactDistance;
+    const FVector Start = DesiredFootPoint
+        + FVector::UpVector * Chimera.LegStepTraceHeight;
+    const FVector End = DesiredFootPoint
+        - FVector::UpVector * Chimera.LegStepTraceDepth;
 
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(&Chimera);
+    if (IgnoredPart)
+    {
+        QueryParams.AddIgnoredActor(IgnoredPart);
+    }
+
+    // 몸이 U자나 원형으로 말리면 다른 장착 파츠가 가상 발의 수직
+    // Sweep을 먼저 막을 수 있다. Actor Attachment 목록 대신 키메라가
+    // 실제 권위 상태로 관리하는 PartSlot들을 순회해 확실히 제외한다.
+    const int32 ActivePartSlotCount = Chimera.ActiveSegmentCount
+        * CMControl::PartSlotsPerSegment;
+    for (int32 FlatSlotIndex = 0;
+        FlatSlotIndex < ActivePartSlotCount;
+        ++FlatSlotIndex)
+    {
+        if (!Chimera.PartSlotPoints.IsValidIndex(FlatSlotIndex))
+        {
+            continue;
+        }
+
+        const UCMPartSlotComponent* AttachedPartSlot =
+            Chimera.PartSlotPoints[FlatSlotIndex];
+        if (AttachedPartSlot && AttachedPartSlot->GetAttachedPart())
+        {
+            QueryParams.AddIgnoredActor(
+                AttachedPartSlot->GetAttachedPart()
+            );
+        }
+    }
 
     TArray<FHitResult> Hits;
     Chimera.GetWorld()->SweepMultiByChannel(
@@ -750,23 +950,123 @@ bool UCMLineBodyMovementCoordinator::TraceGround(
         FCollisionShape::MakeSphere(Chimera.GroundCheckRadius),
         QueryParams
     );
+    const TArray<FHitResult> ChannelHits = Hits;
 
-    bool bHasGroundContact = false;
-    for (const FHitResult& Hit : Hits)
+    const auto SelectWalkableGround = [&Chimera, &OutHit](
+        const TArray<FHitResult>& CandidateHits)
     {
-        if (Hit.ImpactNormal.Z >= Chimera.MinimumGroundNormalZ)
+        for (const FHitResult& Hit : CandidateHits)
         {
-            OutHit = Hit;
-            bHasGroundContact = true;
-            break;
+            const AActor* HitActor = Hit.GetActor();
+            if (HitActor
+                && HitActor->GetAttachParentActor() == &Chimera)
+            {
+                continue;
+            }
+            if (Hit.ImpactNormal.Z >= Chimera.MinimumGroundNormalZ)
+            {
+                OutHit = Hit;
+                return true;
+            }
         }
+        return false;
+    };
+
+    bool bHasGroundContact = SelectWalkableGround(Hits);
+    const TCHAR* SelectedTraceSource = TEXT("Channel");
+    TArray<FHitResult> WorldStaticHits;
+
+    // 레벨 바닥이 Visibility를 막지 않거나, 부착 파츠가 채널 Sweep의
+    // 첫 Blocking Hit가 되면 실제 바닥까지 결과가 이어지지 않을 수 있다.
+    // 설정 채널에서 유효한 지면을 못 찾은 경우 물리 지면인 WorldStatic만
+    // 다시 조회하여 파츠의 Collision 설정에 접지 판정이 좌우되지 않게 한다.
+    if (!bHasGroundContact)
+    {
+        FCollisionObjectQueryParams GroundObjectQuery;
+        GroundObjectQuery.AddObjectTypesToQuery(ECC_WorldStatic);
+        Chimera.GetWorld()->SweepMultiByObjectType(
+            WorldStaticHits,
+            Start,
+            End,
+            FQuat::Identity,
+            GroundObjectQuery,
+            FCollisionShape::MakeSphere(Chimera.GroundCheckRadius),
+            QueryParams
+        );
+        bHasGroundContact = SelectWalkableGround(WorldStaticHits);
+        SelectedTraceSource = TEXT("WorldStatic");
+    }
+
+    if (bHasGroundContact)
+    {
+        const UPrimitiveComponent* HitComponent = OutHit.GetComponent();
+        UE_LOG(LogChimeraMovement, Log,
+            TEXT("[Ground Trace Selected] Source=%s Actor=%s Component=%s ObjectType=%d Blocking=%s StartPenetrating=%s Point=%s Normal=%s"),
+            SelectedTraceSource,
+            *GetNameSafe(OutHit.GetActor()),
+            *GetNameSafe(HitComponent),
+            HitComponent
+                ? static_cast<int32>(HitComponent->GetCollisionObjectType())
+                : INDEX_NONE,
+            OutHit.bBlockingHit ? TEXT("true") : TEXT("false"),
+            OutHit.bStartPenetrating ? TEXT("true") : TEXT("false"),
+            *OutHit.ImpactPoint.ToCompactString(),
+            *OutHit.ImpactNormal.ToCompactString());
+    }
+    else
+    {
+        const auto LogRejectedCandidates = [](const TCHAR* Source,
+            const TArray<FHitResult>& CandidateHits)
+        {
+            UE_LOG(LogChimeraMovement, Warning,
+                TEXT("[Ground Trace Candidates] Source=%s Count=%d"),
+                Source,
+                CandidateHits.Num());
+            for (int32 HitIndex = 0;
+                HitIndex < CandidateHits.Num();
+                ++HitIndex)
+            {
+                const FHitResult& Hit = CandidateHits[HitIndex];
+                const UPrimitiveComponent* HitComponent = Hit.GetComponent();
+                UE_LOG(LogChimeraMovement, Warning,
+                    TEXT("[Ground Trace Hit] Source=%s Index=%d Actor=%s Component=%s ObjectType=%d Blocking=%s StartPenetrating=%s Distance=%.2f Point=%s Normal=%s AttachParent=%s"),
+                    Source,
+                    HitIndex,
+                    *GetNameSafe(Hit.GetActor()),
+                    *GetNameSafe(HitComponent),
+                    HitComponent
+                        ? static_cast<int32>(HitComponent->GetCollisionObjectType())
+                        : INDEX_NONE,
+                    Hit.bBlockingHit ? TEXT("true") : TEXT("false"),
+                    Hit.bStartPenetrating ? TEXT("true") : TEXT("false"),
+                    Hit.Distance,
+                    *Hit.ImpactPoint.ToCompactString(),
+                    *Hit.ImpactNormal.ToCompactString(),
+                    *GetNameSafe(Hit.GetActor()
+                        ? Hit.GetActor()->GetAttachParentActor()
+                        : nullptr));
+            }
+        };
+
+        LogRejectedCandidates(TEXT("Channel"), ChannelHits);
+        LogRejectedCandidates(TEXT("WorldStatic"), WorldStaticHits);
     }
 
     if (Chimera.bDrawGroundContactDebug)
     {
+        DrawDebugLine(
+            Chimera.GetWorld(),
+            Start,
+            End,
+            bHasGroundContact ? FColor::Green : FColor::Red,
+            false,
+            0.5f,
+            0,
+            1.0f
+        );
         DrawDebugSphere(
             Chimera.GetWorld(),
-            End,
+            bHasGroundContact ? OutHit.ImpactPoint : End,
             Chimera.GroundCheckRadius,
             12,
             bHasGroundContact ? FColor::Green : FColor::Red,
@@ -792,6 +1092,7 @@ void UCMLineBodyMovementCoordinator::EndPlay(
     }
     PendingLeftInputs.Reset();
     PendingRightInputs.Reset();
+    ActiveLegSteps.Reset();
 
     Super::EndPlay(EndPlayReason);
 }

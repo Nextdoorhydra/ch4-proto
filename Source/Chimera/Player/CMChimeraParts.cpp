@@ -88,7 +88,6 @@ bool ACMChimera::TryActivateLegPart(
         return false;
     }
 
-    const int32 SegmentIndex = PartSlotAddress.SegmentIndex;
     UCMPartSlotComponent* PartSlot =
         GetPartSlotComponent(PartSlotAddress);
     ACMLegPart* LegPart = PartSlot
@@ -102,11 +101,18 @@ bool ACMChimera::TryActivateLegPart(
     return MovementCoordinator
         && MovementCoordinator->TryActivateLeg(
             *this,
-            SegmentIndex,
-            PartSlot,
+            *LegPart,
             ContributingPlayerState,
             LegPart->GetMovementImpulseMultiplier()
         );
+}
+
+void ACMChimera::CancelLegStep(const ACMLegPart* LegPart)
+{
+    if (HasAuthority() && MovementCoordinator)
+    {
+        MovementCoordinator->CancelLegStep(LegPart);
+    }
 }
 
 bool ACMChimera::TryActivateArmPart(
