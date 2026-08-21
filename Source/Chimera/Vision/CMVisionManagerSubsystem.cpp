@@ -1,5 +1,7 @@
 #include "Vision/CMVisionManagerSubsystem.h"
 
+#include "AsyncLoad/CMStageLoadCoordinatorSubsystem.h"
+#include "AsyncLoad/CMStageLoadLog.h"
 #include "Camera/CameraComponent.h"
 #include "CanvasItem.h"
 #include "Components/PrimitiveComponent.h"
@@ -67,11 +69,27 @@ void UCMVisionManagerSubsystem::Initialize(
 )
 {
     Super::Initialize(Collection);
-    LoadRenderConfig();
+
+    if (!GetWorld() || !GetWorld()->IsGameWorld())
+    {
+        return;
+    }
+
+    if (EnsureLoadCoordinatorSubscription())
+    {
+        RefreshRenderConfigState();
+    }
 }
 
 void UCMVisionManagerSubsystem::Deinitialize()
 {
+    if (UCMStageLoadCoordinatorSubsystem* Coordinator =
+        BoundLoadCoordinator.Get())
+    {
+        Coordinator->OnLoadGroupFinished.RemoveAll(this);
+    }
+    BoundLoadCoordinator.Reset();
+
     RestoreOccluderRenderStates();
     RemovePostProcessBinding();
     PostProcessMaterialAsset = nullptr;
@@ -88,7 +106,8 @@ void UCMVisionManagerSubsystem::Deinitialize()
 void UCMVisionManagerSubsystem::Tick(float DeltaTime)
 {
     UWorld* World = GetWorld();
-    if (!World || World->GetNetMode() == NM_DedicatedServer)
+    if (!World || !World->IsGameWorld()
+        || World->GetNetMode() == NM_DedicatedServer)
     {
         return;
     }
@@ -100,7 +119,21 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
         return;
     }
 
-    if (!RenderConfig && !LoadRenderConfig())
+    if (!bRenderConfigReady)
+    {
+        if (!bRenderConfigFailed
+            && !BoundLoadCoordinator.IsValid()
+            && EnsureLoadCoordinatorSubscription())
+        {
+            RefreshRenderConfigState();
+        }
+        if (!bRenderConfigReady)
+        {
+            return;
+        }
+    }
+
+    if (!RenderConfig)
     {
         return;
     }
@@ -203,18 +236,100 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
 
 }
 
-bool UCMVisionManagerSubsystem::LoadRenderConfig()
+bool UCMVisionManagerSubsystem::EnsureLoadCoordinatorSubscription()
+{
+    if (BoundLoadCoordinator.IsValid())
+    {
+        return true;
+    }
+
+    UGameInstance* GameInstance = GetWorld()
+        ? GetWorld()->GetGameInstance() : nullptr;
+    UCMStageLoadCoordinatorSubsystem* Coordinator = GameInstance
+        ? GameInstance->GetSubsystem<UCMStageLoadCoordinatorSubsystem>()
+        : nullptr;
+    if (!Coordinator)
+    {
+        return false;
+    }
+
+    Coordinator->OnLoadGroupFinished.AddUniqueDynamic(
+        this, &ThisClass::HandleLoadGroupFinished);
+    BoundLoadCoordinator = Coordinator;
+    return true;
+}
+
+void UCMVisionManagerSubsystem::RefreshRenderConfigState()
 {
     const UCMVisionSettings* Settings = GetDefault<UCMVisionSettings>();
-    RenderConfig = Settings
-        ? Settings->DefaultRenderConfig.LoadSynchronous()
-        : nullptr;
-    PostProcessMaterialAsset = RenderConfig
-        ? RenderConfig->PostProcessMaterial.LoadSynchronous()
-        : nullptr;
-
-    if (RenderConfig && PostProcessMaterialAsset)
+    if (!Settings || Settings->DefaultRenderConfig.IsNull())
     {
+        MarkRenderConfigFailed(TEXT("DefaultRenderConfig is empty"));
+        return;
+    }
+    if (Settings->DefaultRenderConfigLoadGroupId.IsNone())
+    {
+        MarkRenderConfigFailed(TEXT("DefaultRenderConfigLoadGroupId is empty"));
+        return;
+    }
+
+    const UCMStageLoadCoordinatorSubsystem* Coordinator =
+        BoundLoadCoordinator.Get();
+    if (!Coordinator)
+    {
+        return;
+    }
+
+    const ECMStageLoadGroupState State = Coordinator->GetLoadGroupState(
+        Settings->DefaultRenderConfigLoadGroupId);
+    if (State == ECMStageLoadGroupState::Ready)
+    {
+        TryResolveLoadedRenderConfig();
+    }
+    else if (State == ECMStageLoadGroupState::Failed
+        || State == ECMStageLoadGroupState::Released)
+    {
+        MarkRenderConfigFailed(TEXT("LoadGroup is not available"));
+    }
+}
+
+void UCMVisionManagerSubsystem::HandleLoadGroupFinished(
+    FName FinishedLoadGroupId,
+    EAsyncLoadResult Result,
+    bool bReleasedImmediately
+)
+{
+    const UCMVisionSettings* Settings = GetDefault<UCMVisionSettings>();
+    if (!Settings
+        || FinishedLoadGroupId != Settings->DefaultRenderConfigLoadGroupId
+        || bRenderConfigReady
+        || bRenderConfigFailed)
+    {
+        return;
+    }
+
+    if (Result != EAsyncLoadResult::Succeeded || bReleasedImmediately)
+    {
+        MarkRenderConfigFailed(
+            TEXT("LoadGroup failed or was released immediately"));
+        return;
+    }
+    TryResolveLoadedRenderConfig();
+}
+
+bool UCMVisionManagerSubsystem::TryResolveLoadedRenderConfig()
+{
+    const UCMVisionSettings* Settings = GetDefault<UCMVisionSettings>();
+    RenderConfig = Settings ? Settings->DefaultRenderConfig.Get() : nullptr;
+    PostProcessMaterialAsset = RenderConfig
+        ? RenderConfig->PostProcessMaterial.Get() : nullptr;
+    MaskDrawTexture = RenderConfig
+        ? RenderConfig->MaskDrawTexture.Get() : nullptr;
+
+    if (RenderConfig && PostProcessMaterialAsset && MaskDrawTexture)
+    {
+        bRenderConfigReady = true;
+        bRenderConfigFailed = false;
         bConfigurationFailureLogged = false;
         MaskWorldHalfExtent = FMath::Max(
             RenderConfig->MinimumWorldHalfExtent,
@@ -222,14 +337,35 @@ bool UCMVisionManagerSubsystem::LoadRenderConfig()
         );
         return true;
     }
+    
+    MarkRenderConfigFailed(
+        TEXT("Definition assets were not loaded by the assigned LoadGroup"));
+    return false;
+}
 
+void UCMVisionManagerSubsystem::MarkRenderConfigFailed(const TCHAR* Reason)
+{
+    if (bRenderConfigFailed)
+    {
+        return;
+    }
+
+    bRenderConfigReady = false;
+    bRenderConfigFailed = true;
     if (!bConfigurationFailureLogged)
     {
-        UE_LOG(LogChimeraVisionManager, Error,
-            TEXT("Vision rendering is disabled. Assign a Vision Render Config with a Post Process Material in Project Settings > Chimera > Vision."));
+        const UCMVisionSettings* Settings = GetDefault<UCMVisionSettings>();
+        UE_LOG(LogChimeraStageLoad, Error,
+            TEXT("Vision Render Config failed. Definition=%s LoadGroup=%s Reason=%s"),
+            Settings
+                ? *Settings->DefaultRenderConfig.ToSoftObjectPath().ToString()
+                : TEXT("None"),
+            Settings
+                ? *Settings->DefaultRenderConfigLoadGroupId.ToString()
+                : TEXT("None"),
+            Reason);
         bConfigurationFailureLogged = true;
     }
-    return false;
 }
 
 TStatId UCMVisionManagerSubsystem::GetStatId() const
@@ -264,6 +400,10 @@ bool UCMVisionManagerSubsystem::IsLocationVisible(
     if (!bVisionSystemEnabled)
     {
         return true;
+    }
+    if (!bRenderConfigReady)
+    {
+        return false;
     }
 
     for (const TWeakObjectPtr<UCMVisionComponent>& VisionSource
@@ -415,10 +555,6 @@ void UCMVisionManagerSubsystem::EnsureVisibilityMask()
         );
     }
 
-    MaskDrawTexture = LoadObject<UTexture2D>(
-        nullptr,
-        TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture")
-    );
 }
 
 void UCMVisionManagerSubsystem::UpdateVisibilityMaskBounds(
@@ -799,15 +935,20 @@ void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
 UCameraComponent* UCMVisionManagerSubsystem::FindViewCamera() const
 {
     const UWorld* World = GetWorld();
+    
     const APlayerController* PlayerController = World
         ? World->GetFirstPlayerController()
         : nullptr;
+    
     AActor* ViewTarget = PlayerController
         ? PlayerController->GetViewTarget()
         : nullptr;
-    return ViewTarget
+    
+    UCameraComponent* Camera = ViewTarget
         ? ViewTarget->FindComponentByClass<UCameraComponent>()
         : nullptr;
+    
+    return Camera;
 }
 
 void UCMVisionManagerSubsystem::RemovePostProcessBinding()

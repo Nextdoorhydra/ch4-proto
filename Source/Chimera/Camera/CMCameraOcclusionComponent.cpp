@@ -1,16 +1,45 @@
 #include "Camera/CMCameraOcclusionComponent.h"
 
 #include "Camera/CameraComponent.h"
+#include "Camera/CMCameraOcclusionConfig.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Parts/Head/CMHeadPartActor.h"
+#include "Parts/Head/CMVisionComponent.h"
+#include "Player/CMChimera.h"
+#include "Player/CMControlBody.h"
+#include "Player/CMControlTypes.h"
+#include "Player/CMPartSlotComponent.h"
+
+namespace
+{
+const FName FadeParameterName(TEXT("CM_OcclusionFade"));
+const FName ScreenCenterParameterName(TEXT("CM_OcclusionCenter"));
+const FName AdditionalScreenCenterParameterNames[] = {
+    TEXT("CM_OcclusionCenter1"),
+    TEXT("CM_OcclusionCenter2"),
+    TEXT("CM_OcclusionCenter3"),
+    TEXT("CM_OcclusionCenter4"),
+    TEXT("CM_OcclusionCenter5"),
+    TEXT("CM_OcclusionCenter6"),
+    TEXT("CM_OcclusionCenter7")
+};
+static_assert(
+    UE_ARRAY_COUNT(AdditionalScreenCenterParameterNames)
+        == CMControl::MaxPlayers - 1
+);
+const FName ScreenRadiusParameterName(TEXT("CM_OcclusionRadius"));
+const FName MinimumOpacityParameterName(TEXT("CM_OcclusionMinOpacity"));
+const FName EdgeSoftnessParameterName(TEXT("CM_OcclusionEdgeSoftness"));
+}
 
 UCMCameraOcclusionComponent::UCMCameraOcclusionComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
-    OccluderObjectTypes.Add(ECC_WorldStatic);
 }
 
 void UCMCameraOcclusionComponent::TickComponent(
@@ -21,7 +50,7 @@ void UCMCameraOcclusionComponent::TickComponent(
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    APlayerController* PlayerController = bEnabled
+    APlayerController* PlayerController = GetOcclusionConfig().bEnabled
         ? FindLocalViewer()
         : nullptr;
     if (!PlayerController)
@@ -30,29 +59,43 @@ void UCMCameraOcclusionComponent::TickComponent(
         return;
     }
 
-    TSet<UPrimitiveComponent*> CurrentOccluders;
-    FVector2D ScreenCenter = FVector2D(0.5f, 0.5f);
+    TMap<UPrimitiveComponent*, TArray<FVector2D>> CurrentOccluders;
     FindCurrentOccluders(
         *PlayerController,
-        CurrentOccluders,
-        ScreenCenter
+        CurrentOccluders
     );
 
     for (FCMCameraOccluderFadeState& State : FadeStates)
     {
-        State.bOccluding = CurrentOccluders.Contains(State.Component.Get());
-    }
-
-    for (UPrimitiveComponent* Component : CurrentOccluders)
-    {
-        if (FCMCameraOccluderFadeState* State =
-            FindOrAddFadeState(*Component))
+        const TArray<FVector2D>* ScreenCenters =
+            CurrentOccluders.Find(State.Component.Get());
+        State.bOccluding = ScreenCenters != nullptr;
+        if (ScreenCenters)
         {
-            State->bOccluding = true;
+            State.ScreenCenters = *ScreenCenters;
         }
     }
 
-    UpdateFadeStates(DeltaTime, ScreenCenter);
+    for (const TPair<UPrimitiveComponent*, TArray<FVector2D>>& Pair
+        : CurrentOccluders)
+    {
+        if (FCMCameraOccluderFadeState* State =
+            FindOrAddFadeState(*Pair.Key))
+        {
+            State->bOccluding = true;
+            State->ScreenCenters = Pair.Value;
+        }
+    }
+
+    UpdateFadeStates(DeltaTime);
+}
+
+const UCMCameraOcclusionConfig&
+UCMCameraOcclusionComponent::GetOcclusionConfig() const
+{
+    return OcclusionConfig
+        ? *OcclusionConfig
+        : *GetDefault<UCMCameraOcclusionConfig>();
 }
 
 void UCMCameraOcclusionComponent::EndPlay(
@@ -87,10 +130,63 @@ APlayerController* UCMCameraOcclusionComponent::FindLocalViewer() const
     return nullptr;
 }
 
+void UCMCameraOcclusionComponent::FindTargetLocations(
+    const UCMCameraOcclusionConfig& Config,
+    TArray<FVector>& OutTargetLocations
+) const
+{
+    OutTargetLocations.Reset();
+    const ACMChimera* Chimera = Cast<ACMChimera>(GetOwner());
+    UWorld* World = GetWorld();
+    if (Chimera && World)
+    {
+        TSet<const ACMHeadPartActor*> AddedHeads;
+        for (TActorIterator<ACMControlBody> It(World); It; ++It)
+        {
+            const ACMControlBody* ControlBody = *It;
+            if (!ControlBody
+                || ControlBody->GetSharedChimera() != Chimera)
+            {
+                continue;
+            }
+
+            for (const FCMPartSlotAddress& SlotAddress
+                : ControlBody->GetControlSlots())
+            {
+                const UCMPartSlotComponent* PartSlot =
+                    Chimera->GetPartSlotComponent(SlotAddress);
+                const ACMHeadPartActor* HeadPart = PartSlot
+                    ? Cast<ACMHeadPartActor>(PartSlot->GetAttachedPart())
+                    : nullptr;
+                if (!HeadPart || AddedHeads.Contains(HeadPart))
+                {
+                    continue;
+                }
+
+                AddedHeads.Add(HeadPart);
+                const UCMVisionComponent* VisionComponent =
+                    HeadPart->GetVisionComponent();
+                OutTargetLocations.Add(VisionComponent
+                    ? VisionComponent->GetVisionOrigin()
+                    : HeadPart->GetActorLocation());
+                break;
+            }
+        }
+    }
+
+    const AActor* Owner = GetOwner();
+    if (OutTargetLocations.IsEmpty() && Owner)
+    {
+        OutTargetLocations.Add(
+            Owner->GetActorLocation()
+                + FVector(0.0f, 0.0f, Config.TargetHeightOffset)
+        );
+    }
+}
+
 void UCMCameraOcclusionComponent::FindCurrentOccluders(
     APlayerController& PlayerController,
-    TSet<UPrimitiveComponent*>& OutOccluders,
-    FVector2D& OutScreenCenter
+    TMap<UPrimitiveComponent*, TArray<FVector2D>>& OutOccluders
 ) const
 {
     const AActor* Owner = GetOwner();
@@ -103,27 +199,19 @@ void UCMCameraOcclusionComponent::FindCurrentOccluders(
         return;
     }
 
-    const FVector TargetLocation = Owner->GetActorLocation()
-        + FVector(0.0f, 0.0f, TargetHeightOffset);
-    FVector2D ScreenPosition;
+    const UCMCameraOcclusionConfig& Config = GetOcclusionConfig();
+    TArray<FVector> TargetLocations;
+    FindTargetLocations(Config, TargetLocations);
     int32 ViewportWidth = 0;
     int32 ViewportHeight = 0;
     PlayerController.GetViewportSize(ViewportWidth, ViewportHeight);
-    if (ViewportWidth > 0
-        && ViewportHeight > 0
-        && PlayerController.ProjectWorldLocationToScreen(
-            TargetLocation,
-            ScreenPosition,
-            true))
+    if (ViewportWidth <= 0 || ViewportHeight <= 0)
     {
-        OutScreenCenter = FVector2D(
-            ScreenPosition.X / ViewportWidth,
-            ScreenPosition.Y / ViewportHeight
-        );
+        return;
     }
 
     FCollisionObjectQueryParams ObjectQueryParams;
-    for (const ECollisionChannel ObjectType : OccluderObjectTypes)
+    for (const ECollisionChannel ObjectType : Config.OccluderObjectTypes)
     {
         ObjectQueryParams.AddObjectTypesToQuery(ObjectType);
     }
@@ -138,22 +226,38 @@ void UCMCameraOcclusionComponent::FindCurrentOccluders(
     Owner->GetAttachedActors(AttachedActors, true, true);
     QueryParams.AddIgnoredActors(AttachedActors);
 
-    TArray<FHitResult> Hits;
-    World->SweepMultiByObjectType(
-        Hits,
-        Camera->GetComponentLocation(),
-        TargetLocation,
-        FQuat::Identity,
-        ObjectQueryParams,
-        FCollisionShape::MakeSphere(TraceRadius),
-        QueryParams
-    );
-
-    for (const FHitResult& Hit : Hits)
+    for (const FVector& TargetLocation : TargetLocations)
     {
-        if (UPrimitiveComponent* Component = Hit.GetComponent())
+        FVector2D ScreenPosition;
+        if (!PlayerController.ProjectWorldLocationToScreen(
+            TargetLocation,
+            ScreenPosition,
+            true))
         {
-            OutOccluders.Add(Component);
+            continue;
+        }
+        const FVector2D ScreenCenter = FVector2D(
+            ScreenPosition.X / ViewportWidth,
+            ScreenPosition.Y / ViewportHeight
+        ) + Config.ScreenCenterOffset;
+
+        TArray<FHitResult> Hits;
+        World->SweepMultiByObjectType(
+            Hits,
+            Camera->GetComponentLocation(),
+            TargetLocation,
+            FQuat::Identity,
+            ObjectQueryParams,
+            FCollisionShape::MakeSphere(Config.TraceRadius),
+            QueryParams
+        );
+
+        for (const FHitResult& Hit : Hits)
+        {
+            if (UPrimitiveComponent* Component = Hit.GetComponent())
+            {
+                OutOccluders.FindOrAdd(Component).AddUnique(ScreenCenter);
+            }
         }
     }
 }
@@ -205,11 +309,9 @@ UCMCameraOcclusionComponent::FindOrAddFadeState(
     return &FadeStates.Add_GetRef(MoveTemp(NewState));
 }
 
-void UCMCameraOcclusionComponent::UpdateFadeStates(
-    float DeltaTime,
-    const FVector2D& ScreenCenter
-)
+void UCMCameraOcclusionComponent::UpdateFadeStates(float DeltaTime)
 {
+    const UCMCameraOcclusionConfig& Config = GetOcclusionConfig();
     for (int32 Index = FadeStates.Num() - 1; Index >= 0; --Index)
     {
         FCMCameraOccluderFadeState& State = FadeStates[Index];
@@ -221,8 +323,8 @@ void UCMCameraOcclusionComponent::UpdateFadeStates(
 
         const float TargetFade = State.bOccluding ? 1.0f : 0.0f;
         const float FadeSpeed = State.bOccluding
-            ? FadeOutSpeed
-            : FadeInSpeed;
+            ? Config.FadeOutSpeed
+            : Config.FadeInSpeed;
         State.Fade = FMath::FInterpConstantTo(
             State.Fade,
             TargetFade,
@@ -239,19 +341,38 @@ void UCMCameraOcclusionComponent::UpdateFadeStates(
             Material->SetScalarParameterValue(FadeParameterName, State.Fade);
             Material->SetVectorParameterValue(
                 ScreenCenterParameterName,
-                FLinearColor(ScreenCenter.X, ScreenCenter.Y, 0.0f, 0.0f)
+                State.ScreenCenters.IsValidIndex(0)
+                    ? FLinearColor(
+                        State.ScreenCenters[0].X,
+                        State.ScreenCenters[0].Y,
+                        0.0f,
+                        0.0f)
+                    : FLinearColor(10.0f, 10.0f, 0.0f, 0.0f)
             );
+            for (int32 CenterIndex = 1;
+                CenterIndex < CMControl::MaxPlayers;
+                ++CenterIndex)
+            {
+                const FVector2D Center =
+                    State.ScreenCenters.IsValidIndex(CenterIndex)
+                    ? State.ScreenCenters[CenterIndex]
+                    : FVector2D(10.0f, 10.0f);
+                Material->SetVectorParameterValue(
+                    AdditionalScreenCenterParameterNames[CenterIndex - 1],
+                    FLinearColor(Center.X, Center.Y, 0.0f, 0.0f)
+                );
+            }
             Material->SetScalarParameterValue(
                 ScreenRadiusParameterName,
-                ScreenFadeRadius
+                Config.ScreenFadeRadius
             );
             Material->SetScalarParameterValue(
                 MinimumOpacityParameterName,
-                MinimumOpacity
+                Config.MinimumOpacity
             );
             Material->SetScalarParameterValue(
                 EdgeSoftnessParameterName,
-                EdgeSoftness
+                Config.EdgeSoftness
             );
         }
 

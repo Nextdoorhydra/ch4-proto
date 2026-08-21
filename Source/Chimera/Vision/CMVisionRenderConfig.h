@@ -1,21 +1,28 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DataAsset.h"
+#include "PrimaryDataAssetBase.h"
 
 #include "CMVisionRenderConfig.generated.h"
 
 class UMaterialInterface;
+class UTexture2D;
 
 /** Editor-authored rendering policy shared by one local Vision Manager. */
 UCLASS(BlueprintType)
-class CHIMERA_API UCMVisionRenderConfig : public UDataAsset
+class CHIMERA_API UCMVisionRenderConfig : public UPrimaryDataAssetBase
 {
     GENERATED_BODY()
 
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering",
+        meta = (AssetBundles = "Gameplay"))
     TSoftObjectPtr<UMaterialInterface> PostProcessMaterial;
+
+    /** Primitive used by the runtime canvas passes. Loaded with this definition. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering",
+        meta = (AssetBundles = "Gameplay"))
+    TSoftObjectPtr<UTexture2D> MaskDrawTexture;
 
     /** Multiplicative color applied only inside the visible mask. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering|Tint")
