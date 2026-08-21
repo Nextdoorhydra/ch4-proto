@@ -28,26 +28,26 @@ public:
     UCMHazardComponent();
 
     // 충돌 컴포넌트에서 감지한 진입 대상을 전달
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Obstacle|Hazard")
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Hazard")
     void NotifyTargetEntered(AActor* TargetActor);
 
     // 충돌 컴포넌트에서 감지한 이탈 대상을 전달
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Obstacle|Hazard")
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Hazard")
     void NotifyTargetExited(AActor* TargetActor);
 
-    UFUNCTION(BlueprintCallable, Category = "Chimera|Obstacle|Hazard")
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Hazard")
     void SetHazardEnabled(bool bEnabled) { bHazardEnabled = bEnabled; }
 
-    UPROPERTY(BlueprintAssignable, Category = "Chimera|Obstacle|Hazard")
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Hazard")
     FCMHazardTargetSignature OnTargetEntered;
 
-    UPROPERTY(BlueprintAssignable, Category = "Chimera|Obstacle|Hazard")
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Hazard")
     FCMHazardTargetSignature OnTargetExited;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Hazard")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Hazard")
     ECMHazardApplicationMode ApplicationMode = ECMHazardApplicationMode::Single;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Hazard", meta = (ClampMin = "0.01"))
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Hazard", meta = (ClampMin = "0.01"))
     float PeriodSeconds = 1.0f;
 
     // Definition PDA에서 준비된 효과 설정을 동기 로드 없이 적용
@@ -57,10 +57,10 @@ public:
         ECMHazardApplicationMode NewApplicationMode,
         float NewPeriodSeconds);
 
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Obstacle|Hazard")
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Hazard")
     TSubclassOf<UGameplayEffect> GameplayEffectClass;
 
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Obstacle|Hazard")
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Hazard")
     FGameplayTag EffectTag;
 
 private:
