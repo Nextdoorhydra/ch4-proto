@@ -4,6 +4,7 @@
 #include "CMGoreMessageTestActor.h"
 
 #include "Components/DecalComponent.h"
+#include "Components/CMBloodPoolSourceComponent.h"
 #include "Data/CMBloodDefinition.h"
 #include "EngineUtils.h"
 #include "HAL/PlatformMisc.h"
@@ -24,6 +25,8 @@ ACMGoreMessageTestActor::ACMGoreMessageTestActor()
 {
 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
+	BloodPoolSourceComponent = CreateDefaultSubobject<UCMBloodPoolSourceComponent>(
+		TEXT("BloodPoolSource"));
 }
 
 // Called when the game starts or when spawned
@@ -65,6 +68,12 @@ void ACMGoreMessageTestActor::BeginPlay()
 		TEXT("CMGorePhase4SmokeTest")))
 	{
 		RunPhase4SmokeTest();
+	}
+	else if (FParse::Param(
+		FCommandLine::Get(),
+		TEXT("CMGorePhase5SmokeTest")))
+	{
+		RunPhase5SmokeTest();
 	}
 }
 
@@ -314,6 +323,214 @@ void ACMGoreMessageTestActor::RecordPhase4SmokeTestResult(
 		LogTemp,
 		Error,
 		TEXT("CMGore Phase 4 Smoke Test: %s"),
+		FailureMessage);
+}
+
+
+void ACMGoreMessageTestActor::RunPhase5SmokeTest()
+{
+	UCMBloodSurfaceSubsystem* SurfaceSubsystem =
+		GetWorld()->GetSubsystem<UCMBloodSurfaceSubsystem>();
+
+	UCMBloodDefinition* Definition = LoadObject<UCMBloodDefinition>(
+		nullptr,
+		TEXT("/Game/CMGore/Definitions/DA_CMBlood_HumanRed.DA_CMBlood_HumanRed"));
+
+	RecordPhase5SmokeTestResult(
+		IsValid(SurfaceSubsystem),
+		TEXT("Blood Surface Subsystem is unavailable."));
+	RecordPhase5SmokeTestResult(
+		IsValid(Definition) &&
+		Definition->Pool.bEnabled &&
+		IsValid(Definition->Pool.DecalMaterial) &&
+		Definition->Pool.DecalActorClass != nullptr,
+		TEXT("Human.Red pool definition is incomplete."));
+
+	if (!SurfaceSubsystem ||
+		!Definition ||
+		!Definition->Pool.bEnabled ||
+		!Definition->Pool.DecalMaterial ||
+		!Definition->Pool.DecalActorClass)
+	{
+		FinishPhase5SmokeTest();
+		return;
+	}
+
+	SurfaceSubsystem->ClearBloodMarks();
+	BloodPoolSourceComponent->GrowthDurationSeconds = 0.2f;
+	BloodPoolSourceComponent->LifetimeSeconds = 0.6f;
+	BloodPoolSourceComponent->FadeDurationSeconds = 0.1f;
+	BloodPoolSourceComponent->TraceDistance = 5000.0f;
+
+	FCMBloodPoolMessage StartMessage;
+	StartMessage.Source = this;
+	StartMessage.Location = GetActorLocation() + FVector(0.0f, 0.0f, 100.0f);
+	StartMessage.SurfaceNormal = FVector::UpVector;
+	StartMessage.Amount = 1.0f;
+	StartMessage.BloodDefinitionId = TEXT("Human.Red");
+
+	UGameplayMessageSubsystem::Get(this).BroadcastMessage(
+		CMGoreGameplayTags::Message::Blood::Pool::Start,
+		StartMessage);
+
+	RecordPhase5SmokeTestResult(
+		BloodPoolSourceComponent->IsBloodPoolActive() &&
+		BloodPoolSourceComponent->IsBloodPoolGrowing(),
+		TEXT("PoolStart message did not activate growth."));
+
+	for (TActorIterator<ACMBloodDecalActor> It(GetWorld()); It; ++It)
+	{
+		if (It->IsPresentationActive())
+		{
+			Phase5FirstPresentationActor = *It;
+			Phase5FirstMID = It->GetDynamicMaterial();
+			break;
+		}
+	}
+
+	RecordPhase5SmokeTestResult(
+		IsValid(Phase5FirstPresentationActor) && IsValid(Phase5FirstMID),
+		TEXT("Pool presentation actor or MID was not created."));
+
+	FTimerHandle Timer;
+	GetWorld()->GetTimerManager().SetTimer(
+		Timer,
+		this,
+		&ThisClass::CheckPhase5GrowthAndStop,
+		0.08f,
+		false);
+}
+
+
+void ACMGoreMessageTestActor::CheckPhase5GrowthAndStop()
+{
+	const float Progress = BloodPoolSourceComponent->GetGrowthProgress();
+	RecordPhase5SmokeTestResult(
+		Progress > 0.0f && Progress < 1.0f,
+		TEXT("Pool did not advance through an intermediate growth value."));
+	RecordPhase5SmokeTestResult(
+		IsValid(Phase5FirstPresentationActor) &&
+		FMath::IsNearlyEqual(
+			Phase5FirstPresentationActor->GetPresentationProgress(),
+			Progress,
+			KINDA_SMALL_NUMBER),
+		TEXT("Semantic growth was not forwarded to the presentation actor."));
+
+	FCMBloodPoolMessage StopMessage;
+	StopMessage.Source = this;
+	UGameplayMessageSubsystem::Get(this).BroadcastMessage(
+		CMGoreGameplayTags::Message::Blood::Pool::Stop,
+		StopMessage);
+
+	Phase5StoppedProgress = BloodPoolSourceComponent->GetGrowthProgress();
+
+	FTimerHandle Timer;
+	GetWorld()->GetTimerManager().SetTimer(
+		Timer,
+		this,
+		&ThisClass::CheckPhase5StopAndReuse,
+		0.08f,
+		false);
+}
+
+
+void ACMGoreMessageTestActor::CheckPhase5StopAndReuse()
+{
+	RecordPhase5SmokeTestResult(
+		BloodPoolSourceComponent->IsBloodPoolActive() &&
+		!BloodPoolSourceComponent->IsBloodPoolGrowing() &&
+		FMath::IsNearlyEqual(
+			BloodPoolSourceComponent->GetGrowthProgress(),
+			Phase5StoppedProgress,
+			KINDA_SMALL_NUMBER),
+		TEXT("PoolStop did not freeze the active pool at its current progress."));
+
+	BloodPoolSourceComponent->RemoveBloodPool();
+	BloodPoolSourceComponent->LifetimeSeconds = 0.25f;
+
+	FCMBloodPoolMessage StartMessage;
+	StartMessage.Source = this;
+	StartMessage.Location = GetActorLocation() + FVector(0.0f, 0.0f, 100.0f);
+	StartMessage.SurfaceNormal = FVector::UpVector;
+	StartMessage.Amount = 1.0f;
+	StartMessage.BloodDefinitionId = TEXT("Human.Red");
+	UGameplayMessageSubsystem::Get(this).BroadcastMessage(
+		CMGoreGameplayTags::Message::Blood::Pool::Start,
+		StartMessage);
+
+	ACMBloodDecalActor* ReusedActor = nullptr;
+	for (TActorIterator<ACMBloodDecalActor> It(GetWorld()); It; ++It)
+	{
+		if (It->IsPresentationActive())
+		{
+			ReusedActor = *It;
+			break;
+		}
+	}
+
+	RecordPhase5SmokeTestResult(
+		ReusedActor == Phase5FirstPresentationActor,
+		TEXT("Pool presentation actor was not reused."));
+	RecordPhase5SmokeTestResult(
+		ReusedActor &&
+		ReusedActor->GetPresentationProgress() <= KINDA_SMALL_NUMBER,
+		TEXT("Reused pool presentation did not reset progress to zero."));
+	RecordPhase5SmokeTestResult(
+		ReusedActor &&
+		IsValid(ReusedActor->GetDynamicMaterial()) &&
+		ReusedActor->GetDynamicMaterial() != Phase5FirstMID,
+		TEXT("Reused pool presentation did not receive an isolated fresh MID."));
+
+	FTimerHandle Timer;
+	GetWorld()->GetTimerManager().SetTimer(
+		Timer,
+		this,
+		&ThisClass::FinishPhase5SmokeTest,
+		0.4f,
+		false);
+}
+
+
+void ACMGoreMessageTestActor::FinishPhase5SmokeTest()
+{
+	RecordPhase5SmokeTestResult(
+		!BloodPoolSourceComponent->IsBloodPoolActive(),
+		TEXT("Pool lifetime expiration did not remove the semantic mark."));
+
+	for (TActorIterator<ACMBloodDecalActor> It(GetWorld()); It; ++It)
+	{
+		RecordPhase5SmokeTestResult(
+			!It->IsPresentationActive(),
+			TEXT("Pool lifetime expiration did not release the presentation actor."));
+	}
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("CMGore Phase 5 Smoke Test: %s"),
+		bPhase5SmokeTestPassed ? TEXT("PASS") : TEXT("FAIL"));
+
+	FPlatformMisc::RequestExitWithStatus(
+		false,
+		bPhase5SmokeTestPassed ? 0 : 1,
+		TEXT("CMGorePhase5SmokeTest"));
+}
+
+
+void ACMGoreMessageTestActor::RecordPhase5SmokeTestResult(
+	bool bCondition,
+	const TCHAR* FailureMessage)
+{
+	if (bCondition)
+	{
+		return;
+	}
+
+	bPhase5SmokeTestPassed = false;
+	UE_LOG(
+		LogTemp,
+		Error,
+		TEXT("CMGore Phase 5 Smoke Test: %s"),
 		FailureMessage);
 }
 

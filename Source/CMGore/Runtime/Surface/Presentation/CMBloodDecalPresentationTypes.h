@@ -41,6 +41,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "CMGore|Blood Decal")
 	int32 RandomSeed = 0;
 
+	/** Source가 전달한 일반화된 표현 강도. Material parameter 이름과 무관하다. */
+	UPROPERTY(BlueprintReadOnly, Category = "CMGore|Blood Decal")
+	float Magnitude = 1.0f;
+
 	UPROPERTY(BlueprintReadOnly, Category = "CMGore|Blood Decal")
 	TWeakObjectPtr<AActor> SurfaceActor;
 

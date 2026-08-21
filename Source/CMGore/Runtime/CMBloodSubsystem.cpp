@@ -1,6 +1,7 @@
 ﻿#include "CMBloodSubsystem.h"
 
 #include "CMBloodEvent.h"
+#include "Components/CMBloodPoolSourceComponent.h"
 #include "Tags/CMGoreGameplayTags.h"
 #include "Messaging/CMGoreMessages.h"
 #include "Data/CMBloodDefinition.h"
@@ -9,6 +10,7 @@
 #include "VFX/CMBloodVFXExecutor.h"
 
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
 #include "GameplayMessageRuntime/Public/GameFramework/GameplayMessageSubsystem.h"
 
@@ -61,6 +63,30 @@ namespace CMBloodSubsystemPrivate
 		default:
 			return TEXT("Unknown");
 		}
+	}
+
+	UCMBloodPoolSourceComponent* ResolvePoolSource(UObject* Source)
+	{
+		if (UCMBloodPoolSourceComponent* PoolSource =
+			Cast<UCMBloodPoolSourceComponent>(Source))
+		{
+			return PoolSource;
+		}
+
+		AActor* SourceActor = Cast<AActor>(Source);
+
+		if (!SourceActor)
+		{
+			if (const UActorComponent* SourceComponent =
+				Cast<UActorComponent>(Source))
+			{
+				SourceActor = SourceComponent->GetOwner();
+			}
+		}
+
+		return SourceActor
+			? SourceActor->FindComponentByClass<UCMBloodPoolSourceComponent>()
+			: nullptr;
 	}
 }
 
@@ -535,8 +561,47 @@ void UCMBloodSubsystem::ProcessBloodEvent(
 	case ECMBloodEventType::Burst:
 		break;
 
+	case ECMBloodEventType::PoolStart:
+	case ECMBloodEventType::PoolStop:
+	{
+		UCMBloodPoolSourceComponent* PoolSource =
+			CMBloodSubsystemPrivate::ResolvePoolSource(Event.Source.Get());
+
+		if (!PoolSource)
+		{
+			UE_LOG(
+				LogCMBloodSubsystem,
+				Warning,
+				TEXT("Ignored %s: Source has no CMBloodPoolSourceComponent."),
+				CMBloodSubsystemPrivate::LexToString(Event.Type));
+			return;
+		}
+
+		if (Event.Type == ECMBloodEventType::PoolStart)
+		{
+			if (!PoolSource->StartBloodPool(
+				Event.Location,
+				Event.SurfaceNormal,
+				Event.Magnitude,
+				Event.BloodDefinitionId))
+			{
+				UE_LOG(
+					LogCMBloodSubsystem,
+					Warning,
+					TEXT("PoolStart failed for Source '%s'."),
+					*GetNameSafe(Event.Source.Get()));
+			}
+		}
+		else
+		{
+			PoolSource->StopBloodPool();
+		}
+
+		return;
+	}
+
 	default:
-		// Bleed / Pool은 이후 Phase에서 처리.
+		// Bleed state는 이후 Phase에서 처리.
 		return;
 	}
 

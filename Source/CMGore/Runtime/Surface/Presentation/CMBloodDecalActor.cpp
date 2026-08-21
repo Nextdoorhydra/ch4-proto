@@ -74,6 +74,8 @@ void ACMBloodDecalActor::ActivatePresentation(
 	if (DynamicMaterial)
 	{
 		ConfigureMaterial(DynamicMaterial, Context);
+		PresentationProgress = 0.0f;
+		ApplyPresentationProgress(DynamicMaterial, PresentationProgress);
 	}
 
 	const float Lifetime = FMath::Max(0.0f, Context.LifetimeSeconds);
@@ -134,6 +136,7 @@ void ACMBloodDecalActor::DeactivatePresentation()
 	}
 
 	DynamicMaterial = nullptr;
+	PresentationProgress = 0.0f;
 	SetActorHiddenInGame(true);
 
 	if (bWasActive)
@@ -146,5 +149,25 @@ void ACMBloodDecalActor::DeactivatePresentation()
 void ACMBloodDecalActor::ConfigureMaterial_Implementation(
 	UMaterialInstanceDynamic* MID,
 	const FCMBloodDecalSpawnContext& Context)
+{
+}
+
+
+void ACMBloodDecalActor::SetPresentationProgress(
+	float NormalizedProgress)
+{
+	if (!bPresentationActive || !IsValid(DynamicMaterial))
+	{
+		return;
+	}
+
+	PresentationProgress = FMath::Clamp(NormalizedProgress, 0.0f, 1.0f);
+	ApplyPresentationProgress(DynamicMaterial, PresentationProgress);
+}
+
+
+void ACMBloodDecalActor::ApplyPresentationProgress_Implementation(
+	UMaterialInstanceDynamic* MID,
+	float NormalizedProgress)
 {
 }

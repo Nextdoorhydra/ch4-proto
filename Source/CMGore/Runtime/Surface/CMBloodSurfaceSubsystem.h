@@ -45,6 +45,12 @@ public:
 		FCMBloodResidueHandle Handle,
 		FCMBloodMark& OutBloodMark) const;
 
+	UFUNCTION(BlueprintPure, Category = "CMGore|Blood Surface")
+	bool IsBloodMarkActive(FCMBloodResidueHandle Handle) const
+	{
+		return ActiveBloodMarks.Contains(Handle);
+	}
+
 	/**
 	 * 미래의 Highlight / Footprint / Investigation 기능을 위한 조회 API.
 	 *
@@ -61,6 +67,12 @@ public:
 	{
 		return ActiveBloodMarks.Num();
 	}
+
+	/** Handle에 연결된 Presentation에 material-agnostic progress를 전달한다. */
+	UFUNCTION(BlueprintCallable, Category = "CMGore|Blood Surface")
+	bool SetBloodMarkPresentationProgress(
+		FCMBloodResidueHandle Handle,
+		float NormalizedProgress);
 
 private:
 	struct FRuntimeBloodMarkState

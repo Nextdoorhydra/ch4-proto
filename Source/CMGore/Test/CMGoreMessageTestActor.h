@@ -6,6 +6,10 @@
 #include "GameFramework/Actor.h"
 #include "CMGoreMessageTestActor.generated.h"
 
+class ACMBloodDecalActor;
+class UCMBloodPoolSourceComponent;
+class UMaterialInstanceDynamic;
+
 UCLASS()
 class CMGORE_API ACMGoreMessageTestActor : public AActor
 {
@@ -28,6 +32,23 @@ private:
 	void FinishPhase4SmokeTest();
 	void RecordPhase4SmokeTestResult(bool bCondition, const TCHAR* FailureMessage);
 
+	void RunPhase5SmokeTest();
+	void CheckPhase5GrowthAndStop();
+	void CheckPhase5StopAndReuse();
+	void FinishPhase5SmokeTest();
+	void RecordPhase5SmokeTestResult(bool bCondition, const TCHAR* FailureMessage);
+
 private:
 	bool bPhase4SmokeTestPassed = true;
+	bool bPhase5SmokeTestPassed = true;
+	float Phase5StoppedProgress = 0.0f;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UCMBloodPoolSourceComponent> BloodPoolSourceComponent;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ACMBloodDecalActor> Phase5FirstPresentationActor;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> Phase5FirstMID;
 };

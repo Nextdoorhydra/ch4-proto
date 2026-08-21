@@ -199,6 +199,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Surface")
 	int32 RandomSeed = 0;
 
+	/** Presentation이 해석할 일반화된 강도. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Surface")
+	float PresentationMagnitude = 1.0f;
+
 	UPROPERTY()
 	TWeakObjectPtr<AActor> IgnoredActor;
 };

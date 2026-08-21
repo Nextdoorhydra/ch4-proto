@@ -49,6 +49,11 @@ public:
 		UObject* Outer
 	) const override;
 
+	/** Registry/default fallback 정책을 공유하는 Definition lookup. */
+	const UCMBloodDefinition* ResolveBloodDefinition(
+		FName RequestedDefinitionId
+	) const;
+
 protected:
 	virtual bool DoesSupportWorldType(
 		const EWorldType::Type WorldType
@@ -100,10 +105,6 @@ private:
 	
 	void LoadDefinitionRegistry();
 
-	const UCMBloodDefinition* ResolveBloodDefinition(
-		FName RequestedDefinitionId
-	) const;
-	
 private:
 	TArray<FGameplayMessageListenerHandle> MessageListenerHandles;
 

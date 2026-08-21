@@ -294,6 +294,7 @@ UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 	PresentationContext.LifetimeSeconds = Lifetime;
 	PresentationContext.FadeDurationSeconds = FadeDuration;
 	PresentationContext.RandomSeed = RandomStream.GetCurrentSeed();
+	PresentationContext.Magnitude = FMath::Max(0.0f, Request.PresentationMagnitude);
 	PresentationContext.SurfaceActor = Hit.GetActor();
 	PresentationContext.SurfaceComponent = Hit.GetComponent();
 
@@ -467,6 +468,36 @@ bool UCMBloodSurfaceSubsystem::FindBloodMark(
 	OutBloodMark =
 		*BloodMark;
 
+	return true;
+}
+
+
+bool UCMBloodSurfaceSubsystem::SetBloodMarkPresentationProgress(
+	FCMBloodResidueHandle Handle,
+	float NormalizedProgress)
+{
+	if (!ActiveBloodMarks.Contains(Handle))
+	{
+		return false;
+	}
+
+	FRuntimeBloodMarkState* RuntimeState =
+		RuntimeBloodMarkStates.Find(Handle);
+
+	if (!RuntimeState || !RuntimeState->PresentationActor.IsValid())
+	{
+		return false;
+	}
+
+	ACMBloodDecalActor* PresentationActor =
+		RuntimeState->PresentationActor.Get();
+
+	if (!PresentationActor->IsPresentationActive())
+	{
+		return false;
+	}
+
+	PresentationActor->SetPresentationProgress(NormalizedProgress);
 	return true;
 }
 

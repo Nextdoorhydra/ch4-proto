@@ -69,6 +69,29 @@ struct CMGORE_API FCMBloodSurfaceDefinition
 	float FadeDurationSeconds = 5.0f;
 };
 
+USTRUCT(BlueprintType)
+struct CMGORE_API FCMBloodPoolDefinition
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Pool")
+	bool bEnabled = false;
+
+	/** Pool의 표현 방식. Growth parameter 해석은 이 Actor/BP가 소유한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Pool")
+	TSubclassOf<ACMBloodDecalActor> DecalActorClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Pool")
+	TObjectPtr<UMaterialInterface> DecalMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Pool")
+	FVector2D DecalExtentRange = FVector2D(36.0f, 48.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Pool",
+		meta = (ClampMin = "0.1"))
+	float DecalDepth = 8.0f;
+};
+
 /**
  * 하나의 혈액 종류에 대한 표현 Definition.
  *
@@ -93,6 +116,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood")
 	FCMBloodSurfaceDefinition Surface;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood")
+	FCMBloodPoolDefinition Pool;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instant VFX")
 	FCMBloodInstantVFXDefinition Impact;
