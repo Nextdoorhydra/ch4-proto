@@ -74,6 +74,31 @@ Definition이 설정되지 않은 장애물은 BP 직접 참조 방식으로 간
 
 ## 컴포넌트 책임
 
+### CMLaserBeamComponent
+
+시작점과 끝점을 받아 중앙 Pivot, 로컬 X축 기준 Mesh 길이와 Niagara의 `User.BeamStart`, `User.BeamEnd`를 갱신한다. 판정이나 데미지는 담당하지 않으며 고정 레이저, 카메라 Hitscan, 전기 Beam 표현에서 공용으로 사용한다.
+
+### CMAttackEmitterComponent
+
+서버에서 `Hitscan` 또는 `Projectile` 공격 방식을 실행한다. Hitscan은 즉시 Line Trace 결과를 `OnAttackResolved`로 전달하고, Projectile은 비동기 준비된 Soft Class만 생성한다. 실제 부위 데미지와 GE 적용은 파츠 피격 계약 확정 후 연결한다.
+
+### CMTargetScannerComponent
+
+서버 Timer에서 거리, 시야각, 벽 가림을 검사해 가장 가까운 대상을 선택한다. 공격 종류와 좌우 스캔 연출은 알지 않으며 `OnTargetAcquired`, `OnTargetLost`만 전달한다.
+
+## 고정 레이저 제작 절차
+
+1. `CMLaserObstacleBase`를 상속한 BP를 만든다.
+2. 부모가 제공하는 `LaserStart`, `BeamCollision`, `Hazard`, `BeamPresentation`을 사용한다.
+3. `PrimaryMesh`에는 중앙 Pivot과 로컬 X축 길이를 가진 Beam Mesh를 지정한다.
+4. `BeamPresentation.MeshOriginalLength`에 원본 Mesh 길이를 cm 단위로 입력한다.
+5. `BeamPresentation.BeamThickness`, `MaxDistance`, `TraceChannel`을 설정한다.
+6. 고정 벽이면 `RefreshInterval=0`, 움직이는 문이 레이저를 가리면 0.05~0.1을 사용한다.
+7. 접촉 확인은 `Hazard.OnTargetEntered`에 Print를 연결한다.
+8. `StartActive=false`면 Stage 명령의 Activate 전까지 Mesh, Niagara, Collision이 모두 꺼진다.
+
+기존 BP에서 직접 만든 `LaserStart`, `BeamCollision`, `Hazard`와 `UpdateLaser` 그래프를 그대로 둔 채 부모를 변경하면 이름과 실행이 중복된다. 새 부모로 변경하기 전에 BP 컴포넌트와 Line Trace 그래프를 제거하거나, 새 자식 BP를 만들고 외형 설정만 옮긴다.
+
 ### CMHazardComponent
 
 접촉 대상을 받아 Single, Periodic, Kill 적용 방식을 표현한다. Definition의 GE·효과 태그·적용 방식·주기를 전달받는다. 현재 실제 몸통 마디 판별과 GE 적용은 TODO다.
