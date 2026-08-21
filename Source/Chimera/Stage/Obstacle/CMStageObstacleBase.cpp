@@ -267,6 +267,8 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
             LoopAudio->Stop();
         }
     }
+
+    HandleObstacleActiveStateChanged(bIsActive);
 }
 
 // Gameplay Bundle에 포함된 Soft Asset을 검증한 뒤 공통 표현과 Hazard에 적용
