@@ -45,6 +45,9 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    // 하위 장애물이 공통 활성 상태에 맞춰 전용 Collision과 표현을 갱신
+    virtual void HandleObstacleActiveStateChanged(bool bIsActive) {}
+
     // 활성 상태가 바뀔 때 C++ 또는 블루프린트 구현에 전달
     UFUNCTION(BlueprintImplementableEvent, Category = "Chimera|Obstacle")
     void OnObstacleActiveChanged(bool bIsActive);
@@ -53,22 +56,22 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "Chimera|Obstacle")
     void OnObstacleReset();
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<USceneComponent> SceneRoot;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Stage")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<UCMStageElementComponent> StageElement;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Definition")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<UCMObstacleDefinitionComponent> DefinitionComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Presentation")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<UStaticMeshComponent> PrimaryMesh;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Presentation")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<UNiagaraComponent> PrimaryEffect;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Presentation")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<UAudioComponent> LoopAudio;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle")
