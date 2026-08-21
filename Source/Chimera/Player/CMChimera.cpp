@@ -40,7 +40,10 @@ ACMChimera::ACMChimera()
 
     PrimaryActorTick.bCanEverTick = true;
     bReplicates = true;
-    SetReplicateMovement(true);
+    // 모든 몸통 마디는 ReplicatedSegmentStates 하나로 복제한다.
+    // 루트만 Actor 이동 복제를 함께 사용하면 클라이언트에서 서로 다른
+    // 물리 보정 기준이 섞이므로 기본 Actor 이동 복제는 사용하지 않는다.
+    SetReplicateMovement(false);
     SetNetUpdateFrequency(30.0f);
     SetMinNetUpdateFrequency(10.0f);
 
@@ -77,7 +80,7 @@ ACMChimera::ACMChimera()
     BodyMesh->SetAngularDamping(BodyAngularDamping);
     BodyMesh->SetCollisionProfileName(BodyCollisionProfile);
     BodyMesh->SetRelativeScale3D(FVector(SegmentScale));
-    BodyMesh->SetIsReplicated(true);
+    BodyMesh->SetIsReplicated(false);
 
     LeftFootPoint = CreateDefaultSubobject<UCMPartSlotComponent>(
         TEXT("LeftFootPoint")

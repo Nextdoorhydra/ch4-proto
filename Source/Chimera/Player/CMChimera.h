@@ -23,6 +23,7 @@ class UDataTable;
 class UPhysicalMaterial;
 class ACMPlayerState;
 class ACMArmPart;
+class ACMLegPart;
 class ACMSpringArmPart;
 class AActor;
 
@@ -154,6 +155,9 @@ public:
         const FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState
     );
+
+    /** Cancels the sustained push owned by one attached Leg. */
+    void CancelLegStep(const ACMLegPart* LegPart);
 
     /** Server-side production entry point shared by concrete Arm abilities. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
@@ -296,6 +300,26 @@ protected:
     UPROPERTY(EditAnywhere, Category = "Chimera|Movement",
         meta = (ClampMin = "0.0"))
     float BaseMovementImpulse = 5000.0f;
+
+    /** Forward reach of the animation-free Virtual Foot prototype. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
+        meta = (ClampMin = "0.0"))
+    float LegStepLength = 100.0f;
+
+    /** Height above the desired foot point where the ground sweep starts. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
+        meta = (ClampMin = "0.0"))
+    float LegStepTraceHeight = 60.0f;
+
+    /** Distance below the desired foot point covered by the ground sweep. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
+        meta = (ClampMin = "0.0"))
+    float LegStepTraceDepth = 140.0f;
+
+    /** Scales the force converted from the existing impulse balance values. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
+        meta = (ClampMin = "0.0"))
+    float LegStepForceScale = 1.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
