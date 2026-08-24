@@ -33,7 +33,8 @@ public:
         ACMChimera& Chimera,
         ACMLegPart& LegPart,
         ACMPlayerState* ContributingPlayerState,
-        float MovementImpulseMultiplier
+        float MovementImpulseMultiplier,
+        bool bReverseMovement
     );
 
     /** Stops only the active push owned by this Leg, if one exists. */
@@ -76,12 +77,13 @@ private:
         ACMChimera& Chimera,
         const struct FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState,
-        const FVector& PlanarImpulse
+        const FVector& PlanarImpulse,
+        float DirectionSign = 1.0f
     );
     void MatchCooperativeInputs(ACMChimera& Chimera);
     void ApplyCooperativeForwardImpulse(
         ACMChimera& Chimera,
-        float ForwardImpulseMagnitude
+        float SignedForwardImpulse
     ) const;
     void ApplyWholeBodyYawAssist(
         ACMChimera& Chimera,
@@ -112,6 +114,7 @@ private:
     {
         int32 FlatSlotIndex = INDEX_NONE;
         float RemainingImpulse = 0.0f;
+        float DirectionSign = 1.0f;
         double ExpireTime = 0.0;
     };
 

@@ -36,7 +36,11 @@ public:
     ACMChimera* GetSharedChimera() const;
 
     /** PlayerController는 키 입력을 슬롯 번호로만 전달한다. */
-    void SetControlSlotPressed(int32 SlotIndex, bool bPressed);
+    void SetControlSlotPressed(
+        int32 SlotIndex,
+        bool bPressed,
+        bool bReverseMovement
+    );
 
     /** Pickup/UI calls this on the owning client after selecting a Part. */
     UFUNCTION(BlueprintCallable, Category = "Chimera|Parts")
@@ -100,7 +104,11 @@ protected:
     void OnRep_ControlState();
 
     UFUNCTION(Server, Reliable)
-    void ServerSetControlSlotPressed(int32 SlotIndex, bool bPressed);
+    void ServerSetControlSlotPressed(
+        int32 SlotIndex,
+        bool bPressed,
+        bool bReverseMovement
+    );
 
     UFUNCTION(Server, Reliable)
     void ServerRequestAttachPartToControlSlot(

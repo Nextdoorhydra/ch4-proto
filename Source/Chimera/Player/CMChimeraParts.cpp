@@ -14,7 +14,8 @@
 
 void ACMChimera::ActivatePartSlot(
     const FCMPartSlotAddress& PartSlotAddress,
-    ACMPlayerState* ContributingPlayerState
+    ACMPlayerState* ContributingPlayerState,
+    bool bReverseMovement
 )
 {
     if (!HasAuthority()
@@ -38,6 +39,12 @@ void ACMChimera::ActivatePartSlot(
             );
         }
 
+        ACMLegPart* LegPart = Cast<ACMLegPart>(PartActor);
+        if (LegPart)
+        {
+            LegPart->SetPendingReverseMovement(bReverseMovement);
+        }
+
 #if !UE_BUILD_SHIPPING
         ACMDebugPartActor* DebugPart =
             Cast<ACMDebugPartActor>(PartSlot->GetAttachedPart());
@@ -53,6 +60,10 @@ void ACMChimera::ActivatePartSlot(
         if (PartActor && !bActivated)
         {
             PartActor->ConsumeContributingPlayerState();
+        }
+        if (LegPart && !bActivated)
+        {
+            LegPart->ConsumePendingReverseMovement();
         }
 #if !UE_BUILD_SHIPPING
         if (DebugPart && !bActivated)
@@ -77,7 +88,8 @@ void ACMChimera::ActivatePartSlot(
 
 bool ACMChimera::TryActivateLegPart(
     const FCMPartSlotAddress& PartSlotAddress,
-    ACMPlayerState* ContributingPlayerState
+    ACMPlayerState* ContributingPlayerState,
+    bool bReverseMovement
 )
 {
     if (!HasAuthority()
@@ -103,7 +115,8 @@ bool ACMChimera::TryActivateLegPart(
             *this,
             *LegPart,
             ContributingPlayerState,
-            LegPart->GetMovementImpulseMultiplier()
+            LegPart->GetMovementImpulseMultiplier(),
+            bReverseMovement
         );
 }
 
@@ -243,7 +256,8 @@ void ACMChimera::ActivateDebugLegPart(
 {
     TryActivateLegPart(
         PartSlotAddress,
-        ContributingPlayerState
+        ContributingPlayerState,
+        false
     );
 }
 #endif

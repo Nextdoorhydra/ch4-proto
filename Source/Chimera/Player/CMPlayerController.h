@@ -99,6 +99,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputAction> DetachModifierAction;
 
+    /** Hold this action while starting a Leg action to move backward. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    TObjectPtr<UInputAction> ReverseModifierAction;
+
 private:
     void FirstControlKeyPressed();
     void SecondControlKeyPressed();
@@ -110,6 +114,8 @@ private:
     void FourthControlKeyReleased();
     void DetachModifierPressed();
     void DetachModifierReleased();
+    void ReverseModifierPressed();
+    void ReverseModifierReleased();
     void SetControlSlotPressed(int32 SlotIndex, bool bPressed);
     void DebugMoveForwardPressed();
     void DebugMoveForwardReleased();
@@ -179,6 +185,7 @@ private:
     TObjectPtr<UCMClientStageLoadComponent> ClientStageLoadComponent;
 
     bool bDetachModifierHeld = false;
+    bool bReverseModifierHeld = false;
     bool bCheatDebugMovementEnabled = false;
     bool bDebugMoveForwardHeld = false;
     bool bDebugMoveBackwardHeld = false;

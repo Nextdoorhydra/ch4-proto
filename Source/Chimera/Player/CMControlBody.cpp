@@ -90,7 +90,8 @@ ACMChimera* ACMControlBody::GetSharedChimera() const
 
 void ACMControlBody::SetControlSlotPressed(
     int32 SlotIndex,
-    bool bPressed
+    bool bPressed,
+    bool bReverseMovement
 )
 {
     if (!IsLocallyControlled()
@@ -101,7 +102,11 @@ void ACMControlBody::SetControlSlotPressed(
         return;
     }
 
-    ServerSetControlSlotPressed(SlotIndex, bPressed);
+    ServerSetControlSlotPressed(
+        SlotIndex,
+        bPressed,
+        bReverseMovement
+    );
 }
 
 void ACMControlBody::RequestAttachPartToControlSlot(
@@ -234,7 +239,8 @@ void ACMControlBody::ServerRequestDetachPartFromControlSlot_Implementation(
 
 void ACMControlBody::ServerSetControlSlotPressed_Implementation(
     int32 SlotIndex,
-    bool bPressed
+    bool bPressed,
+    bool bReverseMovement
 )
 {
     if (!IsControlSlotEnabled(SlotIndex)
@@ -282,7 +288,8 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
     SharedChimera->SetPartSlotPressed(PartSlotAddress, true);
     SharedChimera->ActivatePartSlot(
         PartSlotAddress,
-        CMPlayerState
+        CMPlayerState,
+        bReverseMovement
     );
 }
 

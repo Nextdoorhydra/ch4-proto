@@ -91,7 +91,8 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Controls")
     void ActivatePartSlot(
         const FCMPartSlotAddress& PartSlotAddress,
-        ACMPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState,
+        bool bReverseMovement
     );
 
     void SetPartSlotPressed(
@@ -153,7 +154,8 @@ public:
         Category = "Chimera|Movement")
     bool TryActivateLegPart(
         const FCMPartSlotAddress& PartSlotAddress,
-        ACMPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState,
+        bool bReverseMovement
     );
 
     /** Cancels the sustained push owned by one attached Leg. */
