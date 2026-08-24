@@ -433,6 +433,27 @@ int32 ACMChimera::GetActiveSegmentCount() const
     return ActiveSegmentCount;
 }
 
+float ACMChimera::AdjustLocalCameraDistance(float WheelInput)
+{
+    if (!CameraBoom || FMath::IsNearlyZero(WheelInput))
+    {
+        return CameraBoom ? CameraBoom->TargetArmLength : 0.0f;
+    }
+
+    const float SafeMinimum = FMath::Max(MinimumCameraDistance, 0.0f);
+    const float SafeMaximum = FMath::Max(
+        MaximumCameraDistance,
+        SafeMinimum
+    );
+    CameraBoom->TargetArmLength = FMath::Clamp(
+        CameraBoom->TargetArmLength
+            - WheelInput * FMath::Max(CameraDistanceStep, 0.0f),
+        SafeMinimum,
+        SafeMaximum
+    );
+    return CameraBoom->TargetArmLength;
+}
+
 // 파츠와 ControlBody를 제외하고 활성 BodySegment 컴포넌트만 Volume과 비교
 bool ACMChimera::AreAllActiveBodySegmentsOverlapping(
     const UPrimitiveComponent* Volume) const

@@ -13,6 +13,7 @@ class UCMVisionInputComponent;
 class UInputAction;
 class UInputMappingContext;
 class UCMClientStageLoadComponent;
+struct FInputActionValue;
 
 UCLASS()
 class CHIMERA_API ACMPlayerController : public APlayerController
@@ -103,6 +104,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputAction> ReverseModifierAction;
 
+    /** Local-only mouse-wheel input that changes the shared-body view distance. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    TObjectPtr<UInputAction> CameraDistanceAction;
+
 private:
     void FirstControlKeyPressed();
     void SecondControlKeyPressed();
@@ -116,6 +121,7 @@ private:
     void DetachModifierReleased();
     void ReverseModifierPressed();
     void ReverseModifierReleased();
+    void AdjustCameraDistance(const FInputActionValue& InputValue);
     void SetControlSlotPressed(int32 SlotIndex, bool bPressed);
     void DebugMoveForwardPressed();
     void DebugMoveForwardReleased();

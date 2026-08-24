@@ -121,6 +121,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera")
     int32 GetActiveSegmentCount() const;
 
+    /** Changes only this process's camera component; the value is not replicated. */
+    float AdjustLocalCameraDistance(float WheelInput);
+
     // 지정 Volume과 모든 활성 몸통 물리 컴포넌트가 겹치는지 확인
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;
@@ -480,6 +483,18 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera",
         meta = (ClampMin = "0.0"))
     float DefaultCameraDistance = 900.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera|Distance",
+        meta = (ClampMin = "0.0"))
+    float MinimumCameraDistance = 650.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera|Distance",
+        meta = (ClampMin = "0.0"))
+    float MaximumCameraDistance = 2200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera|Distance",
+        meta = (ClampMin = "0.0"))
+    float CameraDistanceStep = 120.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera",
         meta = (ClampMin = "-89.0", ClampMax = "89.0"))

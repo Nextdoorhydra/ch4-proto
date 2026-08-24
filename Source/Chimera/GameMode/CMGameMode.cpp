@@ -547,11 +547,30 @@ void ACMGameMode::RebalanceControlAssignments(
             NewAssignments[PlayerIndex]
         );
 
+        const bool bAllLeft = !NewAssignments[PlayerIndex].IsEmpty()
+            && !NewAssignments[PlayerIndex].ContainsByPredicate(
+                [](const FCMPartSlotAddress& Address)
+                {
+                    return !CMControl::IsLeftPartSlot(Address);
+                });
+        const bool bAllRight = !NewAssignments[PlayerIndex].IsEmpty()
+            && !NewAssignments[PlayerIndex].ContainsByPredicate(
+                [](const FCMPartSlotAddress& Address)
+                {
+                    return !CMControl::IsRightPartSlot(Address);
+                });
+        const TCHAR* AssignedSide = bAllLeft
+            ? TEXT("Left")
+            : bAllRight
+                ? TEXT("Right")
+                : TEXT("Mixed");
+
         UE_LOG(
             LogChimeraMultiplayer,
             Log,
-            TEXT("Assigned %d mixed PartSlot(s) to %s. OwnedSegments=%d,%d"),
+            TEXT("Assigned %d %s-side PartSlot(s) to %s. OwnedSegments=%d,%d"),
             NewAssignments[PlayerIndex].Num(),
+            AssignedSide,
             *Players[PlayerIndex]->GetPlayerName(),
             ControlBodies[PlayerIndex]->GetOwnedSegmentIndex(),
             ControlBodies[PlayerIndex]->GetOwnedSegmentIndex() + 1
