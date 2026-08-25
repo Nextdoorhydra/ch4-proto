@@ -41,6 +41,9 @@ public:
     float GetStaminaCost() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
+    float GetAnchorStaminaCostPerSecond() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
     virtual float GetSwingDuration() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
@@ -87,6 +90,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm",
         meta = (ClampMin = "0.0"))
     float StaminaCost = 10.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm",
+        meta = (ClampMin = "0.0"))
+    float AnchorStaminaCostPerSecond = 0.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm",
         meta = (ClampMin = "0.01"))
