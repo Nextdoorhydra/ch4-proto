@@ -9,6 +9,7 @@
 
 class UGameplayAbility;
 class UCMBattleComponent;
+class UCMPartStatusComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 class UDataTable;
@@ -89,6 +90,9 @@ public:
     UCMBattleComponent* GetBattleComponent() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    UCMPartStatusComponent* GetPartStatusComponent() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     float GetHealth() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
@@ -152,6 +156,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMBattleComponent> BattleComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UCMPartStatusComponent> PartStatusComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Part")
     ECMPartSlotType PartType = ECMPartSlotType::Any;

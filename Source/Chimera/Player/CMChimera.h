@@ -13,6 +13,7 @@ class USceneComponent;
 class UPhysicsConstraintComponent;
 class USpringArmComponent;
 class UCameraComponent;
+class UCMCameraOcclusionComponent;
 class UMaterialInstanceDynamic;
 class UTextRenderComponent;
 class UAbilitySystemComponent;
@@ -133,6 +134,10 @@ public:
     // 지정 Volume과 모든 활성 몸통 물리 컴포넌트가 겹치는지 확인
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;
+
+    // 서버에서 받은 하나의 환경 Force를 활성 몸통 마디의 질량 비율로 분배
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Physics")
+    void ApplyEnvironmentalForce(const FVector& TotalForce);
 
     // Test Area 이동을 위해 활성 몸통 마디의 상대 배치를 유지하며 전체 물리 조립체 이동
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Testing")
@@ -256,6 +261,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     TObjectPtr<UCameraComponent> FollowCamera;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+    TObjectPtr<UCMCameraOcclusionComponent> CameraOcclusionComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Abilities")

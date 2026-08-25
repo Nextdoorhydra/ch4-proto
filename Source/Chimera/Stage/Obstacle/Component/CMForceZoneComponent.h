@@ -5,6 +5,8 @@
 
 #include "CMForceZoneComponent.generated.h"
 
+class ACMChimera;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCMForceZoneTargetSignature, AActor*, TargetActor, FVector, WorldForceDirection);
 
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
@@ -15,6 +17,13 @@ class CHIMERA_API UCMForceZoneComponent : public UActorComponent
 
 public:
     UCMForceZoneComponent();
+
+    // 서버에서 구역 안의 키메라에게 매 프레임 지속적인 환경 Force 적용
+    virtual void TickComponent(
+        float DeltaTime,
+        ELevelTick TickType,
+        FActorComponentTickFunction* ThisTickFunction
+    ) override;
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Obstacle|ForceZone")
     void NotifyTargetEntered(AActor* TargetActor);
@@ -43,5 +52,6 @@ public:
 private:
     bool bZoneEnabled = true;
 
-    // TODO: 서버에서 키메라 몸통 마디의 PrimitiveComponent에 실제 힘 적용
+    // 여러 몸통 마디가 같은 볼륨과 겹칠 수 있어 액터별 오버랩 횟수 추적
+    TMap<TWeakObjectPtr<ACMChimera>, int32> OverlappingChimeras;
 };

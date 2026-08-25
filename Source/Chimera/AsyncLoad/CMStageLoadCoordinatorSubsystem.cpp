@@ -165,6 +165,12 @@ bool UCMStageLoadCoordinatorSubsystem::StartStageScheduleRequest(
 	ActiveStageRequestId = RequestId;
 	PendingScheduleId = ScheduleId;
 
+	UE_LOG(LogChimeraStageLoad, Display,
+		TEXT("Local stage schedule started. NetMode=%d Request=%s Schedule=%s"),
+		GetWorld() ? static_cast<int32>(GetWorld()->GetNetMode()) : INDEX_NONE,
+		*RequestId.ToString(),
+		*ScheduleId.ToString());
+
 	// 같은 테스트 스테이지를 다시 여는 경우 Schedule PDA는 GameInstance의
 	// AssetManager에 이미 남아 있을 수 있다. 이 상태를 로드 실패로 보지 않고
 	// 기존 객체를 새 스테이지 실행 상태로 다시 활성화한다.

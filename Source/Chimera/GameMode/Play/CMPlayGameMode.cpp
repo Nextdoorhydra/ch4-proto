@@ -147,6 +147,12 @@ bool ACMPlayGameMode::TryBootstrapDirectStageRoute(
         return false;
     }
 
+    bDirectStageRoute = true;
+    if (DirectStageJoinGracePeriod > 0.0f)
+    {
+        ResetDirectStageJoinGracePeriod();
+    }
+
     UE_LOG(LogChimeraStageLoad, Display,
         TEXT("에디터 직접 실행 스테이지를 시작했습니다. Map=%s StageIndex=%d StageRoute=%s"),
         *CurrentMapPackageName,
@@ -167,6 +173,7 @@ void ACMPlayGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
     StageLoadBarrier->CancelBarrier();
     GetWorldTimerManager().ClearTimer(StartingPresentationTimeoutHandle);
     GetWorldTimerManager().ClearTimer(StageLoopRestartTimerHandle);
+    GetWorldTimerManager().ClearTimer(DirectStageJoinGraceTimerHandle);
     for (TPair<FString, FCMDisconnectedPlayerRecord>& Pair : DisconnectedPlayers)
     {
         GetWorldTimerManager().ClearTimer(Pair.Value.ExpirationTimer);
@@ -188,6 +195,18 @@ void ACMPlayGameMode::PostLogin(APlayerController* NewPlayer)
 {
     Super::PostLogin(NewPlayer);
     StageLoadBarrier->HandlePlayerJoined();
+
+    if (bDirectStageRoute
+        && DirectStageJoinGracePeriod > 0.0f
+        && CachedPlayGameState)
+    {
+        const ECMPlayPhase Phase = CachedPlayGameState->GetPlayPhase();
+        if (Phase == ECMPlayPhase::Loading
+            || Phase == ECMPlayPhase::WaitingForPlayers)
+        {
+            ResetDirectStageJoinGracePeriod();
+        }
+    }
 }
 
 // 퇴장한 플레이어를 완료 집합에서 제거하고 남은 인원 기준으로 배리어 재평가
@@ -479,12 +498,42 @@ void ACMPlayGameMode::TryStartStageWhenReady()
     if (!HasAuthority() || !bStageLoadReady || !IsValid(StageDirector)
         || !PlayState
         || PlayState->GetPlayPhase() != ECMPlayPhase::WaitingForPlayers
-        || PlayState->GetLobbyPlayerCount() <= 0)
+        || PlayState->GetLobbyPlayerCount() <= 0
+        || (bDirectStageRoute
+            && DirectStageJoinGracePeriod > 0.0f
+            && !bDirectStageJoinGraceElapsed))
     {
         return;
     }
 
     StartStage();
+}
+
+// 직접 실행한 Route의 참가 대기 시간을 마지막 접속 시점부터 다시 계산
+void ACMPlayGameMode::ResetDirectStageJoinGracePeriod()
+{
+    bDirectStageJoinGraceElapsed = DirectStageJoinGracePeriod <= 0.0f;
+    GetWorldTimerManager().ClearTimer(DirectStageJoinGraceTimerHandle);
+
+    if (bDirectStageJoinGraceElapsed)
+    {
+        TryStartStageWhenReady();
+        return;
+    }
+
+    GetWorldTimerManager().SetTimer(
+        DirectStageJoinGraceTimerHandle,
+        this,
+        &ThisClass::HandleDirectStageJoinGracePeriodElapsed,
+        DirectStageJoinGracePeriod,
+        false);
+}
+
+// 참가 대기가 끝난 뒤 로드와 Director 준비 상태를 다시 검사
+void ACMPlayGameMode::HandleDirectStageJoinGracePeriodElapsed()
+{
+    bDirectStageJoinGraceElapsed = true;
+    TryStartStageWhenReady();
 }
 
 // 공용 키메라의 전체 사망 사건을 상위 게임 흐름에 연결

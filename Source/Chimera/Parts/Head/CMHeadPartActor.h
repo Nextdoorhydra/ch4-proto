@@ -1,12 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DataTable.h"
+#include "AsyncLoadCompleteMessage.h"
 #include "Parts/Core/CMPartActorBase.h"
 
 #include "CMHeadPartActor.generated.h"
 
 class UCMVisionComponent;
+class UCMHeadDefinition;
 
 /** A Head Part that contributes one cone to the team's shared vision. */
 UCLASS(Blueprintable)
@@ -28,15 +29,38 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part|Head")
     UCMVisionComponent* GetVisionComponent() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part|Head")
+    bool IsHeadDefinitionReady() const { return bDefinitionReady; }
+
 protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Part|Head")
     TObjectPtr<UCMVisionComponent> VisionComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-        Category = "Chimera|Part|Head")
-    FDataTableRowHandle HeadDataRow;
+        Category = "Chimera|Part|Head|Definition")
+    TSoftObjectPtr<UCMHeadDefinition> Definition;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Part|Head|Definition")
+    FName LoadGroupId = TEXT("Stage.Entry.HeadVision");
 
 private:
-    void ApplyHeadData();
+    UFUNCTION()
+    void HandleLoadGroupFinished(
+        FName FinishedLoadGroupId,
+        EAsyncLoadResult Result,
+        bool bReleasedImmediately
+    );
+
+    void RefreshDefinitionState();
+    bool TryResolveLoadedDefinition();
+    void MarkDefinitionFailed(const TCHAR* Reason);
+    void ApplyLoadedDefinition();
+
+    bool bDefinitionReady = false;
+    bool bDefinitionFailed = false;
 };

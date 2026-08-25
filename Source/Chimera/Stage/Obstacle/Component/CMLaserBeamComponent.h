@@ -31,6 +31,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Beam Presentation")
     void SetBeamVisible(bool bVisible);
 
+    // 플레이어 타격 여부에 따라 끝점 스파크 발생량을 Niagara에 전달
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Beam Presentation")
+    void SetPlayerImpactActive(bool bActive);
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Beam Presentation",
         meta = (ClampMin = "0.01"))
     float MeshOriginalLength = 100.0f;
@@ -39,11 +43,28 @@ public:
         meta = (ClampMin = "0.01"))
     float BeamThickness = 10.0f;
 
+    // 블루프린트마다 하나의 Niagara System을 다른 색상으로 재사용
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Beam Presentation")
+    FLinearColor BeamColor = FLinearColor::Red;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Beam Presentation",
+        meta = (ClampMin = "0.0"))
+    float ImpactSparkRate = 90.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Beam Presentation|Niagara")
     FName NiagaraStartParameter = TEXT("User.BeamStart");
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Beam Presentation|Niagara")
     FName NiagaraEndParameter = TEXT("User.BeamEnd");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Beam Presentation|Niagara")
+    FName NiagaraWidthParameter = TEXT("User.BeamWidth");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Beam Presentation|Niagara")
+    FName NiagaraColorParameter = TEXT("User.BeamColor");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Beam Presentation|Niagara")
+    FName NiagaraImpactSpawnRateParameter = TEXT("User.ImpactSpawnRate");
 
 private:
     UPROPERTY(Transient)

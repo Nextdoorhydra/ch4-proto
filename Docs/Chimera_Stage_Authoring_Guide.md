@@ -269,8 +269,10 @@ PDA_CMObstacle_MovingBlade
 ├─ Materials
 ├─ NiagaraSystem
 ├─ LoopSound
-├─ GameplayEffectClass
-└─ Hazard 설정
+├─ PartEffect
+│  └─ 파츠 내구도 피해·감전·경직·감속
+└─ ChimeraEffect
+   └─ 키메라 공용 ASC에 적용할 Soft GE
 ```
 
 PDA 방식 Shell BP는 부모의 `PrimaryMesh`, `PrimaryEffect`, `LoopAudio`를 사용하고 같은 런타임 에셋을 BP 기본값에 중복 지정하지 않는다. Schedule Catalog에서 PDA의 GroupId와 Shell 인스턴스의 LoadGroupId를 동일하게 설정한다. 로드 전과 실패 시 장애물은 보이지 않는 판정을 만들지 않도록 비활성 상태를 유지한다.
@@ -282,7 +284,7 @@ S01.Area03.Hazards  Sequential 20
 S01.BranchA.Hazards OnDemand
 ```
 
-위치와 이동 설정은 레벨 인스턴스가 관리하고 재사용할 외형·이펙트·사운드·GE만 Definition이 관리한다. 전체 제작 절차와 컴포넌트 책임은 `Chimera_Obstacle_Mechanism_Architecture.md`를 따른다.
+위치와 이동 설정은 레벨 인스턴스가 관리하고 재사용할 외형·이펙트·사운드·파츠 효과·키메라 GE는 Definition이 관리한다. 파츠 수치와 태그는 PDA 본체와 함께 준비되고, Soft GE와 표현 에셋은 Gameplay Bundle에서 비동기로 준비한다. 전체 제작 절차와 컴포넌트 책임은 `Chimera_Obstacle_Mechanism_Architecture.md`를 따른다.
 
 ## 11. DataForge와 Sheet
 
