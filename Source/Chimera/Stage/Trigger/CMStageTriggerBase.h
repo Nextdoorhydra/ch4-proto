@@ -7,11 +7,6 @@
 
 class UCMActivationTriggerComponent;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
-    FCMStageTriggerStateSignature,
-    bool,
-    bIsTriggered);
-
 UCLASS(Abstract, Blueprintable)
 // 조건 충족과 해제를 StageDirector 대상 명령으로 변환하는 공통 트리거
 class CHIMERA_API ACMStageTriggerBase : public ACMStageElementBase
@@ -28,12 +23,6 @@ public:
     // 유지형 트리거의 조건이 해제되었을 때 서버에서 호출
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Mechanism|Trigger")
     bool DeactivateTrigger(AActor* TriggeringActor);
-
-    UFUNCTION(BlueprintPure, Category = "Chimera|Mechanism|Trigger")
-    bool IsTriggerConditionActive() const;
-
-    UPROPERTY(BlueprintAssignable, Category = "Chimera|Mechanism|Trigger")
-    FCMStageTriggerStateSignature OnTriggerConditionChanged;
 
 protected:
     virtual void BeginPlay() override;
