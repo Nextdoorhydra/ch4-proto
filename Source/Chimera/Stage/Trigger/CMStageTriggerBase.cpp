@@ -32,6 +32,11 @@ bool ACMStageTriggerBase::DeactivateTrigger(AActor* TriggeringActor)
         && ActivationTrigger->SetTriggeredState(false, TriggeringActor);
 }
 
+bool ACMStageTriggerBase::IsTriggerConditionActive() const
+{
+    return ActivationTrigger && ActivationTrigger->IsTriggered();
+}
+
 // 장치 활성 상태를 실제 트리거 입력 허용 상태에 연결
 void ACMStageTriggerBase::HandleElementActiveChanged_Implementation(bool bIsActive)
 {
@@ -56,6 +61,7 @@ void ACMStageTriggerBase::HandleTriggerActivated(AActor* TriggeringActor)
         ResolveTargetPlacementId(),
         TargetGroup,
         TargetCommandTag);
+    OnTriggerConditionChanged.Broadcast(true);
     OnTriggerActivated(TriggeringActor);
 }
 
@@ -66,6 +72,7 @@ void ACMStageTriggerBase::HandleTriggerDeactivated(AActor* TriggeringActor)
         ResolveTargetPlacementId(),
         TargetGroup,
         ReleaseCommandTag);
+    OnTriggerConditionChanged.Broadcast(false);
     OnTriggerDeactivated(TriggeringActor);
 }
 
