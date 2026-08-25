@@ -115,7 +115,7 @@ bool ACMChimera::TryActivateLegPart(
             *this,
             *LegPart,
             ContributingPlayerState,
-            LegPart->GetMovementImpulseMultiplier(),
+            LegPart->GetMovementImpulse(),
             bReverseMovement
         );
 }
@@ -157,6 +157,7 @@ bool ACMChimera::TryActivateArmPart(
             SlotAddress.SegmentIndex,
             PartSlot,
             ContributingPlayerState,
+            ArmPart->GetMovementImpulse(),
             ArmPart->GetMovementImpulseMultiplier()
         );
 
@@ -325,37 +326,37 @@ UClass* LoadTestLegPartClass()
     return TestLegPartClass.LoadSynchronous();
 }
 
-UClass* LoadTestLegTierPartClass(int32 Tier)
+FName GetTestPartTierRowName(int32 Tier)
 {
-    static const TSoftClassPtr<ACMLegPart> TestLegTierPartClasses[] =
-    {
-        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
-            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier1Part.BP_CMLegTier1Part_C"))),
-        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
-            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier2Part.BP_CMLegTier2Part_C"))),
-        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
-            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier3Part.BP_CMLegTier3Part_C"))),
-        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
-            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier4Part.BP_CMLegTier4Part_C"))),
-        TSoftClassPtr<ACMLegPart>(FSoftObjectPath(
-            TEXT("/Game/Chimera/Character/Part/BP_CMLegTier5Part.BP_CMLegTier5Part_C")))
-    };
-
-    const int32 TierIndex = Tier - 1;
-    return TierIndex >= 0
-        && TierIndex < UE_ARRAY_COUNT(TestLegTierPartClasses)
-        ? TestLegTierPartClasses[TierIndex].LoadSynchronous()
-        : nullptr;
+    return Tier >= 1 && Tier <= 5
+        ? FName(*FString::Printf(TEXT("Tier%d"), Tier))
+        : NAME_None;
 }
 
-void AddTestLegTierPartClasses(TArray<UClass*>& OutPartClasses)
+struct FDebugPartSpawnOption
 {
+    UClass* PartClass = nullptr;
+    FName PartRowName = NAME_None;
+    FName TierRowName = NAME_None;
+};
+
+void AddTestLegTierPartOptions(
+    TArray<FDebugPartSpawnOption>& OutPartOptions
+)
+{
+    UClass* LegPartClass = LoadTestLegPartClass();
+    if (!LegPartClass)
+    {
+        return;
+    }
+
     for (int32 Tier = 1; Tier <= 5; ++Tier)
     {
-        if (UClass* LoadedClass = LoadTestLegTierPartClass(Tier))
-        {
-            OutPartClasses.Add(LoadedClass);
-        }
+        OutPartOptions.Add({
+            LegPartClass,
+            TEXT("DefaultLeg"),
+            GetTestPartTierRowName(Tier)
+        });
     }
 }
 
@@ -379,27 +380,38 @@ UClass* LoadTestSpringArmPartClass()
     return TestSpringArmPartClass.LoadSynchronous();
 }
 
-UClass* LoadNamedDebugPartClass(FName PartName)
+bool ResolveNamedDebugPart(
+    FName PartName,
+    FDebugPartSpawnOption& OutPartOption
+)
 {
     if (PartName == TEXT("DefaultArm"))
     {
-        return LoadTestArmPartClass();
+        OutPartOption.PartClass = LoadTestArmPartClass();
+        return OutPartOption.PartClass != nullptr;
     }
     if (PartName == TEXT("SpringArm"))
     {
-        return LoadTestSpringArmPartClass();
+        OutPartOption.PartClass = LoadTestSpringArmPartClass();
+        return OutPartOption.PartClass != nullptr;
     }
 
     const FString PartString = PartName.ToString();
     constexpr TCHAR LegTierPrefix[] = TEXT("LegTier");
     if (PartString.StartsWith(LegTierPrefix, ESearchCase::IgnoreCase))
     {
-        return LoadTestLegTierPartClass(
-            FCString::Atoi(*PartString.RightChop(UE_ARRAY_COUNT(LegTierPrefix) - 1))
+        OutPartOption.PartRowName = TEXT("DefaultLeg");
+        OutPartOption.TierRowName = GetTestPartTierRowName(
+            FCString::Atoi(
+                *PartString.RightChop(UE_ARRAY_COUNT(LegTierPrefix) - 1))
         );
+        OutPartOption.PartClass = OutPartOption.TierRowName.IsNone()
+            ? nullptr
+            : LoadTestLegPartClass();
+        return OutPartOption.PartClass != nullptr;
     }
 
-    return nullptr;
+    return false;
 }
 }
 
@@ -412,18 +424,22 @@ void ACMChimera::SpawnRandomDebugParts()
 
     ClearRandomDebugParts();
 
-    TArray<UClass*> RegisteredPartClasses;
-    AddTestLegTierPartClasses(RegisteredPartClasses);
+    TArray<FDebugPartSpawnOption> RegisteredPartOptions;
+    AddTestLegTierPartOptions(RegisteredPartOptions);
     if (UClass* ArmPartClass = LoadTestArmPartClass())
     {
-        RegisteredPartClasses.Add(ArmPartClass);
+        RegisteredPartOptions.Add({ ArmPartClass, NAME_None, TEXT("Tier1") });
     }
     if (UClass* SpringArmPartClass = LoadTestSpringArmPartClass())
     {
-        RegisteredPartClasses.Add(SpringArmPartClass);
+        RegisteredPartOptions.Add({
+            SpringArmPartClass,
+            NAME_None,
+            TEXT("Tier1")
+        });
     }
 
-    if (RegisteredPartClasses.IsEmpty())
+    if (RegisteredPartOptions.IsEmpty())
     {
         UE_LOG(LogChimeraLineBody, Error,
             TEXT("[Random Parts Failed] No production Part Blueprint could be loaded."));
@@ -431,8 +447,8 @@ void ACMChimera::SpawnRandomDebugParts()
     }
 
     int32 AttachedCount = 0;
-    int32 NextPartClassIndex = FMath::RandHelper(
-        RegisteredPartClasses.Num()
+    int32 NextPartOptionIndex = FMath::RandHelper(
+        RegisteredPartOptions.Num()
     );
     const int32 ActiveSlotCount =
         ActiveSegmentCount * CMControl::PartSlotsPerSegment;
@@ -445,20 +461,18 @@ void ACMChimera::SpawnRandomDebugParts()
             continue;
         }
 
-        FActorSpawnParameters SpawnParameters;
-        SpawnParameters.Owner = this;
-        SpawnParameters.SpawnCollisionHandlingOverride =
-            ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-        UClass* SelectedPartClass =
-            RegisteredPartClasses[NextPartClassIndex];
-        NextPartClassIndex = (NextPartClassIndex + 1)
-            % RegisteredPartClasses.Num();
+        const FDebugPartSpawnOption& SelectedPartOption =
+            RegisteredPartOptions[NextPartOptionIndex];
+        NextPartOptionIndex = (NextPartOptionIndex + 1)
+            % RegisteredPartOptions.Num();
         ACMPartActorBase* PartActor =
-            GetWorld()->SpawnActor<ACMPartActorBase>(
-                SelectedPartClass,
-                GetActorLocation(),
-                FRotator::ZeroRotator,
-                SpawnParameters
+            ACMPartActorBase::SpawnPartFromDataRows(
+                this,
+                SelectedPartOption.PartClass,
+                SelectedPartOption.PartRowName,
+                SelectedPartOption.TierRowName,
+                FTransform(FRotator::ZeroRotator, GetActorLocation()),
+                this
             );
         if (!PartActor)
         {
@@ -477,9 +491,9 @@ void ACMChimera::SpawnRandomDebugParts()
     }
 
     UE_LOG(LogChimeraLineBody, Warning,
-        TEXT("[Random Parts Ready] Attached %d production Parts from %d registered Blueprint class(es)."),
+        TEXT("[Random Parts Ready] Attached %d production Parts from %d registered option(s)."),
         AttachedCount,
-        RegisteredPartClasses.Num());
+        RegisteredPartOptions.Num());
 }
 
 bool ACMChimera::SpawnDebugPartAtSlot(
@@ -502,8 +516,8 @@ bool ACMChimera::SpawnDebugPartAtSlot(
         return false;
     }
 
-    UClass* PartClass = LoadNamedDebugPartClass(PartName);
-    if (!PartClass)
+    FDebugPartSpawnOption PartOption;
+    if (!ResolveNamedDebugPart(PartName, PartOption))
     {
         UE_LOG(LogChimeraLineBody, Warning,
             TEXT("[Attach Part Failed] Unknown Part=%s. Use DefaultArm, SpringArm, or LegTier1..5."),
@@ -517,16 +531,14 @@ bool ACMChimera::SpawnDebugPartAtSlot(
         ExistingPart->Destroy();
     }
 
-    FActorSpawnParameters SpawnParameters;
-    SpawnParameters.Owner = this;
-    SpawnParameters.SpawnCollisionHandlingOverride =
-        ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     ACMPartActorBase* PartActor =
-        GetWorld()->SpawnActor<ACMPartActorBase>(
-            PartClass,
-            GetActorLocation(),
-            FRotator::ZeroRotator,
-            SpawnParameters
+        ACMPartActorBase::SpawnPartFromDataRows(
+            this,
+            PartOption.PartClass,
+            PartOption.PartRowName,
+            PartOption.TierRowName,
+            FTransform(FRotator::ZeroRotator, GetActorLocation()),
+            this
         );
     if (!PartActor)
     {
@@ -547,7 +559,7 @@ bool ACMChimera::SpawnDebugPartAtSlot(
         SlotAddress.SegmentIndex,
         SlotAddress.PartSlotIndex,
         *PartName.ToString(),
-        *GetNameSafe(PartClass));
+        *GetNameSafe(PartOption.PartClass));
     return true;
 }
 

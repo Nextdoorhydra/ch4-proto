@@ -15,7 +15,7 @@ ACMArmPart::ACMArmPart()
 {
     PartType = ECMPartSlotType::Arm;
     GrantedAbilityClass = UCMArmGameplayAbility::StaticClass();
-    MovementImpulseMultiplier = 0.1f;
+    PartRowName = TEXT("DefaultArm");
 }
 
 void ACMArmPart::BeginPlay()

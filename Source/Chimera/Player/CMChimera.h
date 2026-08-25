@@ -306,12 +306,6 @@ protected:
         Category = "Chimera|Control Markers")
     TArray<TObjectPtr<UTextRenderComponent>> ControlAssignmentMarkerTexts;
 
-    // Body CSV가 제공하는 공통 이동 기준 힘이다. 다리와 팔은 자신의
-    // MovementImpulseMultiplier를 곱해 서로 다른 크기의 힘을 만든다.
-    UPROPERTY(EditAnywhere, Category = "Chimera|Movement",
-        meta = (ClampMin = "0.0"))
-    float BaseMovementImpulse = 5000.0f;
-
     /** Forward reach of the animation-free Virtual Foot prototype. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
         meta = (ClampMin = "0.0"))

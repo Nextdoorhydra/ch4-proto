@@ -51,34 +51,19 @@ bool ACMChimera::InitializeFromBodyData()
     BodyLinearDamping = BodyRow->LinearDamping;
     BodyAngularDamping = BodyRow->AngularDamping;
     MaxSpeed = BodyRow->MaxVelocity;
-    // A legacy DT that has not been reimported yet contains zero for the new
-    // column. Keep the C++ default so opening PIE before reimport does not
-    // silently disable every movement Part.
-    if (BodyRow->BaseMovementImpulse > 0.0f)
-    {
-        BaseMovementImpulse = BodyRow->BaseMovementImpulse;
-    }
-    else
-    {
-        UE_LOG(LogChimeraLineBody, Warning,
-            TEXT("[CSV -> Physics] Row=%s has no valid BaseMovementImpulse; keeping fallback %.1f. Reimport the Body table."),
-            *BodyRowName.ToString(),
-            BaseMovementImpulse);
-    }
 
     RuntimeBodyPhysicalMaterial = NewObject<UPhysicalMaterial>(this);
     RuntimeBodyPhysicalMaterial->Friction = BodyGroundFriction;
 
     UE_LOG(LogChimeraLineBody, Log,
-        TEXT("[CSV -> Physics] Row=%s Type=%s Mass=%.1f Friction=%.2f LinearDamping=%.2f AngularDamping=%.2f MaxVelocity=%.1f BaseImpulse=%.1f"),
+        TEXT("[CSV -> Physics] Row=%s Type=%s Mass=%.1f Friction=%.2f LinearDamping=%.2f AngularDamping=%.2f MaxVelocity=%.1f"),
         *BodyRowName.ToString(),
         *BodyRow->BodyType.ToString(),
         BodySegmentMass,
         BodyGroundFriction,
         BodyLinearDamping,
         BodyAngularDamping,
-        MaxSpeed,
-        BaseMovementImpulse);
+        MaxSpeed);
 
     if (HasAuthority())
     {

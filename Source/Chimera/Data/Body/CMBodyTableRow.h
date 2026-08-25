@@ -53,9 +53,4 @@ struct CHIMERA_API FCMBodyTableRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float MaxVelocity = 0.0f;
-
-	// 모든 이동 파츠가 공유하는 몸통 기준 Impulse다. 파츠별 최종 힘은
-	// 이 값에 MovementImpulseMultiplier를 곱해서 계산한다.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float BaseMovementImpulse = 0.0f;
 };
