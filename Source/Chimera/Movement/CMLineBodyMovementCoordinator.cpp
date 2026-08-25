@@ -1,8 +1,11 @@
 #include "Movement/CMLineBodyMovementCoordinator.h"
 
+#include "Ability/CMChimeraAttributeSet.h"
+#include "AbilitySystemComponent.h"
 #include "Player/CMControlTypes.h"
 #include "DrawDebugHelpers.h"
 #include "GameMode/CMGameState.h"
+#include "Parts/Arm/CMArmPart.h"
 #include "Parts/Leg/CMLegPart.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
@@ -12,6 +15,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraMovement, Log, All);
@@ -554,6 +558,134 @@ void UCMLineBodyMovementCoordinator::MatchCooperativeInputs(
     }
 }
 
+bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
+    ACMChimera& Chimera,
+    ACMArmPart& ArmPart
+)
+{
+    UCMPartSlotComponent* PartSlot = ArmPart.GetAttachedPartSlot();
+    const FCMPartSlotAddress PartSlotAddress =
+        ArmPart.GetAttachedSlotAddress();
+    const int32 SegmentIndex = PartSlotAddress.SegmentIndex;
+    if (!Chimera.HasAuthority()
+        || !ArmPart.IsOperational()
+        || ArmPart.IsSwinging()
+        || !PartSlot
+        || PartSlot->GetOwner() != &Chimera
+        || SegmentIndex < 0
+        || SegmentIndex >= Chimera.ActiveSegmentCount
+        || !Chimera.BodySegments.IsValidIndex(SegmentIndex))
+    {
+        return false;
+    }
+
+    const bool bAlreadyAnchored = ActiveArmAnchors.ContainsByPredicate(
+        [&PartSlotAddress](const FActiveArmAnchor& Anchor)
+        {
+            return Anchor.PartSlotAddress == PartSlotAddress;
+        }
+    );
+    UStaticMeshComponent* SegmentBody = Chimera.BodySegments[SegmentIndex];
+    if (bAlreadyAnchored || !SegmentBody
+        || !SegmentBody->IsSimulatingPhysics())
+    {
+        return bAlreadyAnchored;
+    }
+
+    FHitResult GroundHit;
+    if (!TraceGroundAtPoint(
+        Chimera,
+        PartSlot->GetComponentLocation(),
+        &ArmPart,
+        GroundHit))
+    {
+        UE_LOG(LogChimeraMovement, Warning,
+            TEXT("[Arm Anchor Rejected] Part=%s Slot=(%d,%d) NoGround=true"),
+            *GetNameSafe(&ArmPart),
+            PartSlotAddress.SegmentIndex,
+            PartSlotAddress.PartSlotIndex);
+        return false;
+    }
+
+    UPhysicsConstraintComponent* Constraint =
+        NewObject<UPhysicsConstraintComponent>(&Chimera);
+    if (!Constraint)
+    {
+        return false;
+    }
+
+    Chimera.AddInstanceComponent(Constraint);
+    Constraint->RegisterComponent();
+    Constraint->SetWorldLocation(GroundHit.ImpactPoint);
+    Constraint->SetDisableCollision(true);
+    Constraint->SetLinearXLimit(
+        ELinearConstraintMotion::LCM_Locked,
+        0.0f
+    );
+    Constraint->SetLinearYLimit(
+        ELinearConstraintMotion::LCM_Locked,
+        0.0f
+    );
+    Constraint->SetLinearZLimit(
+        ELinearConstraintMotion::LCM_Locked,
+        0.0f
+    );
+    Constraint->SetAngularSwing1Limit(
+        EAngularConstraintMotion::ACM_Free,
+        0.0f
+    );
+    Constraint->SetAngularSwing2Limit(
+        EAngularConstraintMotion::ACM_Free,
+        0.0f
+    );
+    Constraint->SetAngularTwistLimit(
+        EAngularConstraintMotion::ACM_Free,
+        0.0f
+    );
+    Constraint->SetConstrainedComponents(
+        SegmentBody,
+        NAME_None,
+        nullptr,
+        NAME_None
+    );
+
+    FActiveArmAnchor& Anchor = ActiveArmAnchors.AddDefaulted_GetRef();
+    Anchor.ArmPart = &ArmPart;
+    Anchor.Constraint = Constraint;
+    Anchor.PartSlotAddress = PartSlotAddress;
+    Anchor.SegmentIndex = SegmentIndex;
+    if (ArmPart.GetAnchorStaminaCostPerSecond() > UE_SMALL_NUMBER)
+    {
+        Chimera.PauseStaminaRegeneration();
+    }
+
+    UE_LOG(LogChimeraMovement, Log,
+        TEXT("[Arm Anchor Started] Part=%s Slot=(%d,%d) Segment=%d Ground=%s DrainPerSecond=%.1f"),
+        *GetNameSafe(&ArmPart),
+        PartSlotAddress.SegmentIndex,
+        PartSlotAddress.PartSlotIndex,
+        SegmentIndex,
+        *GroundHit.ImpactPoint.ToCompactString(),
+        ArmPart.GetAnchorStaminaCostPerSecond());
+    return true;
+}
+
+void UCMLineBodyMovementCoordinator::EndArmAnchor(
+    const FCMPartSlotAddress& PartSlotAddress
+)
+{
+    for (int32 AnchorIndex = ActiveArmAnchors.Num() - 1;
+        AnchorIndex >= 0;
+        --AnchorIndex)
+    {
+        if (ActiveArmAnchors[AnchorIndex].PartSlotAddress
+            == PartSlotAddress)
+        {
+            DestroyArmAnchor(AnchorIndex);
+        }
+    }
+}
+
 void UCMLineBodyMovementCoordinator::ApplyCooperativeForwardImpulse(
     ACMChimera& Chimera,
     float SignedForwardImpulse
@@ -771,6 +903,9 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
         return;
     }
 
+    RemoveInvalidArmAnchors(Chimera);
+    ApplyArmAnchorStaminaDrain(Chimera);
+
     // A Step is a sustained ground reaction, so its Force is supplied every
     // server physics frame before the existing whole-body speed cap runs.
     ApplyActiveLegSteps(Chimera);
@@ -833,6 +968,118 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
         SegmentVelocity.X += HorizontalVelocityCorrection.X;
         SegmentVelocity.Y += HorizontalVelocityCorrection.Y;
         BodySegment->SetPhysicsLinearVelocity(SegmentVelocity);
+    }
+}
+
+void UCMLineBodyMovementCoordinator::ApplyArmAnchorStaminaDrain(
+    ACMChimera& Chimera
+)
+{
+    float StaminaPerSecond = 0.0f;
+    for (const FActiveArmAnchor& Anchor : ActiveArmAnchors)
+    {
+        const ACMArmPart* ArmPart = Anchor.ArmPart.Get();
+        if (IsValid(ArmPart) && ArmPart->IsOperational())
+        {
+            StaminaPerSecond += FMath::Max(
+                ArmPart->GetAnchorStaminaCostPerSecond(),
+                0.0f
+            );
+        }
+    }
+
+    const float DeltaSeconds = Chimera.GetWorld()
+        ? Chimera.GetWorld()->GetDeltaSeconds()
+        : 0.0f;
+    if (StaminaPerSecond <= UE_SMALL_NUMBER
+        || DeltaSeconds <= 0.0f
+        || !Chimera.AbilitySystemComponent
+        || !Chimera.AttributeSet)
+    {
+        return;
+    }
+
+    Chimera.AbilitySystemComponent->ApplyModToAttribute(
+        UCMChimeraAttributeSet::GetStaminaAttribute(),
+        EGameplayModOp::Additive,
+        -StaminaPerSecond * DeltaSeconds
+    );
+    if (Chimera.AttributeSet->GetStamina() > UE_SMALL_NUMBER)
+    {
+        return;
+    }
+
+    UE_LOG(LogChimeraMovement, Log,
+        TEXT("[Arm Anchor Stamina Depleted] Rate=%.1f Anchors=%d"),
+        StaminaPerSecond,
+        ActiveArmAnchors.Num());
+    for (int32 AnchorIndex = ActiveArmAnchors.Num() - 1;
+        AnchorIndex >= 0;
+        --AnchorIndex)
+    {
+        DestroyArmAnchor(AnchorIndex);
+    }
+}
+
+void UCMLineBodyMovementCoordinator::RemoveInvalidArmAnchors(
+    ACMChimera& Chimera
+)
+{
+    for (int32 AnchorIndex = ActiveArmAnchors.Num() - 1;
+        AnchorIndex >= 0;
+        --AnchorIndex)
+    {
+        const FActiveArmAnchor& Anchor = ActiveArmAnchors[AnchorIndex];
+        const ACMArmPart* ArmPart = Anchor.ArmPart.Get();
+        if (!IsValid(ArmPart)
+            || !ArmPart->IsOperational()
+            || !Anchor.Constraint.IsValid()
+            || !Chimera.IsSegmentAlive(Anchor.SegmentIndex))
+        {
+            DestroyArmAnchor(AnchorIndex);
+        }
+    }
+}
+
+void UCMLineBodyMovementCoordinator::DestroyArmAnchor(int32 AnchorIndex)
+{
+    if (!ActiveArmAnchors.IsValidIndex(AnchorIndex))
+    {
+        return;
+    }
+
+    const FActiveArmAnchor Anchor = ActiveArmAnchors[AnchorIndex];
+    if (UPhysicsConstraintComponent* Constraint = Anchor.Constraint.Get())
+    {
+        Constraint->BreakConstraint();
+        Constraint->DestroyComponent();
+    }
+
+    UE_LOG(LogChimeraMovement, Log,
+        TEXT("[Arm Anchor Ended] Part=%s Slot=(%d,%d)"),
+        *GetNameSafe(Anchor.ArmPart.Get()),
+        Anchor.PartSlotAddress.SegmentIndex,
+        Anchor.PartSlotAddress.PartSlotIndex);
+    ActiveArmAnchors.RemoveAtSwap(
+        AnchorIndex,
+        EAllowShrinking::No
+    );
+
+    const bool bStillDraining = ActiveArmAnchors.ContainsByPredicate(
+        [](const FActiveArmAnchor& ActiveAnchor)
+        {
+            const ACMArmPart* ArmPart = ActiveAnchor.ArmPart.Get();
+            return IsValid(ArmPart)
+                && ArmPart->GetAnchorStaminaCostPerSecond()
+                    > UE_SMALL_NUMBER;
+        }
+    );
+    if (!bStillDraining)
+    {
+        if (ACMChimera* Chimera = Cast<ACMChimera>(GetOwner()))
+        {
+            Chimera->StartStaminaRegeneration();
+        }
     }
 }
 
@@ -1149,6 +1396,12 @@ void UCMLineBodyMovementCoordinator::EndPlay(
     PendingLeftInputs.Reset();
     PendingRightInputs.Reset();
     ActiveLegSteps.Reset();
+    for (int32 AnchorIndex = ActiveArmAnchors.Num() - 1;
+        AnchorIndex >= 0;
+        --AnchorIndex)
+    {
+        DestroyArmAnchor(AnchorIndex);
+    }
 
     Super::EndPlay(EndPlayReason);
 }

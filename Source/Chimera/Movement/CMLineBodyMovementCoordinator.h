@@ -2,13 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Player/CMControlTypes.h"
 
 #include "CMLineBodyMovementCoordinator.generated.h"
 
 class ACMChimera;
+class ACMArmPart;
 class ACMLegPart;
 class ACMPlayerState;
 class AActor;
+class UPhysicsConstraintComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 
@@ -39,6 +42,17 @@ public:
 
     /** Stops only the active push owned by this Leg, if one exists. */
     void CancelLegStep(const ACMLegPart* LegPart);
+
+    /** Pins a basic Arm slot to walkable ground while its control is held. */
+    bool TryBeginArmAnchor(
+        ACMChimera& Chimera,
+        ACMArmPart& ArmPart
+    );
+
+    /** Removes any held Arm anchor owned by the specified physical slot. */
+    void EndArmAnchor(
+        const struct FCMPartSlotAddress& PartSlotAddress
+    );
 
     /** Applies an immediate, non-grounded impulse from an Arm slot. */
     bool TryActivateArm(
@@ -102,6 +116,9 @@ private:
     ) const;
 
     void ApplyActiveLegSteps(ACMChimera& Chimera);
+    void ApplyArmAnchorStaminaDrain(ACMChimera& Chimera);
+    void RemoveInvalidArmAnchors(ACMChimera& Chimera);
+    void DestroyArmAnchor(int32 AnchorIndex);
 
     float GetPlayerCountSpeedMultiplier(
         const ACMChimera& Chimera
@@ -130,9 +147,18 @@ private:
         double EndTime = 0.0;
     };
 
+    struct FActiveArmAnchor
+    {
+        TWeakObjectPtr<ACMArmPart> ArmPart;
+        TWeakObjectPtr<UPhysicsConstraintComponent> Constraint;
+        struct FCMPartSlotAddress PartSlotAddress;
+        int32 SegmentIndex = INDEX_NONE;
+    };
+
     // Each remaining input keeps its original expiry even after partial use.
     TArray<FPendingCooperativeImpulse> PendingLeftInputs;
     TArray<FPendingCooperativeImpulse> PendingRightInputs;
     TArray<FActiveLegStep> ActiveLegSteps;
+    TArray<FActiveArmAnchor> ActiveArmAnchors;
     FTimerHandle CooperationExpiryTimerHandle;
 };

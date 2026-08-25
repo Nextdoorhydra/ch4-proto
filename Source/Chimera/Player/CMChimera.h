@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ActiveGameplayEffectHandle.h"
 #include "AbilitySystemInterface.h"
 #include "GameFramework/Pawn.h"
 
@@ -99,6 +100,11 @@ public:
         const FCMPartSlotAddress& PartSlotAddress,
         bool bPressed
     );
+
+    /** True only for the standard Arm; SpringArm keeps press activation. */
+    bool IsBasicArmPartSlot(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
 
     void ClearPressedControlParts();
 
@@ -581,6 +587,7 @@ private:
     );
     void InitializeSegmentHealth(float SegmentMaxHealth);
     void StartStaminaRegeneration();
+    void PauseStaminaRegeneration();
     void ApplyBlueprintSettings();
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
@@ -619,6 +626,7 @@ private:
     float ConfiguredSegmentMaxHealth = 0.0f;
     
     TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
+    FActiveGameplayEffectHandle StaminaRegenEffectHandle;
 
     // The coordinator reads the existing editor/CSV tuning fields without
     // moving them and invalidating Blueprint defaults.

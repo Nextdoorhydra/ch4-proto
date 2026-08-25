@@ -41,6 +41,11 @@ float ACMArmPart::GetStaminaCost() const
     return StaminaCost;
 }
 
+float ACMArmPart::GetAnchorStaminaCostPerSecond() const
+{
+    return AnchorStaminaCostPerSecond;
+}
+
 float ACMArmPart::GetSwingDuration() const
 {
     return SwingDuration;
@@ -149,6 +154,10 @@ void ACMArmPart::HandlePartDied()
 void ACMArmPart::ApplyPartData(const FCMPartLegArmTableRow& PartRow)
 {
     StaminaCost = FMath::Max(PartRow.StaminaCost, 0.0f);
+    AnchorStaminaCostPerSecond = FMath::Max(
+        PartRow.StaminaPerSecond,
+        0.0f
+    );
     SwingDuration = FMath::Max(PartRow.ActionDuration, 0.01f);
     AttackRange = FMath::Max(PartRow.AttackRange, 0.0f);
     AttackRadius = FMath::Max(PartRow.AttackRadius, 0.0f);

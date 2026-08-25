@@ -262,10 +262,21 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
     {
         if (CMControl::IsValidPartSlot(PressedPartSlot))
         {
+            const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
+            const bool bActivateOnRelease =
+                SharedChimera->IsBasicArmPartSlot(ReleasedPartSlot);
             SharedChimera->SetPartSlotPressed(
-                PressedPartSlot,
+                ReleasedPartSlot,
                 false
             );
+            if (bActivateOnRelease)
+            {
+                SharedChimera->ActivatePartSlot(
+                    ReleasedPartSlot,
+                    CMPlayerState,
+                    false
+                );
+            }
         }
         PressedPartSlot = FCMPartSlotAddress();
         return;
@@ -286,11 +297,14 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
 
     PressedPartSlot = PartSlotAddress;
     SharedChimera->SetPartSlotPressed(PartSlotAddress, true);
-    SharedChimera->ActivatePartSlot(
-        PartSlotAddress,
-        CMPlayerState,
-        bReverseMovement
-    );
+    if (!SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
+    {
+        SharedChimera->ActivatePartSlot(
+            PartSlotAddress,
+            CMPlayerState,
+            bReverseMovement
+        );
+    }
 }
 
 void ACMControlBody::SetControlSlots(
