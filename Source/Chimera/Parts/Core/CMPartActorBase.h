@@ -14,7 +14,6 @@ class UStaticMeshComponent;
 class UDataTable;
 class ACMPlayerState;
 struct FCMPartLegArmTableRow;
-struct FCMPartTierTableRow;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
     FCMPartHealthChangedSignature,
@@ -102,16 +101,7 @@ public:
     float GetMovementImpulseMultiplier() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
-    float GetBaseMovementImpulse() const;
-
-    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     float GetMovementImpulse() const;
-
-    UFUNCTION(BlueprintPure, Category = "Chimera|Part Data")
-    FName GetPartRowName() const;
-
-    UFUNCTION(BlueprintPure, Category = "Chimera|Part Data")
-    FName GetTierRowName() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     bool IsAlive() const;
@@ -206,10 +196,6 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Part Data")
     FName PartDataID = NAME_None;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Part Data")
-    FName TierDataID = NAME_None;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Part Data")

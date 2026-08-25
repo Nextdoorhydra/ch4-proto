@@ -201,24 +201,9 @@ float ACMPartActorBase::GetMovementImpulseMultiplier() const
     return MovementImpulseMultiplier;
 }
 
-float ACMPartActorBase::GetBaseMovementImpulse() const
-{
-    return BaseMovementImpulse;
-}
-
 float ACMPartActorBase::GetMovementImpulse() const
 {
     return BaseMovementImpulse * MovementImpulseMultiplier;
-}
-
-FName ACMPartActorBase::GetPartRowName() const
-{
-    return PartRowName;
-}
-
-FName ACMPartActorBase::GetTierRowName() const
-{
-    return TierRowName;
 }
 
 void ACMPartActorBase::ApplyPartData(
@@ -300,7 +285,6 @@ bool ACMPartActorBase::InitializeFromPartData()
     }
 
     PartDataID = PartRow->ID;
-    TierDataID = TierRow->ID;
     Species = PartRow->Species;
     MaxHealth = FMath::Max(
         PartRow->MaxHealth * TierRow->HealthMultiplier,
@@ -326,7 +310,7 @@ bool ACMPartActorBase::InitializeFromPartData()
         *PartRowName.ToString(),
         *TierRowName.ToString(),
         *PartDataID.ToString(),
-        *TierDataID.ToString(),
+        *TierRow->ID.ToString(),
         *PartRow->PartType.ToString(),
         *Species.ToString(),
         MaxHealth,

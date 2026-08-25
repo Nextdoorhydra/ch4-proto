@@ -6,7 +6,6 @@
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Leg/CMLegPart.h"
 #include "Player/CMControlBody.h"
-#include "Player/CMDebugPartActor.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
 #include "Engine/World.h"
@@ -45,17 +44,6 @@ void ACMChimera::ActivatePartSlot(
             LegPart->SetPendingReverseMovement(bReverseMovement);
         }
 
-#if !UE_BUILD_SHIPPING
-        ACMDebugPartActor* DebugPart =
-            Cast<ACMDebugPartActor>(PartSlot->GetAttachedPart());
-        if (DebugPart)
-        {
-            DebugPart->SetContributingPlayerState(
-                ContributingPlayerState
-            );
-        }
-#endif
-
         const bool bActivated = PartSlot->TryActivateGrantedAbility();
         if (PartActor && !bActivated)
         {
@@ -65,12 +53,6 @@ void ACMChimera::ActivatePartSlot(
         {
             LegPart->ConsumePendingReverseMovement();
         }
-#if !UE_BUILD_SHIPPING
-        if (DebugPart && !bActivated)
-        {
-            DebugPart->ConsumeContributingPlayerState();
-        }
-#endif
         UE_LOG(LogChimeraLineBody, Log,
             TEXT("[Attached Part Input] Slot=(%d,%d) Part=%s Activated=%s"),
             PartSlotAddress.SegmentIndex,
@@ -320,7 +302,7 @@ UClass* LoadTestLegPartClass()
 {
     static TSoftClassPtr<ACMLegPart> TestLegPartClass(
         FSoftObjectPath(
-            TEXT("/Game/Chimera/Character/Part/BP_CMLegPart.BP_CMLegPart_C")
+            TEXT("/Game/Chimera/Character/Part/Leg/BP_CMLegPart.BP_CMLegPart_C")
         )
     );
     return TestLegPartClass.LoadSynchronous();
@@ -364,7 +346,7 @@ UClass* LoadTestArmPartClass()
 {
     static TSoftClassPtr<ACMArmPart> TestArmPartClass(
         FSoftObjectPath(
-            TEXT("/Game/Chimera/Character/Part/BP_CMArmPart.BP_CMArmPart_C")
+            TEXT("/Game/Chimera/Character/Part/Arm/BP_CMArmPart.BP_CMArmPart_C")
         )
     );
     return TestArmPartClass.LoadSynchronous();
@@ -374,7 +356,7 @@ UClass* LoadTestSpringArmPartClass()
 {
     static TSoftClassPtr<ACMSpringArmPart> TestSpringArmPartClass(
         FSoftObjectPath(
-            TEXT("/Game/Chimera/Character/Part/BP_CMSpringArmPart.BP_CMSpringArmPart_C")
+            TEXT("/Game/Chimera/Character/Part/Arm/BP_CMSpringArmPart.BP_CMSpringArmPart_C")
         )
     );
     return TestSpringArmPartClass.LoadSynchronous();
