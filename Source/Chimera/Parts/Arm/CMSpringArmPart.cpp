@@ -6,6 +6,7 @@
 #include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Stage/Mechanism/CMGrabPullTarget.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/ArrowComponent.h"
 #include "Engine/World.h"
@@ -266,6 +267,7 @@ void ACMSpringArmPart::ResolveHookHit(const FHitResult& Hit)
     AActor* HitActor = Hit.GetActor();
     UPrimitiveComponent* HitComponent = Hit.GetComponent();
     bool bPulledTarget = false;
+    bool bHandledPullTarget = false;
 
     if (HitActor)
     {
@@ -278,9 +280,19 @@ void ACMSpringArmPart::ResolveHookHit(const FHitResult& Hit)
                 Hit.ImpactNormal
             );
         }
+
+        if (HitActor->Implements<UCMGrabPullTarget>())
+        {
+            bHandledPullTarget = ICMGrabPullTarget::Execute_TryHandlePull(
+                HitActor,
+                this,
+                GetActorLocation(),
+                PullImpulse);
+            bPulledTarget = bHandledPullTarget;
+        }
     }
 
-    if (HitComponent && HitComponent->IsSimulatingPhysics())
+    if (!bHandledPullTarget && HitComponent && HitComponent->IsSimulatingPhysics())
     {
         const FVector PullDirection =
             (GetActorLocation() - Hit.ImpactPoint).GetSafeNormal();
@@ -293,15 +305,18 @@ void ACMSpringArmPart::ResolveHookHit(const FHitResult& Hit)
             bPulledTarget = true;
         }
     }
-    else if (UCMPartSlotComponent* PartSlot = GetAttachedPartSlot())
+    else if (!bHandledPullTarget)
     {
-        if (ACMChimera* Chimera = Cast<ACMChimera>(PartSlot->GetOwner()))
+        if (UCMPartSlotComponent* PartSlot = GetAttachedPartSlot())
         {
-            StartBodyPull(
-                Chimera,
-                PartSlot->GetSlotAddress(),
-                Hit.ImpactPoint
-            );
+            if (ACMChimera* Chimera = Cast<ACMChimera>(PartSlot->GetOwner()))
+            {
+                StartBodyPull(
+                    Chimera,
+                    PartSlot->GetSlotAddress(),
+                    Hit.ImpactPoint
+                );
+            }
         }
     }
 

@@ -14,6 +14,7 @@
 #include "Stage/CMStageElementComponent.h"
 #include "Stage/Obstacle/Component/CMForceZoneComponent.h"
 #include "Stage/Obstacle/Component/CMHazardComponent.h"
+#include "Stage/Obstacle/Component/CMChimeraEffectZoneComponent.h"
 #include "Stage/Obstacle/Component/CMObstacleDefinitionComponent.h"
 #include "Stage/Obstacle/Component/CMObstacleMotionComponent.h"
 #include "Stage/Obstacle/Component/CMStatusZoneComponent.h"
@@ -239,6 +240,14 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
         StatusZoneComponent->SetZoneEnabled(bIsActive);
     }
 
+    TInlineComponentArray<UCMChimeraEffectZoneComponent*>
+        ChimeraEffectZoneComponents(this);
+    for (UCMChimeraEffectZoneComponent* ChimeraEffectZone
+        : ChimeraEffectZoneComponents)
+    {
+        ChimeraEffectZone->SetZoneEnabled(bIsActive);
+    }
+
     TInlineComponentArray<UCMForceZoneComponent*> ForceZoneComponents(this);
     for (UCMForceZoneComponent* ForceZoneComponent : ForceZoneComponents)
     {
@@ -304,10 +313,20 @@ bool ACMStageObstacleBase::ApplyDefinitionAssets(UCMObstacleDefinition* LoadedDe
 
     UNiagaraSystem* LoadedNiagara = LoadedDefinition->NiagaraSystem.Get();
     USoundBase* LoadedSound = LoadedDefinition->LoopSound.Get();
-    UClass* LoadedGameplayEffect = LoadedDefinition->GameplayEffectClass.Get();
+    UClass* LoadedGameplayEffect =
+        LoadedDefinition->ChimeraEffect.GameplayEffectClass.Get();
+    if (LoadedDefinition->ChimeraEffect.bEnabled
+        && LoadedDefinition->ChimeraEffect.GameplayEffectClass.IsNull())
+    {
+        UE_LOG(LogChimeraStageLoad, Error,
+            TEXT("Obstacle ChimeraEffect is enabled without a GameplayEffectClass. Actor=%s Definition=%s"),
+            *GetNameSafe(this), *GetNameSafe(LoadedDefinition));
+        return false;
+    }
     if ((!LoadedDefinition->NiagaraSystem.IsNull() && !LoadedNiagara)
         || (!LoadedDefinition->LoopSound.IsNull() && !LoadedSound)
-        || (!LoadedDefinition->GameplayEffectClass.IsNull() && !LoadedGameplayEffect))
+        || (!LoadedDefinition->ChimeraEffect.GameplayEffectClass.IsNull()
+            && !LoadedGameplayEffect))
     {
         UE_LOG(LogChimeraStageLoad, Error,
             TEXT("Obstacle Definition bundle is incomplete. Actor=%s Definition=%s"),
@@ -326,11 +345,17 @@ bool ACMStageObstacleBase::ApplyDefinitionAssets(UCMObstacleDefinition* LoadedDe
     TInlineComponentArray<UCMHazardComponent*> HazardComponents(this);
     for (UCMHazardComponent* HazardComponent : HazardComponents)
     {
-        HazardComponent->ConfigureHazard(
-            LoadedGameplayEffect,
-            LoadedDefinition->HazardEffectTag,
-            LoadedDefinition->ApplicationMode,
-            LoadedDefinition->PeriodSeconds);
+        HazardComponent->ConfigurePartEffect(LoadedDefinition->PartEffect);
+    }
+
+    TInlineComponentArray<UCMChimeraEffectZoneComponent*>
+        ChimeraEffectZoneComponents(this);
+    for (UCMChimeraEffectZoneComponent* ChimeraEffectZone
+        : ChimeraEffectZoneComponents)
+    {
+        ChimeraEffectZone->ConfigureChimeraEffect(
+            LoadedDefinition->ChimeraEffect,
+            LoadedGameplayEffect);
     }
     return true;
 }

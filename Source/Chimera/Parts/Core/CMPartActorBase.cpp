@@ -6,6 +6,7 @@
 #include "Engine/DataTable.h"
 #include "Net/UnrealNetwork.h"
 #include "Parts/Combat/CMBattleComponent.h"
+#include "Parts/Core/CMPartStatusComponent.h"
 #include "Player/CMPartSlotComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPart, Log, All);
@@ -24,6 +25,9 @@ ACMPartActorBase::ACMPartActorBase()
 
     BattleComponent = CreateDefaultSubobject<UCMBattleComponent>(
         TEXT("BattleComponent")
+    );
+    PartStatusComponent = CreateDefaultSubobject<UCMPartStatusComponent>(
+        TEXT("PartStatusComponent")
     );
 }
 
@@ -93,6 +97,10 @@ void ACMPartActorBase::OnDetachedFromPartSlot_Implementation(
 
     AttachedPartSlot.Reset();
     PendingContributingPlayerState.Reset();
+    if (PartStatusComponent)
+    {
+        PartStatusComponent->ClearAllStatuses();
+    }
     if (BattleComponent)
     {
         BattleComponent->EndParryWindow();
@@ -123,6 +131,11 @@ UCMBattleComponent* ACMPartActorBase::GetBattleComponent() const
     return BattleComponent;
 }
 
+UCMPartStatusComponent* ACMPartActorBase::GetPartStatusComponent() const
+{
+    return PartStatusComponent;
+}
+
 float ACMPartActorBase::GetHealth() const
 {
     return Health;
@@ -140,7 +153,10 @@ float ACMPartActorBase::GetStrength() const
 
 float ACMPartActorBase::GetMovementImpulseMultiplier() const
 {
-    return MovementImpulseMultiplier;
+    return MovementImpulseMultiplier
+        * (PartStatusComponent
+            ? PartStatusComponent->GetMovementMultiplier()
+            : 1.0f);
 }
 
 void ACMPartActorBase::ApplyPartData(
@@ -236,7 +252,11 @@ bool ACMPartActorBase::IsAttached() const
 
 bool ACMPartActorBase::IsOperational() const
 {
-    return IsAlive() && !bDisabled && IsAttached();
+    return IsAlive()
+        && !bDisabled
+        && IsAttached()
+        && (!PartStatusComponent
+            || !PartStatusComponent->BlocksAbility());
 }
 
 bool ACMPartActorBase::ApplyPartDamage(float Damage)
@@ -255,6 +275,10 @@ bool ACMPartActorBase::ApplyPartDamage(float Damage)
     {
         bDead = true;
         bDisabled = true;
+        if (PartStatusComponent)
+        {
+            PartStatusComponent->ClearAllStatuses();
+        }
         BattleComponent->EndParryWindow();
         OnPartDied.Broadcast();
         OnDisabledChanged.Broadcast(true);
