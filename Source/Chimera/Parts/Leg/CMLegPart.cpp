@@ -21,6 +21,18 @@ float ACMLegPart::GetActionDuration() const
     return ActionDuration;
 }
 
+void ACMLegPart::SetPendingReverseMovement(bool bReverseMovement)
+{
+    bPendingReverseMovement = bReverseMovement;
+}
+
+bool ACMLegPart::ConsumePendingReverseMovement()
+{
+    const bool bWasReverse = bPendingReverseMovement;
+    bPendingReverseMovement = false;
+    return bWasReverse;
+}
+
 void ACMLegPart::ApplyPartData(const FCMPartLegArmTableRow& PartRow)
 {
     StaminaCost = FMath::Max(PartRow.StaminaCost, 0.0f);
