@@ -10,6 +10,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/CMCameraOcclusionComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -130,6 +131,9 @@ ACMChimera::ACMChimera()
         USpringArmComponent::SocketName
     );
     FollowCamera->bUsePawnControlRotation = false;
+
+    CameraOcclusionComponent = CreateDefaultSubobject<
+        UCMCameraOcclusionComponent>(TEXT("CameraOcclusionComponent"));
 
     BodySegments.Add(BodyMesh);
     LeftFootPoints.Add(LeftFootPoint);
@@ -431,6 +435,27 @@ void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
 int32 ACMChimera::GetActiveSegmentCount() const
 {
     return ActiveSegmentCount;
+}
+
+float ACMChimera::AdjustLocalCameraDistance(float WheelInput)
+{
+    if (!CameraBoom || FMath::IsNearlyZero(WheelInput))
+    {
+        return CameraBoom ? CameraBoom->TargetArmLength : 0.0f;
+    }
+
+    const float SafeMinimum = FMath::Max(MinimumCameraDistance, 0.0f);
+    const float SafeMaximum = FMath::Max(
+        MaximumCameraDistance,
+        SafeMinimum
+    );
+    CameraBoom->TargetArmLength = FMath::Clamp(
+        CameraBoom->TargetArmLength
+            - WheelInput * FMath::Max(CameraDistanceStep, 0.0f),
+        SafeMinimum,
+        SafeMaximum
+    );
+    return CameraBoom->TargetArmLength;
 }
 
 void ACMChimera::ApplyPlanarKnockback(FVector WorldDirection, float Speed)

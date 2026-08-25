@@ -46,6 +46,12 @@ void UCMLaserBeamComponent::ApplyBeam(
     {
         BeamEffect->SetVariablePosition(NiagaraStartParameter, StartLocation);
         BeamEffect->SetVariablePosition(NiagaraEndParameter, EndLocation);
+        // BeamThickness는 충돌의 반지름이므로 Niagara에는 전체 폭을 전달
+        BeamEffect->SetVariableFloat(NiagaraWidthParameter, BeamThickness * 2.0f);
+        // Niagara의 BeamColor는 Scale RGB 입력과 같은 Vector3 타입으로 사용
+        BeamEffect->SetVariableVec3(
+            NiagaraColorParameter,
+            FVector(BeamColor.R, BeamColor.G, BeamColor.B));
     }
 }
 
@@ -59,13 +65,24 @@ void UCMLaserBeamComponent::SetBeamVisible(bool bVisible)
     if (BeamEffect)
     {
         BeamEffect->SetVisibility(bVisible, true);
-        if (bVisible)
+        if (bVisible && !BeamEffect->IsActive())
         {
             BeamEffect->Activate(true);
         }
-        else
+        else if (!bVisible)
         {
             BeamEffect->Deactivate();
         }
+    }
+}
+
+// 플레이어를 맞힌 동안에만 Niagara 끝점 스파크가 생성되도록 Spawn Rate 갱신
+void UCMLaserBeamComponent::SetPlayerImpactActive(bool bActive)
+{
+    if (BeamEffect)
+    {
+        BeamEffect->SetVariableFloat(
+            NiagaraImpactSpawnRateParameter,
+            bActive ? ImpactSparkRate : 0.0f);
     }
 }

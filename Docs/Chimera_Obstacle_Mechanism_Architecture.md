@@ -2,7 +2,7 @@
 
 ## 장애물 제작 원칙
 
-단순 장애물은 기존처럼 BP에 에셋을 직접 지정할 수 있다. 일반 장애물은 레벨에 Shell BP를 직접 배치하고 외형·이펙트·사운드·GE를 `CMObstacleDefinition` PDA의 Soft Reference로 준비한다. 위치·회전·이동축·이동거리는 레벨 인스턴스가 관리한다.
+단순 장애물은 기존처럼 BP에 에셋을 직접 지정할 수 있다. 일반 장애물은 레벨에 Shell BP를 직접 배치하고 외형·이펙트·사운드와 효과 설정을 `CMObstacleDefinition` PDA로 준비한다. 위치·회전·이동축·이동거리는 레벨 인스턴스가 관리한다.
 
 ```text
 레벨 배치 Shell
@@ -16,9 +16,12 @@ CMObstacleDefinition PDA
 ├─ Materials
 ├─ NiagaraSystem
 ├─ LoopSound
-├─ GameplayEffectClass
-├─ HazardEffectTag
-└─ ApplicationMode·PeriodSeconds
+├─ PartEffect
+│  ├─ 코드 기반 내구도 피해·파츠 상태
+│  └─ ApplicationPolicy·PeriodSeconds
+└─ ChimeraEffect
+   ├─ 공용 ASC GameplayEffectClass
+   └─ ApplicationPolicy·PeriodSeconds
 ```
 
 ## 공통 장애물
@@ -29,7 +32,8 @@ CMObstacleDefinition PDA
 - 움직이는 칼날: Hazard + ObstacleMotion
 - 송곳: Hazard + ObstacleMotion
 - 레이저: Hazard
-- 독·감전·빙판 장판: StatusZone
+- 독·감전·빙판 장판: Hazard + PartStatus
+- 키메라 전체 혼란·경직 영역: ChimeraEffectZone
 - 컨베이어·환풍구: ForceZone
 
 충돌 영역의 BeginOverlap과 EndOverlap에서 각 컴포넌트의 `NotifyTargetEntered`, `NotifyTargetExited`를 호출합니다. 컴포넌트가 충돌 모양을 직접 소유하지 않으므로 장애물별 메시와 판정 영역을 자유롭게 구성할 수 있습니다.
@@ -41,11 +45,11 @@ CMObstacleDefinition PDA
 → Shell Actor 생성
 → Definition 미준비 상태
 → PrimaryMesh 숨김
-→ Motion·Hazard·StatusZone·ForceZone 비활성
+→ Motion·Hazard·ChimeraEffectZone·StatusZone·ForceZone 비활성
 → Schedule이 LoadGroup 요청
 → PDA와 Gameplay Bundle 준비
 → DefinitionComponent가 완료 감지
-→ Mesh·Material·Niagara·Sound·GE 적용
+→ Mesh·Material·Niagara·Sound·PartEffect·ChimeraEffect 적용
 → 기존 활성화 요청이 있으면 실제 장애물 작동
 ```
 
@@ -55,9 +59,9 @@ Definition이 설정되지 않은 장애물은 BP 직접 참조 방식으로 간
 
 1. `CMStageObstacleBase`를 상속한 Shell BP를 만든다.
 2. 부모의 `PrimaryMesh`, `PrimaryEffect`, `LoopAudio`를 사용하고 실제 에셋은 BP에 직접 지정하지 않는다.
-3. Box·Sphere 등 판정 Collision과 Motion·Hazard·StatusZone·ForceZone 중 필요한 컴포넌트를 추가한다.
+3. Box·Sphere 등 판정 Collision과 Motion·Hazard·ChimeraEffectZone·ForceZone 중 필요한 컴포넌트를 추가한다.
 4. `/Game/Chimera/Environment/Obstacle/Data`에 `CMObstacleDefinition` Data Asset을 만든다.
-5. PDA의 Mesh·Material·Niagara·Sound·GE를 지정한다.
+5. PDA의 Mesh·Material·Niagara·Sound와 PartEffect 또는 ChimeraEffect를 지정한다.
 6. 배치 BP의 `ObstacleDefinition.Definition`에 PDA를 Soft Reference로 지정한다.
 7. `ObstacleDefinition.LoadGroupId`에 Schedule의 그룹 ID를 지정한다.
 8. Stage Schedule의 Catalog에서 같은 PDA를 같은 GroupId에 배정하고 `Refresh And Rebuild Catalog`를 실행한다.
@@ -101,7 +105,15 @@ Definition이 설정되지 않은 장애물은 BP 직접 참조 방식으로 간
 
 ### CMHazardComponent
 
-접촉 대상을 받아 Single, Periodic, Kill 적용 방식을 표현한다. Definition의 GE·효과 태그·적용 방식·주기를 전달받는다. 현재 실제 몸통 마디 판별과 GE 적용은 TODO다.
+접촉한 팔·다리 파츠만 추적해 `PartEffect`의 내구도 피해와 상태를 코드로 적용한다. `OnceOnEnter`, `PeriodicWhileOverlapping`, `WhileOverlapping`, `KillOnEnter` 정책을 지원하며 복수 콜리전 중복은 파츠별 오버랩 횟수로 방지한다.
+
+### CMPartStatusComponent
+
+개별 파츠의 감전·경직·감속 상태를 관리한다. 같은 발생원의 같은 태그는 갱신하고, 여러 상태의 이동 배율은 곱한다. 행동 차단 상태는 해당 파츠의 `IsOperational`만 실패시켜 다른 파츠 GA에는 영향을 주지 않는다.
+
+### CMChimeraEffectZoneComponent
+
+키메라 전체에 영향을 주는 Definition의 Soft GE를 공용 ASC에 적용한다. `WhileOverlapping` 효과는 적용 Handle을 키메라별로 저장해 마지막 마디가 이탈하거나 장애물이 비활성화될 때 정확히 제거한다.
 
 ### CMObstacleMotionComponent
 
@@ -114,11 +126,11 @@ Rotation, Linear, PingPong 종류와 축, 속도, 거리, 시작·정지·반전
 
 ### CMStatusZoneComponent
 
-대상 진입·이탈과 상태 태그를 전달합니다. 지속형 GE 적용 핸들을 저장하고 제거하는 로직은 후속 단계에서 구현합니다.
+대상 진입·이탈과 상태 태그만 전달하는 기존 확장 지점입니다. 신규 파츠 장판은 `CMHazardComponent + CMPartStatusComponent`, 키메라 전체 GE 영역은 `CMChimeraEffectZoneComponent`를 사용합니다.
 
 ### CMForceZoneComponent
 
-로컬 방향과 힘 세기를 보관하고 월드 방향을 계산합니다. 키메라 몸통 마디에 실제 힘을 가하는 서버 로직은 후속 단계에서 구현합니다.
+로컬 방향과 힘 세기를 보관하고 월드 방향을 계산합니다. 서버에서 키메라 전체 Force를 활성 몸통 마디의 질량 비율로 분배합니다.
 
 ### CMObstacleDefinitionComponent
 
@@ -126,7 +138,7 @@ Soft Definition과 LoadGroupId를 보관한다. 로컬 Coordinator의 그룹 완
 
 ### CMStageObstacleBase 활성 조건
 
-실제 장애물 활성 상태는 `활성화 요청 && Definition 준비 완료`다. Definition이 준비되기 전에 Activate 명령을 받으면 요청을 기억하고 로드 성공 후 작동한다. 비활성 상태에서는 Motion, Hazard, StatusZone, ForceZone, 기본 Niagara와 반복 사운드를 함께 정지한다.
+실제 장애물 활성 상태는 `활성화 요청 && Definition 준비 완료`다. Definition이 준비되기 전에 Activate 명령을 받으면 요청을 기억하고 로드 성공 후 작동한다. 비활성 상태에서는 Motion, Hazard, ChimeraEffectZone, StatusZone, ForceZone, 기본 Niagara와 반복 사운드를 함께 정지한다.
 
 ## 에디터 프리뷰
 

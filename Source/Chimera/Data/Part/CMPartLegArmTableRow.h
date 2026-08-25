@@ -24,20 +24,24 @@ struct CHIMERA_API FCMPartLegArmTableRow : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float MaxHealth = 0.0f;
 
-    // Arm damage or another concrete Part action's power. Movement uses the
-    // separate MovementImpulseMultiplier so combat tuning cannot change speed.
+    // Arm damage or another concrete Part action's power.
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Strength = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float StaminaCost = 0.0f;
 
+    // Shared Stamina consumed per second while an ordinary Arm is anchored.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StaminaPerSecond = 0.0f;
+
     // Leg action lock time and Arm swing time share one sheet column.
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float ActionDuration = 0.0f;
 
+    // Base movement force for this concrete Part type. Tier data scales it.
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementImpulseMultiplier = 0.0f;
+    float BaseMovementImpulse = 0.0f;
 
     // Arm-only values. Leg rows explicitly store zero.
     UPROPERTY(EditAnywhere, BlueprintReadWrite)

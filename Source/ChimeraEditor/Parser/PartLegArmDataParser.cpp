@@ -16,9 +16,9 @@ namespace PartColumns
     const FString MaxHealth = TEXT("MaxHealth");
     const FString Strength = TEXT("Strength");
     const FString StaminaCost = TEXT("StaminaCost");
+    const FString StaminaPerSecond = TEXT("Staminapersec");
     const FString ActionDuration = TEXT("ActionDuration");
-    const FString MovementImpulseMultiplier =
-        TEXT("MovementImpulseMultiplier");
+    const FString BaseMovementImpulse = TEXT("BaseMovementImpulse");
     const FString AttackRange = TEXT("AttackRange");
     const FString AttackRadius = TEXT("AttackRadius");
     const FString ExtensionSpeed = TEXT("ExtensionSpeed");
@@ -35,8 +35,9 @@ namespace PartColumns
         MaxHealth,
         Strength,
         StaminaCost,
+        StaminaPerSecond,
         ActionDuration,
-        MovementImpulseMultiplier,
+        BaseMovementImpulse,
         AttackRange,
         AttackRadius,
         ExtensionSpeed,
@@ -147,11 +148,15 @@ bool UPartLegArmDataParser::OnParseComplete(FString& OutError)
             Row, PartColumns::StaminaCost, NewRow.StaminaCost,
             Report, Index, ParsedRowName, true);
         bHasValidNumbers &= PartColumns::ReadRequiredFloat(
+            Row, PartColumns::StaminaPerSecond,
+            NewRow.StaminaPerSecond,
+            Report, Index, ParsedRowName, true);
+        bHasValidNumbers &= PartColumns::ReadRequiredFloat(
             Row, PartColumns::ActionDuration, NewRow.ActionDuration,
             Report, Index, ParsedRowName, false);
         bHasValidNumbers &= PartColumns::ReadRequiredFloat(
-            Row, PartColumns::MovementImpulseMultiplier,
-            NewRow.MovementImpulseMultiplier,
+            Row, PartColumns::BaseMovementImpulse,
+            NewRow.BaseMovementImpulse,
             Report, Index, ParsedRowName, true);
         bHasValidNumbers &= PartColumns::ReadRequiredFloat(
             Row, PartColumns::AttackRange, NewRow.AttackRange,
@@ -207,15 +212,16 @@ bool UPartLegArmDataParser::OnParseComplete(FString& OutError)
         Report.AddSuccess();
 
         UE_LOG(LogChimeraPartDataParser, Verbose,
-            TEXT("[CSV -> Part DataTable] Row=%s ID=%s Type=%s Health=%.1f Strength=%.1f Stamina=%.1f Action=%.2f MoveScale=%.2f"),
+            TEXT("[CSV -> Part DataTable] Row=%s ID=%s Type=%s Health=%.1f Strength=%.1f Stamina=%.1f StaminaPerSecond=%.1f Action=%.2f BaseImpulse=%.1f"),
             *ParsedRowName.ToString(),
             *NewRow.ID.ToString(),
             *NewRow.PartType.ToString(),
             NewRow.MaxHealth,
             NewRow.Strength,
             NewRow.StaminaCost,
+            NewRow.StaminaPerSecond,
             NewRow.ActionDuration,
-            NewRow.MovementImpulseMultiplier);
+            NewRow.BaseMovementImpulse);
     }
 
     return FinalizeParseReport(ParserName, Report, OutError);

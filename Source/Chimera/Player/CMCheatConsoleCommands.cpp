@@ -59,7 +59,7 @@ void AttachPart(const TArray<FString>& Args, UWorld* World)
     if (Args.Num() < 2)
     {
         UE_LOG(LogTemp, Warning,
-            TEXT("[Cheat Usage] CM.AttachPart <SlotNumber> <Arm|SpringArm|LegTier1..5>"));
+            TEXT("[Cheat Usage] CM.AttachPart <SlotNumber> <DefaultArm|SpringArm|LegTier1..5>"));
         return;
     }
 
@@ -133,7 +133,7 @@ FAutoConsoleCommandWithWorldAndArgs SpawnRandomPartsCommand(
 
 FAutoConsoleCommandWithWorldAndArgs AttachPartCommand(
     TEXT("CM.AttachPart"),
-    TEXT("Replaces a one-based slot Part. Usage: CM.AttachPart <SlotNumber> <Arm|SpringArm|LegTier1..5>"),
+    TEXT("Replaces a one-based slot Part. Usage: CM.AttachPart <SlotNumber> <DefaultArm|SpringArm|LegTier1..5>"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &AttachPart
     )

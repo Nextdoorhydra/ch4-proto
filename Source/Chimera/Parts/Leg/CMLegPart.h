@@ -21,6 +21,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Leg")
     float GetActionDuration() const;
 
+    /** Stores the direction sampled when Q/W/E/R starts this activation. */
+    void SetPendingReverseMovement(bool bReverseMovement);
+
+    /** Consumed once by the granted Leg ability when its Step begins. */
+    bool ConsumePendingReverseMovement();
+
 protected:
     virtual void ApplyPartData(
         const FCMPartLegArmTableRow& PartRow
@@ -35,4 +41,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Leg",
         meta = (ClampMin = "0.01"))
     float ActionDuration = 0.25f;
+
+private:
+    bool bPendingReverseMovement = false;
 };

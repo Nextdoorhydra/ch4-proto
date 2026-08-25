@@ -13,6 +13,7 @@ class UCMVisionInputComponent;
 class UInputAction;
 class UInputMappingContext;
 class UCMClientStageLoadComponent;
+struct FInputActionValue;
 
 UCLASS()
 class CHIMERA_API ACMPlayerController : public APlayerController
@@ -99,6 +100,14 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputAction> DetachModifierAction;
 
+    /** Hold this action while starting a Leg action to move backward. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    TObjectPtr<UInputAction> ReverseModifierAction;
+
+    /** Local-only mouse-wheel input that changes the shared-body view distance. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    TObjectPtr<UInputAction> CameraDistanceAction;
+
 private:
     void FirstControlKeyPressed();
     void SecondControlKeyPressed();
@@ -110,6 +119,9 @@ private:
     void FourthControlKeyReleased();
     void DetachModifierPressed();
     void DetachModifierReleased();
+    void ReverseModifierPressed();
+    void ReverseModifierReleased();
+    void AdjustCameraDistance(const FInputActionValue& InputValue);
     void SetControlSlotPressed(int32 SlotIndex, bool bPressed);
     void DebugMoveForwardPressed();
     void DebugMoveForwardReleased();
@@ -179,6 +191,7 @@ private:
     TObjectPtr<UCMClientStageLoadComponent> ClientStageLoadComponent;
 
     bool bDetachModifierHeld = false;
+    bool bReverseModifierHeld = false;
     bool bCheatDebugMovementEnabled = false;
     bool bDebugMoveForwardHeld = false;
     bool bDebugMoveBackwardHeld = false;

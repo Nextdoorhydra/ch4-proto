@@ -20,6 +20,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
     TargetPart
 );
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+    FCMArmSwingTargetDetectedSignature,
+    AActor*,
+    TargetActor,
+    FVector,
+    TargetLocation
+);
+
 /** Production Arm Part. One GA activation owns one complete swing. */
 UCLASS(Blueprintable)
 class CHIMERA_API ACMArmPart : public ACMPartActorBase
@@ -39,6 +47,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
     float GetStaminaCost() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
+    float GetAnchorStaminaCostPerSecond() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
     virtual float GetSwingDuration() const;
@@ -77,6 +88,10 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Arm")
     FCMArmSwingHitSignature OnSwingHit;
 
+    /** Server-only notification for actors found inside this Arm's swing sector. */
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Arm")
+    FCMArmSwingTargetDetectedSignature OnSwingTargetDetected;
+
 protected:
     virtual void BeginPlay() override;
     virtual void ApplyPartData(
@@ -87,6 +102,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm",
         meta = (ClampMin = "0.0"))
     float StaminaCost = 10.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm",
+        meta = (ClampMin = "0.0"))
+    float AnchorStaminaCostPerSecond = 0.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm",
         meta = (ClampMin = "0.01"))
@@ -100,7 +119,25 @@ protected:
         meta = (ClampMin = "0.0"))
     float AttackRadius = 30.0f;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Arm|Debug")
+    bool bDrawSwingDebug = true;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Arm|Debug", meta = (ClampMin = "0.0"))
+    float SwingDebugDuration = 1.0f;
+
 private:
+    void DetectSwingTargets();
+
+    static bool IsInsideSwingSector(
+        const FVector& Origin,
+        const FVector& ForwardDirection,
+        const FVector& TargetLocation,
+        float Range,
+        float Radius
+    );
+
     UFUNCTION()
     void OnRep_Swinging();
 

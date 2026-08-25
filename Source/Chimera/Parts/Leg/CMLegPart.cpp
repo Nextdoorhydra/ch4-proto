@@ -7,8 +7,7 @@ ACMLegPart::ACMLegPart()
 {
     PartType = ECMPartSlotType::Leg;
     GrantedAbilityClass = UCMLegGameplayAbility::StaticClass();
-    Strength = 1.0f;
-    MovementImpulseMultiplier = 1.0f;
+    PartRowName = TEXT("DefaultLeg");
 }
 
 float ACMLegPart::GetStaminaCost() const
@@ -19,6 +18,18 @@ float ACMLegPart::GetStaminaCost() const
 float ACMLegPart::GetActionDuration() const
 {
     return ActionDuration;
+}
+
+void ACMLegPart::SetPendingReverseMovement(bool bReverseMovement)
+{
+    bPendingReverseMovement = bReverseMovement;
+}
+
+bool ACMLegPart::ConsumePendingReverseMovement()
+{
+    const bool bWasReverse = bPendingReverseMovement;
+    bPendingReverseMovement = false;
+    return bWasReverse;
 }
 
 void ACMLegPart::ApplyPartData(const FCMPartLegArmTableRow& PartRow)

@@ -25,6 +25,11 @@
 			"LoadingPhase": "Default"
 		},
 		{
+			"Name": "CMGore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "ChimeraEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
@@ -90,6 +95,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "NKMSound",
+			"Enabled": true
+		},
+		{
 			"Name": "NKMLocalization",
 			"Enabled": true
 		},
@@ -110,6 +119,10 @@
 		},
 		{
 			"Name": "Niagara",
+			"Enabled": true
+		},
+		{
+			"Name": "CascadeToNiagaraConverter",
 			"Enabled": true
 		}
 	]
