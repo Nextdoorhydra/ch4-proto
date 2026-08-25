@@ -1,4 +1,4 @@
-#include "Stage/Mechanism/Component/CMMechanismWeightComponent.h"
+#include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 
 UCMMechanismWeightComponent::UCMMechanismWeightComponent()
 {

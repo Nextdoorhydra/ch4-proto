@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Stage/Mechanism/CMStageButtonBase.h"
+#include "Stage/Trigger/CMStageButtonBase.h"
 
 #include "CMPressurePlateBase.generated.h"
 
@@ -22,7 +22,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void HandleMechanismReset_Implementation() override;
+    virtual void HandleElementReset_Implementation() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Pressure Plate")
     TObjectPtr<UBoxComponent> PressureVolume;

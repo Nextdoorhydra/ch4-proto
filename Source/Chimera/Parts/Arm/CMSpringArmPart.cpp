@@ -6,7 +6,7 @@
 #include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
-#include "Stage/Mechanism/CMGrabPullTarget.h"
+#include "Stage/Trigger/CMGrabPullTarget.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/ArrowComponent.h"
 #include "Engine/World.h"

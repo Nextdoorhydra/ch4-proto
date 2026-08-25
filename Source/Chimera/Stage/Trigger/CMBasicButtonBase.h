@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Stage/Mechanism/CMStageButtonBase.h"
+#include "Stage/Trigger/CMStageButtonBase.h"
 
 #include "CMBasicButtonBase.generated.h"
 

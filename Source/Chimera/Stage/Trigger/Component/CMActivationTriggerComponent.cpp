@@ -1,4 +1,4 @@
-#include "Stage/Mechanism/Component/CMActivationTriggerComponent.h"
+#include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 
 #include "Net/UnrealNetwork.h"
 

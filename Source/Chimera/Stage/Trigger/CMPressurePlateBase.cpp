@@ -1,8 +1,8 @@
-#include "Stage/Mechanism/CMPressurePlateBase.h"
+#include "Stage/Trigger/CMPressurePlateBase.h"
 
 #include "Components/BoxComponent.h"
-#include "Stage/Mechanism/Component/CMActivationTriggerComponent.h"
-#include "Stage/Mechanism/Component/CMMechanismWeightComponent.h"
+#include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
+#include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 
 ACMPressurePlateBase::ACMPressurePlateBase()
 {
@@ -99,9 +99,9 @@ float ACMPressurePlateBase::ResolveMechanismWeight(const AActor* Actor) const
 }
 
 // 리셋 시 기존 Overlap을 비우고 다음 진입부터 무게를 다시 계산
-void ACMPressurePlateBase::HandleMechanismReset_Implementation()
+void ACMPressurePlateBase::HandleElementReset_Implementation()
 {
-    Super::HandleMechanismReset_Implementation();
+    Super::HandleElementReset_Implementation();
     OverlapCounts.Reset();
     CurrentWeight = 0.0f;
     OnPressureChanged(CurrentWeight, false);

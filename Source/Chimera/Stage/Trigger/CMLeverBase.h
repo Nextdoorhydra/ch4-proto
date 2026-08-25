@@ -1,8 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Stage/Mechanism/CMGrabPullTarget.h"
-#include "Stage/Mechanism/CMStageButtonBase.h"
+#include "Stage/Trigger/CMGrabPullTarget.h"
+#include "Stage/Trigger/CMStageButtonBase.h"
 
 #include "CMLeverBase.generated.h"
 

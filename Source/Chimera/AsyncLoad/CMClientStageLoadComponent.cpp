@@ -1,5 +1,6 @@
 #include "AsyncLoad/CMClientStageLoadComponent.h"
 
+#include "AsyncLoad/CMStageLoadLog.h"
 #include "AsyncLoad/CMStageLoadCoordinatorSubsystem.h"
 #include "GameMode/Play/CMPlayGameState.h"
 #include "Player/CMPlayerController.h"
@@ -74,6 +75,13 @@ void UCMClientStageLoadComponent::TryBindPlayGameState()
     StageLoadCoordinator->OnStageStartRequiredFinished.AddUniqueDynamic(
         this, &ThisClass::HandleStageStartRequiredFinished);
     HandleStageLoadRequestChanged(BoundPlayGameState->GetStageLoadRequest());
+
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Local stage loader bound. NetMode=%d Controller=%s Request=%s Schedule=%s"),
+        static_cast<int32>(GetWorld()->GetNetMode()),
+        *GetNameSafe(Controller),
+        *BoundPlayGameState->GetStageLoadRequest().RequestId.ToString(),
+        *BoundPlayGameState->GetStageLoadRequest().ScheduleId.ToString());
 }
 
 // 새로운 요청만 Coordinator에 전달하고 즉시 실패도 서버에 보고
@@ -91,6 +99,14 @@ void UCMClientStageLoadComponent::HandleStageLoadRequestChanged(
     const FGuid RequestId = Request.RequestId;
     const FPrimaryAssetId ScheduleId = Request.ScheduleId;
     LastHandledRequestId = RequestId;
+
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Local stage load request received. NetMode=%d Controller=%s Request=%s Schedule=%s"),
+        static_cast<int32>(GetWorld()->GetNetMode()),
+        *GetNameSafe(Controller),
+        *RequestId.ToString(),
+        *ScheduleId.ToString());
+
     if (!StageLoadCoordinator->StartStageScheduleRequest(
         ScheduleId, RequestId))
     {

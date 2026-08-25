@@ -1,4 +1,4 @@
-#include "Stage/Mechanism/CMLeverBase.h"
+#include "Stage/Trigger/CMLeverBase.h"
 
 ACMLeverBase::ACMLeverBase()
 {

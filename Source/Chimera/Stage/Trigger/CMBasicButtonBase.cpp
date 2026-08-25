@@ -1,8 +1,8 @@
-#include "Stage/Mechanism/CMBasicButtonBase.h"
+#include "Stage/Trigger/CMBasicButtonBase.h"
 
 #include "Components/BoxComponent.h"
 #include "Parts/Arm/CMArmPart.h"
-#include "Stage/Mechanism/Component/CMActivationTriggerComponent.h"
+#include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 
 ACMBasicButtonBase::ACMBasicButtonBase()
 {
