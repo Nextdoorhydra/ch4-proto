@@ -13,6 +13,8 @@ public class CMGore : ModuleRules
 			new string[]
 			{
 				"Core",
+				"CoreUObject",
+				"Engine",
 				"GameplayTags",
 			}
 		);
@@ -20,8 +22,6 @@ public class CMGore : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"CoreUObject",
-				"Engine",
 				"DeveloperSettings",
 				"GameplayMessageRuntime",
 				"Niagara",

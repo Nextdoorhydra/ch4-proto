@@ -2,6 +2,8 @@
 
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
+#include "Math/RotationMatrix.h"
+#include "CoreGlobals.h"
 #include "TimerManager.h"
 
 #include "Runtime/Surface/Presentation/CMBloodDecalActor.h"
@@ -174,6 +176,151 @@ UCMBloodSurfaceSubsystem::SpawnSurfaceBurst(
 }
 
 
+FCMBloodResidueHandle UCMBloodSurfaceSubsystem::SpawnStrokeStamp(
+	const FCMBloodStrokeStampRequest& Request)
+{
+	FCMBloodResidueHandle InvalidHandle;
+	UWorld* World = GetWorld();
+	const UCMBloodSettings* Settings = GetDefault<UCMBloodSettings>();
+	if (!World || !Settings || !IsValid(Request.DecalMaterial) ||
+		Request.Width <= 0.0f || Request.Length <= 0.0f ||
+		Settings->MaxActiveBloodStrokeMarks <= 0 ||
+		Settings->MaxStrokeStampsPerFrame <= 0)
+	{
+		return InvalidHandle;
+	}
+
+	if (LastStrokeFrame != GFrameCounter)
+	{
+		LastStrokeFrame = GFrameCounter;
+		StrokeStampsThisFrame = 0;
+	}
+	if (StrokeStampsThisFrame >= Settings->MaxStrokeStampsPerFrame)
+	{
+		return InvalidHandle;
+	}
+
+	while (ActiveStrokeMarkCount >= Settings->MaxActiveBloodStrokeMarks)
+	{
+		const FCMBloodResidueHandle* OldestStroke =
+			BloodMarkSpawnOrder.FindByPredicate(
+				[this](const FCMBloodResidueHandle& Handle)
+				{
+					const FCMBloodMark* Mark = ActiveBloodMarks.Find(Handle);
+					return Mark &&
+						Mark->ResidueType == ECMBloodResidueType::Stroke;
+				});
+		if (!OldestStroke)
+		{
+			break;
+		}
+		RemoveBloodMark(*OldestStroke);
+	}
+
+	EvictOldestBloodMarkIfNeeded();
+
+	const FVector SurfaceNormal = Request.SurfaceNormal.GetSafeNormal(
+		SMALL_NUMBER,
+		FVector::UpVector);
+	FVector Tangent = FVector::VectorPlaneProject(
+		Request.TangentDirection,
+		SurfaceNormal).GetSafeNormal();
+	if (Tangent.IsNearlyZero())
+	{
+		Tangent = FVector::CrossProduct(
+			SurfaceNormal,
+			FVector::RightVector).GetSafeNormal();
+	}
+	if (Tangent.IsNearlyZero())
+	{
+		Tangent = FVector::ForwardVector;
+	}
+
+	const FRotator DecalRotation =
+		FRotationMatrix::MakeFromXZ(SurfaceNormal, Tangent).Rotator();
+	const FVector DecalLocation = Request.SurfaceLocation +
+		SurfaceNormal * FMath::Max(0.0f, Request.SurfaceOffset);
+	const float Lifetime = FMath::Max(0.0f, Request.LifetimeSeconds);
+	const float FadeDuration = Lifetime > 0.0f
+		? FMath::Clamp(Request.FadeDurationSeconds, 0.0f, Lifetime)
+		: 0.0f;
+
+	TSubclassOf<ACMBloodDecalActor> PresentationClass =
+		Request.DecalActorClass;
+	if (!PresentationClass)
+	{
+		PresentationClass = ACMBloodDecalActor::StaticClass();
+	}
+	ACMBloodDecalActor* PresentationActor =
+		AcquirePresentationActor(PresentationClass);
+	if (!IsValid(PresentationActor))
+	{
+		return InvalidHandle;
+	}
+
+	FCMBloodDecalSpawnContext PresentationContext;
+	PresentationContext.WorldTransform =
+		FTransform(DecalRotation, DecalLocation);
+	PresentationContext.SurfaceNormal = SurfaceNormal;
+	PresentationContext.DecalSize = FVector(
+		FMath::Max(0.1f, Request.DecalDepth),
+		FMath::Max(0.1f, Request.Width),
+		FMath::Max(0.1f, Request.Length));
+	PresentationContext.LifetimeSeconds = Lifetime;
+	PresentationContext.FadeDurationSeconds = FadeDuration;
+	PresentationContext.RandomSeed = FMath::Rand();
+	PresentationContext.Magnitude = 1.0f;
+	PresentationContext.SurfaceActor = Request.SurfaceActor;
+	PresentationContext.SurfaceComponent = Request.SurfaceComponent;
+
+	PresentationActor->ActivatePresentation(
+		PresentationContext,
+		Request.DecalMaterial);
+	if (!PresentationActor->IsPresentationActive())
+	{
+		ReleasePresentationActor(PresentationActor);
+		return InvalidHandle;
+	}
+
+	const FCMBloodResidueHandle Handle = FCMBloodResidueHandle::Create();
+	FCMBloodMark BloodMark;
+	BloodMark.Handle = Handle;
+	BloodMark.ResidueType = ECMBloodResidueType::Stroke;
+	BloodMark.BloodDefinitionId = Request.BloodDefinitionId;
+	BloodMark.WorldTransform = PresentationContext.WorldTransform;
+	BloodMark.SurfaceNormal = SurfaceNormal;
+	BloodMark.DecalSize = PresentationContext.DecalSize;
+	BloodMark.SpawnTimeSeconds = World->GetTimeSeconds();
+	BloodMark.LifetimeSeconds = Lifetime;
+	BloodMark.PresentationProgress = 1.0f;
+	BloodMark.SourceActor = Request.SourceActor;
+	BloodMark.SurfaceActor = Request.SurfaceActor;
+	BloodMark.SurfaceComponent = Request.SurfaceComponent;
+	ActiveBloodMarks.Add(Handle, MoveTemp(BloodMark));
+	BloodMarkSpawnOrder.Add(Handle);
+
+	FRuntimeBloodMarkState RuntimeState;
+	RuntimeState.PresentationActor = PresentationActor;
+	if (Lifetime > 0.0f)
+	{
+		FTimerDelegate ExpirationDelegate;
+		ExpirationDelegate.BindUObject(
+			this,
+			&UCMBloodSurfaceSubsystem::HandleBloodMarkExpired,
+			Handle);
+		World->GetTimerManager().SetTimer(
+			RuntimeState.ExpirationTimer,
+			ExpirationDelegate,
+			Lifetime,
+			false);
+	}
+	RuntimeBloodMarkStates.Add(Handle, MoveTemp(RuntimeState));
+	++ActiveStrokeMarkCount;
+	++StrokeStampsThisFrame;
+	return Handle;
+}
+
+
 FCMBloodResidueHandle
 UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 	const FHitResult& Hit,
@@ -316,6 +463,10 @@ UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 	BloodMark.Handle =
 		Handle;
 
+	BloodMark.ResidueType = Request.ResidueType;
+
+	BloodMark.BloodDefinitionId = Request.BloodDefinitionId;
+
 	BloodMark.WorldTransform = PresentationContext.WorldTransform;
 
 	BloodMark.SurfaceNormal =
@@ -326,6 +477,11 @@ UCMBloodSurfaceSubsystem::SpawnBloodMarkFromHit(
 
 	BloodMark.LifetimeSeconds =
 		Lifetime;
+
+	BloodMark.PresentationProgress =
+		Request.ResidueType == ECMBloodResidueType::Pool ? 0.0f : 1.0f;
+
+	BloodMark.SourceActor = Request.SourceActor;
 
 	BloodMark.SpawnTimeSeconds =
 		World->GetTimeSeconds();
@@ -417,6 +573,14 @@ bool UCMBloodSurfaceSubsystem::RemoveBloodMark(
 		}
 	}
 
+	if (const FCMBloodMark* Mark = ActiveBloodMarks.Find(Handle))
+	{
+		if (Mark->ResidueType == ECMBloodResidueType::Stroke)
+		{
+			ActiveStrokeMarkCount = FMath::Max(0, ActiveStrokeMarkCount - 1);
+		}
+	}
+
 	RuntimeBloodMarkStates.Remove(
 		Handle
 	);
@@ -476,7 +640,8 @@ bool UCMBloodSurfaceSubsystem::SetBloodMarkPresentationProgress(
 	FCMBloodResidueHandle Handle,
 	float NormalizedProgress)
 {
-	if (!ActiveBloodMarks.Contains(Handle))
+	FCMBloodMark* BloodMark = ActiveBloodMarks.Find(Handle);
+	if (!BloodMark)
 	{
 		return false;
 	}
@@ -498,6 +663,8 @@ bool UCMBloodSurfaceSubsystem::SetBloodMarkPresentationProgress(
 	}
 
 	PresentationActor->SetPresentationProgress(NormalizedProgress);
+	BloodMark->PresentationProgress =
+		FMath::Clamp(NormalizedProgress, 0.0f, 1.0f);
 	return true;
 }
 

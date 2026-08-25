@@ -16,6 +16,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Data/CMBloodDefinition.h"
 #include "Components/CMBloodPoolSourceComponent.h"
+#include "Components/CMBloodTransferComponent.h"
 #include "Runtime/CMBloodSubsystem.h"
 #include "Runtime/Surface/CMBloodSurfaceSubsystem.h"
 #include "Tags/CMGoreGameplayTags.h"
@@ -182,11 +183,18 @@ bool UCMDismembermentComponent::SeverBodyPart(
     DetachedActor->FinishSpawning(AttachedMesh->GetComponentTransform());
     DetachedActor->SetLifeSpan(SpawnedGoreLifeSpan);
 
+    UCMBloodTransferComponent* BloodTransfer =
+        NewObject<UCMBloodTransferComponent>(
+            DetachedActor,
+            TEXT("BloodTransfer"));
+    if (BloodTransfer)
+    {
+        DetachedActor->AddInstanceComponent(BloodTransfer);
+        BloodTransfer->InitializeTransfer(DetachedComponent, BloodDefinitionId);
+        BloodTransfer->RegisterComponent();
+    }
+
     DetachedComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    DetachedComponent->SetAllBodiesNotifyRigidBodyCollision(true);
-    DetachedComponent->OnComponentHit.AddUniqueDynamic(
-        this,
-        &UCMDismembermentComponent::HandleDetachedPartHit);
     DetachedComponent->SetAllBodiesSimulatePhysics(true);
     DetachedComponent->SetSimulatePhysics(true);
     DetachedComponent->WakeAllRigidBodies();
@@ -594,6 +602,9 @@ bool UCMDismembermentComponent::SpawnBloodDecalAtSurface(
         FVector::UpVector);
     FCMBloodSurfaceBurstRequest Request;
     Request.Origin = SurfaceLocation + Normal * 5.0f;
+    Request.ResidueType = ECMBloodResidueType::Splash;
+    Request.BloodDefinitionId = BloodDefinitionId;
+    Request.SourceActor = GetOwner();
     Request.Direction = -Normal;
     Request.SampleCount = 1;
     Request.TraceDistance = 12.0f;
@@ -614,59 +625,3 @@ bool UCMDismembermentComponent::SpawnBloodDecalAtSurface(
     return bSpawned;
 }
 
-void UCMDismembermentComponent::HandleDetachedPartHit(
-    UPrimitiveComponent* HitComponent,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComponent,
-    const FVector NormalImpulse,
-    const FHitResult& Hit
-)
-{
-    if (!bSpawnBloodDecals || !HitComponent ||
-        MaxBloodTrailDecalsPerPart <= 0 ||
-        (OtherActor && OtherActor->ActorHasTag(TEXT("CM.DetachedBodyPart"))))
-    {
-        return;
-    }
-
-    const TWeakObjectPtr<UPrimitiveComponent> ComponentKey(HitComponent);
-    const int32 ExistingDecalCount =
-        BloodTrailDecalCounts.FindRef(ComponentKey);
-    if (ExistingDecalCount >= MaxBloodTrailDecalsPerPart ||
-        HitComponent->GetPhysicsLinearVelocity().Size() < BloodTrailMinSpeed)
-    {
-        return;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    const FVector ContactLocation = Hit.ImpactPoint.IsNearlyZero()
-        ? HitComponent->Bounds.Origin
-        : FVector(Hit.ImpactPoint);
-    const double CurrentTime = World->GetTimeSeconds();
-    if (const FVector* LastLocation =
-        LastBloodTrailLocations.Find(ComponentKey))
-    {
-        const double LastTime = LastBloodTrailTimes.FindRef(ComponentKey);
-        if (FVector::DistSquared(*LastLocation, ContactLocation) <
-                FMath::Square(BloodTrailMinDistance) ||
-            CurrentTime - LastTime < BloodTrailMinIntervalSeconds)
-        {
-            return;
-        }
-    }
-
-    if (SpawnBloodDecalAtSurface(
-        ContactLocation,
-        Hit.ImpactNormal,
-        HitComponent->GetOwner()))
-    {
-        LastBloodTrailLocations.Add(ComponentKey, ContactLocation);
-        LastBloodTrailTimes.Add(ComponentKey, CurrentTime);
-        BloodTrailDecalCounts.Add(ComponentKey, ExistingDecalCount + 1);
-    }
-}

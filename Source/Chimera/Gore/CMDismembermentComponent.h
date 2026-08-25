@@ -144,26 +144,6 @@ public:
     float GroundBloodTraceDistance = 250.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Dismemberment|Blood Trail",
-        meta = (ClampMin = "0.0"))
-    float BloodTrailMinDistance = 25.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Dismemberment|Blood Trail",
-        meta = (ClampMin = "0.0"))
-    float BloodTrailMinIntervalSeconds = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Dismemberment|Blood Trail",
-        meta = (ClampMin = "0.0"))
-    float BloodTrailMinSpeed = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Dismemberment|Blood Trail",
-        meta = (ClampMin = "0"))
-    int32 MaxBloodTrailDecalsPerPart = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Dismemberment|Blood Pool")
     bool bSpawnCorpseBloodPool = true;
 
@@ -205,15 +185,6 @@ private:
         AActor* IgnoredActor
     );
 
-    UFUNCTION()
-    void HandleDetachedPartHit(
-        UPrimitiveComponent* HitComponent,
-        AActor* OtherActor,
-        UPrimitiveComponent* OtherComponent,
-        FVector NormalImpulse,
-        const FHitResult& Hit
-    );
-
     UPROPERTY(Transient)
     TArray<FCMDismembermentPartDefinition> FallbackParts;
 
@@ -234,13 +205,6 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UCMBloodPoolSourceComponent> CorpseBloodPoolComponent;
-
-    TMap<TWeakObjectPtr<UPrimitiveComponent>, FVector>
-        LastBloodTrailLocations;
-    TMap<TWeakObjectPtr<UPrimitiveComponent>, double>
-        LastBloodTrailTimes;
-    TMap<TWeakObjectPtr<UPrimitiveComponent>, int32>
-        BloodTrailDecalCounts;
 
     UPROPERTY(ReplicatedUsing = OnRep_CorpseRagdoll)
     bool bCorpseRagdoll = false;

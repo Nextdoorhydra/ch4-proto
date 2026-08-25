@@ -92,6 +92,46 @@ struct CMGORE_API FCMBloodPoolDefinition
 	float DecalDepth = 8.0f;
 };
 
+USTRUCT(BlueprintType)
+struct CMGORE_API FCMBloodStrokeDefinition
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke")
+	bool bEnabled = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke")
+	TSubclassOf<ACMBloodDecalActor> DecalActorClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke")
+	TObjectPtr<UMaterialInterface> DecalMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke")
+	FVector2D TransferDistanceRange = FVector2D(100.0f, 200.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke")
+	FVector2D WidthRange = FVector2D(15.0f, 25.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke",
+		meta = (ClampMin = "0.1"))
+	float StampLength = 24.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke",
+		meta = (ClampMin = "0.1"))
+	float StampSpacing = 12.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke",
+		meta = (ClampMin = "0.0"))
+	float MinimumPaintSpeed = 15.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke")
+	float LifetimeSeconds = 45.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood Stroke",
+		meta = (ClampMin = "0.0"))
+	float FadeDurationSeconds = 5.0f;
+};
+
 /**
  * 하나의 혈액 종류에 대한 표현 Definition.
  *
@@ -119,6 +159,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood")
 	FCMBloodPoolDefinition Pool;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blood")
+	FCMBloodStrokeDefinition Stroke;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instant VFX")
 	FCMBloodInstantVFXDefinition Impact;

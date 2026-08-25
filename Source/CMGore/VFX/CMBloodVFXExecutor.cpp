@@ -3,6 +3,7 @@
 #include "Data/CMBloodDefinition.h"
 #include "Runtime/CMBloodEvent.h"
 #include "Runtime/Surface/CMBloodSurfaceSubsystem.h"
+#include "GameFramework/Actor.h"
 
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
@@ -127,6 +128,9 @@ bool FCMBloodVFXExecutor::ExecuteInstant(
 				World->GetSubsystem<UCMBloodSurfaceSubsystem>())
 			{
 				FCMBloodSurfaceBurstRequest SurfaceRequest;
+				SurfaceRequest.ResidueType = ECMBloodResidueType::Splash;
+				SurfaceRequest.BloodDefinitionId = Event.BloodDefinitionId;
+				SurfaceRequest.SourceActor = Cast<AActor>(Event.Source.Get());
 
 				SurfaceRequest.Origin =
 					Event.Location;

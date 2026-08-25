@@ -76,4 +76,24 @@ public:
 		Category = "Blood Surface",
 		meta = (ClampMin = "0"))
 	int32 MaxActiveBloodMarks = 256;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
+		meta = (ClampMin = "0"))
+	int32 MaxActiveBloodStrokeMarks = 128;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
+		meta = (ClampMin = "0"))
+	int32 MaxStrokeStampsPerObject = 20;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
+		meta = (ClampMin = "0"))
+	int32 MaxStrokeStampsPerFrame = 8;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
+		meta = (ClampMin = "0.1"))
+	float MinimumStrokeSpacing = 8.0f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
+		meta = (ClampMin = "0.0"))
+	float StrokeCullDistance = 3000.0f;
 };

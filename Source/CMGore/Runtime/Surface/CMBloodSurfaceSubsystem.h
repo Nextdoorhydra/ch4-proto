@@ -25,6 +25,10 @@ public:
 	TArray<FCMBloodResidueHandle> SpawnSurfaceBurst(
 		const FCMBloodSurfaceBurstRequest& Request);
 
+	UFUNCTION(BlueprintCallable, Category = "CMGore|Blood Stroke")
+	FCMBloodResidueHandle SpawnStrokeStamp(
+		const FCMBloodStrokeStampRequest& Request);
+
 	/**
 	 * 특정 Blood Mark 제거.
 	 */
@@ -129,4 +133,8 @@ private:
 		TSubclassOf<ACMBloodDecalActor>,
 		TArray<TWeakObjectPtr<ACMBloodDecalActor>>
 	> AvailablePresentationActors;
+
+	int32 ActiveStrokeMarkCount = 0;
+	int32 StrokeStampsThisFrame = 0;
+	uint64 LastStrokeFrame = MAX_uint64;
 };

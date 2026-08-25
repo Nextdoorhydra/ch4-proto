@@ -10,6 +10,14 @@ class ACMBloodDecalActor;
 class UMaterialInterface;
 class UPrimitiveComponent;
 
+UENUM(BlueprintType)
+enum class ECMBloodResidueType : uint8
+{
+	Splash,
+	Pool,
+	Stroke
+};
+
 /**
  * 월드에 남은 Blood Residue를 외부에서 참조하기 위한 안정적인 Handle.
  *
@@ -82,6 +90,12 @@ public:
 	FCMBloodResidueHandle Handle;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CMGore|Blood Surface")
+	ECMBloodResidueType ResidueType = ECMBloodResidueType::Splash;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CMGore|Blood Surface")
+	FName BloodDefinitionId = NAME_None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CMGore|Blood Surface")
 	FTransform WorldTransform = FTransform::Identity;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CMGore|Blood Surface")
@@ -104,6 +118,12 @@ public:
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CMGore|Blood Surface")
 	float LifetimeSeconds = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CMGore|Blood Surface")
+	float PresentationProgress = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CMGore|Blood Surface")
+	TWeakObjectPtr<AActor> SourceActor;
 
 	/**
 	 * 혈흔이 붙어 있는 Actor.
@@ -132,6 +152,12 @@ struct CMGORE_API FCMBloodSurfaceBurstRequest
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Surface")
 	FVector Origin = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Surface")
+	ECMBloodResidueType ResidueType = ECMBloodResidueType::Splash;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Surface")
+	FName BloodDefinitionId = NAME_None;
 
 	/**
 	 * 혈액이 진행하는 대표 방향.
@@ -205,4 +231,63 @@ public:
 
 	UPROPERTY()
 	TWeakObjectPtr<AActor> IgnoredActor;
+
+	UPROPERTY()
+	TWeakObjectPtr<AActor> SourceActor;
+};
+
+USTRUCT(BlueprintType)
+struct CMGORE_API FCMBloodStrokeStampRequest
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke")
+	FVector SurfaceLocation = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke")
+	FVector SurfaceNormal = FVector::UpVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke")
+	FVector TangentDirection = FVector::ForwardVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke")
+	FName BloodDefinitionId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke")
+	TObjectPtr<UMaterialInterface> DecalMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke")
+	TSubclassOf<ACMBloodDecalActor> DecalActorClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke",
+		meta = (ClampMin = "0.1"))
+	float Width = 20.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke",
+		meta = (ClampMin = "0.1"))
+	float Length = 24.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke",
+		meta = (ClampMin = "0.1"))
+	float DecalDepth = 8.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke")
+	float LifetimeSeconds = 45.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke",
+		meta = (ClampMin = "0.0"))
+	float FadeDurationSeconds = 5.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CMGore|Blood Stroke",
+		meta = (ClampMin = "0.0"))
+	float SurfaceOffset = 1.0f;
+
+	UPROPERTY()
+	TWeakObjectPtr<AActor> SourceActor;
+
+	UPROPERTY()
+	TWeakObjectPtr<AActor> SurfaceActor;
+
+	UPROPERTY()
+	TWeakObjectPtr<UPrimitiveComponent> SurfaceComponent;
 };

@@ -133,6 +133,9 @@ bool UCMBloodPoolSourceComponent::StartBloodPool(
 	}
 
 	FCMBloodSurfaceBurstRequest Request;
+	Request.ResidueType = ECMBloodResidueType::Pool;
+	Request.BloodDefinitionId = EffectiveDefinitionId;
+	Request.SourceActor = GetOwner();
 	Request.Origin = Location + Normal * FMath::Max(0.0f, TraceStartOffset);
 	Request.Direction = -Normal;
 	Request.SampleCount = 1;
