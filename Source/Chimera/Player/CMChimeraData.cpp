@@ -133,7 +133,8 @@ void ACMChimera::StartStaminaRegeneration()
 {
     if (!HasAuthority()
         || !AbilitySystemComponent
-        || !AttributeSet)
+        || !AttributeSet
+        || StaminaRegenEffectHandle.IsValid())
     {
         return;
     }
@@ -151,11 +152,27 @@ void ACMChimera::StartStaminaRegeneration()
         return;
     }
 
-    AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(
+    StaminaRegenEffectHandle =
+        AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(
         *RegenSpec.Data.Get()
     );
 
     UE_LOG(LogChimeraLineBody, Log,
         TEXT("[GAS Stamina] Periodic regeneration started. AmountPerSecond=%.1f"),
         AttributeSet->GetStaminaRegen());
+}
+
+void ACMChimera::PauseStaminaRegeneration()
+{
+    if (!HasAuthority()
+        || !AbilitySystemComponent
+        || !StaminaRegenEffectHandle.IsValid())
+    {
+        return;
+    }
+
+    AbilitySystemComponent->RemoveActiveGameplayEffect(
+        StaminaRegenEffectHandle
+    );
+    StaminaRegenEffectHandle.Invalidate();
 }

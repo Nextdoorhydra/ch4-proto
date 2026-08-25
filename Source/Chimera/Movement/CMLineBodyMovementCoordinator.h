@@ -2,13 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Player/CMControlTypes.h"
 
 #include "CMLineBodyMovementCoordinator.generated.h"
 
 class ACMChimera;
+class ACMArmPart;
 class ACMLegPart;
 class ACMPlayerState;
 class AActor;
+class UPhysicsConstraintComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 
@@ -33,11 +36,23 @@ public:
         ACMChimera& Chimera,
         ACMLegPart& LegPart,
         ACMPlayerState* ContributingPlayerState,
-        float MovementImpulseMultiplier
+        float MovementImpulseMultiplier,
+        bool bReverseMovement
     );
 
     /** Stops only the active push owned by this Leg, if one exists. */
     void CancelLegStep(const ACMLegPart* LegPart);
+
+    /** Pins a basic Arm slot to walkable ground while its control is held. */
+    bool TryBeginArmAnchor(
+        ACMChimera& Chimera,
+        ACMArmPart& ArmPart
+    );
+
+    /** Removes any held Arm anchor owned by the specified physical slot. */
+    void EndArmAnchor(
+        const struct FCMPartSlotAddress& PartSlotAddress
+    );
 
     /** Applies an immediate, non-grounded impulse from an Arm slot. */
     bool TryActivateArm(
@@ -76,12 +91,13 @@ private:
         ACMChimera& Chimera,
         const struct FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState,
-        const FVector& PlanarImpulse
+        const FVector& PlanarImpulse,
+        float DirectionSign = 1.0f
     );
     void MatchCooperativeInputs(ACMChimera& Chimera);
     void ApplyCooperativeForwardImpulse(
         ACMChimera& Chimera,
-        float ForwardImpulseMagnitude
+        float SignedForwardImpulse
     ) const;
     void ApplyWholeBodyYawAssist(
         ACMChimera& Chimera,
@@ -100,6 +116,9 @@ private:
     ) const;
 
     void ApplyActiveLegSteps(ACMChimera& Chimera);
+    void ApplyArmAnchorStaminaDrain(ACMChimera& Chimera);
+    void RemoveInvalidArmAnchors(ACMChimera& Chimera);
+    void DestroyArmAnchor(int32 AnchorIndex);
 
     float GetPlayerCountSpeedMultiplier(
         const ACMChimera& Chimera
@@ -112,6 +131,7 @@ private:
     {
         int32 FlatSlotIndex = INDEX_NONE;
         float RemainingImpulse = 0.0f;
+        float DirectionSign = 1.0f;
         double ExpireTime = 0.0;
     };
 
@@ -127,9 +147,18 @@ private:
         double EndTime = 0.0;
     };
 
+    struct FActiveArmAnchor
+    {
+        TWeakObjectPtr<ACMArmPart> ArmPart;
+        TWeakObjectPtr<UPhysicsConstraintComponent> Constraint;
+        struct FCMPartSlotAddress PartSlotAddress;
+        int32 SegmentIndex = INDEX_NONE;
+    };
+
     // Each remaining input keeps its original expiry even after partial use.
     TArray<FPendingCooperativeImpulse> PendingLeftInputs;
     TArray<FPendingCooperativeImpulse> PendingRightInputs;
     TArray<FActiveLegStep> ActiveLegSteps;
+    TArray<FActiveArmAnchor> ActiveArmAnchors;
     FTimerHandle CooperationExpiryTimerHandle;
 };

@@ -163,7 +163,8 @@ void UCMLegGameplayAbility::ActivateAbility(
         : nullptr;
     const bool bMovementApplied = Chimera && Chimera->TryActivateLegPart(
         LegPart->GetAttachedSlotAddress(),
-        LegPart->ConsumeContributingPlayerState()
+        LegPart->ConsumeContributingPlayerState(),
+        LegPart->ConsumePendingReverseMovement()
     );
     if (!bMovementApplied)
     {

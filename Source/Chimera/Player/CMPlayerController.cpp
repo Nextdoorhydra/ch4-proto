@@ -12,6 +12,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputCoreTypes.h"
 #include "InputAction.h"
+#include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "EngineUtils.h"
 #include "Stage/Test/CMTestAreaManager.h"
@@ -549,6 +550,50 @@ void ACMPlayerController::SetupInputComponent()
             *GetName());
     }
 
+    if (ReverseModifierAction)
+    {
+        EnhancedInputComponent->BindAction(
+            ReverseModifierAction,
+            ETriggerEvent::Started,
+            this,
+            &ACMPlayerController::ReverseModifierPressed
+        );
+        EnhancedInputComponent->BindAction(
+            ReverseModifierAction,
+            ETriggerEvent::Completed,
+            this,
+            &ACMPlayerController::ReverseModifierReleased
+        );
+        EnhancedInputComponent->BindAction(
+            ReverseModifierAction,
+            ETriggerEvent::Canceled,
+            this,
+            &ACMPlayerController::ReverseModifierReleased
+        );
+    }
+    else
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("ReverseModifierAction is not assigned on %s."),
+            *GetName());
+    }
+
+    if (CameraDistanceAction)
+    {
+        EnhancedInputComponent->BindAction(
+            CameraDistanceAction,
+            ETriggerEvent::Triggered,
+            this,
+            &ACMPlayerController::AdjustCameraDistance
+        );
+    }
+    else
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("CameraDistanceAction is not assigned on %s."),
+            *GetName());
+    }
+
 #if !UE_BUILD_SHIPPING
     // 기존 Q/W/E/R Mapping Context와 분리된 개발 전용 화살표 입력
     InputComponent->BindKey(EKeys::Up, IE_Pressed,
@@ -748,6 +793,41 @@ void ACMPlayerController::DetachModifierReleased()
     bDetachModifierHeld = false;
 }
 
+void ACMPlayerController::ReverseModifierPressed()
+{
+    bReverseModifierHeld = true;
+}
+
+void ACMPlayerController::ReverseModifierReleased()
+{
+    bReverseModifierHeld = false;
+}
+
+void ACMPlayerController::AdjustCameraDistance(
+    const FInputActionValue& InputValue
+)
+{
+    if (!IsLocalController())
+    {
+        return;
+    }
+
+    const float WheelInput = InputValue.Get<float>();
+    ACMChimera* SharedChimera = GetSharedChimera();
+    if (!SharedChimera || FMath::IsNearlyZero(WheelInput))
+    {
+        return;
+    }
+
+    const float NewDistance =
+        SharedChimera->AdjustLocalCameraDistance(WheelInput);
+    UE_LOG(LogChimeraPlayerController, Verbose,
+        TEXT("[Camera Distance] Controller=%s Input=%.2f Distance=%.1f"),
+        *GetName(),
+        WheelInput,
+        NewDistance);
+}
+
 void ACMPlayerController::DebugMoveForwardPressed()
 {
     bDebugMoveForwardHeld = true;
@@ -809,7 +889,14 @@ void ACMPlayerController::SetControlSlotPressed(
             ControlBody->RequestDetachPartFromControlSlot(SlotIndex);
             return;
         }
-        ControlBody->SetControlSlotPressed(SlotIndex, bPressed);
+        // Reverse is sampled only when the control key starts. The server
+        // stores the resulting direction in that Leg Step, so changing Space
+        // while the Step is active cannot reverse an already-running action.
+        ControlBody->SetControlSlotPressed(
+            SlotIndex,
+            bPressed,
+            bPressed && bReverseModifierHeld
+        );
     }
 }
 

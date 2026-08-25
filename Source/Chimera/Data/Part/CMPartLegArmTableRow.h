@@ -32,6 +32,10 @@ struct CHIMERA_API FCMPartLegArmTableRow : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float StaminaCost = 0.0f;
 
+    // Shared Stamina consumed per second while an ordinary Arm is anchored.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StaminaPerSecond = 0.0f;
+
     // Leg action lock time and Arm swing time share one sheet column.
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float ActionDuration = 0.0f;

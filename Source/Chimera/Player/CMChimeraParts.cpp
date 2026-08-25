@@ -14,7 +14,8 @@
 
 void ACMChimera::ActivatePartSlot(
     const FCMPartSlotAddress& PartSlotAddress,
-    ACMPlayerState* ContributingPlayerState
+    ACMPlayerState* ContributingPlayerState,
+    bool bReverseMovement
 )
 {
     if (!HasAuthority()
@@ -38,6 +39,12 @@ void ACMChimera::ActivatePartSlot(
             );
         }
 
+        ACMLegPart* LegPart = Cast<ACMLegPart>(PartActor);
+        if (LegPart)
+        {
+            LegPart->SetPendingReverseMovement(bReverseMovement);
+        }
+
 #if !UE_BUILD_SHIPPING
         ACMDebugPartActor* DebugPart =
             Cast<ACMDebugPartActor>(PartSlot->GetAttachedPart());
@@ -53,6 +60,10 @@ void ACMChimera::ActivatePartSlot(
         if (PartActor && !bActivated)
         {
             PartActor->ConsumeContributingPlayerState();
+        }
+        if (LegPart && !bActivated)
+        {
+            LegPart->ConsumePendingReverseMovement();
         }
 #if !UE_BUILD_SHIPPING
         if (DebugPart && !bActivated)
@@ -77,7 +88,8 @@ void ACMChimera::ActivatePartSlot(
 
 bool ACMChimera::TryActivateLegPart(
     const FCMPartSlotAddress& PartSlotAddress,
-    ACMPlayerState* ContributingPlayerState
+    ACMPlayerState* ContributingPlayerState,
+    bool bReverseMovement
 )
 {
     if (!HasAuthority()
@@ -103,7 +115,8 @@ bool ACMChimera::TryActivateLegPart(
             *this,
             *LegPart,
             ContributingPlayerState,
-            LegPart->GetMovementImpulseMultiplier()
+            LegPart->GetMovementImpulseMultiplier(),
+            bReverseMovement
         );
 }
 
@@ -243,7 +256,8 @@ void ACMChimera::ActivateDebugLegPart(
 {
     TryActivateLegPart(
         PartSlotAddress,
-        ContributingPlayerState
+        ContributingPlayerState,
+        false
     );
 }
 #endif
@@ -367,7 +381,7 @@ UClass* LoadTestSpringArmPartClass()
 
 UClass* LoadNamedDebugPartClass(FName PartName)
 {
-    if (PartName == TEXT("Arm"))
+    if (PartName == TEXT("DefaultArm"))
     {
         return LoadTestArmPartClass();
     }
@@ -492,7 +506,7 @@ bool ACMChimera::SpawnDebugPartAtSlot(
     if (!PartClass)
     {
         UE_LOG(LogChimeraLineBody, Warning,
-            TEXT("[Attach Part Failed] Unknown Part=%s. Use Arm, SpringArm, or LegTier1..5."),
+            TEXT("[Attach Part Failed] Unknown Part=%s. Use DefaultArm, SpringArm, or LegTier1..5."),
             *PartName.ToString());
         return false;
     }
@@ -726,7 +740,41 @@ void ACMChimera::SetPartSlotPressed(
         PressedPartSlotMask &= ~PartSlotBit;
     }
 
+    if (MovementCoordinator)
+    {
+        if (bPressed && IsBasicArmPartSlot(PartSlotAddress))
+        {
+            UCMPartSlotComponent* PartSlot =
+                GetPartSlotComponent(PartSlotAddress);
+            ACMArmPart* ArmPart = PartSlot
+                ? Cast<ACMArmPart>(PartSlot->GetAttachedPart())
+                : nullptr;
+            if (ArmPart)
+            {
+                MovementCoordinator->TryBeginArmAnchor(*this, *ArmPart);
+            }
+        }
+        else if (!bPressed)
+        {
+            MovementCoordinator->EndArmAnchor(PartSlotAddress);
+        }
+    }
+
     ForceNetUpdate();
+}
+
+bool ACMChimera::IsBasicArmPartSlot(
+    const FCMPartSlotAddress& PartSlotAddress
+) const
+{
+    const UCMPartSlotComponent* PartSlot =
+        GetPartSlotComponent(PartSlotAddress);
+    const AActor* AttachedPart = PartSlot
+        ? PartSlot->GetAttachedPart()
+        : nullptr;
+    return AttachedPart
+        && AttachedPart->IsA<ACMArmPart>()
+        && !AttachedPart->IsA<ACMSpringArmPart>();
 }
 
 void ACMChimera::ClearPressedControlParts()
