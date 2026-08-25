@@ -81,15 +81,37 @@ void UCMEscapeMenuWidget::HandleResumeClicked()
 
 void UCMEscapeMenuWidget::HandleOptionsClicked()
 {
+    if (bOptionRequestPending
+        || (ActiveOptionWidget.IsValid()
+            && ActiveOptionWidget->IsActivated()))
+    {
+        return;
+    }
+
     if (UGameInstance* GameInstance = GetGameInstance())
     {
         if (UNKMUIManagerSubsystem* UIManager =
             GameInstance->GetSubsystem<UNKMUIManagerSubsystem>())
         {
-            UIManager->PushWidgetAsync(
-                UITags::UI_Layer_Modal, OptionWidgetClass);
+            bOptionRequestPending = true;
+            FNKMUIWidgetPushCompleted OnPushed;
+            OnPushed.BindDynamic(this, &ThisClass::HandleOptionPushed);
+            UIManager->PushWidgetAsyncWithResult(
+                UITags::UI_Layer_Modal,
+                OptionWidgetClass,
+                OnPushed);
         }
     }
+}
+
+void UCMEscapeMenuWidget::HandleOptionPushed(
+    ENKMUIAsyncResult Result,
+    UNKMUIActivatableWidget* Widget)
+{
+    bOptionRequestPending = false;
+    ActiveOptionWidget = Result == ENKMUIAsyncResult::Succeeded
+        ? Cast<UCMOptionWidget>(Widget)
+        : nullptr;
 }
 
 void UCMEscapeMenuWidget::HandleLeaveGameClicked()

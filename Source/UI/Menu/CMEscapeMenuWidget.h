@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UI/NKMUIDialogBase.h"
 #include "UI/NKMUIActivatableWidget.h"
+#include "UI/Subsystem/NKMUIManagerSubsystem.h"
 
 #include "CMEscapeMenuWidget.generated.h"
 
@@ -35,6 +36,11 @@ private:
     void HandleOptionsClicked();
 
     UFUNCTION()
+    void HandleOptionPushed(
+        ENKMUIAsyncResult Result,
+        UNKMUIActivatableWidget* Widget);
+
+    UFUNCTION()
     void HandleLeaveGameClicked();
 
     UFUNCTION()
@@ -59,4 +65,7 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UNKMAsyncAction_ShowConfirmation> ActiveLeaveAction;
+
+    TWeakObjectPtr<UCMOptionWidget> ActiveOptionWidget;
+    bool bOptionRequestPending = false;
 };
