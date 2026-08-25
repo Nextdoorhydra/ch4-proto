@@ -53,7 +53,10 @@ protected:
 
 private:
     UFUNCTION(Server, Unreliable)
-    void ServerUpdateVisionTarget(FVector_NetQuantize100 WorldTarget);
+    void ServerUpdateVisionTarget(
+        FVector_NetQuantize100 WorldTarget,
+        float AimRotationDegrees
+    );
 
     void GetControlledHeadParts(
         TArray<ACMHeadPartActor*>& OutHeadParts
@@ -66,6 +69,10 @@ private:
 
     FVector LastSentWorldTarget = FVector::ZeroVector;
     float TimeSinceLastAimSend = 0.0f;
+    float LocalAimRotationDegrees = 0.0f;
+    float LastLocalAimAngleDegrees = 0.0f;
+    float LastSentAimRotationDegrees = 0.0f;
     bool bHasSentWorldTarget = false;
+    bool bHasLocalAimRotation = false;
     TSet<TWeakObjectPtr<UCMVisionComponent>> LocallyPredictedVisions;
 };

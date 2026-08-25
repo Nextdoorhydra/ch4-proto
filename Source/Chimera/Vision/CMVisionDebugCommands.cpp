@@ -1,5 +1,7 @@
 #include "CoreMinimal.h"
 
+#include "Data/Head/CMHeadDefinition.h"
+#include "Engine/AssetManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Parts/Head/CMHeadPartActor.h"
 #include "Parts/Head/CMVisionComponent.h"
@@ -16,8 +18,27 @@ DEFINE_LOG_CATEGORY_STATIC(LogChimeraVisionDebug, Log, All);
 
 namespace CMVisionDebugCommands
 {
-const TCHAR* HeadPartClassPath =
-    TEXT("/Game/Chimera/Character/Part/Head/BP_CMHead01HeadPart.BP_CMHead01HeadPart_C");
+const FName DefaultDebugHeadId(TEXT("Head01"));
+
+const UCMHeadDefinition* FindLoadedDebugHeadDefinition()
+{
+    TArray<FPrimaryAssetId> HeadDefinitionIds;
+    UAssetManager::Get().GetPrimaryAssetIdList(
+        FPrimaryAssetType(TEXT("CMHeadDefinition")),
+        HeadDefinitionIds
+    );
+    for (const FPrimaryAssetId& AssetId : HeadDefinitionIds)
+    {
+        const UCMHeadDefinition* Definition = Cast<UCMHeadDefinition>(
+            UAssetManager::Get().GetPrimaryAssetObject(AssetId)
+        );
+        if (Definition && Definition->ID == DefaultDebugHeadId)
+        {
+            return Definition;
+        }
+    }
+    return nullptr;
+}
 
 ACMPlayerController* FindPlayerController(
     UWorld* World,
@@ -154,15 +175,15 @@ void AttachHead(const TArray<FString>& Args, UWorld* World)
         return;
     }
 
-    UClass* HeadPartClass = LoadClass<ACMHeadPartActor>(
-        nullptr,
-        HeadPartClassPath
-    );
+    const UCMHeadDefinition* HeadDefinition =
+        FindLoadedDebugHeadDefinition();
+    UClass* HeadPartClass = HeadDefinition
+        ? HeadDefinition->PartClass.Get()
+        : nullptr;
     if (!HeadPartClass)
     {
         UE_LOG(LogChimeraVisionDebug, Warning,
-            TEXT("[Attach Head Failed] Could not load %s."),
-            HeadPartClassPath);
+            TEXT("[Attach Head Failed] Head01 Definition or its PartClass is not ready. Wait for the Stage.Entry.HeadVision async load group."));
         return;
     }
 

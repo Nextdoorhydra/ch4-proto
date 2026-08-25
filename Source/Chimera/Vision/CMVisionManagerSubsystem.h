@@ -1,12 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AsyncLoadCompleteMessage.h"
 #include "Subsystems/WorldSubsystem.h"
 
 #include "CMVisionManagerSubsystem.generated.h"
 
 class UCMVisionComponent;
 class UCMVisionRenderConfig;
+class UCMStageLoadCoordinatorSubsystem;
 class UCanvas;
 class UCanvasRenderTarget2D;
 class UCameraComponent;
@@ -28,6 +30,7 @@ struct FCMVisionRaySample
     FVector BaseEnd = FVector::ZeroVector;
     FVector RevealedEnd = FVector::ZeroVector;
     TWeakObjectPtr<UPrimitiveComponent> HitComponent;
+    bool bBlockingHit = false;
 };
 
 struct FCMVisionSourceMaskData
@@ -36,6 +39,7 @@ struct FCMVisionSourceMaskData
     TArray<FCMVisionRaySample> Rays;
     TArray<FCMVisionRaySample> NearVisionRays;
     FLinearColor VisionTint = FLinearColor::Transparent;
+    bool bRevealsWorld = true;
 };
 
 /** Local registry and union query for all replicated shared-vision sources. */
@@ -79,7 +83,18 @@ public:
     float GetVisibilityMaskWorldHalfExtent() const;
 
 private:
-    bool LoadRenderConfig();
+    bool EnsureLoadCoordinatorSubscription();
+    void RefreshRenderConfigState();
+    bool TryResolveLoadedRenderConfig();
+    void MarkRenderConfigFailed(const TCHAR* Reason);
+
+    UFUNCTION()
+    void HandleLoadGroupFinished(
+        FName FinishedLoadGroupId,
+        EAsyncLoadResult Result,
+        bool bReleasedImmediately
+    );
+
     void EnsureVisibilityMask();
     void UpdateVisibilityMaskBounds(
         const TArray<UCMVisionComponent*>& ActiveSources
@@ -157,11 +172,16 @@ private:
     TObjectPtr<UTexture2D> MaskDrawTexture;
 
     TWeakObjectPtr<UCameraComponent> BoundCamera;
+    TWeakObjectPtr<UCMStageLoadCoordinatorSubsystem> BoundLoadCoordinator;
     TArray<FCMVisionSourceMaskData> CachedVisionMaskData;
     TArray<FCMVisionOccluderRenderState> OccluderRenderStates;
     FVector2D MaskWorldCenter = FVector2D::ZeroVector;
     float MaskWorldHalfExtent = 1000.0f;
+    float MaskWorldMinHeight = -100.0f;
+    float MaskWorldHeightRange = 200.0f;
     float TimeUntilMaskUpdate = 0.0f;
     bool bVisionSystemEnabled = true;
+    bool bRenderConfigReady = false;
+    bool bRenderConfigFailed = false;
     bool bConfigurationFailureLogged = false;
 };

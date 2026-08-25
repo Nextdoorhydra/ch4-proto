@@ -10,6 +10,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/CMCameraOcclusionComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -130,6 +131,9 @@ ACMChimera::ACMChimera()
         USpringArmComponent::SocketName
     );
     FollowCamera->bUsePawnControlRotation = false;
+
+    CameraOcclusionComponent = CreateDefaultSubobject<
+        UCMCameraOcclusionComponent>(TEXT("CameraOcclusionComponent"));
 
     BodySegments.Add(BodyMesh);
     LeftFootPoints.Add(LeftFootPoint);

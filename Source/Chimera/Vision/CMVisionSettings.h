@@ -19,4 +19,9 @@ public:
     UPROPERTY(Config, EditAnywhere, BlueprintReadOnly,
         Category = "Rendering")
     TSoftObjectPtr<UCMVisionRenderConfig> DefaultRenderConfig;
+
+    /** BeforeStageStart group that owns DefaultRenderConfig. */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly,
+        Category = "Rendering")
+    FName DefaultRenderConfigLoadGroupId = TEXT("Stage.Entry.HeadVision");
 };
