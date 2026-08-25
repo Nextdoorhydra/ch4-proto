@@ -289,7 +289,9 @@ void ACMChimera::ConfigureNetworkPhysics()
         }
     }
 
-    for (int32 Index = 1; Index < BodySegments.Num(); ++Index)
+    // 클라이언트는 루트를 포함한 모든 마디를 서버 상태로만 표시한다.
+    // 로컬 Chaos 시뮬레이션을 남기면 첫 마디만 서버와 다른 자세가 된다.
+    for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
     {
         UStaticMeshComponent* SegmentBody = BodySegments[Index];
         if (SegmentBody)
@@ -308,7 +310,7 @@ void ACMChimera::UpdateReplicatedSegmentStates()
 {
     const int32 ReplicatedSegmentCount = FMath::Max(
         0,
-        FMath::Min(ActiveSegmentCount, BodySegments.Num()) - 1
+        FMath::Min(ActiveSegmentCount, BodySegments.Num())
     );
     ReplicatedSegmentStates.SetNum(ReplicatedSegmentCount);
 
@@ -317,7 +319,7 @@ void ACMChimera::UpdateReplicatedSegmentStates()
         ++StateIndex)
     {
         const UStaticMeshComponent* SegmentBody =
-            BodySegments[StateIndex + 1];
+            BodySegments[StateIndex];
         if (!SegmentBody)
         {
             continue;
@@ -344,7 +346,7 @@ void ACMChimera::ApplyReplicatedSegmentStates(float DeltaTime)
         StateIndex < ReplicatedSegmentStates.Num();
         ++StateIndex)
     {
-        const int32 SegmentIndex = StateIndex + 1;
+        const int32 SegmentIndex = StateIndex;
         if (!BodySegments.IsValidIndex(SegmentIndex)
             || !BodySegments[SegmentIndex])
         {
