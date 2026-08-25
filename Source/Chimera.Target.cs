@@ -15,7 +15,8 @@ public class ChimeraTarget : TargetRules
 			"Chimera",
 			"Shared",
 			"AI",
-			"UI"
+			"UI",
+			"CMGore"
 		});
 	}
 }
