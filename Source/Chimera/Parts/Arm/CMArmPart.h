@@ -119,6 +119,14 @@ protected:
         meta = (ClampMin = "0.0"))
     float AttackRadius = 30.0f;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Arm|Debug")
+    bool bDrawSwingDebug = true;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Arm|Debug", meta = (ClampMin = "0.0"))
+    float SwingDebugDuration = 1.0f;
+
 private:
     void DetectSwingTargets();
 

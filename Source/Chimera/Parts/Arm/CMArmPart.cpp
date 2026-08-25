@@ -3,6 +3,7 @@
 #include "Ability/CMArmGameplayAbility.h"
 #include "Components/StaticMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
@@ -156,7 +157,54 @@ void ACMArmPart::DetectSwingTargets()
     }
 
     const FVector Origin = PartMesh->GetComponentLocation();
-    const FVector ForwardDirection = PartMesh->GetForwardVector();
+    FVector ForwardDirection = PartMesh->GetForwardVector();
+    if (const UCMPartSlotComponent* PartSlot = GetAttachedPartSlot())
+    {
+        if (const USceneComponent* SegmentBody = PartSlot->GetAttachParent())
+        {
+            const FVector OutwardDirection = FVector::VectorPlaneProject(
+                PartSlot->GetComponentLocation()
+                    - SegmentBody->GetComponentLocation(),
+                SegmentBody->GetUpVector()
+            ).GetSafeNormal();
+            if (!OutwardDirection.IsNearlyZero())
+            {
+                ForwardDirection = OutwardDirection;
+            }
+        }
+    }
+#if ENABLE_DRAW_DEBUG
+    if (bDrawSwingDebug)
+    {
+        const FVector SafeForward = ForwardDirection.GetSafeNormal();
+        const float HalfAngle = FMath::Atan2(AttackRadius, AttackRange);
+        DrawDebugCone(
+            World,
+            Origin,
+            SafeForward,
+            AttackRange,
+            HalfAngle,
+            HalfAngle,
+            24,
+            FColor::Cyan,
+            false,
+            SwingDebugDuration,
+            0,
+            1.5f
+        );
+        DrawDebugDirectionalArrow(
+            World,
+            Origin,
+            Origin + SafeForward * AttackRange,
+            20.0f,
+            FColor::Yellow,
+            false,
+            SwingDebugDuration,
+            0,
+            2.5f
+        );
+    }
+#endif
     TArray<FOverlapResult> Overlaps;
     FCollisionQueryParams QueryParams(
         SCENE_QUERY_STAT(CMArmSwingSector),
