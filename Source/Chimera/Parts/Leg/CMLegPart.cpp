@@ -7,8 +7,7 @@ ACMLegPart::ACMLegPart()
 {
     PartType = ECMPartSlotType::Leg;
     GrantedAbilityClass = UCMLegGameplayAbility::StaticClass();
-    Strength = 1.0f;
-    MovementImpulseMultiplier = 1.0f;
+    PartRowName = TEXT("DefaultLeg");
 }
 
 float ACMLegPart::GetStaminaCost() const

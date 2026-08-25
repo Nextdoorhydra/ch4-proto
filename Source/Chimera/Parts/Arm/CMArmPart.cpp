@@ -1,7 +1,11 @@
 #include "Parts/Arm/CMArmPart.h"
 
 #include "Ability/CMArmGameplayAbility.h"
+#include "Components/StaticMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/OverlapResult.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMPartSlotComponent.h"
 
@@ -11,7 +15,7 @@ ACMArmPart::ACMArmPart()
 {
     PartType = ECMPartSlotType::Arm;
     GrantedAbilityClass = UCMArmGameplayAbility::StaticClass();
-    MovementImpulseMultiplier = 0.1f;
+    PartRowName = TEXT("DefaultArm");
 }
 
 void ACMArmPart::BeginPlay()
@@ -85,6 +89,8 @@ bool ACMArmPart::BeginSwing()
     OnSwingStateChanged.Broadcast(true);
     ForceNetUpdate();
 
+    DetectSwingTargets();
+
     UE_LOG(LogChimeraArm, Log,
         TEXT("[Arm Swing Started] Part=%s Duration=%.3f AttackId=%s"),
         *GetName(),
@@ -139,6 +145,154 @@ ECMPartHitResult ACMArmPart::ResolveSwingHit(
         TargetBattleComponent->ResolveHit(HitPayload);
     OnSwingHit.Broadcast(Result, TargetBattleComponent->GetOwner());
     return Result;
+}
+
+void ACMArmPart::DetectSwingTargets()
+{
+    UWorld* World = GetWorld();
+    if (!HasAuthority() || !World || !PartMesh
+        || AttackRange <= 0.0f || AttackRadius <= 0.0f)
+    {
+        return;
+    }
+
+    const FVector Origin = PartMesh->GetComponentLocation();
+    FVector ForwardDirection = PartMesh->GetForwardVector();
+    if (const UCMPartSlotComponent* PartSlot = GetAttachedPartSlot())
+    {
+        if (const USceneComponent* SegmentBody = PartSlot->GetAttachParent())
+        {
+            const FVector OutwardDirection = FVector::VectorPlaneProject(
+                PartSlot->GetComponentLocation()
+                    - SegmentBody->GetComponentLocation(),
+                SegmentBody->GetUpVector()
+            ).GetSafeNormal();
+            if (!OutwardDirection.IsNearlyZero())
+            {
+                ForwardDirection = OutwardDirection;
+            }
+        }
+    }
+#if ENABLE_DRAW_DEBUG
+    if (bDrawSwingDebug)
+    {
+        const FVector SafeForward = ForwardDirection.GetSafeNormal();
+        const float HalfAngle = FMath::Atan2(AttackRadius, AttackRange);
+        DrawDebugCone(
+            World,
+            Origin,
+            SafeForward,
+            AttackRange,
+            HalfAngle,
+            HalfAngle,
+            24,
+            FColor::Cyan,
+            false,
+            SwingDebugDuration,
+            0,
+            1.5f
+        );
+        DrawDebugDirectionalArrow(
+            World,
+            Origin,
+            Origin + SafeForward * AttackRange,
+            20.0f,
+            FColor::Yellow,
+            false,
+            SwingDebugDuration,
+            0,
+            2.5f
+        );
+    }
+#endif
+    TArray<FOverlapResult> Overlaps;
+    FCollisionQueryParams QueryParams(
+        SCENE_QUERY_STAT(CMArmSwingSector),
+        false,
+        this
+    );
+    if (AActor* OwnerActor = GetOwner())
+    {
+        QueryParams.AddIgnoredActor(OwnerActor);
+    }
+    const FCollisionObjectQueryParams ObjectQueryParams(
+        FCollisionObjectQueryParams::AllObjects
+    );
+
+    World->OverlapMultiByObjectType(
+        Overlaps,
+        Origin,
+        FQuat::Identity,
+        ObjectQueryParams,
+        FCollisionShape::MakeSphere(AttackRange),
+        QueryParams
+    );
+
+    TSet<AActor*> DetectedActors;
+    for (const FOverlapResult& Overlap : Overlaps)
+    {
+        AActor* TargetActor = Overlap.GetActor();
+        UPrimitiveComponent* TargetComponent = Overlap.GetComponent();
+        if (!TargetActor || !TargetComponent
+            || TargetActor == this
+            || TargetActor == GetOwner()
+            || TargetActor->GetOwner() == GetOwner()
+            || DetectedActors.Contains(TargetActor))
+        {
+            continue;
+        }
+
+        const FVector TargetLocation = TargetComponent->Bounds.Origin;
+        if (!IsInsideSwingSector(
+                Origin,
+                ForwardDirection,
+                TargetLocation,
+                AttackRange,
+                AttackRadius))
+        {
+            continue;
+        }
+
+        DetectedActors.Add(TargetActor);
+        OnSwingTargetDetected.Broadcast(TargetActor, TargetLocation);
+    }
+
+    UE_LOG(LogChimeraArm, Verbose,
+        TEXT("[Arm Swing Sector] Part=%s Direction=%s Range=%.1f Radius=%.1f Detected=%d"),
+        *GetName(),
+        *ForwardDirection.ToCompactString(),
+        AttackRange,
+        AttackRadius,
+        DetectedActors.Num());
+}
+
+bool ACMArmPart::IsInsideSwingSector(
+    const FVector& Origin,
+    const FVector& ForwardDirection,
+    const FVector& TargetLocation,
+    float Range,
+    float Radius
+)
+{
+    const FVector ToTarget = TargetLocation - Origin;
+    const float DistanceSquared = ToTarget.SizeSquared();
+    if (DistanceSquared <= UE_SMALL_NUMBER
+        || DistanceSquared > FMath::Square(Range))
+    {
+        return false;
+    }
+
+    const FVector SafeForward = ForwardDirection.GetSafeNormal();
+    if (SafeForward.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const float CosHalfAngle = Range / FMath::Sqrt(
+        FMath::Square(Range) + FMath::Square(Radius)
+    );
+    return FVector::DotProduct(ToTarget.GetSafeNormal(), SafeForward)
+        >= CosHalfAngle;
 }
 
 void ACMArmPart::OnRep_Swinging()

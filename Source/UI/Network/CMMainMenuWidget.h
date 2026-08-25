@@ -10,6 +10,8 @@ class UButton;
 class UEditableText;
 class UListenServerSessionSubsystem;
 class UTextBlock;
+class UCMOptionWidget;
+enum class ENKMUIAsyncResult : uint8;
 
 UCLASS(Abstract, Blueprintable)
 class UI_API UCMMainMenuWidget : public UUserWidget
@@ -53,6 +55,9 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "Chimera|Main Menu")
     void OnOptionsRequested();
 
+    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Main Menu")
+    TSoftClassPtr<UCMOptionWidget> OptionWidgetClass;
+
     UFUNCTION()
     void HandleJoinConfirmClicked();
 
@@ -78,6 +83,8 @@ private:
 
     UFUNCTION()
     void HandleOptionsClicked();
+
+    void HandleUIPolicyInitialized(ENKMUIAsyncResult Result);
 
     UFUNCTION()
     void HandleCreateRoomClicked();
