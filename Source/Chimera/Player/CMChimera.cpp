@@ -433,6 +433,25 @@ int32 ACMChimera::GetActiveSegmentCount() const
     return ActiveSegmentCount;
 }
 
+void ACMChimera::ApplyPlanarKnockback(FVector WorldDirection, float Speed)
+{
+    if (!HasAuthority())
+        return;
+
+    WorldDirection.Z = 0.0f;
+    const FVector VelocityChange = WorldDirection.GetSafeNormal() * FMath::Max(Speed, 0.0f);
+    if (VelocityChange.IsNearlyZero())
+        return;
+
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    for (int32 SegmentIndex = 0; SegmentIndex < SegmentCount; ++SegmentIndex)
+    {
+        UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+        if (Segment && Segment->IsSimulatingPhysics())
+            Segment->AddImpulse(VelocityChange, NAME_None, true);
+    }
+}
+
 // 파츠와 ControlBody를 제외하고 활성 BodySegment 컴포넌트만 Volume과 비교
 bool ACMChimera::AreAllActiveBodySegmentsOverlapping(
     const UPrimitiveComponent* Volume) const

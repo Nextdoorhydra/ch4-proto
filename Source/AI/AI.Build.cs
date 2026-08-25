@@ -12,6 +12,11 @@ public class AI : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"Learning",
+			"LearningAgents",
+			"LearningAgentsTraining",
+			"LearningTraining",
+			"NavigationSystem",
 			"Shared",
 			"Chimera"
 		});

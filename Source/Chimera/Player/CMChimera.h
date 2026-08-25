@@ -120,6 +120,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera")
     int32 GetActiveSegmentCount() const;
 
+    /** 모든 활성 몸통 마디에 질량 독립적인 평면 넉백 속도를 더한다. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Movement")
+    void ApplyPlanarKnockback(FVector WorldDirection, float Speed);
+
     // 지정 Volume과 모든 활성 몸통 물리 컴포넌트가 겹치는지 확인
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;

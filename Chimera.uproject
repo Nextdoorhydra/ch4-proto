@@ -56,6 +56,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "LearningAgents",
+			"Enabled": true
+		},
+		{
 			"Name": "CommonUI",
 			"Enabled": true
 		},
