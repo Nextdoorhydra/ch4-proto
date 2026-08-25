@@ -86,6 +86,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "NKMSound",
+			"Enabled": true
+		},
+		{
 			"Name": "NKMLocalization",
 			"Enabled": true
 		},

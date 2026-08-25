@@ -8,7 +8,9 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "ListenServerNetworkSettings.h"
 #include "ListenServerSessionSubsystem.h"
-#include "GameFramework/PlayerController.h"
+#include "Option/CMOptionWidget.h"
+#include "UI/NKMUITagList.h"
+#include "UI/Subsystem/NKMUIManagerSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraMainMenuUI, Log, All);
 
@@ -42,6 +44,21 @@ namespace
 void UCMMainMenuWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+
+    if (OptionWidgetClass.IsNull())
+    {
+        OptionWidgetClass = TSoftClassPtr<UCMOptionWidget>(FSoftObjectPath(
+            TEXT("/Game/Chimera/UI/Option/WBP_CMOption.WBP_CMOption_C")));
+    }
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UNKMUIManagerSubsystem* UIManager =
+            GameInstance->GetSubsystem<UNKMUIManagerSubsystem>())
+        {
+            UIManager->InitializePolicy(GetOwningLocalPlayer());
+        }
+    }
 
     NetworkSubsystem = GetGameInstance()
         ? GetGameInstance()->GetSubsystem<UListenServerSessionSubsystem>()
@@ -239,7 +256,42 @@ void UCMMainMenuWidget::HandleOperationCompleted(
 
 void UCMMainMenuWidget::HandleOptionsClicked()
 {
-    OnOptionsRequested();
+    UGameInstance* GameInstance = GetGameInstance();
+    UNKMUIManagerSubsystem* UIManager = GameInstance
+        ? GameInstance->GetSubsystem<UNKMUIManagerSubsystem>()
+        : nullptr;
+    ULocalPlayer* LocalPlayer = GetOwningLocalPlayer();
+    if (!UIManager || !LocalPlayer)
+    {
+        OnOptionsRequested();
+        return;
+    }
+
+    UIManager->InitializePolicyWithResult(
+        LocalPlayer,
+        FNKMUIPolicyInitializationCompleted::CreateUObject(
+            this,
+            &ThisClass::HandleUIPolicyInitialized));
+}
+
+void UCMMainMenuWidget::HandleUIPolicyInitialized(ENKMUIAsyncResult Result)
+{
+    if (Result != ENKMUIAsyncResult::Succeeded)
+    {
+        OnOptionsRequested();
+        return;
+    }
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UNKMUIManagerSubsystem* UIManager =
+            GameInstance->GetSubsystem<UNKMUIManagerSubsystem>())
+        {
+            UIManager->PushWidgetAsync(
+                UITags::UI_Layer_Modal,
+                OptionWidgetClass);
+        }
+    }
 }
 
 void UCMMainMenuWidget::HandleCreateRoomClicked()
