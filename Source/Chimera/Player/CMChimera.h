@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ActiveGameplayEffectHandle.h"
 #include "AbilitySystemInterface.h"
 #include "GameFramework/Pawn.h"
 
@@ -12,6 +13,7 @@ class USceneComponent;
 class UPhysicsConstraintComponent;
 class USpringArmComponent;
 class UCameraComponent;
+class UCMCameraOcclusionComponent;
 class UMaterialInstanceDynamic;
 class UTextRenderComponent;
 class UAbilitySystemComponent;
@@ -23,6 +25,7 @@ class UDataTable;
 class UPhysicalMaterial;
 class ACMPlayerState;
 class ACMArmPart;
+class ACMLegPart;
 class ACMSpringArmPart;
 class AActor;
 
@@ -90,13 +93,19 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Controls")
     void ActivatePartSlot(
         const FCMPartSlotAddress& PartSlotAddress,
-        ACMPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState,
+        bool bReverseMovement
     );
 
     void SetPartSlotPressed(
         const FCMPartSlotAddress& PartSlotAddress,
         bool bPressed
     );
+
+    /** True only for the standard Arm; SpringArm keeps press activation. */
+    bool IsBasicArmPartSlot(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
 
     void ClearPressedControlParts();
 
@@ -119,9 +128,16 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera")
     int32 GetActiveSegmentCount() const;
 
+    /** Changes only this process's camera component; the value is not replicated. */
+    float AdjustLocalCameraDistance(float WheelInput);
+
     // 지정 Volume과 모든 활성 몸통 물리 컴포넌트가 겹치는지 확인
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;
+
+    // 서버에서 받은 하나의 환경 Force를 활성 몸통 마디의 질량 비율로 분배
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Physics")
+    void ApplyEnvironmentalForce(const FVector& TotalForce);
 
     // Test Area 이동을 위해 활성 몸통 마디의 상대 배치를 유지하며 전체 물리 조립체 이동
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Testing")
@@ -152,8 +168,12 @@ public:
         Category = "Chimera|Movement")
     bool TryActivateLegPart(
         const FCMPartSlotAddress& PartSlotAddress,
-        ACMPlayerState* ContributingPlayerState
+        ACMPlayerState* ContributingPlayerState,
+        bool bReverseMovement
     );
+
+    /** Cancels the sustained push owned by one attached Leg. */
+    void CancelLegStep(const ACMLegPart* LegPart);
 
     /** Server-side production entry point shared by concrete Arm abilities. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
@@ -242,6 +262,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     TObjectPtr<UCameraComponent> FollowCamera;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+    TObjectPtr<UCMCameraOcclusionComponent> CameraOcclusionComponent;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Abilities")
     TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
@@ -296,6 +319,26 @@ protected:
     UPROPERTY(EditAnywhere, Category = "Chimera|Movement",
         meta = (ClampMin = "0.0"))
     float BaseMovementImpulse = 5000.0f;
+
+    /** Forward reach of the animation-free Virtual Foot prototype. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
+        meta = (ClampMin = "0.0"))
+    float LegStepLength = 100.0f;
+
+    /** Height above the desired foot point where the ground sweep starts. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
+        meta = (ClampMin = "0.0"))
+    float LegStepTraceHeight = 60.0f;
+
+    /** Distance below the desired foot point covered by the ground sweep. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
+        meta = (ClampMin = "0.0"))
+    float LegStepTraceDepth = 140.0f;
+
+    /** Scales the force converted from the existing impulse balance values. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
+        meta = (ClampMin = "0.0"))
+    float LegStepForceScale = 1.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
@@ -455,6 +498,18 @@ protected:
         meta = (ClampMin = "0.0"))
     float DefaultCameraDistance = 900.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera|Distance",
+        meta = (ClampMin = "0.0"))
+    float MinimumCameraDistance = 650.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera|Distance",
+        meta = (ClampMin = "0.0"))
+    float MaximumCameraDistance = 2200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera|Distance",
+        meta = (ClampMin = "0.0"))
+    float CameraDistanceStep = 120.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera",
         meta = (ClampMin = "-89.0", ClampMax = "89.0"))
     float InitialCameraPitch = -65.0f;
@@ -540,6 +595,7 @@ private:
     );
     void InitializeSegmentHealth(float SegmentMaxHealth);
     void StartStaminaRegeneration();
+    void PauseStaminaRegeneration();
     void ApplyBlueprintSettings();
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
@@ -578,6 +634,7 @@ private:
     float ConfiguredSegmentMaxHealth = 0.0f;
     
     TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
+    FActiveGameplayEffectHandle StaminaRegenEffectHandle;
 
     // The coordinator reads the existing editor/CSV tuning fields without
     // moving them and invalidating Blueprint defaults.

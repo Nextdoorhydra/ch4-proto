@@ -1,0 +1,12 @@
+#pragma once
+
+#include "NativeGameplayTags.h"
+
+namespace CMPartStatusTags
+{
+    CHIMERA_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Electrified);
+    CHIMERA_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Staggered);
+    CHIMERA_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Slowed);
+    CHIMERA_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Confused);
+    CHIMERA_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Poisoned);
+}

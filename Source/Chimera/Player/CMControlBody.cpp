@@ -90,7 +90,8 @@ ACMChimera* ACMControlBody::GetSharedChimera() const
 
 void ACMControlBody::SetControlSlotPressed(
     int32 SlotIndex,
-    bool bPressed
+    bool bPressed,
+    bool bReverseMovement
 )
 {
     if (!IsLocallyControlled()
@@ -101,7 +102,11 @@ void ACMControlBody::SetControlSlotPressed(
         return;
     }
 
-    ServerSetControlSlotPressed(SlotIndex, bPressed);
+    ServerSetControlSlotPressed(
+        SlotIndex,
+        bPressed,
+        bReverseMovement
+    );
 }
 
 void ACMControlBody::RequestAttachPartToControlSlot(
@@ -234,7 +239,8 @@ void ACMControlBody::ServerRequestDetachPartFromControlSlot_Implementation(
 
 void ACMControlBody::ServerSetControlSlotPressed_Implementation(
     int32 SlotIndex,
-    bool bPressed
+    bool bPressed,
+    bool bReverseMovement
 )
 {
     if (!IsControlSlotEnabled(SlotIndex)
@@ -256,10 +262,21 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
     {
         if (CMControl::IsValidPartSlot(PressedPartSlot))
         {
+            const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
+            const bool bActivateOnRelease =
+                SharedChimera->IsBasicArmPartSlot(ReleasedPartSlot);
             SharedChimera->SetPartSlotPressed(
-                PressedPartSlot,
+                ReleasedPartSlot,
                 false
             );
+            if (bActivateOnRelease)
+            {
+                SharedChimera->ActivatePartSlot(
+                    ReleasedPartSlot,
+                    CMPlayerState,
+                    false
+                );
+            }
         }
         PressedPartSlot = FCMPartSlotAddress();
         return;
@@ -280,10 +297,14 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
 
     PressedPartSlot = PartSlotAddress;
     SharedChimera->SetPartSlotPressed(PartSlotAddress, true);
-    SharedChimera->ActivatePartSlot(
-        PartSlotAddress,
-        CMPlayerState
-    );
+    if (!SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
+    {
+        SharedChimera->ActivatePartSlot(
+            PartSlotAddress,
+            CMPlayerState,
+            bReverseMovement
+        );
+    }
 }
 
 void ACMControlBody::SetControlSlots(

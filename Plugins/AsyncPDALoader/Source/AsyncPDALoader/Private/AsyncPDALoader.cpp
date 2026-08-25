@@ -172,15 +172,9 @@ void UAsyncPDALoader::HandleLoadRequest(FGameplayTag Channel, const FAsyncLoadRe
 	{
 		StillActiveBatch->Handle = Handle;
 
-		if (!Handle.IsValid())
-		{
-			FActiveLoadBatch FailedBatch;
-			ActiveBatches.RemoveAndCopyValue(BatchId, FailedBatch);
-			for (const FAssetLoadKey& AssetKey : FailedBatch.AssetKeys)
-			{
-				ResolveAssetLoadResult(AssetKey, false);
-			}
-		}
+		// AssetManager는 요청한 에셋과 번들이 이미 준비된 경우 null 핸들을
+		// 반환하면서 완료 델리게이트를 다음 틱에 실행할 수 있다. null 핸들을
+		// 실패로 판정하지 않고 OnBatchLoaded가 실제 객체 상태를 확인하게 한다.
 	}
 	// batch가 없으면 완료 callback이 이미 처리한 상태다.
 }

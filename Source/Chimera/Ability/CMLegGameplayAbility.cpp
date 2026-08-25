@@ -143,20 +143,37 @@ void UCMLegGameplayAbility::ActivateAbility(
     ActiveLegPart = Cast<ACMLegPart>(GetSourceObject(Handle, ActorInfo));
     if (!ActiveLegPart.IsValid())
     {
+        UE_LOG(LogChimeraLegAbility, Warning,
+            TEXT("[Leg Ability Rejected] Ability SourceObject is not ACMLegPart."));
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
 
     ACMLegPart* LegPart = ActiveLegPart.Get();
+    LegPart->OnPartDied.AddDynamic(
+        this,
+        &UCMLegGameplayAbility::HandleActiveLegDied
+    );
+    LegPart->OnDisabledChanged.AddDynamic(
+        this,
+        &UCMLegGameplayAbility::HandleActiveLegDisabledChanged
+    );
     ACMChimera* Chimera = ActorInfo
         ? Cast<ACMChimera>(ActorInfo->AvatarActor.Get())
         : nullptr;
     const bool bMovementApplied = Chimera && Chimera->TryActivateLegPart(
         LegPart->GetAttachedSlotAddress(),
-        LegPart->ConsumeContributingPlayerState()
+        LegPart->ConsumeContributingPlayerState(),
+        LegPart->ConsumePendingReverseMovement()
     );
     if (!bMovementApplied)
     {
+        UE_LOG(LogChimeraLegAbility, Warning,
+            TEXT("[Leg Ability Rejected] Step start failed. Chimera=%s Part=%s Slot=(%d,%d)"),
+            *GetNameSafe(Chimera),
+            *GetNameSafe(LegPart),
+            LegPart->GetAttachedSlotAddress().SegmentIndex,
+            LegPart->GetAttachedSlotAddress().PartSlotIndex);
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
@@ -198,6 +215,20 @@ void UCMLegGameplayAbility::EndAbility(
 {
     if (ACMLegPart* LegPart = ActiveLegPart.Get())
     {
+        LegPart->OnPartDied.RemoveDynamic(
+            this,
+            &UCMLegGameplayAbility::HandleActiveLegDied
+        );
+        LegPart->OnDisabledChanged.RemoveDynamic(
+            this,
+            &UCMLegGameplayAbility::HandleActiveLegDisabledChanged
+        );
+        if (ACMChimera* Chimera = ActorInfo
+            ? Cast<ACMChimera>(ActorInfo->AvatarActor.Get())
+            : nullptr)
+        {
+            Chimera->CancelLegStep(LegPart);
+        }
         LegPart->ConsumeContributingPlayerState();
     }
     ActiveLegPart.Reset();
@@ -220,4 +251,29 @@ void UCMLegGameplayAbility::FinishAction()
         true,
         false
     );
+}
+
+void UCMLegGameplayAbility::HandleActiveLegDied()
+{
+    EndAbility(
+        CurrentSpecHandle,
+        CurrentActorInfo,
+        CurrentActivationInfo,
+        true,
+        true
+    );
+}
+
+void UCMLegGameplayAbility::HandleActiveLegDisabledChanged(bool bDisabled)
+{
+    if (bDisabled && ActiveLegPart.IsValid())
+    {
+        EndAbility(
+            CurrentSpecHandle,
+            CurrentActorInfo,
+            CurrentActivationInfo,
+            true,
+            true
+        );
+    }
 }

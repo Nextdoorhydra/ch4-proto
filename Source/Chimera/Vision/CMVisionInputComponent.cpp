@@ -63,6 +63,7 @@ void UCMVisionInputComponent::TickComponent(
     {
         ClearLocalAimPredictions();
         bHasSentWorldTarget = false;
+        bHasLocalAimRotation = false;
         TimeSinceLastAimSend = 0.0f;
         return;
     }
@@ -83,6 +84,7 @@ void UCMVisionInputComponent::TickComponent(
     {
         ClearLocalAimPredictions();
         bHasSentWorldTarget = false;
+        bHasLocalAimRotation = false;
         TimeSinceLastAimSend = 0.0f;
         return;
     }
@@ -107,6 +109,25 @@ void UCMVisionInputComponent::TickComponent(
 
     const FVector WorldTarget = MouseRayOrigin
         + MouseRayDirection * IntersectionDistance;
+    FVector ReferenceDirection = WorldTarget
+        - ReferenceVision->GetVisionOrigin();
+    ReferenceDirection.Z = 0.0f;
+    const float CurrentAimAngleDegrees = FMath::RadiansToDegrees(
+        FMath::Atan2(ReferenceDirection.Y, ReferenceDirection.X)
+    );
+    if (bHasLocalAimRotation)
+    {
+        LocalAimRotationDegrees += FMath::FindDeltaAngleDegrees(
+            LastLocalAimAngleDegrees,
+            CurrentAimAngleDegrees
+        );
+    }
+    else
+    {
+        LocalAimRotationDegrees = CurrentAimAngleDegrees;
+        bHasLocalAimRotation = true;
+    }
+    LastLocalAimAngleDegrees = CurrentAimAngleDegrees;
 
     TSet<UCMVisionComponent*> CurrentPredictions;
     for (const ACMHeadPartActor* HeadPart : ControlledHeads)
@@ -135,26 +156,36 @@ void UCMVisionInputComponent::TickComponent(
     const bool bTargetMoved = !bHasSentWorldTarget
         || FVector::DistSquared2D(WorldTarget, LastSentWorldTarget)
             >= FMath::Square(MinimumTargetMovement);
+    const bool bAimRotated = !bHasSentWorldTarget
+        || !FMath::IsNearlyEqual(
+            LocalAimRotationDegrees,
+            LastSentAimRotationDegrees,
+            0.01f
+        );
     const bool bHeartbeatDue = bHasSentWorldTarget
         && TimeSinceLastAimSend >= HeartbeatInterval;
     const bool bSendIntervalElapsed = !bHasSentWorldTarget
         || TimeSinceLastAimSend >= SendInterval;
-    if (!bSendIntervalElapsed || (!bTargetMoved && !bHeartbeatDue))
+    if (!bSendIntervalElapsed
+        || (!bTargetMoved && !bAimRotated && !bHeartbeatDue))
     {
         return;
     }
 
     LastSentWorldTarget = WorldTarget;
+    LastSentAimRotationDegrees = LocalAimRotationDegrees;
     bHasSentWorldTarget = true;
     TimeSinceLastAimSend = 0.0f;
-    ServerUpdateVisionTarget(WorldTarget);
+    ServerUpdateVisionTarget(WorldTarget, LocalAimRotationDegrees);
 }
 
 void UCMVisionInputComponent::ServerUpdateVisionTarget_Implementation(
-    FVector_NetQuantize100 WorldTarget
+    FVector_NetQuantize100 WorldTarget,
+    float AimRotationDegrees
 )
 {
-    if (FVector(WorldTarget).ContainsNaN())
+    if (FVector(WorldTarget).ContainsNaN()
+        || !FMath::IsFinite(AimRotationDegrees))
     {
         return;
     }
@@ -174,7 +205,10 @@ void UCMVisionInputComponent::ServerUpdateVisionTarget_Implementation(
         FVector AimDirection =
             FVector(WorldTarget) - VisionComponent->GetVisionOrigin();
         AimDirection.Z = 0.0f;
-        VisionComponent->SetAimDirection(AimDirection);
+        VisionComponent->SetNetworkAimDirection(
+            AimDirection,
+            AimRotationDegrees
+        );
     }
 }
 

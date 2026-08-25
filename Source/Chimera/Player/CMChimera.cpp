@@ -10,6 +10,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/CMCameraOcclusionComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -40,7 +41,10 @@ ACMChimera::ACMChimera()
 
     PrimaryActorTick.bCanEverTick = true;
     bReplicates = true;
-    SetReplicateMovement(true);
+    // 모든 몸통 마디는 ReplicatedSegmentStates 하나로 복제한다.
+    // 루트만 Actor 이동 복제를 함께 사용하면 클라이언트에서 서로 다른
+    // 물리 보정 기준이 섞이므로 기본 Actor 이동 복제는 사용하지 않는다.
+    SetReplicateMovement(false);
     SetNetUpdateFrequency(30.0f);
     SetMinNetUpdateFrequency(10.0f);
 
@@ -77,7 +81,7 @@ ACMChimera::ACMChimera()
     BodyMesh->SetAngularDamping(BodyAngularDamping);
     BodyMesh->SetCollisionProfileName(BodyCollisionProfile);
     BodyMesh->SetRelativeScale3D(FVector(SegmentScale));
-    BodyMesh->SetIsReplicated(true);
+    BodyMesh->SetIsReplicated(false);
 
     LeftFootPoint = CreateDefaultSubobject<UCMPartSlotComponent>(
         TEXT("LeftFootPoint")
@@ -127,6 +131,9 @@ ACMChimera::ACMChimera()
         USpringArmComponent::SocketName
     );
     FollowCamera->bUsePawnControlRotation = false;
+
+    CameraOcclusionComponent = CreateDefaultSubobject<
+        UCMCameraOcclusionComponent>(TEXT("CameraOcclusionComponent"));
 
     BodySegments.Add(BodyMesh);
     LeftFootPoints.Add(LeftFootPoint);
@@ -428,6 +435,27 @@ void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
 int32 ACMChimera::GetActiveSegmentCount() const
 {
     return ActiveSegmentCount;
+}
+
+float ACMChimera::AdjustLocalCameraDistance(float WheelInput)
+{
+    if (!CameraBoom || FMath::IsNearlyZero(WheelInput))
+    {
+        return CameraBoom ? CameraBoom->TargetArmLength : 0.0f;
+    }
+
+    const float SafeMinimum = FMath::Max(MinimumCameraDistance, 0.0f);
+    const float SafeMaximum = FMath::Max(
+        MaximumCameraDistance,
+        SafeMinimum
+    );
+    CameraBoom->TargetArmLength = FMath::Clamp(
+        CameraBoom->TargetArmLength
+            - WheelInput * FMath::Max(CameraDistanceStep, 0.0f),
+        SafeMinimum,
+        SafeMaximum
+    );
+    return CameraBoom->TargetArmLength;
 }
 
 // 파츠와 ControlBody를 제외하고 활성 BodySegment 컴포넌트만 Volume과 비교

@@ -22,32 +22,32 @@ class CHIMERA_API UCMObstacleDefinitionComponent : public UActorComponent
 public:
     UCMObstacleDefinitionComponent();
 
-    UFUNCTION(BlueprintPure, Category = "Chimera|Obstacle|Definition")
+    UFUNCTION(BlueprintPure, Category = "Chimera|Definition")
     bool HasDefinition() const { return !Definition.IsNull(); }
 
-    UFUNCTION(BlueprintPure, Category = "Chimera|Obstacle|Definition")
+    UFUNCTION(BlueprintPure, Category = "Chimera|Definition")
     bool IsDefinitionReady() const { return bDefinitionReady; }
 
-    UFUNCTION(BlueprintPure, Category = "Chimera|Obstacle|Definition")
+    UFUNCTION(BlueprintPure, Category = "Chimera|Definition")
     bool HasDefinitionFailed() const { return bDefinitionFailed; }
 
-    UFUNCTION(BlueprintPure, Category = "Chimera|Obstacle|Definition")
+    UFUNCTION(BlueprintPure, Category = "Chimera|Definition")
     UCMObstacleDefinition* GetLoadedDefinition() const;
 
     // 현재 LoadGroup 상태와 메모리 준비 상태를 다시 확인
-    UFUNCTION(BlueprintCallable, Category = "Chimera|Obstacle|Definition")
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Definition")
     void RefreshDefinitionState();
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Definition")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Definition")
     TSoftObjectPtr<UCMObstacleDefinition> Definition;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Definition")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Definition")
     FName LoadGroupId;
 
-    UPROPERTY(BlueprintAssignable, Category = "Chimera|Obstacle|Definition")
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Definition")
     FCMObstacleDefinitionReadySignature OnDefinitionReady;
 
-    UPROPERTY(BlueprintAssignable, Category = "Chimera|Obstacle|Definition")
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Definition")
     FCMObstacleDefinitionFailedSignature OnDefinitionFailed;
 
 protected:

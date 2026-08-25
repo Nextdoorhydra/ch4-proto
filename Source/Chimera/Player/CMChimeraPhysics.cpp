@@ -3,6 +3,44 @@
 #include "Components/StaticMeshComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 
+// 전체 환경 Force를 질량 비율로 나눠 모든 마디에 같은 가속도 적용
+void ACMChimera::ApplyEnvironmentalForce(const FVector& TotalForce)
+{
+    if (!HasAuthority() || TotalForce.IsNearlyZero())
+    {
+        return;
+    }
+
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    float TotalMass = 0.0f;
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        if (SegmentBody && SegmentBody->IsSimulatingPhysics())
+        {
+            TotalMass += FMath::Max(SegmentBody->GetMass(), UE_SMALL_NUMBER);
+        }
+    }
+
+    if (TotalMass <= UE_SMALL_NUMBER)
+    {
+        return;
+    }
+
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        if (!SegmentBody || !SegmentBody->IsSimulatingPhysics())
+        {
+            continue;
+        }
+
+        const float MassFraction =
+            FMath::Max(SegmentBody->GetMass(), UE_SMALL_NUMBER) / TotalMass;
+        SegmentBody->AddForce(TotalForce * MassFraction);
+    }
+}
+
 // 활성 몸통 마디의 현재 상대 배치를 유지하고 속도를 제거한 뒤 서버에서 일괄 이동
 bool ACMChimera::TeleportAssembly(const FTransform& DestinationTransform)
 {
@@ -251,7 +289,9 @@ void ACMChimera::ConfigureNetworkPhysics()
         }
     }
 
-    for (int32 Index = 1; Index < BodySegments.Num(); ++Index)
+    // 클라이언트는 루트를 포함한 모든 마디를 서버 상태로만 표시한다.
+    // 로컬 Chaos 시뮬레이션을 남기면 첫 마디만 서버와 다른 자세가 된다.
+    for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
     {
         UStaticMeshComponent* SegmentBody = BodySegments[Index];
         if (SegmentBody)
@@ -270,7 +310,7 @@ void ACMChimera::UpdateReplicatedSegmentStates()
 {
     const int32 ReplicatedSegmentCount = FMath::Max(
         0,
-        FMath::Min(ActiveSegmentCount, BodySegments.Num()) - 1
+        FMath::Min(ActiveSegmentCount, BodySegments.Num())
     );
     ReplicatedSegmentStates.SetNum(ReplicatedSegmentCount);
 
@@ -279,7 +319,7 @@ void ACMChimera::UpdateReplicatedSegmentStates()
         ++StateIndex)
     {
         const UStaticMeshComponent* SegmentBody =
-            BodySegments[StateIndex + 1];
+            BodySegments[StateIndex];
         if (!SegmentBody)
         {
             continue;
@@ -306,7 +346,7 @@ void ACMChimera::ApplyReplicatedSegmentStates(float DeltaTime)
         StateIndex < ReplicatedSegmentStates.Num();
         ++StateIndex)
     {
-        const int32 SegmentIndex = StateIndex + 1;
+        const int32 SegmentIndex = StateIndex;
         if (!BodySegments.IsValidIndex(SegmentIndex)
             || !BodySegments[SegmentIndex])
         {
