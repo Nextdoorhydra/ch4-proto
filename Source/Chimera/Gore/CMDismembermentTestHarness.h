@@ -6,6 +6,7 @@
 #include "CMDismembermentTestHarness.generated.h"
 
 class ACharacter;
+class UCMBloodTransferComponent;
 
 /** CMGore map smoke-test fixture: spawn BP_Human, then ragdoll it after a delay. */
 UCLASS()
@@ -61,6 +62,26 @@ public:
         Category = "Dismemberment Test")
     FVector SubjectSpawnOffset = FVector(0.0f, 0.0f, 100.0f);
 
+    /** After death, visibly drags the detached left arm through the corpse pool. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Dismemberment Test|Blood Stroke")
+    bool bRunBloodPoolStrokeVisualTest = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Dismemberment Test|Blood Stroke",
+        meta = (ClampMin = "0.0"))
+    float BloodStrokeVisualStartDelaySeconds = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Dismemberment Test|Blood Stroke",
+        meta = (ClampMin = "1.0"))
+    float BloodStrokeVisualStepDistance = 18.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Dismemberment Test|Blood Stroke",
+        meta = (ClampMin = "0.01"))
+    float BloodStrokeVisualStepIntervalSeconds = 0.12f;
+
     UFUNCTION(BlueprintPure, Category = "Dismemberment Test")
     ACharacter* GetSpawnedSubject() const
     {
@@ -71,14 +92,31 @@ private:
     void HandleDeathTimerElapsed();
     void HandleSeverStepElapsed();
     void VerifyTestDeath();
+    void VerifyBloodPoolStroke();
+    void AdvanceBloodPoolStrokeVisualTest();
+    void FinishBloodPoolStrokeVisualTest(bool bMovementCompleted);
     bool EnsureDismembermentComponent();
     class USkeletalMeshComponent* FindSubjectPartMesh(FName ComponentName) const;
 
     UPROPERTY(Transient)
     TObjectPtr<ACharacter> SpawnedSubject;
 
+    UPROPERTY(Transient)
+    TObjectPtr<AActor> BloodStrokeVisualPart;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCMBloodTransferComponent> BloodStrokeVisualTransfer;
+
     FTimerHandle DeathTimerHandle;
     FTimerHandle SeverStepTimerHandle;
     FTimerHandle VerificationTimerHandle;
+    FTimerHandle BloodStrokeVerificationTimerHandle;
     int32 CurrentSeverStep = 0;
+    int32 BloodStrokeVisualStep = 0;
+    float BloodStrokeLoadedDistance = 0.0f;
+    float BloodStrokeTravelDistance = 0.0f;
+    FVector BloodStrokePoolLocation = FVector::ZeroVector;
+    FVector BloodStrokeSurfaceNormal = FVector::UpVector;
+    FVector BloodStrokeSurfaceTangent = FVector::ForwardVector;
+    bool bBloodStrokeSmokeTestRequested = false;
 };

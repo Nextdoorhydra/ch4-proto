@@ -3,11 +3,16 @@
 #include "Engine/World.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/CMBloodTransferComponent.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Gore/CMDismembermentComponent.h"
 #include "EngineUtils.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+#include "Runtime/Surface/CMBloodSurfaceSubsystem.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCMDismembermentTest, Log, All);
@@ -104,6 +109,7 @@ void ACMDismembermentTestHarness::EndPlay(
         World->GetTimerManager().ClearTimer(DeathTimerHandle);
         World->GetTimerManager().ClearTimer(SeverStepTimerHandle);
         World->GetTimerManager().ClearTimer(VerificationTimerHandle);
+        World->GetTimerManager().ClearTimer(BloodStrokeVerificationTimerHandle);
     }
     Super::EndPlay(EndPlayReason);
 }
@@ -349,6 +355,208 @@ void ACMDismembermentTestHarness::VerifyTestDeath()
             : TEXT("inactive"),
         Component ? Component->GetSpawnedFleshChunkCount() : 0,
         ExpectedChunkCount);
+
+    bBloodStrokeSmokeTestRequested = FParse::Param(
+        FCommandLine::Get(),
+        TEXT("CMGorePhase6SmokeTest"));
+    if (bRunBloodPoolStrokeVisualTest || bBloodStrokeSmokeTestRequested)
+    {
+        if (!bPassed)
+        {
+            if (bBloodStrokeSmokeTestRequested)
+            {
+                FPlatformMisc::RequestExitWithStatus(
+                    false,
+                    1,
+                    TEXT("CMGorePhase6SmokeTest"));
+            }
+            return;
+        }
+        GetWorld()->GetTimerManager().SetTimer(
+            BloodStrokeVerificationTimerHandle,
+            this,
+            &ACMDismembermentTestHarness::VerifyBloodPoolStroke,
+            BloodStrokeVisualStartDelaySeconds,
+            false);
+    }
+}
+
+void ACMDismembermentTestHarness::VerifyBloodPoolStroke()
+{
+    UCMDismembermentComponent* Dismemberment = SpawnedSubject
+        ? SpawnedSubject->FindComponentByClass<UCMDismembermentComponent>()
+        : nullptr;
+    AActor* DetachedActor = Dismemberment
+        ? Dismemberment->GetDetachedPartActor(ECMBodyPart::ArmLeft)
+        : nullptr;
+    UCMBloodTransferComponent* Transfer = DetachedActor
+        ? DetachedActor->FindComponentByClass<UCMBloodTransferComponent>()
+        : nullptr;
+    UCMBloodSurfaceSubsystem* SurfaceSubsystem = GetWorld()
+        ? GetWorld()->GetSubsystem<UCMBloodSurfaceSubsystem>()
+        : nullptr;
+
+    TArray<FCMBloodMark> Marks;
+    if (SurfaceSubsystem && SpawnedSubject)
+    {
+        SurfaceSubsystem->GetBloodMarksInRadius(
+            SpawnedSubject->GetActorLocation(),
+            500.0f,
+            Marks);
+    }
+    const FCMBloodMark* PoolMark = Marks.FindByPredicate(
+        [this](const FCMBloodMark& Mark)
+        {
+            return Mark.ResidueType == ECMBloodResidueType::Pool &&
+                Mark.SourceActor == SpawnedSubject;
+        });
+    if (Transfer && PoolMark)
+    {
+        BloodStrokeVisualPart = DetachedActor;
+        BloodStrokeVisualTransfer = Transfer;
+        BloodStrokePoolLocation = PoolMark->WorldTransform.GetLocation();
+        BloodStrokeSurfaceNormal = PoolMark->SurfaceNormal.GetSafeNormal(
+            SMALL_NUMBER,
+            FVector::UpVector);
+        BloodStrokeSurfaceTangent =
+            PoolMark->WorldTransform.GetUnitAxis(EAxis::Y);
+        BloodStrokeTravelDistance =
+            PoolMark->DecalSize.Y * PoolMark->PresentationProgress;
+        BloodStrokeVisualStep = 0;
+
+        if (USkeletalMeshComponent* DetachedMesh =
+            DetachedActor->FindComponentByClass<USkeletalMeshComponent>())
+        {
+            DetachedMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+            DetachedMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+            DetachedMesh->SetAllBodiesSimulatePhysics(false);
+            DetachedMesh->SetSimulatePhysics(false);
+        }
+        DetachedActor->SetActorLocation(
+            BloodStrokePoolLocation + BloodStrokeSurfaceNormal * 20.0f,
+            false,
+            nullptr,
+            ETeleportType::TeleportPhysics);
+
+        const bool bLoaded = Transfer->ProcessContactSample(
+            BloodStrokePoolLocation,
+            PoolMark->SurfaceNormal,
+            100.0f);
+        BloodStrokeLoadedDistance = Transfer->GetRemainingStrokeDistance();
+        if (bLoaded && BloodStrokeLoadedDistance >= 100.0f &&
+            BloodStrokeLoadedDistance <= 200.0f)
+        {
+            UE_LOG(LogCMDismembermentTest, Display,
+                TEXT("[DismembermentTest] Blood Pool Stroke visual test started: part=%s budget=%.1fcm."),
+                *GetNameSafe(DetachedActor),
+                BloodStrokeLoadedDistance);
+            GetWorld()->GetTimerManager().SetTimer(
+                BloodStrokeVerificationTimerHandle,
+                this,
+                &ACMDismembermentTestHarness::AdvanceBloodPoolStrokeVisualTest,
+                BloodStrokeVisualStepIntervalSeconds,
+                false);
+            return;
+        }
+    }
+
+    FinishBloodPoolStrokeVisualTest(false);
+}
+
+void ACMDismembermentTestHarness::AdvanceBloodPoolStrokeVisualTest()
+{
+    if (!BloodStrokeVisualPart || !BloodStrokeVisualTransfer)
+    {
+        FinishBloodPoolStrokeVisualTest(false);
+        return;
+    }
+
+    BloodStrokeTravelDistance += FMath::Max(1.0f, BloodStrokeVisualStepDistance);
+    ++BloodStrokeVisualStep;
+    const FVector ContactLocation = BloodStrokePoolLocation +
+        BloodStrokeSurfaceTangent * BloodStrokeTravelDistance;
+    BloodStrokeVisualPart->SetActorLocation(
+        ContactLocation + BloodStrokeSurfaceNormal * 20.0f,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    BloodStrokeVisualTransfer->ProcessContactSample(
+        ContactLocation,
+        BloodStrokeSurfaceNormal,
+        100.0f);
+
+    const bool bCompleted =
+        BloodStrokeVisualTransfer->GetTransferState() ==
+            ECMBloodTransferState::Dry;
+    if (bCompleted || BloodStrokeVisualStep >= 20)
+    {
+        FinishBloodPoolStrokeVisualTest(bCompleted);
+        return;
+    }
+
+    GetWorld()->GetTimerManager().SetTimer(
+        BloodStrokeVerificationTimerHandle,
+        this,
+        &ACMDismembermentTestHarness::AdvanceBloodPoolStrokeVisualTest,
+        BloodStrokeVisualStepIntervalSeconds,
+        false);
+}
+
+void ACMDismembermentTestHarness::FinishBloodPoolStrokeVisualTest(
+    const bool bMovementCompleted)
+{
+    UCMBloodSurfaceSubsystem* SurfaceSubsystem = GetWorld()
+        ? GetWorld()->GetSubsystem<UCMBloodSurfaceSubsystem>()
+        : nullptr;
+    TArray<FCMBloodMark> Marks;
+    if (SurfaceSubsystem)
+    {
+        SurfaceSubsystem->GetBloodMarksInRadius(
+            BloodStrokePoolLocation,
+            500.0f,
+            Marks);
+    }
+
+    const int32 StrokeMarkCount = Marks.FilterByPredicate(
+        [this](const FCMBloodMark& Mark)
+        {
+            return Mark.ResidueType == ECMBloodResidueType::Stroke &&
+                Mark.SourceActor == BloodStrokeVisualPart;
+        }).Num();
+    const int32 StampCount = BloodStrokeVisualTransfer
+        ? BloodStrokeVisualTransfer->GetSpawnedStrokeStampCount()
+        : 0;
+    const float PaintedDistance = BloodStrokeVisualTransfer
+        ? BloodStrokeVisualTransfer->GetTotalPaintedDistance()
+        : 0.0f;
+    const bool bPassed = bMovementCompleted && StampCount > 0 &&
+        PaintedDistance >= 90.0f && PaintedDistance <= 204.0f &&
+        StrokeMarkCount > 0;
+
+    UE_LOG(LogCMDismembermentTest, Display,
+        TEXT("[DismembermentTest] Blood Pool Stroke visual test: %s | Budget=%.1fcm Stamps=%d Painted=%.1fcm StrokeMarks=%d"),
+        bPassed ? TEXT("PASS") : TEXT("FAIL"),
+        BloodStrokeLoadedDistance,
+        StampCount,
+        PaintedDistance,
+        StrokeMarkCount);
+
+    if (USkeletalMeshComponent* DetachedMesh = BloodStrokeVisualPart
+        ? BloodStrokeVisualPart->FindComponentByClass<USkeletalMeshComponent>()
+        : nullptr)
+    {
+        DetachedMesh->SetAllBodiesSimulatePhysics(true);
+        DetachedMesh->SetSimulatePhysics(true);
+        DetachedMesh->WakeAllRigidBodies();
+    }
+
+    if (bBloodStrokeSmokeTestRequested)
+    {
+        FPlatformMisc::RequestExitWithStatus(
+            false,
+            bPassed ? 0 : 1,
+            TEXT("CMGorePhase6SmokeTest"));
+    }
 }
 
 USkeletalMeshComponent* ACMDismembermentTestHarness::FindSubjectPartMesh(
