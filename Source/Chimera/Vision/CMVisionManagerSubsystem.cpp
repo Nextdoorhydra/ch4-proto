@@ -406,22 +406,36 @@ bool UCMVisionManagerSubsystem::IsLocationVisible(
         return false;
     }
 
-    for (const TWeakObjectPtr<UCMVisionComponent>& VisionSource
-        : VisionSources)
+    TArray<UCMVisionComponent*> SeeingSources;
+    GetVisionSourcesSeeingLocation(WorldLocation, SeeingSources);
+    return !SeeingSources.IsEmpty();
+}
+
+void UCMVisionManagerSubsystem::GetVisionSourcesSeeingLocation(
+    const FVector& WorldLocation,
+    TArray<UCMVisionComponent*>& OutSources
+) const
+{
+    OutSources.Reset();
+
+    if (!bVisionSystemEnabled || !bRenderConfigReady)
     {
-        if (const UCMVisionComponent* VisionComponent = VisionSource.Get())
+        return;
+    }
+
+    for (const TWeakObjectPtr<UCMVisionComponent>& VisionSource : VisionSources)
+    {
+        if (UCMVisionComponent* VisionComponent = VisionSource.Get())
         {
             if (VisionComponent->GetVisionContribution()
                     == ECMVisionContribution::RevealAndTint
                 && VisionComponent->IsLocationVisible(WorldLocation)
                 && HasLineOfSight(*VisionComponent, WorldLocation))
             {
-                return true;
+                OutSources.Add(VisionComponent);
             }
         }
     }
-
-    return false;
 }
 
 void UCMVisionManagerSubsystem::DisableVisionSystem()
