@@ -21,6 +21,10 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Mechanism|Trigger")
     bool TryActivate(AActor* TriggeringActor);
 
+    // 감압판처럼 유지형 장치의 눌림과 해제 상태를 서버에서 변경
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Mechanism|Trigger")
+    bool SetTriggeredState(bool bNewTriggered, AActor* TriggeringActor);
+
     // 작동 이력을 지우고 다시 사용할 수 있는 상태로 복원
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Mechanism|Trigger")
     void ResetTrigger();
@@ -32,11 +36,17 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Mechanism|Trigger")
     bool CanActivate() const { return bTriggerEnabled && (!bOneShot || !bHasTriggered); }
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Mechanism|Trigger")
+    bool IsTriggered() const { return bIsTriggered; }
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Trigger")
     bool bOneShot = true;
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Mechanism|Trigger")
     FCMActivationTriggerSignature OnActivated;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Mechanism|Trigger")
+    FCMActivationTriggerSignature OnDeactivated;
 
 protected:
     // 복제된 작동 상태를 버튼 애니메이션 등에 전달
@@ -52,4 +62,7 @@ private:
 
     UPROPERTY(ReplicatedUsing = OnRep_TriggerState)
     bool bHasTriggered = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_TriggerState)
+    bool bIsTriggered = false;
 };
