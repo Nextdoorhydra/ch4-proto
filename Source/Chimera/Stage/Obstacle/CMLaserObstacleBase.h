@@ -63,6 +63,9 @@ private:
     void OnRep_LaserEndLocation();
 
     UFUNCTION()
+    void OnRep_PlayerImpactActive();
+
+    UFUNCTION()
     void HandleBeamBeginOverlap(
         UPrimitiveComponent* OverlappedComponent,
         AActor* OtherActor,
@@ -80,9 +83,13 @@ private:
 
     void ApplyLaserGeometry();
     void UpdateRefreshTimer(bool bShouldRun);
+    bool IsPlayerImpactTarget(const AActor* HitActor) const;
 
     UPROPERTY(ReplicatedUsing = OnRep_LaserEndLocation)
     FVector_NetQuantize100 LaserEndLocation = FVector::ZeroVector;
+
+    UPROPERTY(ReplicatedUsing = OnRep_PlayerImpactActive)
+    bool bPlayerImpactActive = false;
 
     FTimerHandle RefreshTimerHandle;
 };

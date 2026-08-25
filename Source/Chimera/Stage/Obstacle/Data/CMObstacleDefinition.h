@@ -1,13 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameplayTagContainer.h"
 #include "PrimaryDataAssetBase.h"
-#include "Stage/Obstacle/Component/CMHazardComponent.h"
+#include "Stage/Obstacle/Data/CMObstacleEffectTypes.h"
 
 #include "CMObstacleDefinition.generated.h"
 
-class UGameplayEffect;
 class UMaterialInterface;
 class UNiagaraSystem;
 class USoundBase;
@@ -36,17 +34,13 @@ public:
         meta = (AssetBundles = "Gameplay"))
     TSoftObjectPtr<USoundBase> LoopSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Gameplay",
-        meta = (AssetBundles = "Gameplay"))
-    TSoftClassPtr<UGameplayEffect> GameplayEffectClass;
+    // 팔과 다리처럼 개별 파츠에 코드로 적용할 내구도 및 상태 설정
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Obstacle|Part Effect")
+    FCMPartObstacleEffectConfig PartEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Gameplay")
-    FGameplayTag HazardEffectTag;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Gameplay")
-    ECMHazardApplicationMode ApplicationMode = ECMHazardApplicationMode::Single;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Gameplay",
-        meta = (ClampMin = "0.01"))
-    float PeriodSeconds = 1.0f;
+    // 키메라 전체의 공용 ASC에 적용할 GameplayEffect 설정
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Obstacle|Chimera Effect")
+    FCMChimeraObstacleEffectConfig ChimeraEffect;
 };

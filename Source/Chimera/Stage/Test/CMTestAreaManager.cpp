@@ -4,8 +4,7 @@
 #include "GameFramework/PlayerStart.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMChimera.h"
-#include "Stage/Mechanism/CMStageMechanismBase.h"
-#include "Stage/Obstacle/CMStageObstacleBase.h"
+#include "Stage/CMStageElementBase.h"
 #include "Stage/Test/CMTestAreaDefinition.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraTestArea, Log, All);
@@ -176,7 +175,7 @@ ACMChimera* ACMTestAreaManager::FindSharedChimera() const
     return nullptr;
 }
 
-// 대상 PlayerStart와 같은 서브레벨의 장애물·Mechanism을 초기 상태로 복원
+// 대상 PlayerStart와 같은 서브레벨의 모든 Stage Element를 초기 상태로 복원
 void ACMTestAreaManager::ResetArea(const APlayerStart* PlayerStart) const
 {
     if (!PlayerStart)
@@ -185,18 +184,11 @@ void ACMTestAreaManager::ResetArea(const APlayerStart* PlayerStart) const
     }
 
     ULevel* TargetLevel = PlayerStart->GetLevel();
-    for (TActorIterator<ACMStageObstacleBase> It(GetWorld()); It; ++It)
+    for (TActorIterator<ACMStageElementBase> It(GetWorld()); It; ++It)
     {
         if (It->GetLevel() == TargetLevel)
         {
-            It->ResetObstacle();
-        }
-    }
-    for (TActorIterator<ACMStageMechanismBase> It(GetWorld()); It; ++It)
-    {
-        if (It->GetLevel() == TargetLevel)
-        {
-            It->ResetMechanism();
+            It->ResetElement();
         }
     }
 }

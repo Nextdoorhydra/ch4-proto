@@ -23,11 +23,11 @@ public:
 
 #if WITH_EDITOR
 	// PDA catalog를 다시 검색한 뒤 LoadGroupId 기준으로 Scope와 Timing을 자동 동기화
-	UFUNCTION(CallInEditor, Category = "Load")
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Load")
 	void RefreshAndRebuildCatalog();
 
 	// 현재 LoadGroups와 catalog assignment만 다시 계산하고 잘못된 GroupId를 미할당 처리
-	UFUNCTION(CallInEditor, Category = "Load")
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Load")
 	void RebuildLoadGroupScopes();
 #endif
 

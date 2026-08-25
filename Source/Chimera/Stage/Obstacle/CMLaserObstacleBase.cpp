@@ -4,6 +4,8 @@
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
+#include "Parts/Core/CMPartActorBase.h"
+#include "Player/CMChimera.h"
 #include "Stage/Obstacle/Component/CMHazardComponent.h"
 #include "Stage/Obstacle/Component/CMLaserBeamComponent.h"
 #include "TimerManager.h"
@@ -32,6 +34,7 @@ void ACMLaserObstacleBase::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ThisClass, LaserEndLocation);
+    DOREPLIFETIME(ThisClass, bPlayerImpactActive);
 }
 
 // 공용 표현과 Overlap을 연결하고 활성 상태를 다시 반영
@@ -82,6 +85,7 @@ void ACMLaserObstacleBase::RefreshLaser()
         QueryParams);
 
     LaserEndLocation = bHit ? HitResult.ImpactPoint : TraceEnd;
+    bPlayerImpactActive = bHit && IsPlayerImpactTarget(HitResult.GetActor());
     ApplyLaserGeometry();
     ForceNetUpdate();
 }
@@ -95,6 +99,11 @@ void ACMLaserObstacleBase::HandleObstacleActiveStateChanged(bool bIsActive)
     }
 
     BeamPresentation->SetBeamVisible(bIsActive);
+    if (!bIsActive)
+    {
+        bPlayerImpactActive = false;
+        BeamPresentation->SetPlayerImpactActive(false);
+    }
     BeamCollision->SetCollisionEnabled(
         bIsActive && HasAuthority()
             ? ECollisionEnabled::QueryOnly
@@ -111,6 +120,15 @@ void ACMLaserObstacleBase::HandleObstacleActiveStateChanged(bool bIsActive)
 void ACMLaserObstacleBase::OnRep_LaserEndLocation()
 {
     ApplyLaserGeometry();
+}
+
+// 서버가 판정한 플레이어 타격 상태를 로컬 Niagara 스파크에 반영
+void ACMLaserObstacleBase::OnRep_PlayerImpactActive()
+{
+    if (BeamPresentation)
+    {
+        BeamPresentation->SetPlayerImpactActive(bPlayerImpactActive);
+    }
 }
 
 // 지속형 레이저 진입을 기존 Hazard 이벤트로 전달
@@ -160,6 +178,7 @@ void ACMLaserObstacleBase::ApplyLaserGeometry()
     }
 
     BeamPresentation->ApplyBeam(StartLocation, LaserEndLocation);
+    BeamPresentation->SetPlayerImpactActive(bPlayerImpactActive);
     BeamPresentation->SetBeamVisible(IsObstacleActive());
 
     BeamCollision->SetWorldLocationAndRotation(
@@ -170,6 +189,23 @@ void ACMLaserObstacleBase::ApplyLaserGeometry()
         BeamLength * 0.5f,
         BeamPresentation->BeamThickness,
         BeamPresentation->BeamThickness));
+}
+
+// 키메라 몸통 또는 현재 슬롯에 장착된 파츠만 플레이어 타격으로 판정
+bool ACMLaserObstacleBase::IsPlayerImpactTarget(const AActor* HitActor) const
+{
+    if (!IsValid(HitActor))
+    {
+        return false;
+    }
+
+    if (HitActor->IsA<ACMChimera>())
+    {
+        return true;
+    }
+
+    const ACMPartActorBase* PartActor = Cast<ACMPartActorBase>(HitActor);
+    return PartActor && PartActor->IsAttached();
 }
 
 // 움직이는 차폐물이 있는 레이저만 선택적으로 서버 재계산

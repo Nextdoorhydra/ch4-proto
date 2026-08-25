@@ -1,6 +1,8 @@
 #include "Parts/Head/CMHeadPartActor.h"
 
-#include "Data/Head/CMHeadTableRow.h"
+#include "AsyncLoad/CMStageLoadCoordinatorSubsystem.h"
+#include "AsyncLoad/CMStageLoadLog.h"
+#include "Data/Head/CMHeadDefinition.h"
 #include "Parts/Head/CMVisionComponent.h"
 
 ACMHeadPartActor::ACMHeadPartActor()
@@ -14,6 +16,42 @@ ACMHeadPartActor::ACMHeadPartActor()
     VisionComponent->SetupAttachment(SceneRoot);
 }
 
+void ACMHeadPartActor::BeginPlay()
+{
+    Super::BeginPlay();
+
+    if (HasAuthority())
+    {
+        VisionComponent->SetVisionActive(false);
+    }
+
+    if (UGameInstance* GameInstance = GetWorld()
+        ? GetWorld()->GetGameInstance() : nullptr)
+    {
+        if (UCMStageLoadCoordinatorSubsystem* Coordinator =
+            GameInstance->GetSubsystem<UCMStageLoadCoordinatorSubsystem>())
+        {
+            Coordinator->OnLoadGroupFinished.AddUniqueDynamic(
+                this, &ThisClass::HandleLoadGroupFinished);
+        }
+    }
+    RefreshDefinitionState();
+}
+
+void ACMHeadPartActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UGameInstance* GameInstance = GetWorld()
+        ? GetWorld()->GetGameInstance() : nullptr)
+    {
+        if (UCMStageLoadCoordinatorSubsystem* Coordinator =
+            GameInstance->GetSubsystem<UCMStageLoadCoordinatorSubsystem>())
+        {
+            Coordinator->OnLoadGroupFinished.RemoveAll(this);
+        }
+    }
+    Super::EndPlay(EndPlayReason);
+}
+
 void ACMHeadPartActor::OnAttachedToPartSlot_Implementation(
     UCMPartSlotComponent* PartSlot
 )
@@ -22,8 +60,15 @@ void ACMHeadPartActor::OnAttachedToPartSlot_Implementation(
 
     if (HasAuthority())
     {
-        ApplyHeadData();
-        VisionComponent->SetVisionActive(true);
+        if (bDefinitionReady)
+        {
+            ApplyLoadedDefinition();
+            VisionComponent->SetVisionActive(true);
+        }
+        else
+        {
+            VisionComponent->SetVisionActive(false);
+        }
     }
 }
 
@@ -44,22 +89,115 @@ UCMVisionComponent* ACMHeadPartActor::GetVisionComponent() const
     return VisionComponent;
 }
 
-void ACMHeadPartActor::ApplyHeadData()
+void ACMHeadPartActor::RefreshDefinitionState()
 {
-    if (!HeadDataRow.DataTable || HeadDataRow.RowName.IsNone())
+    if (Definition.IsNull() || bDefinitionReady || bDefinitionFailed)
+    {
+        if (Definition.IsNull())
+        {
+            MarkDefinitionFailed(TEXT("Definition is empty"));
+        }
+        return;
+    }
+    if (LoadGroupId.IsNone())
+    {
+        MarkDefinitionFailed(TEXT("LoadGroupId is empty"));
+        return;
+    }
+
+    UGameInstance* GameInstance = GetWorld()
+        ? GetWorld()->GetGameInstance() : nullptr;
+    const UCMStageLoadCoordinatorSubsystem* Coordinator = GameInstance
+        ? GameInstance->GetSubsystem<UCMStageLoadCoordinatorSubsystem>()
+        : nullptr;
+    if (!Coordinator)
+    {
+        MarkDefinitionFailed(TEXT("StageLoadCoordinator is missing"));
+        return;
+    }
+
+    const ECMStageLoadGroupState State = Coordinator->GetLoadGroupState(
+        LoadGroupId);
+    if (State == ECMStageLoadGroupState::Ready)
+    {
+        TryResolveLoadedDefinition();
+    }
+    else if (State == ECMStageLoadGroupState::Failed
+        || State == ECMStageLoadGroupState::Released)
+    {
+        MarkDefinitionFailed(TEXT("LoadGroup is not available"));
+    }
+}
+
+void ACMHeadPartActor::HandleLoadGroupFinished(
+    FName FinishedLoadGroupId,
+    EAsyncLoadResult Result,
+    bool bReleasedImmediately
+)
+{
+    if (FinishedLoadGroupId != LoadGroupId
+        || bDefinitionReady
+        || bDefinitionFailed)
+    {
+        return;
+    }
+    if (Result != EAsyncLoadResult::Succeeded || bReleasedImmediately)
+    {
+        MarkDefinitionFailed(
+            TEXT("LoadGroup failed or was released immediately"));
+        return;
+    }
+    TryResolveLoadedDefinition();
+}
+
+bool ACMHeadPartActor::TryResolveLoadedDefinition()
+{
+    if (!Definition.Get())
+    {
+        MarkDefinitionFailed(
+            TEXT("Definition was not loaded by the assigned LoadGroup"));
+        return false;
+    }
+
+    bDefinitionReady = true;
+    bDefinitionFailed = false;
+    if (HasAuthority())
+    {
+        ApplyLoadedDefinition();
+        VisionComponent->SetVisionActive(IsAttached());
+    }
+    return true;
+}
+
+void ACMHeadPartActor::MarkDefinitionFailed(const TCHAR* Reason)
+{
+    if (bDefinitionFailed)
     {
         return;
     }
 
-    const FCMHeadTableRow* HeadData = HeadDataRow.GetRow<FCMHeadTableRow>(
-        TEXT("ACMHeadPartActor::ApplyHeadData")
-    );
-    if (HeadData)
+    bDefinitionReady = false;
+    bDefinitionFailed = true;
+    if (HasAuthority())
+    {
+        VisionComponent->SetVisionActive(false);
+    }
+    UE_LOG(LogChimeraStageLoad, Error,
+        TEXT("Head Definition failed. Actor=%s Definition=%s LoadGroup=%s Reason=%s"),
+        *GetName(),
+        *Definition.ToSoftObjectPath().ToString(),
+        *LoadGroupId.ToString(),
+        Reason);
+}
+
+void ACMHeadPartActor::ApplyLoadedDefinition()
+{
+    if (const UCMHeadDefinition* LoadedDefinition = Definition.Get())
     {
         VisionComponent->ConfigureVision(
-            HeadData->VisionAngle,
-            HeadData->VisionRange,
-            HeadData->NearVisionRadius
+            LoadedDefinition->VisionAngle,
+            LoadedDefinition->VisionRange,
+            LoadedDefinition->NearVisionRadius
         );
     }
 }

@@ -129,6 +129,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Testing", meta = (ClampMin = "0.0"))
     float LoopingStageRestartDelay = 1.0f;
 
+    // 에디터에서 Route를 직접 실행할 때 추가 플레이어 접속을 기다리는 시간, 0이면 즉시 시작
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Testing", meta = (ClampMin = "0.0"))
+    float DirectStageJoinGracePeriod = 0.0f;
+
     // 접속 종료 후 기존 파츠와 조작 배정을 유지하는 시간
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Reconnect", meta = (ClampMin = "0.0"))
     float ReconnectGracePeriod = 60.0f;
@@ -164,6 +168,12 @@ private:
     // 현재 맵을 다시 열어 키메라와 모든 레벨 상태 초기화
     void RestartLoopingStage();
 
+    // 직접 실행한 Route의 참가 대기 시간을 마지막 접속 시점부터 다시 계산
+    void ResetDirectStageJoinGracePeriod();
+
+    // 참가 대기가 끝난 뒤 로드와 Director 준비 상태를 다시 검사
+    void HandleDirectStageJoinGracePeriodElapsed();
+
     // 시작 연출이 완료되지 않아 Starting에 멈춘 상태를 오류로 보고
     void HandleStartingPresentationTimeout();
 
@@ -191,8 +201,11 @@ private:
     TArray<FCMQueuedStageLoadRequest> QueuedStageLoadRequests;
     FTimerHandle StartingPresentationTimeoutHandle;
     FTimerHandle StageLoopRestartTimerHandle;
+    FTimerHandle DirectStageJoinGraceTimerHandle;
     bool bStageLoadReady = false;
     bool bStageLoopRestartScheduled = false;
+    bool bDirectStageRoute = false;
+    bool bDirectStageJoinGraceElapsed = true;
     TMap<FString, FCMDisconnectedPlayerRecord> DisconnectedPlayers;
     TSet<FString> ExpiredReconnectKeys;
 };
