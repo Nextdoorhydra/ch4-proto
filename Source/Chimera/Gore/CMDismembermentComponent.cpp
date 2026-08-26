@@ -17,11 +17,24 @@
 #include "Data/CMBloodDefinition.h"
 #include "Components/CMBloodPoolSourceComponent.h"
 #include "Components/CMBloodTransferComponent.h"
+#include "Parts/Core/CMDroppedPartActor.h"
+#include "Parts/Core/CMPartActorBase.h"
 #include "Runtime/CMBloodSubsystem.h"
 #include "Runtime/Surface/CMBloodSurfaceSubsystem.h"
 #include "Tags/CMGoreGameplayTags.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCMDismemberment, Log, All);
+
+namespace
+{
+    uint8 GetBodyPartBit(const ECMBodyPart BodyPart)
+    {
+        const uint8 Index = static_cast<uint8>(BodyPart);
+        return BodyPart == ECMBodyPart::None || Index >= 8
+            ? 0
+            : static_cast<uint8>(1u << Index);
+    }
+}
 
 UCMDismembermentComponent::UCMDismembermentComponent()
 {
@@ -38,7 +51,17 @@ void UCMDismembermentComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    if (!Definition && !bIncludeTorsoInFallbackDefinition)
+    {
+        FallbackParts.RemoveAll(
+            [](const FCMDismembermentPartDefinition& Part)
+            {
+                return Part.BodyPart == ECMBodyPart::Torso;
+            });
+    }
+
     InitializePartStates();
+    ApplySeveredPartMask();
     if (bConfigureLeaderPoseOnBeginPlay)
     {
         ConfigureLeaderPose();
@@ -51,6 +74,38 @@ void UCMDismembermentComponent::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(UCMDismembermentComponent, bCorpseRagdoll);
+    DOREPLIFETIME(UCMDismembermentComponent, SeveredPartMask);
+}
+
+bool UCMDismembermentComponent::SeverBodyPart(
+    const ECMBodyPart BodyPart,
+    const FVector HitLocation,
+    const FVector Impulse
+)
+{
+    return SeverBodyPartInternal(
+        BodyPart,
+        HitLocation,
+        Impulse,
+        nullptr);
+}
+
+bool UCMDismembermentComponent::SeverBodyPartWithReward(
+    const ECMBodyPart BodyPart,
+    const FVector HitLocation,
+    const FVector Impulse,
+    const TSubclassOf<ACMPartActorBase> PartClass
+)
+{
+    if (!PartClass)
+    {
+        return false;
+    }
+    return SeverBodyPartInternal(
+        BodyPart,
+        HitLocation,
+        Impulse,
+        PartClass);
 }
 
 bool UCMDismembermentComponent::ConfigureLeaderPose()
@@ -120,10 +175,11 @@ bool UCMDismembermentComponent::EnterCorpseRagdoll()
     return true;
 }
 
-bool UCMDismembermentComponent::SeverBodyPart(
+bool UCMDismembermentComponent::SeverBodyPartInternal(
     const ECMBodyPart BodyPart,
     const FVector HitLocation,
-    const FVector Impulse
+    const FVector Impulse,
+    const TSubclassOf<ACMPartActorBase> RewardPartClass
 )
 {
     AActor* Owner = GetOwner();
@@ -162,26 +218,72 @@ bool UCMDismembermentComponent::SeverBodyPart(
         return false;
     }
 
-    ASkeletalMeshActor* DetachedActor =
-        World->SpawnActorDeferred<ASkeletalMeshActor>(
-            ASkeletalMeshActor::StaticClass(),
-            AttachedMesh->GetComponentTransform(),
-            Owner,
-            nullptr,
-            ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-    if (!DetachedActor)
-    {
-        return false;
-    }
+    FVector AppliedImpulse = Impulse * Part->ImpulseMultiplier;
+    AppliedImpulse = AppliedImpulse.GetClampedToMaxSize(Part->MaxImpulse);
 
-    USkeletalMeshComponent* DetachedComponent =
-        DetachedActor->GetSkeletalMeshComponent();
-    DetachedComponent->SetSkeletalMeshAsset(DetachedMesh);
-    DetachedComponent->SetPhysicsAsset(DetachedPhysicsAsset, false);
-    DetachedComponent->SetCollisionProfileName(RagdollCollisionProfileName);
+    AActor* DetachedActor = nullptr;
+    USkeletalMeshComponent* DetachedComponent = nullptr;
+    if (RewardPartClass)
+    {
+        ACMDroppedPartActor* DroppedPart =
+            World->SpawnActorDeferred<ACMDroppedPartActor>(
+                ACMDroppedPartActor::StaticClass(),
+                AttachedMesh->GetComponentTransform(),
+                Owner,
+                nullptr,
+                ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+        if (!DroppedPart)
+        {
+            return false;
+        }
+
+        DroppedPart->FinishSpawning(AttachedMesh->GetComponentTransform());
+        DroppedPart->InitializeDroppedPart(
+            BodyPart,
+            RewardPartClass,
+            DetachedMesh,
+            DetachedPhysicsAsset,
+            RagdollCollisionProfileName,
+            AppliedImpulse);
+        DetachedActor = DroppedPart;
+        DetachedComponent = DroppedPart->GetPartMesh();
+        DetachedActor->Tags.AddUnique(TEXT("CM.CollectiblePart"));
+    }
+    else
+    {
+        ASkeletalMeshActor* CosmeticPart =
+            World->SpawnActorDeferred<ASkeletalMeshActor>(
+                ASkeletalMeshActor::StaticClass(),
+                AttachedMesh->GetComponentTransform(),
+                Owner,
+                nullptr,
+                ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+        if (!CosmeticPart)
+        {
+            return false;
+        }
+
+        CosmeticPart->SetReplicates(true);
+        CosmeticPart->SetReplicateMovement(true);
+        DetachedComponent = CosmeticPart->GetSkeletalMeshComponent();
+        DetachedComponent->SetSkeletalMeshAsset(DetachedMesh);
+        DetachedComponent->SetPhysicsAsset(DetachedPhysicsAsset, false);
+        DetachedComponent->SetCollisionProfileName(RagdollCollisionProfileName);
+        CosmeticPart->FinishSpawning(AttachedMesh->GetComponentTransform());
+        CosmeticPart->SetLifeSpan(SpawnedGoreLifeSpan);
+        DetachedComponent->SetCollisionEnabled(
+            ECollisionEnabled::QueryAndPhysics);
+        DetachedComponent->SetAllBodiesSimulatePhysics(true);
+        DetachedComponent->SetSimulatePhysics(true);
+        DetachedComponent->WakeAllRigidBodies();
+        if (!AppliedImpulse.IsNearlyZero())
+        {
+            DetachedComponent->AddImpulse(AppliedImpulse, NAME_None, false);
+        }
+        DetachedActor = CosmeticPart;
+        DetachedActor->Tags.AddUnique(TEXT("CM.CosmeticDetachedBodyPart"));
+    }
     DetachedActor->Tags.AddUnique(TEXT("CM.DetachedBodyPart"));
-    DetachedActor->FinishSpawning(AttachedMesh->GetComponentTransform());
-    DetachedActor->SetLifeSpan(SpawnedGoreLifeSpan);
 
     UCMBloodTransferComponent* BloodTransfer =
         NewObject<UCMBloodTransferComponent>(
@@ -194,21 +296,10 @@ bool UCMDismembermentComponent::SeverBodyPart(
         BloodTransfer->RegisterComponent();
     }
 
-    DetachedComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    DetachedComponent->SetAllBodiesSimulatePhysics(true);
-    DetachedComponent->SetSimulatePhysics(true);
-    DetachedComponent->WakeAllRigidBodies();
-
-    FVector AppliedImpulse = Impulse * Part->ImpulseMultiplier;
-    AppliedImpulse = AppliedImpulse.GetClampedToMaxSize(Part->MaxImpulse);
-    if (!AppliedImpulse.IsNearlyZero())
-    {
-        DetachedComponent->AddImpulse(AppliedImpulse, NAME_None, false);
-    }
-
     AttachedMesh->SetVisibility(false, true);
     AttachedMesh->SetHiddenInGame(true, true);
     *State = ECMBodyPartState::Severed;
+    SeveredPartMask |= GetBodyPartBit(BodyPart);
     DetachedPartActors.Add(BodyPart, DetachedActor);
 
     const FVector BurstDirection = AppliedImpulse.GetSafeNormal(
@@ -293,6 +384,33 @@ void UCMDismembermentComponent::OnRep_CorpseRagdoll()
     if (bCorpseRagdoll)
     {
         ApplyCorpseRagdoll();
+    }
+}
+
+void UCMDismembermentComponent::OnRep_SeveredPartMask()
+{
+    ApplySeveredPartMask();
+}
+
+void UCMDismembermentComponent::ApplySeveredPartMask()
+{
+    for (const FCMDismembermentPartDefinition& Part
+        : GetEffectivePartDefinitions())
+    {
+        if ((SeveredPartMask & GetBodyPartBit(Part.BodyPart)) == 0)
+        {
+            continue;
+        }
+
+        if (USkeletalMeshComponent* PartMesh = FindPartMesh(Part.ComponentName))
+        {
+            PartMesh->SetVisibility(false, true);
+            PartMesh->SetHiddenInGame(true, true);
+        }
+        if (ECMBodyPartState* State = PartStates.Find(Part.BodyPart))
+        {
+            *State = ECMBodyPartState::Severed;
+        }
     }
 }
 

@@ -12,6 +12,7 @@ class UMaterialInterface;
 class UPrimitiveComponent;
 class USkeletalMeshComponent;
 class UStaticMesh;
+class ACMPartActorBase;
 struct FHitResult;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMCorpseRagdollStartedSignature);
@@ -40,13 +41,23 @@ public:
         Category = "Chimera|Dismemberment")
     bool EnterCorpseRagdoll();
 
-    /** Hides an attached corpse part and replaces it with an impulsed ragdoll mesh. */
+    /** Severs a body part as a temporary, non-collectible visual ragdoll. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Dismemberment")
     bool SeverBodyPart(
         ECMBodyPart BodyPart,
         FVector HitLocation,
         FVector Impulse
+    );
+
+    /** Severs a body part as a persistent, collectible gameplay reward. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Dismemberment")
+    bool SeverBodyPartWithReward(
+        ECMBodyPart BodyPart,
+        FVector HitLocation,
+        FVector Impulse,
+        TSubclassOf<ACMPartActorBase> PartClass
     );
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Dismemberment")
@@ -97,6 +108,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Dismemberment")
     bool bConfigureLeaderPoseOnBeginPlay = true;
+
+    /** Keeps the legacy six-part fallback; Sacrifice characters disable it. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Dismemberment")
+    bool bIncludeTorsoInFallbackDefinition = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Dismemberment|Ragdoll")
@@ -168,6 +184,12 @@ private:
     void InitializePartStates();
     void ApplyCorpseRagdoll();
     bool StartCorpseBloodPool();
+    bool SeverBodyPartInternal(
+        ECMBodyPart BodyPart,
+        FVector HitLocation,
+        FVector Impulse,
+        TSubclassOf<ACMPartActorBase> RewardPartClass
+    );
 
     const TArray<FCMDismembermentPartDefinition>&
         GetEffectivePartDefinitions() const;
@@ -205,6 +227,14 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UCMBloodPoolSourceComponent> CorpseBloodPoolComponent;
+
+    UFUNCTION()
+    void OnRep_SeveredPartMask();
+
+    void ApplySeveredPartMask();
+
+    UPROPERTY(ReplicatedUsing = OnRep_SeveredPartMask)
+    uint8 SeveredPartMask = 0;
 
     UPROPERTY(ReplicatedUsing = OnRep_CorpseRagdoll)
     bool bCorpseRagdoll = false;
