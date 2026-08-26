@@ -66,6 +66,16 @@ void ACMStageElementBase::DeactivateElement()
     }
 }
 
+// 현재 요청 상태를 서버에서 반전하고 하위 활성 조건과 함께 다시 계산
+void ACMStageElementBase::ToggleElement()
+{
+    if (HasAuthority())
+    {
+        bActivationRequested = !bActivationRequested;
+        RefreshElementActiveState();
+    }
+}
+
 // 실행 중 상태를 먼저 끈 뒤 하위 초기화와 시작 상태 복원을 순서대로 수행
 void ACMStageElementBase::ResetElement()
 {
@@ -108,6 +118,10 @@ void ACMStageElementBase::HandleStageCommand(
         || CommandTag.MatchesTagExact(CMStageCommandTags::Effect_Deactivate))
     {
         DeactivateElement();
+    }
+    else if (CommandTag.MatchesTagExact(CMStageCommandTags::Mechanism_Toggle))
+    {
+        ToggleElement();
     }
     else if (CommandTag.MatchesTagExact(CMStageCommandTags::Mechanism_Reset)
         || CommandTag.MatchesTagExact(CMStageCommandTags::Effect_Restart))
