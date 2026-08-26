@@ -156,6 +156,11 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     Step.GroundNormal = GroundHit.ImpactNormal;
     Step.PushForce = PushDirection * PushForceMagnitude;
     Step.EndTime = Chimera.GetWorld()->GetTimeSeconds() + PushDuration;
+    LegPart.BeginProceduralStep(
+        bReverseMovement,
+        GroundHit.ImpactPoint,
+        GroundHit.ImpactNormal,
+        PushDuration);
 
     // 개별 Step Force는 해당 마디의 회전과 접지 이동을 담당한다.
     // 같은 시간창에 좌우 다리가 함께 눌렸을 때만 기존 Rolling Match가
@@ -224,7 +229,7 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
 }
 
 void UCMLineBodyMovementCoordinator::CancelLegStep(
-    const ACMLegPart* LegPart
+    ACMLegPart* LegPart
 )
 {
     if (!LegPart)
@@ -238,6 +243,10 @@ void UCMLineBodyMovementCoordinator::CancelLegStep(
             return Step.LegPart.Get() == LegPart;
         }
     );
+    if (RemovedCount > 0)
+    {
+        LegPart->EndProceduralStep();
+    }
     if (RemovedCount > 0)
     {
         UE_LOG(LogChimeraMovement, Log,
@@ -655,6 +664,9 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
     Anchor.Constraint = Constraint;
     Anchor.PartSlotAddress = PartSlotAddress;
     Anchor.SegmentIndex = SegmentIndex;
+    ArmPart.BeginGroundAnchor(
+        GroundHit.ImpactPoint,
+        GroundHit.ImpactNormal);
     if (ArmPart.GetAnchorStaminaCostPerSecond() > UE_SMALL_NUMBER)
     {
         Chimera.PauseStaminaRegeneration();
@@ -1050,6 +1062,10 @@ void UCMLineBodyMovementCoordinator::DestroyArmAnchor(int32 AnchorIndex)
     }
 
     const FActiveArmAnchor Anchor = ActiveArmAnchors[AnchorIndex];
+    if (ACMArmPart* ArmPart = Anchor.ArmPart.Get())
+    {
+        ArmPart->EndGroundAnchor();
+    }
     if (UPhysicsConstraintComponent* Constraint = Anchor.Constraint.Get())
     {
         Constraint->BreakConstraint();
@@ -1176,6 +1192,10 @@ void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
                 LegPart && LegPart->IsOperational()
                     ? TEXT("true")
                     : TEXT("false"));
+            if (LegPart)
+            {
+                LegPart->EndProceduralStep();
+            }
             ActiveLegSteps.RemoveAtSwap(
                 StepIndex,
                 EAllowShrinking::No
@@ -1396,6 +1416,13 @@ void UCMLineBodyMovementCoordinator::EndPlay(
     }
     PendingLeftInputs.Reset();
     PendingRightInputs.Reset();
+    for (const FActiveLegStep& Step : ActiveLegSteps)
+    {
+        if (ACMLegPart* LegPart = Step.LegPart.Get())
+        {
+            LegPart->EndProceduralStep();
+        }
+    }
     ActiveLegSteps.Reset();
     for (int32 AnchorIndex = ActiveArmAnchors.Num() - 1;
         AnchorIndex >= 0;
