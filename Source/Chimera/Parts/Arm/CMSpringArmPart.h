@@ -32,12 +32,21 @@ public:
     virtual void EndSwing() override;
     virtual float GetSwingDuration() const override;
     virtual void Tick(float DeltaSeconds) override;
+    virtual void GetLifetimeReplicatedProps(
+        TArray<FLifetimeProperty>& OutLifetimeProps
+    ) const override;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Spring Arm")
     float GetExtensionSpeed() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Spring Arm")
     float GetPullImpulse() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Spring Arm|Animation")
+    float GetCurrentExtensionLength() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Spring Arm|Animation")
+    float GetExtensionRatio() const;
 
     /** Current synchronized yaw inside [-SweepHalfAngle, +SweepHalfAngle]. */
     UFUNCTION(BlueprintPure, Category = "Chimera|Spring Arm|Aim")
@@ -114,7 +123,7 @@ private:
     UFUNCTION()
     void HandleHookDestroyed(AActor* DestroyedActor);
 
-    UPROPERTY(Transient)
+    UPROPERTY(Replicated)
     TObjectPtr<ACMSpringArmHookProjectile> ActiveHook;
 
     TWeakObjectPtr<class ACMChimera> PullTargetChimera;

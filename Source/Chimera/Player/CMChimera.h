@@ -184,7 +184,7 @@ public:
     );
 
     /** Cancels the sustained push owned by one attached Leg. */
-    void CancelLegStep(const ACMLegPart* LegPart);
+    void CancelLegStep(ACMLegPart* LegPart);
 
     /** Server-side production entry point shared by concrete Arm abilities. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,

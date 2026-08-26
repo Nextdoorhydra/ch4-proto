@@ -102,7 +102,7 @@ bool ACMChimera::TryActivateLegPart(
         );
 }
 
-void ACMChimera::CancelLegStep(const ACMLegPart* LegPart)
+void ACMChimera::CancelLegStep(ACMLegPart* LegPart)
 {
     if (HasAuthority() && MovementCoordinator)
     {
