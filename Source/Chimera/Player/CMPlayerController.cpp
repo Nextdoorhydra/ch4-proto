@@ -8,6 +8,8 @@
 #include "AsyncLoad/CMClientStageLoadComponent.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMChimera.h"
+#include "Player/CMPartSlotComponent.h"
+#include "Parts/Core/CMPartActorBase.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputCoreTypes.h"
@@ -70,6 +72,28 @@ void ACMPlayerController::RequestCheatKillSegment(int32 SegmentIndex)
     }
 
     ServerCheatKillSegment(SegmentIndex);
+}
+
+void ACMPlayerController::RequestCheatDamageSegment(
+    int32 SegmentIndex,
+    float Damage
+)
+{
+    if (IsLocalController() && Damage > 0.0f)
+    {
+        ServerCheatDamageSegment(SegmentIndex, Damage);
+    }
+}
+
+void ACMPlayerController::RequestCheatDamagePart(
+    int32 OneBasedSlotIndex,
+    float Damage
+)
+{
+    if (IsLocalController() && Damage > 0.0f)
+    {
+        ServerCheatDamagePart(OneBasedSlotIndex, Damage);
+    }
 }
 
 void ACMPlayerController::RequestCheatSpawnRandomParts()
@@ -466,6 +490,78 @@ void ACMPlayerController::EndPlay(
     }
 
     Super::EndPlay(EndPlayReason);
+}
+
+void ACMPlayerController::ServerCheatDamageSegment_Implementation(
+    int32 SegmentIndex,
+    float Damage
+)
+{
+#if !UE_BUILD_SHIPPING
+    ACMChimera* SharedChimera = GetSharedChimera();
+    const TArray<FCMBodySegmentHealthState> SegmentStates = SharedChimera
+        ? SharedChimera->GetSegmentHealthStates()
+        : TArray<FCMBodySegmentHealthState>();
+    if (!SharedChimera
+        || !SegmentStates.IsValidIndex(SegmentIndex)
+        || Damage <= 0.0f)
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.DamageBody Index=%d Damage=%.1f"),
+            SegmentIndex,
+            Damage);
+        return;
+    }
+
+    SharedChimera->ApplyDamageToSegment(SegmentIndex, Damage);
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] CM.DamageBody Index=%d Damage=%.1f requested by %s."),
+        SegmentIndex,
+        Damage,
+        *GetName());
+#endif
+}
+
+void ACMPlayerController::ServerCheatDamagePart_Implementation(
+    int32 OneBasedSlotIndex,
+    float Damage
+)
+{
+#if !UE_BUILD_SHIPPING
+    ACMChimera* SharedChimera = GetSharedChimera();
+    const int32 ActiveSlotCount = SharedChimera
+        ? SharedChimera->GetActiveSegmentCount()
+            * CMControl::PartSlotsPerSegment
+        : 0;
+    const int32 FlatSlotIndex = OneBasedSlotIndex - 1;
+    const FCMPartSlotAddress SlotAddress =
+        CMControl::FromFlatPartSlotIndex(FlatSlotIndex);
+    UCMPartSlotComponent* PartSlot = SharedChimera
+        && FlatSlotIndex >= 0
+        && FlatSlotIndex < ActiveSlotCount
+        ? SharedChimera->GetPartSlotComponent(SlotAddress)
+        : nullptr;
+    ACMPartActorBase* Part = PartSlot
+        ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
+        : nullptr;
+    if (!Part || Damage <= 0.0f)
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.DamagePart Slot=%d Damage=%.1f ActiveSlots=%d. Slot is invalid or has no attached Part."),
+            OneBasedSlotIndex,
+            Damage,
+            ActiveSlotCount);
+        return;
+    }
+
+    Part->ApplyPartDamage(Damage);
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] CM.DamagePart Slot=%d Part=%s Damage=%.1f requested by %s."),
+        OneBasedSlotIndex,
+        *Part->GetName(),
+        Damage,
+        *GetName());
+#endif
 }
 
 void ACMPlayerController::SetupInputComponent()

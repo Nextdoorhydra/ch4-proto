@@ -119,6 +119,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     TArray<FCMBodySegmentHealthState> GetSegmentHealthStates() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stamina")
+    float GetStamina() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stamina")
+    float GetMaxStamina() const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     bool AreAllSegmentsDead() const;
 
@@ -145,6 +151,11 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
     UCMPartSlotComponent* GetPartSlotComponent(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
+    bool IsPartSlotPressed(
         const FCMPartSlotAddress& PartSlotAddress
     ) const;
 

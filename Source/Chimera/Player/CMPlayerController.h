@@ -48,6 +48,9 @@ public:
     /** Console-command entry point using the zero-based body-segment index. */
     void RequestCheatKillSegment(int32 SegmentIndex);
 
+    void RequestCheatDamageSegment(int32 SegmentIndex, float Damage);
+    void RequestCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+
     void RequestCheatSpawnRandomParts();
     void RequestCheatAttachPart(int32 OneBasedSlotIndex, FName PartName);
     void RequestCheatFillAllSlotsWithPart(FName PartName);
@@ -159,6 +162,12 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatKillSegment(int32 SegmentIndex);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatDamageSegment(int32 SegmentIndex, float Damage);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
 
     UFUNCTION(Server, Reliable)
     void ServerCheatSpawnRandomParts();

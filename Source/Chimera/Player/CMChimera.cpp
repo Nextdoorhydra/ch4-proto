@@ -269,31 +269,6 @@ void ACMChimera::BeginPlay()
     ConfigureSegments();
     ConfigureNetworkPhysics();
 
-    ControlMarkerMaterials.SetNum(ControlAssignmentMarkers.Num());
-    AppliedMarkerColorIndices.Init(
-        INDEX_NONE,
-        ControlAssignmentMarkers.Num()
-    );
-    AppliedMarkerSlotIndices.Init(
-        INDEX_NONE,
-        ControlAssignmentMarkers.Num()
-    );
-    AppliedMarkerPressedStates.Init(
-        false,
-        ControlAssignmentMarkers.Num()
-    );
-    for (int32 MarkerIndex = 0;
-        MarkerIndex < ControlAssignmentMarkers.Num();
-        ++MarkerIndex)
-    {
-        if (ControlAssignmentMarkers[MarkerIndex])
-        {
-            ControlMarkerMaterials[MarkerIndex] =
-                ControlAssignmentMarkers[MarkerIndex]
-                    ->CreateDynamicMaterialInstance(0);
-        }
-    }
-    UpdateControlAssignmentMarkers(0.0f);
 }
 
 void ACMChimera::OnConstruction(const FTransform& Transform)
@@ -305,9 +280,6 @@ void ACMChimera::OnConstruction(const FTransform& Transform)
 void ACMChimera::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // TargetOffset은 설정 변경 시에만 갱신하면 되어 Tick에서 다시 쓸 필요가 없다.
-    UpdateControlAssignmentMarkers(DeltaTime);
 
     if (!HasAuthority())
     {
