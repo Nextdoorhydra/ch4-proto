@@ -29,7 +29,7 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     ACMChimera& Chimera,
     ACMLegPart& LegPart,
     ACMPlayerState* ContributingPlayerState,
-    float MovementImpulseMultiplier,
+    float MovementImpulse,
     bool bReverseMovement
 )
 {
@@ -40,20 +40,20 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
         || !LegPart.IsOperational()
         || !PartSlot
         || PartSlot->GetOwner() != &Chimera
-        || MovementImpulseMultiplier <= 0.0f
+        || MovementImpulse <= 0.0f
         || SegmentIndex < 0
         || SegmentIndex >= Chimera.ActiveSegmentCount
         || !Chimera.BodySegments.IsValidIndex(SegmentIndex)
         || !Chimera.IsSegmentAlive(SegmentIndex))
     {
         UE_LOG(LogChimeraMovement, Warning,
-            TEXT("[Leg Step Rejected] Preconditions Part=%s Authority=%s Operational=%s Slot=%s SlotOwner=%s Scale=%.2f Segment=%d ActiveSegments=%d Alive=%s"),
+            TEXT("[Leg Step Rejected] Preconditions Part=%s Authority=%s Operational=%s Slot=%s SlotOwner=%s Impulse=%.1f Segment=%d ActiveSegments=%d Alive=%s"),
             *GetNameSafe(&LegPart),
             Chimera.HasAuthority() ? TEXT("true") : TEXT("false"),
             LegPart.IsOperational() ? TEXT("true") : TEXT("false"),
             *GetNameSafe(PartSlot),
             *GetNameSafe(PartSlot ? PartSlot->GetOwner() : nullptr),
-            MovementImpulseMultiplier,
+            MovementImpulse,
             SegmentIndex,
             Chimera.ActiveSegmentCount,
             Chimera.IsSegmentAlive(SegmentIndex)
@@ -128,21 +128,19 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
         0.01f
     );
     const float PushForceMagnitude =
-        Chimera.BaseMovementImpulse
+        MovementImpulse
         * GetPerControlImpulseMultiplier(Chimera)
-        * MovementImpulseMultiplier
         * FMath::Max(Chimera.LegStepForceScale, 0.0f)
         / PushDuration;
     if (PushDirection.IsNearlyZero()
         || PushForceMagnitude <= UE_SMALL_NUMBER)
     {
         UE_LOG(LogChimeraMovement, Warning,
-            TEXT("[Leg Step Rejected] Invalid force Part=%s Direction=%s Base=%.1f PerControl=%.3f Scale=%.2f StepScale=%.3f Duration=%.3f Final=%.1f"),
+            TEXT("[Leg Step Rejected] Invalid force Part=%s Direction=%s Impulse=%.1f PerControl=%.3f StepScale=%.3f Duration=%.3f Final=%.1f"),
             *GetNameSafe(&LegPart),
             *PushDirection.ToCompactString(),
-            Chimera.BaseMovementImpulse,
+            MovementImpulse,
             GetPerControlImpulseMultiplier(Chimera),
-            MovementImpulseMultiplier,
             Chimera.LegStepForceScale,
             PushDuration,
             PushForceMagnitude);
@@ -253,6 +251,7 @@ bool UCMLineBodyMovementCoordinator::TryActivateArm(
     int32 SegmentIndex,
     USceneComponent* ImpulsePoint,
     ACMPlayerState* ContributingPlayerState,
+    float MovementImpulse,
     float MovementImpulseMultiplier
 )
 {
@@ -269,6 +268,7 @@ bool UCMLineBodyMovementCoordinator::TryActivateArm(
         Chimera.BodySegments[SegmentIndex],
         ImpulsePoint,
         ContributingPlayerState,
+        MovementImpulse,
         MovementImpulseMultiplier
     );
 }
@@ -352,10 +352,12 @@ bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
     UStaticMeshComponent* SegmentBody,
     USceneComponent* ImpulsePoint,
     ACMPlayerState* ContributingPlayerState,
+    float MovementImpulse,
     float MovementImpulseMultiplier
 )
 {
     if (!SegmentBody || !ImpulsePoint
+        || MovementImpulse <= 0.0f
         || MovementImpulseMultiplier <= 0.0f)
     {
         return false;
@@ -369,9 +371,8 @@ bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
     }
 
     const FVector Impulse = ForwardDirection
-        * Chimera.BaseMovementImpulse
-        * GetPerControlImpulseMultiplier(Chimera)
-        * MovementImpulseMultiplier;
+        * MovementImpulse
+        * GetPerControlImpulseMultiplier(Chimera);
     const float TranslationFraction = FMath::Clamp(
         Chimera.IndividualPlanarTranslationFraction,
         0.0f,
@@ -408,10 +409,10 @@ bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
     }
 
     UE_LOG(LogChimeraMovement, Log,
-        TEXT("[Arm Impulse] Segment=%d Scale=%.2f Base=%.1f Final=%.1f"),
+        TEXT("[Arm Impulse] Segment=%d Scale=%.2f PartImpulse=%.1f Final=%.1f"),
         Chimera.BodySegments.IndexOfByKey(SegmentBody),
         MovementImpulseMultiplier,
-        Chimera.BaseMovementImpulse,
+        MovementImpulse,
         Impulse.Size());
     return true;
 }

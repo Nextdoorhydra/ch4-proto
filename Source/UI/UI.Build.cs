@@ -13,10 +13,20 @@ public class UI : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"UMG",
+			"CommonUI",
+			"GameplayTags",
+			"NKMUI",
+			"NKMSoundRuntime",
 			"Chimera",
 			"Shared",
 			"ListenServerNetwork",
 			"GameplayMessageRuntime"
+		});
+
+		PrivateDependencyModuleNames.AddRange(new[]
+		{
+			"InputCore",
+			"SlateCore"
 		});
 	}
 }

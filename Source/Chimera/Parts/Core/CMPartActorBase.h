@@ -50,6 +50,19 @@ class CHIMERA_API ACMPartActorBase
 public:
     ACMPartActorBase();
 
+    /** Spawns one shared Part class and applies both data rows before BeginPlay. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Part",
+        meta = (WorldContext = "WorldContextObject"))
+    static ACMPartActorBase* SpawnPartFromDataRows(
+        UObject* WorldContextObject,
+        TSubclassOf<ACMPartActorBase> PartClass,
+        FName InPartRowName,
+        FName InTierRowName,
+        const FTransform& SpawnTransform,
+        AActor* InOwner
+    );
+
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
@@ -90,6 +103,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     float GetMovementImpulseMultiplier() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    float GetMovementImpulse() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     bool IsAlive() const;
@@ -159,9 +175,13 @@ protected:
         Category = "Chimera|Part", meta = (ClampMin = "0.0"))
     float Strength = 10.0f;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+    UPROPERTY(VisibleInstanceOnly, Replicated, BlueprintReadOnly,
         Category = "Chimera|Part", meta = (ClampMin = "0.0"))
     float MovementImpulseMultiplier = 0.0f;
+
+    UPROPERTY(VisibleInstanceOnly, Replicated, BlueprintReadOnly,
+        Category = "Chimera|Part", meta = (ClampMin = "0.0"))
+    float BaseMovementImpulse = 0.0f;
 
     // Google Sheet Loader/DataForge가 갱신하는 공용 Arm/Leg DataTable이다.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -170,7 +190,15 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Part Data")
+    TSoftObjectPtr<UDataTable> PartTierDataTable;
+
+    UPROPERTY(EditDefaultsOnly, Replicated, BlueprintReadOnly,
+        Category = "Chimera|Part Data")
     FName PartRowName = NAME_None;
+
+    UPROPERTY(EditDefaultsOnly, Replicated, BlueprintReadOnly,
+        Category = "Chimera|Part Data")
+    FName TierRowName = TEXT("Tier1");
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Part Data")

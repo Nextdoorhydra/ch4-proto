@@ -15,7 +15,8 @@ public class ChimeraEditorTarget : TargetRules
 			"Chimera",
 			"Shared",
 			"AI",
-			"UI"
+			"UI",
+			"CMGore"
 		});
 		RegisterModulesCreatedByRider();
 	}

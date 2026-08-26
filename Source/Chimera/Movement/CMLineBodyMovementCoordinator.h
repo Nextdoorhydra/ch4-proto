@@ -36,7 +36,7 @@ public:
         ACMChimera& Chimera,
         ACMLegPart& LegPart,
         ACMPlayerState* ContributingPlayerState,
-        float MovementImpulseMultiplier,
+        float MovementImpulse,
         bool bReverseMovement
     );
 
@@ -60,6 +60,7 @@ public:
         int32 SegmentIndex,
         USceneComponent* ImpulsePoint,
         ACMPlayerState* ContributingPlayerState,
+        float MovementImpulse,
         float MovementImpulseMultiplier
     );
 
@@ -84,6 +85,7 @@ private:
         UStaticMeshComponent* SegmentBody,
         USceneComponent* ImpulsePoint,
         ACMPlayerState* ContributingPlayerState,
+        float MovementImpulse,
         float MovementImpulseMultiplier
     );
 

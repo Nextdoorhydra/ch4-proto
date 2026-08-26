@@ -27,6 +27,7 @@ public class Chimera : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"CMGore",
 			"ListenServerNetwork",
 			"EnhancedInput",
 			"InputCore",

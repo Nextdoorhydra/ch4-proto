@@ -3,7 +3,10 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
+#include "Data/Part/CMPartTierTableRow.h"
 #include "Engine/DataTable.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Parts/Combat/CMBattleComponent.h"
 #include "Parts/Core/CMPartStatusComponent.h"
@@ -29,6 +32,57 @@ ACMPartActorBase::ACMPartActorBase()
     PartStatusComponent = CreateDefaultSubobject<UCMPartStatusComponent>(
         TEXT("PartStatusComponent")
     );
+
+    PartDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(
+        TEXT("/Game/Chimera/Data/Body/DT_LegArmDataTable.DT_LegArmDataTable")
+    ));
+    PartTierDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(
+        TEXT("/Game/Chimera/Data/Body/DT_PartTierDataTable.DT_PartTierDataTable")
+    ));
+}
+
+ACMPartActorBase* ACMPartActorBase::SpawnPartFromDataRows(
+    UObject* WorldContextObject,
+    TSubclassOf<ACMPartActorBase> PartClass,
+    FName InPartRowName,
+    FName InTierRowName,
+    const FTransform& SpawnTransform,
+    AActor* InOwner
+)
+{
+    UWorld* World = GEngine
+        ? GEngine->GetWorldFromContextObject(
+            WorldContextObject,
+            EGetWorldErrorMode::ReturnNull)
+        : nullptr;
+    if (!World || !PartClass || World->GetNetMode() == NM_Client)
+    {
+        return nullptr;
+    }
+
+    ACMPartActorBase* PartActor =
+        World->SpawnActorDeferred<ACMPartActorBase>(
+            PartClass,
+            SpawnTransform,
+            InOwner,
+            nullptr,
+            ESpawnActorCollisionHandlingMethod::AlwaysSpawn
+        );
+    if (!PartActor)
+    {
+        return nullptr;
+    }
+
+    if (!InPartRowName.IsNone())
+    {
+        PartActor->PartRowName = InPartRowName;
+    }
+    if (!InTierRowName.IsNone())
+    {
+        PartActor->TierRowName = InTierRowName;
+    }
+    PartActor->FinishSpawning(SpawnTransform);
+    return PartActor;
 }
 
 void ACMPartActorBase::BeginPlay()
@@ -56,6 +110,10 @@ void ACMPartActorBase::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPartActorBase, MaxHealth);
     DOREPLIFETIME(ACMPartActorBase, Health);
     DOREPLIFETIME(ACMPartActorBase, Strength);
+    DOREPLIFETIME(ACMPartActorBase, BaseMovementImpulse);
+    DOREPLIFETIME(ACMPartActorBase, MovementImpulseMultiplier);
+    DOREPLIFETIME(ACMPartActorBase, PartRowName);
+    DOREPLIFETIME(ACMPartActorBase, TierRowName);
     DOREPLIFETIME(ACMPartActorBase, PartStateTags);
     DOREPLIFETIME(ACMPartActorBase, bDead);
     DOREPLIFETIME(ACMPartActorBase, bDisabled);
@@ -159,6 +217,11 @@ float ACMPartActorBase::GetMovementImpulseMultiplier() const
             : 1.0f);
 }
 
+float ACMPartActorBase::GetMovementImpulse() const
+{
+    return BaseMovementImpulse * GetMovementImpulseMultiplier();
+}
+
 void ACMPartActorBase::ApplyPartData(
     const FCMPartLegArmTableRow& PartRow
 )
@@ -167,7 +230,8 @@ void ACMPartActorBase::ApplyPartData(
 
 bool ACMPartActorBase::InitializeFromPartData()
 {
-    if (PartDataTable.IsNull() || PartRowName.IsNone())
+    if (PartDataTable.IsNull() || PartTierDataTable.IsNull()
+        || PartRowName.IsNone() || TierRowName.IsNone())
     {
         return false;
     }
@@ -182,6 +246,16 @@ bool ACMPartActorBase::InitializeFromPartData()
         return false;
     }
 
+    UDataTable* LoadedTierTable = PartTierDataTable.LoadSynchronous();
+    if (!LoadedTierTable)
+    {
+        UE_LOG(LogChimeraPart, Error,
+            TEXT("[Part Data Failed] Part=%s TierTable=%s could not be loaded."),
+            *GetName(),
+            *PartTierDataTable.ToSoftObjectPath().ToString());
+        return false;
+    }
+
     const FCMPartLegArmTableRow* PartRow =
         LoadedTable->FindRow<FCMPartLegArmTableRow>(
             PartRowName,
@@ -193,6 +267,20 @@ bool ACMPartActorBase::InitializeFromPartData()
             TEXT("[Part Data Failed] Part=%s Row=%s was not found."),
             *GetName(),
             *PartRowName.ToString());
+        return false;
+    }
+
+    const FCMPartTierTableRow* TierRow =
+        LoadedTierTable->FindRow<FCMPartTierTableRow>(
+            TierRowName,
+            TEXT("ACMPartActorBase::InitializeFromPartData")
+        );
+    if (!TierRow)
+    {
+        UE_LOG(LogChimeraPart, Error,
+            TEXT("[Part Data Failed] Part=%s TierRow=%s was not found."),
+            *GetName(),
+            *TierRowName.ToString());
         return false;
     }
 
@@ -214,24 +302,38 @@ bool ACMPartActorBase::InitializeFromPartData()
 
     PartDataID = PartRow->ID;
     Species = PartRow->Species;
-    MaxHealth = FMath::Max(PartRow->MaxHealth, 1.0f);
-    Strength = FMath::Max(PartRow->Strength, 0.0f);
+    MaxHealth = FMath::Max(
+        PartRow->MaxHealth * TierRow->HealthMultiplier,
+        1.0f
+    );
+    Strength = FMath::Max(
+        PartRow->Strength * TierRow->StrengthMultiplier,
+        0.0f
+    );
+    BaseMovementImpulse = FMath::Max(
+        PartRow->BaseMovementImpulse,
+        0.0f
+    );
     MovementImpulseMultiplier = FMath::Max(
-        PartRow->MovementImpulseMultiplier,
+        TierRow->MovementImpulseMultiplier,
         0.0f
     );
     ApplyPartData(*PartRow);
 
     UE_LOG(LogChimeraPart, Log,
-        TEXT("[Part Data Ready] Part=%s Row=%s ID=%s Type=%s Species=%s Health=%.1f Strength=%.1f MoveScale=%.2f"),
+        TEXT("[Part Data Ready] Part=%s Row=%s Tier=%s ID=%s TierID=%s Type=%s Species=%s Health=%.1f Strength=%.1f BaseImpulse=%.1f MoveScale=%.2f FinalImpulse=%.1f"),
         *GetName(),
         *PartRowName.ToString(),
+        *TierRowName.ToString(),
         *PartDataID.ToString(),
+        *TierRow->ID.ToString(),
         *PartRow->PartType.ToString(),
         *Species.ToString(),
         MaxHealth,
         Strength,
-        MovementImpulseMultiplier);
+        BaseMovementImpulse,
+        MovementImpulseMultiplier,
+        GetMovementImpulse());
     return true;
 }
 
