@@ -43,8 +43,7 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
         || MovementImpulse <= 0.0f
         || SegmentIndex < 0
         || SegmentIndex >= Chimera.ActiveSegmentCount
-        || !Chimera.BodySegments.IsValidIndex(SegmentIndex)
-        || !Chimera.IsSegmentAlive(SegmentIndex))
+        || !Chimera.BodySegments.IsValidIndex(SegmentIndex))
     {
         UE_LOG(LogChimeraMovement, Warning,
             TEXT("[Leg Step Rejected] Preconditions Part=%s Authority=%s Operational=%s Slot=%s SlotOwner=%s Impulse=%.1f Segment=%d ActiveSegments=%d Alive=%s"),
@@ -1165,8 +1164,7 @@ void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
             && IsValid(LegPart)
             && LegPart->IsOperational()
             && IsValid(SegmentBody)
-            && SegmentBody->IsSimulatingPhysics()
-            && Chimera.IsSegmentAlive(Step.SegmentIndex);
+            && SegmentBody->IsSimulatingPhysics();
         if (!bCanContinue)
         {
             UE_LOG(LogChimeraMovement, Verbose,
