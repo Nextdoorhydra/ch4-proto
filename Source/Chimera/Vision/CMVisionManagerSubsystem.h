@@ -60,6 +60,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     bool IsLocationVisible(const FVector& WorldLocation) const;
 
+    /** Returns the active vision sources that can currently see a world location. */
+    void GetVisionSourcesSeeingLocation(
+        const FVector& WorldLocation,
+        TArray<UCMVisionComponent*>& OutSources
+    ) const;
+
     UFUNCTION(BlueprintCallable, Category = "Chimera|Vision")
     void DisableVisionSystem();
 
