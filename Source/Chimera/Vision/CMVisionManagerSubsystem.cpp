@@ -929,9 +929,16 @@ void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
         CeilingSurfaceNormalZThresholdParameterName,
         RenderConfig->CeilingSurfaceNormalZThreshold
     );
+    const float LowObstacleTopRevealHeight = FMath::Max(
+        FMath::Max(
+            RenderConfig->VisionHeightTolerance,
+            RenderConfig->OccluderSurfaceRevealDistance
+        ),
+        RenderConfig->VisionBelowHeightAllowance
+    );
     PostProcessMaterialInstance->SetScalarParameterValue(
         VisionHeightToleranceParameterName,
-        RenderConfig->VisionHeightTolerance
+        LowObstacleTopRevealHeight
     );
 
     Camera->PostProcessSettings.AddBlendable(
@@ -1113,8 +1120,39 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
     }
 
     const FVector TraceDirection = (TraceEnd - TraceStart).GetSafeNormal();
+    float OccluderDistance = Hit.Distance;
+    if (const UPrimitiveComponent* HitComponent = Hit.GetComponent())
+    {
+        const FBoxSphereBounds Bounds = HitComponent->Bounds;
+        const float TopHeight = Bounds.Origin.Z + Bounds.BoxExtent.Z;
+        const float LowObstacleTopRevealHeight = FMath::Max(
+            FMath::Max(
+                RenderConfig->VisionHeightTolerance,
+                RenderConfig->OccluderSurfaceRevealDistance
+            ),
+            RenderConfig->VisionBelowHeightAllowance
+        );
+        const float VisionTopHeight = VisionSource.GetVisionOrigin().Z
+            + LowObstacleTopRevealHeight;
+        if (TopHeight <= VisionTopHeight)
+        {
+            const FVector PlanarDirection = TraceDirection.GetSafeNormal2D();
+            const float ProjectedCenter = FVector::DotProduct(
+                Bounds.Origin - TraceStart,
+                PlanarDirection
+            );
+            const float ProjectedExtent = FMath::Abs(PlanarDirection.X)
+                * Bounds.BoxExtent.X
+                + FMath::Abs(PlanarDirection.Y) * Bounds.BoxExtent.Y;
+            OccluderDistance = FMath::Max(
+                OccluderDistance,
+                FMath::Min(ProjectedCenter + ProjectedExtent,
+                    FVector::Distance(TraceStart, TraceEnd))
+            );
+        }
+    }
     const float RevealedDistance = FMath::Min(
-        Hit.Distance + FMath::Max(RevealDistance, 0.0f),
+        OccluderDistance + FMath::Max(RevealDistance, 0.0f),
         FVector::Distance(TraceStart, TraceEnd)
     );
     const FVector RevealedPoint = TraceStart

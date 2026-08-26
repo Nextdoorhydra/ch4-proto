@@ -78,6 +78,11 @@ public:
         meta = (ClampMin = "0.0"))
     float VisionHeightTolerance = 2.0f;
 
+    /** Maximum height difference below the vision source that remains visible. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
+        meta = (ClampMin = "0.0"))
+    float VisionBelowHeightAllowance = 1000.0f;
+
     /** Object types treated as walls. WorldStatic excludes Pawns and Parts. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion")
     TArray<TEnumAsByte<ECollisionChannel>> OccluderObjectTypes = {
