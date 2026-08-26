@@ -3,6 +3,7 @@
 #include "AsyncLoadCompleteMessage.h"
 #include "AsyncPDALoader.h"
 #include "AsyncPDALoaderTags.h"
+#include "PrimaryDataAssetBase.h"
 #include "Sound/NKMSoundSettings.h"
 #include "Sound/NKMSoundSubsystem.h"
 
