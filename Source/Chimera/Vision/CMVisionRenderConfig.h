@@ -68,6 +68,11 @@ public:
         meta = (ClampMin = "1.0"))
     float MaskBoundsPadding = 1.05f;
 
+    /** World-space width of the visibility mask's soft boundary. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
+        meta = (ClampMin = "0.0"))
+    float VisionEdgeSoftness = 30.0f;
+
     /** High surfaces flatter than this are treated as ceilings. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
