@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Data/Part/CMPartTier.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "Player/CMPartInterface.h"
@@ -11,7 +12,7 @@ class UGameplayAbility;
 class UCMBattleComponent;
 class UCMPartStatusComponent;
 class USceneComponent;
-class UStaticMeshComponent;
+class USkeletalMeshComponent;
 class UDataTable;
 class ACMPlayerState;
 struct FCMPartLegArmTableRow;
@@ -93,6 +94,9 @@ public:
     UCMPartStatusComponent* GetPartStatusComponent() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    USkeletalMeshComponent* GetPartMesh() const { return PartMesh; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     float GetHealth() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
@@ -106,6 +110,15 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     float GetMovementImpulse() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    ECMPartTier GetTier() const { return Tier; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    int32 GetTierLevel() const { return CMPartTier::ToLevel(Tier); }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    FName GetTierRowName() const { return TierRowName; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     bool IsAlive() const;
@@ -152,7 +165,7 @@ protected:
     TObjectPtr<USceneComponent> SceneRoot;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<UStaticMeshComponent> PartMesh;
+    TObjectPtr<USkeletalMeshComponent> PartMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMBattleComponent> BattleComponent;
@@ -199,6 +212,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, Replicated, BlueprintReadOnly,
         Category = "Chimera|Part Data")
     FName TierRowName = TEXT("Tier1");
+
+    UPROPERTY(VisibleInstanceOnly, Replicated, BlueprintReadOnly,
+        Category = "Chimera|Part Data")
+    ECMPartTier Tier = ECMPartTier::Tier1;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Part Data")

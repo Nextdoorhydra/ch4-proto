@@ -9,6 +9,12 @@
 class UCMVisionComponent;
 class UCMHeadDefinition;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+    FCMHeadLookRotationChangedSignature,
+    FRotator,
+    LookRotation
+);
+
 /** A Head Part that contributes one cone to the team's shared vision. */
 UCLASS(Blueprintable)
 class CHIMERA_API ACMHeadPartActor : public ACMPartActorBase
@@ -17,6 +23,10 @@ class CHIMERA_API ACMHeadPartActor : public ACMPartActorBase
 
 public:
     ACMHeadPartActor();
+
+    virtual void GetLifetimeReplicatedProps(
+        TArray<FLifetimeProperty>& OutLifetimeProps
+    ) const override;
 
     virtual void OnAttachedToPartSlot_Implementation(
         UCMPartSlotComponent* PartSlot
@@ -31,6 +41,20 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part|Head")
     bool IsHeadDefinitionReady() const { return bDefinitionReady; }
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Part|Head|Animation")
+    void SetProceduralLookRotation(FRotator InLookRotation);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part|Head|Animation")
+    FRotator GetProceduralLookRotation() const
+    {
+        return ProceduralLookRotation;
+    }
+
+    UPROPERTY(BlueprintAssignable,
+        Category = "Chimera|Part|Head|Animation")
+    FCMHeadLookRotationChangedSignature OnLookRotationChanged;
 
 protected:
     virtual void BeginPlay() override;
@@ -50,6 +74,9 @@ protected:
 
 private:
     UFUNCTION()
+    void OnRep_ProceduralLookRotation();
+
+    UFUNCTION()
     void HandleLoadGroupFinished(
         FName FinishedLoadGroupId,
         EAsyncLoadResult Result,
@@ -63,4 +90,7 @@ private:
 
     bool bDefinitionReady = false;
     bool bDefinitionFailed = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_ProceduralLookRotation)
+    FRotator ProceduralLookRotation = FRotator::ZeroRotator;
 };

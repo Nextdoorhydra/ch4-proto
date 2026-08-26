@@ -41,7 +41,7 @@ public:
     );
 
     /** Stops only the active push owned by this Leg, if one exists. */
-    void CancelLegStep(const ACMLegPart* LegPart);
+    void CancelLegStep(ACMLegPart* LegPart);
 
     /** Pins a basic Arm slot to walkable ground while its control is held. */
     bool TryBeginArmAnchor(
