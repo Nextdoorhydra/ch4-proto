@@ -263,6 +263,22 @@ UCMPartSlotComponent* ACMChimera::GetPartSlotComponent(
         : nullptr;
 }
 
+bool ACMChimera::IsPartSlotPressed(
+    const FCMPartSlotAddress& PartSlotAddress
+) const
+{
+    if (!CMControl::IsValidPartSlot(
+        PartSlotAddress,
+        ActiveSegmentCount))
+    {
+        return false;
+    }
+
+    const int32 FlatIndex =
+        CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    return (PressedPartSlotMask & (1u << FlatIndex)) != 0;
+}
+
 bool ACMChimera::AttachPartToSlot(
     const FCMPartSlotAddress& PartSlotAddress,
     AActor* PartActor

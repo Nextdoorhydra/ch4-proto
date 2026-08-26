@@ -148,6 +148,11 @@ public:
         const FCMPartSlotAddress& PartSlotAddress
     ) const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
+    bool IsPartSlotPressed(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
+
     /** Server-authoritative attachment entry point for pickup/UI systems. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Part Slots")

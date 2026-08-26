@@ -87,11 +87,14 @@ void ACMChimera::UpdateControlAssignmentMarkers(float DeltaTime)
         );
     }
 
+    const ACMPlayerState* LocalPlayerState = nullptr;
     APlayerCameraManager* CameraManager = nullptr;
     if (const APlayerController* LocalPlayerController = GetWorld()
         ? GetWorld()->GetFirstPlayerController()
         : nullptr)
     {
+        LocalPlayerState = LocalPlayerController
+            ->GetPlayerState<ACMPlayerState>();
         CameraManager = LocalPlayerController->PlayerCameraManager;
     }
     static const TCHAR* KeyLabels[] =
@@ -120,6 +123,7 @@ void ACMChimera::UpdateControlAssignmentMarkers(float DeltaTime)
             MarkerIndex / CMControl::PartSlotsPerSegment;
         const bool bShouldShow = Marker
             && ControlOwner
+            && ControlOwner == LocalPlayerState
             && SegmentIndex < ActiveSegmentCount;
 
         if (!Marker)
