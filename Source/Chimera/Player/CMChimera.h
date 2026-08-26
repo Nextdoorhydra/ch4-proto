@@ -119,6 +119,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     TArray<FCMBodySegmentHealthState> GetSegmentHealthStates() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stamina")
+    float GetStamina() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stamina")
+    float GetMaxStamina() const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     bool AreAllSegmentsDead() const;
 

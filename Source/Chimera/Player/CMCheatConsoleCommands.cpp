@@ -46,6 +46,58 @@ void KillSegment(UWorld* World, int32 SegmentIndex)
     }
 }
 
+void DamageBody(const TArray<FString>& Args, UWorld* World)
+{
+    if (Args.Num() < 2)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[Cheat Usage] CM.DamageBody <BodyIndex> <Damage>"));
+        return;
+    }
+
+    const float Damage = FCString::Atof(*Args[1]);
+    if (Damage <= 0.0f)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[Cheat Usage] Damage must be greater than zero."));
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatDamageSegment(
+            FCString::Atoi(*Args[0]),
+            Damage);
+    }
+}
+
+void DamagePart(const TArray<FString>& Args, UWorld* World)
+{
+    if (Args.Num() < 2)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[Cheat Usage] CM.DamagePart <SlotNumber> <Damage>"));
+        return;
+    }
+
+    const int32 OneBasedSlotIndex = FCString::Atoi(*Args[0]);
+    const float Damage = FCString::Atof(*Args[1]);
+    if (OneBasedSlotIndex < 1
+        || OneBasedSlotIndex > CMControl::MaxPartSlots
+        || Damage <= 0.0f)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[Cheat Usage] CM.DamagePart <SlotNumber> <Damage> (SlotNumber=1..%d)"),
+            CMControl::MaxPartSlots);
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatDamagePart(OneBasedSlotIndex, Damage);
+    }
+}
+
 void SpawnRandomParts(const TArray<FString>& Args, UWorld* World)
 {
     if (ACMPlayerController* Controller = FindLocalController(World))
@@ -121,6 +173,18 @@ FAutoConsoleCommandWithWorldAndArgs KillAllSegmentsCommand(
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &KillAllSegments
     )
+);
+
+FAutoConsoleCommandWithWorldAndArgs DamageBodyCommand(
+    TEXT("CM.DamageBody"),
+    TEXT("Damages a zero-based Chimera body segment. Usage: CM.DamageBody <BodyIndex> <Damage>"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&DamageBody)
+);
+
+FAutoConsoleCommandWithWorldAndArgs DamagePartCommand(
+    TEXT("CM.DamagePart"),
+    TEXT("Damages the Part attached to a one-based global Chimera slot. Usage: CM.DamagePart <SlotNumber> <Damage>"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&DamagePart)
 );
 
 FAutoConsoleCommandWithWorldAndArgs SpawnRandomPartsCommand(

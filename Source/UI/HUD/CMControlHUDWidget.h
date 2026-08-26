@@ -7,7 +7,9 @@
 
 class UBorder;
 class UHorizontalBox;
+class UProgressBar;
 class UTextBlock;
+class UVerticalBox;
 class ACMControlBody;
 
 /** Local-only, persistent Q/W/E/R control assignment HUD. */
@@ -32,19 +34,19 @@ protected:
     FVector2D HUDPosition = FVector2D(0.0f, -30.0f);
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Layout", meta = (ClampMin = "1.0"))
-    float CardWidth = 145.0f;
+    float CardWidth = 95.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Layout", meta = (ClampMin = "1.0"))
-    float CardHeight = 76.0f;
+    float CardHeight = 58.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Layout", meta = (ClampMin = "0.0"))
     float CardSpacing = 5.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Text", meta = (ClampMin = "1"))
-    int32 KeyFontSize = 24;
+    int32 KeyFontSize = 20;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Text", meta = (ClampMin = "1"))
-    int32 AssignmentFontSize = 14;
+    int32 AssignmentFontSize = 11;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Color")
     FLinearColor DisabledCardColor = FLinearColor(0.08f, 0.08f, 0.08f, 0.82f);
@@ -63,7 +65,19 @@ private:
     TWeakObjectPtr<ACMControlBody> ControlBody;
 
     UPROPERTY(Transient)
+    TObjectPtr<UVerticalBox> HUDContainer;
+
+    UPROPERTY(Transient)
     TObjectPtr<UHorizontalBox> ControlSlotBox;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UProgressBar> StaminaProgressBar;
+
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UProgressBar>> BodyHealthBars;
+
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UProgressBar>> PartHealthBars;
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<UBorder>> ControlSlotBorders;

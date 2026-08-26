@@ -7,6 +7,16 @@
 #include "Engine/DataTable.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 
+float ACMChimera::GetStamina() const
+{
+    return AttributeSet ? AttributeSet->GetStamina() : 0.0f;
+}
+
+float ACMChimera::GetMaxStamina() const
+{
+    return AttributeSet ? AttributeSet->GetMaxStamina() : 0.0f;
+}
+
 bool ACMChimera::InitializeFromBodyData()
 {
     UE_LOG(LogChimeraLineBody, Verbose,
