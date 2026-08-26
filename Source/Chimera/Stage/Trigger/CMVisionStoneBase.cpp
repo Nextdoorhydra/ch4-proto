@@ -8,8 +8,7 @@
 
 ACMVisionStoneBase::ACMVisionStoneBase()
 {
-    // The element stays enabled so the inherited trigger can receive
-    // continuous condition changes. Its triggered state is the puzzle state.
+    // 시야 조건을 계속 검사할 수 있도록 Element는 활성 상태로 유지하고 Trigger 상태만 퍼즐 입력으로 사용
     bStartActive = true;
     ActivationTrigger->bOneShot = false;
 

@@ -323,44 +323,70 @@ void ACMChimera::Tick(float DeltaTime)
     UpdateReplicatedSegmentStates();
 }
 
-// 서버에서 전후 Force와 좌우 Yaw Torque를 적용해 충돌 가능한 테스트 이동 제공
+// 모든 활성 마디를 하나의 몸처럼 전후 이동하고 좌우 회전시키는 테스트 입력 처리
 void ACMChimera::ApplyDebugMovementInput(
     float ForwardInput,
     float TurnInput)
 {
 #if !UE_BUILD_SHIPPING
-    if (!HasAuthority() || !BodyMesh || !BodyMesh->IsSimulatingPhysics())
+    if (!HasAuthority())
     {
         return;
     }
 
-    FVector ForwardDirection = BodyMesh->GetForwardVector();
-    ForwardDirection.Z = 0.0f;
-    ForwardDirection.Normalize();
+    TArray<UStaticMeshComponent*> SimulatedSegments;
+    FVector CombinedForwardDirection = FVector::ZeroVector;
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount, BodySegments.Num());
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        if (!SegmentBody || !SegmentBody->IsSimulatingPhysics())
+        {
+            continue;
+        }
 
-    if (!FMath::IsNearlyZero(ForwardInput))
+        SimulatedSegments.Add(SegmentBody);
+        FVector SegmentForward = SegmentBody->GetForwardVector();
+        SegmentForward.Z = 0.0f;
+        CombinedForwardDirection += SegmentForward.GetSafeNormal();
+    }
+
+    if (SimulatedSegments.IsEmpty())
+    {
+        return;
+    }
+
+    const FVector ForwardDirection =
+        CombinedForwardDirection.GetSafeNormal();
+
+    if (!FMath::IsNearlyZero(ForwardInput)
+        && !ForwardDirection.IsNearlyZero())
     {
         const FVector DebugAcceleration =
             ForwardDirection * ForwardInput * DebugMovementForce;
-        const int32 SegmentCount = FMath::Min(
-            ActiveSegmentCount, BodySegments.Num());
-        for (int32 Index = 0; Index < SegmentCount; ++Index)
+        for (UStaticMeshComponent* SegmentBody : SimulatedSegments)
         {
-            UStaticMeshComponent* SegmentBody = BodySegments[Index];
-            if (SegmentBody && SegmentBody->IsSimulatingPhysics())
-            {
-                // 디버그 이동은 마디 수와 질량에 따른 협동 Force 분산을 무시
-                SegmentBody->AddForce(
-                    DebugAcceleration,
-                    NAME_None,
-                    true);
-            }
+            // 모든 마디에 같은 가속도를 적용해 질량과 마디 수 영향을 제거
+            SegmentBody->AddForce(
+                DebugAcceleration,
+                NAME_None,
+                true);
         }
     }
+
     if (!FMath::IsNearlyZero(TurnInput))
     {
-        BodyMesh->AddTorqueInRadians(
-            FVector::UpVector * TurnInput * DebugTurnTorque);
+        const FVector DebugAngularAcceleration =
+            FVector::UpVector * TurnInput * DebugTurnTorque;
+        for (UStaticMeshComponent* SegmentBody : SimulatedSegments)
+        {
+            // 모든 마디에 같은 각가속도를 적용해 몸 전체가 함께 회전
+            SegmentBody->AddTorqueInRadians(
+                DebugAngularAcceleration,
+                NAME_None,
+                true);
+        }
     }
 #endif
 }

@@ -32,6 +32,14 @@ bool ACMStageTriggerBase::DeactivateTrigger(AActor* TriggeringActor)
         && ActivationTrigger->SetTriggeredState(false, TriggeringActor);
 }
 
+void ACMStageTriggerBase::SetDirectTargetCommandEnabled(bool bEnabled)
+{
+    if (HasAuthority())
+    {
+        bDirectTargetCommandEnabled = bEnabled;
+    }
+}
+
 // 장치 활성 상태를 실제 트리거 입력 허용 상태에 연결
 void ACMStageTriggerBase::HandleElementActiveChanged_Implementation(bool bIsActive)
 {
@@ -52,21 +60,37 @@ void ACMStageTriggerBase::HandleElementReset_Implementation()
 // 활성 조건이 충족되면 설정된 대상 명령과 표현 이벤트를 실행
 void ACMStageTriggerBase::HandleTriggerActivated(AActor* TriggeringActor)
 {
-    StageElement->RequestStageCommand(
-        ResolveTargetPlacementId(),
-        TargetGroup,
-        TargetCommandTag);
+    if (bDirectTargetCommandEnabled)
+    {
+        StageElement->RequestStageCommand(
+            ResolveTargetPlacementId(),
+            TargetGroup,
+            TargetCommandTag);
+    }
+    OnTriggerSignal.Broadcast(this, ResolveTriggerSignal(true));
     OnTriggerActivated(TriggeringActor);
 }
 
 // 활성 조건이 해제되면 설정된 해제 명령과 표현 이벤트를 실행
 void ACMStageTriggerBase::HandleTriggerDeactivated(AActor* TriggeringActor)
 {
-    StageElement->RequestStageCommand(
-        ResolveTargetPlacementId(),
-        TargetGroup,
-        ReleaseCommandTag);
+    if (bDirectTargetCommandEnabled)
+    {
+        StageElement->RequestStageCommand(
+            ResolveTargetPlacementId(),
+            TargetGroup,
+            ReleaseCommandTag);
+    }
+    OnTriggerSignal.Broadcast(this, ResolveTriggerSignal(false));
     OnTriggerDeactivated(TriggeringActor);
+}
+
+ECMStageTriggerSignal ACMStageTriggerBase::ResolveTriggerSignal(
+    bool bActivated) const
+{
+    return bActivated
+        ? ECMStageTriggerSignal::Activated
+        : ECMStageTriggerSignal::Deactivated;
 }
 
 // 직접 선택한 액터의 StageElement ID를 우선 사용하고 수동 ID를 대체 경로로 사용

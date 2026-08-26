@@ -28,6 +28,10 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Stage|Element")
     void DeactivateElement();
 
+    // 요소의 현재 작동 요청 상태를 반대로 전환
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Stage|Element")
+    void ToggleElement();
+
     // 요소를 레벨 시작 상태로 복원
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Stage|Element")
     void ResetElement();
