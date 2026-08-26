@@ -20,6 +20,16 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
     TargetPart
 );
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+    FCMArmAnchorStateChangedSignature,
+    bool,
+    bAnchored,
+    FVector,
+    AnchorLocation,
+    FVector,
+    AnchorNormal
+);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
     FCMArmSwingTargetDetectedSignature,
     AActor*,
@@ -66,6 +76,21 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm")
     FGuid GetCurrentSwingAttackId() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
+    bool IsGroundAnchored() const { return bGroundAnchored; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
+    FVector GetGroundAnchorLocation() const { return GroundAnchorLocation; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
+    FVector GetGroundAnchorNormal() const { return GroundAnchorNormal; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
+    float GetSwingPhase() const;
+
+    void BeginGroundAnchor(FVector Location, FVector Normal);
+    void EndGroundAnchor();
+
     /** Called by the authoritative Arm GA at the start of one swing. */
     virtual bool BeginSwing();
     virtual void EndSwing();
@@ -91,6 +116,9 @@ public:
     /** Server-only notification for actors found inside this Arm's swing sector. */
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Arm")
     FCMArmSwingTargetDetectedSignature OnSwingTargetDetected;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Arm|Animation")
+    FCMArmAnchorStateChangedSignature OnGroundAnchorStateChanged;
 
 protected:
     virtual void BeginPlay() override;
@@ -142,6 +170,9 @@ private:
     void OnRep_Swinging();
 
     UFUNCTION()
+    void OnRep_GroundAnchor();
+
+    UFUNCTION()
     void HandlePartDied();
 
     UPROPERTY(ReplicatedUsing = OnRep_Swinging,
@@ -149,5 +180,18 @@ private:
         meta = (AllowPrivateAccess = "true"))
     bool bSwinging = false;
 
+    UPROPERTY(ReplicatedUsing = OnRep_GroundAnchor)
+    bool bGroundAnchored = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_GroundAnchor)
+    FVector_NetQuantize10 GroundAnchorLocation = FVector::ZeroVector;
+
+    UPROPERTY(ReplicatedUsing = OnRep_GroundAnchor)
+    FVector_NetQuantizeNormal GroundAnchorNormal = FVector::UpVector;
+
+    UPROPERTY(Replicated)
+    float SwingStartTime = 0.0f;
+
     FGuid CurrentSwingAttackId;
+    FTimerHandle SwingDetectionTimerHandle;
 };

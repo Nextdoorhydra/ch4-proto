@@ -3,6 +3,7 @@
 #include "AsyncLoad/CMStageLoadCoordinatorSubsystem.h"
 #include "AsyncLoad/CMStageLoadLog.h"
 #include "Data/Head/CMHeadDefinition.h"
+#include "Net/UnrealNetwork.h"
 #include "Parts/Head/CMVisionComponent.h"
 
 ACMHeadPartActor::ACMHeadPartActor()
@@ -14,6 +15,35 @@ ACMHeadPartActor::ACMHeadPartActor()
         TEXT("VisionComponent")
     );
     VisionComponent->SetupAttachment(SceneRoot);
+}
+
+void ACMHeadPartActor::GetLifetimeReplicatedProps(
+    TArray<FLifetimeProperty>& OutLifetimeProps
+) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ACMHeadPartActor, ProceduralLookRotation);
+}
+
+void ACMHeadPartActor::SetProceduralLookRotation(
+    const FRotator InLookRotation
+)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+    ProceduralLookRotation = FRotator(
+        FMath::ClampAngle(InLookRotation.Pitch, -70.0f, 70.0f),
+        FMath::ClampAngle(InLookRotation.Yaw, -100.0f, 100.0f),
+        0.0f);
+    OnLookRotationChanged.Broadcast(ProceduralLookRotation);
+    ForceNetUpdate();
+}
+
+void ACMHeadPartActor::OnRep_ProceduralLookRotation()
+{
+    OnLookRotationChanged.Broadcast(ProceduralLookRotation);
 }
 
 void ACMHeadPartActor::BeginPlay()

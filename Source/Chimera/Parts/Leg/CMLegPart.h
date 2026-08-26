@@ -5,6 +5,26 @@
 
 #include "CMLegPart.generated.h"
 
+UENUM(BlueprintType)
+enum class ECMLegStepDirection : uint8
+{
+    None,
+    Forward,
+    Reverse
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+    FCMLegStepStateChangedSignature,
+    ECMLegStepDirection,
+    Direction,
+    FVector,
+    GroundLocation,
+    FVector,
+    GroundNormal,
+    float,
+    Duration
+);
+
 /** First production Part that grants the shared Chimera its leg action GA. */
 UCLASS(Blueprintable)
 class CHIMERA_API ACMLegPart : public ACMPartActorBase
@@ -13,6 +33,14 @@ class CHIMERA_API ACMLegPart : public ACMPartActorBase
 
 public:
     ACMLegPart();
+
+    virtual void GetLifetimeReplicatedProps(
+        TArray<FLifetimeProperty>& OutLifetimeProps
+    ) const override;
+
+    virtual void OnDetachedFromPartSlot_Implementation(
+        UCMPartSlotComponent* PartSlot
+    ) override;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Leg")
     float GetStaminaCost() const;
@@ -26,6 +54,29 @@ public:
 
     /** Consumed once by the granted Leg ability when its Step begins. */
     bool ConsumePendingReverseMovement();
+
+    void BeginProceduralStep(
+        bool bReverseMovement,
+        FVector GroundLocation,
+        FVector GroundNormal,
+        float Duration
+    );
+    void EndProceduralStep();
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    ECMLegStepDirection GetStepDirection() const { return StepDirection; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    FVector GetStepGroundLocation() const { return StepGroundLocation; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    FVector GetStepGroundNormal() const { return StepGroundNormal; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    float GetStepPhase() const;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Leg|Animation")
+    FCMLegStepStateChangedSignature OnStepStateChanged;
 
 protected:
     virtual void ApplyPartData(
@@ -43,5 +94,23 @@ protected:
     float ActionDuration = 0.25f;
 
 private:
+    UFUNCTION()
+    void OnRep_StepState();
+
     bool bPendingReverseMovement = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_StepState)
+    ECMLegStepDirection StepDirection = ECMLegStepDirection::None;
+
+    UPROPERTY(ReplicatedUsing = OnRep_StepState)
+    FVector_NetQuantize10 StepGroundLocation = FVector::ZeroVector;
+
+    UPROPERTY(ReplicatedUsing = OnRep_StepState)
+    FVector_NetQuantizeNormal StepGroundNormal = FVector::UpVector;
+
+    UPROPERTY(Replicated)
+    float StepStartTime = 0.0f;
+
+    UPROPERTY(Replicated)
+    float StepDuration = 0.0f;
 };

@@ -1,0 +1,26 @@
+#include "Sound/CMSoundTags.h"
+
+namespace CMSoundTags
+{
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(BGM_Menu, "Chimera.Sound.BGM.Menu", "메인 메뉴 BGM");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(BGM_Stage_Stage01, "Chimera.Sound.BGM.Stage.Stage01", "Stage 1 BGM");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(BGM_Result_Victory, "Chimera.Sound.BGM.Result.Victory", "스테이지 성공 BGM");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(BGM_Result_Defeat, "Chimera.Sound.BGM.Result.Defeat", "스테이지 실패 BGM");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(BGM_Ending, "Chimera.Sound.BGM.Ending", "엔딩 BGM");
+
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Body_Footstep, "Chimera.Sound.Body.Footstep", "공용 몸통 발걸음");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Body_Hit, "Chimera.Sound.Body.Hit", "공용 몸통 피격");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Body_Death, "Chimera.Sound.Body.Death", "공용 몸통 사망");
+
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Pickup, "Chimera.Sound.Part.Pickup", "부위 획득");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Attach, "Chimera.Sound.Part.Attach", "부위 장착");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Detach, "Chimera.Sound.Part.Detach", "부위 탈착");
+
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Button_Press, "Chimera.Sound.Stage.Button.Press", "스테이지 버튼 입력");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Open, "Chimera.Sound.Stage.Door.Open", "스테이지 문 열림");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Close, "Chimera.Sound.Stage.Door.Close", "스테이지 문 닫힘");
+
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(UI_Click, "Chimera.Sound.UI.Click", "UI 기본 클릭");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(UI_Confirm, "Chimera.Sound.UI.Confirm", "UI 확인");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(UI_Cancel, "Chimera.Sound.UI.Cancel", "UI 취소");
+}

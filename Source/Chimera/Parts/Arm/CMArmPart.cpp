@@ -1,15 +1,22 @@
 #include "Parts/Arm/CMArmPart.h"
 
 #include "Ability/CMArmGameplayAbility.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
+#include "Gore/CMDismemberableTarget.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMPartSlotComponent.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraArm, Log, All);
+
+namespace
+{
+    constexpr float SwingDetectionIntervalSeconds = 0.05f;
+}
 
 ACMArmPart::ACMArmPart()
 {
@@ -30,12 +37,17 @@ void ACMArmPart::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACMArmPart, bSwinging);
+    DOREPLIFETIME(ACMArmPart, bGroundAnchored);
+    DOREPLIFETIME(ACMArmPart, GroundAnchorLocation);
+    DOREPLIFETIME(ACMArmPart, GroundAnchorNormal);
+    DOREPLIFETIME(ACMArmPart, SwingStartTime);
 }
 
 void ACMArmPart::OnDetachedFromPartSlot_Implementation(
     UCMPartSlotComponent* PartSlot
 )
 {
+    EndGroundAnchor();
     EndSwing();
     Super::OnDetachedFromPartSlot_Implementation(PartSlot);
 }
@@ -75,6 +87,51 @@ FGuid ACMArmPart::GetCurrentSwingAttackId() const
     return CurrentSwingAttackId;
 }
 
+float ACMArmPart::GetSwingPhase() const
+{
+    const UWorld* World = GetWorld();
+    return bSwinging && World
+        ? FMath::Clamp(
+            (World->GetTimeSeconds() - SwingStartTime)
+                / FMath::Max(SwingDuration, 0.01f),
+            0.0f,
+            1.0f)
+        : 0.0f;
+}
+
+void ACMArmPart::BeginGroundAnchor(
+    const FVector Location,
+    const FVector Normal
+)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+    bGroundAnchored = true;
+    GroundAnchorLocation = Location;
+    GroundAnchorNormal = Normal.GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+    OnGroundAnchorStateChanged.Broadcast(
+        true,
+        GroundAnchorLocation,
+        GroundAnchorNormal);
+    ForceNetUpdate();
+}
+
+void ACMArmPart::EndGroundAnchor()
+{
+    if (!HasAuthority() || !bGroundAnchored)
+    {
+        return;
+    }
+    bGroundAnchored = false;
+    OnGroundAnchorStateChanged.Broadcast(
+        false,
+        GroundAnchorLocation,
+        GroundAnchorNormal);
+    ForceNetUpdate();
+}
+
 bool ACMArmPart::BeginSwing()
 {
     if (!HasAuthority() || !IsOperational() || bSwinging
@@ -85,11 +142,21 @@ bool ACMArmPart::BeginSwing()
     }
 
     CurrentSwingAttackId = FGuid::NewGuid();
+    SwingStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     bSwinging = true;
     OnSwingStateChanged.Broadcast(true);
     ForceNetUpdate();
 
     DetectSwingTargets();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            SwingDetectionTimerHandle,
+            this,
+            &ThisClass::DetectSwingTargets,
+            SwingDetectionIntervalSeconds,
+            true);
+    }
 
     UE_LOG(LogChimeraArm, Log,
         TEXT("[Arm Swing Started] Part=%s Duration=%.3f AttackId=%s"),
@@ -101,7 +168,17 @@ bool ACMArmPart::BeginSwing()
 
 void ACMArmPart::EndSwing()
 {
-    if (!HasAuthority() || !bSwinging)
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(SwingDetectionTimerHandle);
+    }
+
+    if (!bSwinging)
     {
         return;
     }
@@ -150,7 +227,7 @@ ECMPartHitResult ACMArmPart::ResolveSwingHit(
 void ACMArmPart::DetectSwingTargets()
 {
     UWorld* World = GetWorld();
-    if (!HasAuthority() || !World || !PartMesh
+    if (!HasAuthority() || !bSwinging || !World || !PartMesh
         || AttackRange <= 0.0f || AttackRadius <= 0.0f)
     {
         return;
@@ -174,7 +251,9 @@ void ACMArmPart::DetectSwingTargets()
         }
     }
 #if ENABLE_DRAW_DEBUG
-    if (bDrawSwingDebug)
+    if (bDrawSwingDebug
+        && !World->GetTimerManager().IsTimerActive(
+            SwingDetectionTimerHandle))
     {
         const FVector SafeForward = ForwardDirection.GetSafeNormal();
         const float HalfAngle = FMath::Atan2(AttackRadius, AttackRange);
@@ -242,8 +321,14 @@ void ACMArmPart::DetectSwingTargets()
             continue;
         }
 
-        const FVector TargetLocation = TargetComponent->Bounds.Origin;
-        if (!IsInsideSwingSector(
+        FVector TargetLocation = TargetComponent->Bounds.Origin;
+        const float ClosestPointDistance =
+            TargetComponent->GetClosestPointOnCollision(
+                Origin,
+                TargetLocation);
+        const bool bOriginInsideTarget = ClosestPointDistance == 0.0f
+            && TargetComponent->Bounds.GetBox().IsInsideOrOn(Origin);
+        if (!bOriginInsideTarget && !IsInsideSwingSector(
                 Origin,
                 ForwardDirection,
                 TargetLocation,
@@ -254,15 +339,40 @@ void ACMArmPart::DetectSwingTargets()
         }
 
         DetectedActors.Add(TargetActor);
+        int32 SeveredPartCount = 0;
+        if (TargetActor->Implements<UCMDismemberableTarget>())
+        {
+            FCMDismembermentHitRequest Request;
+            Request.Attacker = GetOwner();
+            Request.SourcePart = this;
+            Request.AttackId = CurrentSwingAttackId;
+            Request.ImpactPoint = TargetLocation;
+            Request.ImpactDirection = ForwardDirection;
+            SeveredPartCount =
+                ICMDismemberableTarget::Execute_ReceiveDismembermentHit(
+                TargetActor,
+                Request);
+        }
         OnSwingTargetDetected.Broadcast(TargetActor, TargetLocation);
+
+        UE_LOG(LogChimeraArm, Log,
+            TEXT("[Arm Swing Target] Part=%s Target=%s Dismemberable=%s Severed=%d Impact=%s"),
+            *GetName(),
+            *GetNameSafe(TargetActor),
+            TargetActor->Implements<UCMDismemberableTarget>()
+                ? TEXT("true")
+                : TEXT("false"),
+            SeveredPartCount,
+            *TargetLocation.ToCompactString());
     }
 
-    UE_LOG(LogChimeraArm, Verbose,
-        TEXT("[Arm Swing Sector] Part=%s Direction=%s Range=%.1f Radius=%.1f Detected=%d"),
+    UE_LOG(LogChimeraArm, Log,
+        TEXT("[Arm Swing Sector] Part=%s Direction=%s Range=%.1f Radius=%.1f Overlaps=%d Detected=%d"),
         *GetName(),
         *ForwardDirection.ToCompactString(),
         AttackRange,
         AttackRadius,
+        Overlaps.Num(),
         DetectedActors.Num());
 }
 
@@ -298,6 +408,14 @@ bool ACMArmPart::IsInsideSwingSector(
 void ACMArmPart::OnRep_Swinging()
 {
     OnSwingStateChanged.Broadcast(bSwinging);
+}
+
+void ACMArmPart::OnRep_GroundAnchor()
+{
+    OnGroundAnchorStateChanged.Broadcast(
+        bGroundAnchored,
+        GroundAnchorLocation,
+        GroundAnchorNormal);
 }
 
 void ACMArmPart::HandlePartDied()

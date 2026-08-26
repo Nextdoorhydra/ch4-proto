@@ -12,6 +12,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/GameStateBase.h"
+#include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraSpringArm, Log, All);
@@ -31,6 +32,14 @@ ACMSpringArmPart::ACMSpringArmPart()
     SweepDirectionArrow->ArrowSize = 2.0f;
     
     PrimaryActorTick.bCanEverTick = true;
+}
+
+void ACMSpringArmPart::GetLifetimeReplicatedProps(
+    TArray<FLifetimeProperty>& OutLifetimeProps
+) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ACMSpringArmPart, ActiveHook);
 }
 
 bool ACMSpringArmPart::BeginSwing()
@@ -92,6 +101,20 @@ float ACMSpringArmPart::GetExtensionSpeed() const
 float ACMSpringArmPart::GetPullImpulse() const
 {
     return PullImpulse;
+}
+
+float ACMSpringArmPart::GetCurrentExtensionLength() const
+{
+    return IsValid(ActiveHook)
+        ? FVector::Distance(GetActorLocation(), ActiveHook->GetActorLocation())
+        : 0.0f;
+}
+
+float ACMSpringArmPart::GetExtensionRatio() const
+{
+    return AttackRange > UE_SMALL_NUMBER
+        ? FMath::Clamp(GetCurrentExtensionLength() / AttackRange, 0.0f, 1.0f)
+        : 0.0f;
 }
 
 float ACMSpringArmPart::GetCurrentSweepAngle() const
