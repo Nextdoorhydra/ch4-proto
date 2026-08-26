@@ -60,7 +60,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     bool IsLocationVisible(const FVector& WorldLocation) const;
 
-    /** Returns the active vision sources that can currently see a world location. */
+    // 지정한 월드 위치를 현재 바라볼 수 있는 활성 시야 컴포넌트 수집
     void GetVisionSourcesSeeingLocation(
         const FVector& WorldLocation,
         TArray<UCMVisionComponent*>& OutSources
