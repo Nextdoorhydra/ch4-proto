@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "ListenServerNetworkTypes.h"
+#include "UI/Subsystem/NKMUIManagerSubsystem.h"
 
 #include "CMMainMenuWidget.generated.h"
 
@@ -11,7 +12,7 @@ class UEditableText;
 class UListenServerSessionSubsystem;
 class UTextBlock;
 class UCMOptionWidget;
-enum class ENKMUIAsyncResult : uint8;
+class UNKMUIActivatableWidget;
 
 UCLASS(Abstract, Blueprintable)
 class UI_API UCMMainMenuWidget : public UUserWidget
@@ -87,6 +88,13 @@ private:
     void HandleUIPolicyInitialized(ENKMUIAsyncResult Result);
 
     UFUNCTION()
+    void HandleOptionPushed(
+        ENKMUIAsyncResult Result,
+        UNKMUIActivatableWidget* Widget);
+
+    void HandleOptionClosed();
+
+    UFUNCTION()
     void HandleCreateRoomClicked();
 
     UFUNCTION()
@@ -101,6 +109,10 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UListenServerSessionSubsystem> NetworkSubsystem;
 
+    TWeakObjectPtr<UCMOptionWidget> ActiveOptionWidget;
+    ESlateVisibility VisibilityBeforeOptions = ESlateVisibility::Visible;
+
     FString PendingRoomId;
     bool bWaitingForRoomSearch = false;
+    bool bOptionRequestPending = false;
 };

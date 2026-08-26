@@ -27,6 +27,10 @@ namespace CMStageCommandTags
         "Chimera.Stage.Command.Mechanism.Deactivate",
         "등록된 문이나 장치를 비활성화");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+        Mechanism_Toggle,
+        "Chimera.Stage.Command.Mechanism.Toggle",
+        "등록된 장애물이나 장치의 현재 활성 상태 반전");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(
         Mechanism_Reset,
         "Chimera.Stage.Command.Mechanism.Reset",
         "등록된 문이나 장치를 초기 상태로 복원");
