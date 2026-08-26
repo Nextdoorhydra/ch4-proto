@@ -884,6 +884,11 @@ void ACMPlayerController::SetControlSlotPressed(
     // Possess 중인 ControlBody에 SlotIndex와 Press/Release만 전달한다.
     if (ACMControlBody* ControlBody = GetPawn<ACMControlBody>())
     {
+        if (bPressed && VisionInputComponent)
+        {
+            VisionInputComponent->SetActiveControlSlot(SlotIndex);
+        }
+
         if (bPressed && bDetachModifierHeld)
         {
             ControlBody->RequestDetachPartFromControlSlot(SlotIndex);

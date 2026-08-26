@@ -20,6 +20,9 @@ class CHIMERA_API UCMVisionInputComponent : public UActorComponent
 public:
     UCMVisionInputComponent();
 
+    /** Selects the only Head that receives local aim input. */
+    void SetActiveControlSlot(int32 SlotIndex);
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -58,9 +61,13 @@ private:
         float AimRotationDegrees
     );
 
+    UFUNCTION(Server, Reliable)
+    void ServerSetActiveControlSlot(int32 SlotIndex);
+
     void GetControlledHeadParts(
         TArray<ACMHeadPartActor*>& OutHeadParts
-    ) const;
+    );
+    ACMHeadPartActor* FindHeadForControlSlot(int32 SlotIndex) const;
 
     void ReplaceLocalAimPredictions(
         const TSet<UCMVisionComponent*>& CurrentPredictions
@@ -74,5 +81,7 @@ private:
     float LastSentAimRotationDegrees = 0.0f;
     bool bHasSentWorldTarget = false;
     bool bHasLocalAimRotation = false;
+    bool bActiveHeadChanged = false;
+    int32 ActiveControlSlotIndex = INDEX_NONE;
     TSet<TWeakObjectPtr<UCMVisionComponent>> LocallyPredictedVisions;
 };
