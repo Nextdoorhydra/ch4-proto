@@ -103,6 +103,8 @@ float ACMArmPart::GetSwingPhase() const
 
 FVector ACMArmPart::GetGroundAnchorLocation() const
 {
+    // 상호작 대상이 움직일 수 있으므로 저장된 로컬 지점을
+    // 매번 현재 컴포넌트 기준 월드 좌표로 복원한다.
     const FVector StoredLocation = GroundAnchorLocation;
     return HoldType == ECMArmHoldType::Interactable
         && IsValid(HeldComponent)
@@ -156,6 +158,8 @@ void ACMArmPart::BeginInteractableHold(
     HeldComponent = TargetComponent;
     if (HeldComponent)
     {
+        // 손 위치와 방향을 대상 로컬 공간에 저장해
+        // 물체가 움직이거나 회전해도 IK가 같은 표면을 따라간다.
         const FTransform ComponentTransform = HeldComponent->GetComponentTransform();
         GroundAnchorLocation = ComponentTransform.InverseTransformPosition(Location);
         GroundAnchorNormal = ComponentTransform.InverseTransformVectorNoScale(
@@ -181,6 +185,7 @@ void ACMArmPart::EndGroundAnchor()
     {
         return;
     }
+    // 컴포넌트 참조를 비우기 전에 마지막 월드 손 좌표를 보존한다.
     const FVector LastHoldLocation = GetGroundAnchorLocation();
     const FVector LastHoldNormal = GetGroundAnchorNormal();
     HoldType = ECMArmHoldType::None;

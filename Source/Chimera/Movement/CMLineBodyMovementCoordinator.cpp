@@ -602,6 +602,8 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         return bAlreadyAnchored;
     }
 
+    // 지면 짚기는 키메라 몸을 월드에 고정하는 것이 목적이므로
+    // 상호작 물체와 달리 기존 하드 Constraint를 유지한다.
     const auto CreateGroundConstraint = [&Chimera, SegmentBody](
         const FVector& HoldLocation)
     {
@@ -658,6 +660,8 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         FVector HoldDirection = ArmPart.GetPartMesh()
             ? ArmPart.GetPartMesh()->GetForwardVector()
             : PartSlot->GetForwardVector();
+        // 파트 메시의 전방보다 몸통 중심에서 슬롯 밖으로 향하는
+        // 방향이 실제 왼손/오른손 탐색 방향에 더 안정적이다.
         if (const USceneComponent* SegmentComponent =
                 PartSlot->GetAttachParent())
         {
@@ -718,6 +722,8 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         }
     }
 
+    // 대상이 제공한 우선순위를 먼저 적용하고,
+    // 같은 우선순위라면 팔에 더 가까운 대상을 선택한다.
     Candidates.Sort([](
         const FArmHoldCandidate& Left,
         const FArmHoldCandidate& Right)
@@ -738,6 +744,8 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
             continue;
         }
 
+        // 물체 이동은 몸통과 대상을 Constraint로 묶지 않는다.
+        // 키메라는 목표점만 제공하고 Physics Handle이 물체만 따라오게 한다.
         UPhysicsHandleComponent* PhysicsHandle = nullptr;
         if (Candidate.Spec.bUsePhysicsHandle)
         {
@@ -772,6 +780,8 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         Anchor.TargetComponent = Candidate.Spec.TargetComponent;
         Anchor.PhysicsHandle = PhysicsHandle;
         Anchor.PartSlotAddress = PartSlotAddress;
+        // 잡은 순간의 몸통 대비 손 위치를 저장해 마디가
+        // 이동·회전해도 물체가 같은 상대 위치를 따라오게 한다.
         Anchor.PhysicsHandleTargetInSegmentSpace =
             SegmentBody->GetComponentTransform().InverseTransformPosition(
                 Candidate.Spec.HoldLocation);
@@ -799,6 +809,7 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         return true;
     }
 
+    // 승인된 상호작 대상이 없을 때만 기존 지면 짚기를 시도한다.
     FHitResult GroundHit;
     if (!TraceGroundAtPoint(
         Chimera,
@@ -1174,6 +1185,8 @@ void UCMLineBodyMovementCoordinator::UpdatePhysicsHandles(
             continue;
         }
 
+        // Handle 목표만 옮기므로 물체의 반력이 키메라 몸통에
+        // Constraint 힘으로 역전달되지 않는다.
         PhysicsHandle->SetTargetLocation(
             SegmentBody->GetComponentTransform().TransformPosition(
                 Anchor.PhysicsHandleTargetInSegmentSpace));
@@ -1266,6 +1279,8 @@ void UCMLineBodyMovementCoordinator::DestroyArmAnchor(int32 AnchorIndex)
         return;
     }
 
+    // 대상 콜백, 팔 상태, 물리 컴포넌트를 한 경로에서 끝내
+    // 입력 해제·파트 파괴·스태미나 고갈이 모두 같은 정리를 거치게 한다.
     const FActiveArmAnchor Anchor = ActiveArmAnchors[AnchorIndex];
     if (Anchor.bInteractable)
     {

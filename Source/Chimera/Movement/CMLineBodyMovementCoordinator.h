@@ -45,13 +45,13 @@ public:
     /** Stops only the active push owned by this Leg, if one exists. */
     void CancelLegStep(ACMLegPart* LegPart);
 
-    /** Holds an interactable first, otherwise pins the Arm to walkable ground. */
+    // 상호작 대상을 먼저 잡고, 없으면 기존처럼 다닐 수 있는 지면을 짚는다.
     bool TryBeginArmAnchor(
         ACMChimera& Chimera,
         ACMArmPart& ArmPart
     );
 
-    /** Ends the interaction or ground hold owned by the physical Arm slot. */
+    // 해당 팔 슬롯이 소유한 상호작 또는 지면 홀드를 끝낸다.
     void EndArmAnchor(
         const struct FCMPartSlotAddress& PartSlotAddress
     );
@@ -158,6 +158,7 @@ private:
 
     struct FActiveArmAnchor
     {
+        // 지면 짚기와 대상 홀드의 수명을 하나의 슬롯 단위로 관리한다.
         TWeakObjectPtr<ACMArmPart> ArmPart;
         TWeakObjectPtr<AActor> InteractionTarget;
         TWeakObjectPtr<UPrimitiveComponent> TargetComponent;

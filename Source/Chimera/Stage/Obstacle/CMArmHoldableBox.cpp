@@ -60,6 +60,8 @@ bool ACMArmHoldableBox::QueryArmHold_Implementation(
     const FVector ArmLocation = ArmPart->GetPartMesh()
         ? ArmPart->GetPartMesh()->GetComponentLocation()
         : ArmPart->GetActorLocation();
+    // 중심이 아니라 팔에서 가장 가까운 충돌 표면을 잡아
+    // 상자 크기가 바뀌어도 손 IK가 자연스럽게 보이도록 한다.
     FVector HoldLocation = BoxMesh->Bounds.Origin;
     BoxMesh->GetClosestPointOnCollision(ArmLocation, HoldLocation);
 
@@ -69,6 +71,7 @@ bool ACMArmHoldableBox::QueryArmHold_Implementation(
         SMALL_NUMBER,
         FVector::UpVector);
     OutSpec.TargetComponent = BoxMesh;
+    // 상자는 손을 따라 실제로 이동해야 하므로 Physics Handle을 요청한다.
     OutSpec.bUsePhysicsHandle = true;
     return true;
 }

@@ -71,8 +71,7 @@ void UCMPartAnimInstance::NativeUpdateAnimation(const float DeltaSeconds)
 
     if (const ACMArmPart* ArmPart = Cast<ACMArmPart>(PartActor))
     {
-
-        bArmGroundAnchored = ArmPart->IsHolding();
+        bArmGroundAnchored = ArmPart->IsGroundAnchored();
         bArmSwinging = ArmPart->IsSwinging();
         ArmHandTargetLocation = WorldLocationToComponent(
             ArmPart->GetGroundAnchorLocation());

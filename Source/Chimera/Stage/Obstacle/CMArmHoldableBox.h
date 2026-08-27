@@ -9,7 +9,7 @@
 class ACMArmPart;
 class UStaticMeshComponent;
 
-/** Simple replicated physics box used to validate the default Arm hold. */
+// 디폴트 암의 물리 물체 홀드를 검증하는 복제 상자다.
 UCLASS(Blueprintable)
 class CHIMERA_API ACMArmHoldableBox
     : public AActor
