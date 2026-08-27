@@ -22,6 +22,30 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPlayerController, Log, All);
 
+namespace
+{
+    const FKey SoloTestControlKeys[CMControl::SoloTestKeyCount] = {
+        EKeys::Q, EKeys::W, EKeys::E, EKeys::R,
+        EKeys::A, EKeys::S, EKeys::D, EKeys::F,
+        EKeys::P, EKeys::O, EKeys::I, EKeys::U,
+        EKeys::L, EKeys::K, EKeys::J, EKeys::H
+    };
+
+    int32 FindSoloTestControlKeyIndex(const FKey Key)
+    {
+        for (int32 Index = 0;
+            Index < CMControl::SoloTestKeyCount;
+            ++Index)
+        {
+            if (SoloTestControlKeys[Index] == Key)
+            {
+                return Index;
+            }
+        }
+        return INDEX_NONE;
+    }
+}
+
 ACMPlayerController::ACMPlayerController()
 {
     // APlayerController Tick은 입력 처리와 Non-Shipping 화살표 치트 전송에 사용한다.
@@ -34,6 +58,11 @@ ACMPlayerController::ACMPlayerController()
     VisionInputComponent = CreateDefaultSubobject<UCMVisionInputComponent>(
         TEXT("VisionInputComponent")
     );
+
+    for (FCMPartSlotAddress& PressedPartSlot : SoloPressedPartSlots)
+    {
+        PressedPartSlot = FCMPartSlotAddress();
+    }
 }
 
 bool ACMPlayerController::CanRequestRetryGame() const
@@ -618,6 +647,20 @@ void ACMPlayerController::SetupInputComponent()
         &ACMPlayerController::FourthControlKeyPressed,
         &ACMPlayerController::FourthControlKeyReleased);
 
+    for (const FKey Key : SoloTestControlKeys)
+    {
+        InputComponent->BindKey(
+            Key,
+            IE_Pressed,
+            this,
+            &ThisClass::SoloControlKeyPressed);
+        InputComponent->BindKey(
+            Key,
+            IE_Released,
+            this,
+            &ThisClass::SoloControlKeyReleased);
+    }
+
     if (DetachModifierAction)
     {
         EnhancedInputComponent->BindAction(
@@ -970,6 +1013,7 @@ void ACMPlayerController::SetControlSlotPressed(
 )
 {
     if (!IsLocalController()
+        || IsSoloTestMode()
         || SlotIndex < 0
         || SlotIndex >= CMControl::MaxKeysPerPlayer)
     {
@@ -994,6 +1038,123 @@ void ACMPlayerController::SetControlSlotPressed(
             bPressed && bReverseModifierHeld
         );
     }
+}
+
+void ACMPlayerController::SoloControlKeyPressed(FKey Key)
+{
+    SetSoloControlKeyPressed(Key, true);
+}
+
+void ACMPlayerController::SoloControlKeyReleased(FKey Key)
+{
+    SetSoloControlKeyPressed(Key, false);
+}
+
+void ACMPlayerController::SetSoloControlKeyPressed(
+    FKey Key,
+    bool bPressed)
+{
+    if (!IsLocalController() || !IsSoloTestMode())
+    {
+        return;
+    }
+
+    const int32 KeyIndex = FindSoloTestControlKeyIndex(Key);
+    if (KeyIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    ServerSetSoloControlKeyPressed(
+        KeyIndex,
+        bPressed,
+        bPressed && bReverseModifierHeld,
+        bPressed && bDetachModifierHeld);
+}
+
+void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
+    int32 KeyIndex,
+    bool bPressed,
+    bool bReverseMovement,
+    bool bDetachPart)
+{
+    if (!IsSoloTestMode()
+        || KeyIndex < 0
+        || KeyIndex >= CMControl::SoloTestKeyCount)
+    {
+        return;
+    }
+
+    ACMChimera* SharedChimera = GetSharedChimera();
+    ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>();
+    if (!SharedChimera
+        || !CMPlayerState
+        || SharedChimera->GetActiveSegmentCount()
+            != CMControl::SoloTestSegmentCount)
+    {
+        return;
+    }
+
+    FCMPartSlotAddress& PressedPartSlot =
+        SoloPressedPartSlots[KeyIndex];
+    if (!bPressed)
+    {
+        if (CMControl::IsValidPartSlot(
+            PressedPartSlot,
+            CMControl::SoloTestSegmentCount))
+        {
+            const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
+            const bool bActivateOnRelease =
+                SharedChimera->IsBasicArmPartSlot(ReleasedPartSlot);
+            SharedChimera->SetPartSlotPressed(ReleasedPartSlot, false);
+            if (bActivateOnRelease)
+            {
+                SharedChimera->ActivatePartSlot(
+                    ReleasedPartSlot,
+                    CMPlayerState,
+                    false);
+            }
+        }
+        PressedPartSlot = FCMPartSlotAddress();
+        return;
+    }
+
+    const FCMPartSlotAddress PartSlotAddress =
+        CMControl::GetSoloTestPartSlotAddress(KeyIndex);
+    if (bDetachPart)
+    {
+        if (CMControl::IsValidPartSlot(PressedPartSlot))
+        {
+            SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
+            PressedPartSlot = FCMPartSlotAddress();
+        }
+        SharedChimera->DetachPartFromSlot(PartSlotAddress);
+        return;
+    }
+
+    if (CMControl::IsValidPartSlot(PressedPartSlot)
+        && PressedPartSlot != PartSlotAddress)
+    {
+        SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
+    }
+
+    PressedPartSlot = PartSlotAddress;
+    SharedChimera->SetPartSlotPressed(PartSlotAddress, true);
+    if (!SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
+    {
+        SharedChimera->ActivatePartSlot(
+            PartSlotAddress,
+            CMPlayerState,
+            bReverseMovement);
+    }
+}
+
+bool ACMPlayerController::IsSoloTestMode() const
+{
+    const ACMGameState* GameState = GetWorld()
+        ? GetWorld()->GetGameState<ACMGameState>()
+        : nullptr;
+    return GameState && GameState->IsSoloTestMode();
 }
 
 ACMChimera*

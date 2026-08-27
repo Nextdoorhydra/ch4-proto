@@ -126,6 +126,10 @@ private:
     void ReverseModifierReleased();
     void AdjustCameraDistance(const FInputActionValue& InputValue);
     void SetControlSlotPressed(int32 SlotIndex, bool bPressed);
+    void SoloControlKeyPressed(FKey Key);
+    void SoloControlKeyReleased(FKey Key);
+    void SetSoloControlKeyPressed(FKey Key, bool bPressed);
+    bool IsSoloTestMode() const;
     void DebugMoveForwardPressed();
     void DebugMoveForwardReleased();
     void DebugMoveBackwardPressed();
@@ -191,6 +195,13 @@ private:
     void ServerApplyCheatDebugMovement(float ForwardInput, float TurnInput);
 
     UFUNCTION(Server, Reliable)
+    void ServerSetSoloControlKeyPressed(
+        int32 KeyIndex,
+        bool bPressed,
+        bool bReverseMovement,
+        bool bDetachPart);
+
+    UFUNCTION(Server, Reliable)
     void ServerRequestTeleportToTestArea(FName AreaId);
 
     UPROPERTY(Transient)
@@ -206,5 +217,7 @@ private:
     bool bDebugMoveBackwardHeld = false;
     bool bDebugTurnLeftHeld = false;
     bool bDebugTurnRightHeld = false;
+
+    FCMPartSlotAddress SoloPressedPartSlots[CMControl::SoloTestKeyCount];
 
 };

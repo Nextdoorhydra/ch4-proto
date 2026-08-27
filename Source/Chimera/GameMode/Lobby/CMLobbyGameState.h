@@ -23,7 +23,10 @@ public:
     void SetLobbyPhase(ECMLobbyPhase NewPhase);
 
     // 서버 권한으로 Ready 인원·게임 시작 가능 여부 반영 처리
-    void SetLobbySummary(int32 NewReadyCount, bool bNewCanStart);
+    void SetLobbySummary(
+        int32 NewReadyCount,
+        bool bNewCanStart,
+        bool bNewCanStartTest);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Lobby")
     ECMLobbyPhase GetLobbyPhase() const { return LobbyPhase; }
@@ -33,6 +36,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Lobby")
     bool CanStartGame() const { return bCanStartGame; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Lobby")
+    bool CanStartTestGame() const { return bCanStartTestGame; }
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Lobby")
     FChimeraLobbyStateChanged OnLobbyStateChanged;
@@ -56,4 +62,7 @@ private:
     // 게임 시작 조건 충족 여부
     UPROPERTY(ReplicatedUsing = OnRep_LobbyState)
     bool bCanStartGame = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_LobbyState)
+    bool bCanStartTestGame = false;
 };

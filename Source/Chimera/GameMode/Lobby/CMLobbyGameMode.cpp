@@ -89,7 +89,12 @@ void ACMLobbyGameMode::RefreshLobbySummary()
 
     const bool bCanStart = PlayerCount >= MinimumPlayersToStart
         && ReadyCount == PlayerCount;
-    LobbyState->SetLobbySummary(ReadyCount, bCanStart);
+    const bool bCanStartTest = PlayerCount >= 1
+        && ReadyCount == PlayerCount;
+    LobbyState->SetLobbySummary(
+        ReadyCount,
+        bCanStart,
+        bCanStartTest);
     LobbyState->NotifyLobbyRosterChanged();
 }
 
@@ -117,20 +122,27 @@ bool ACMLobbyGameMode::TrySetPlayerReady(
 // 준비 완료 로비에서 유효한 캠페인을 등록하고 첫 스테이지 맵으로 이동
 bool ACMLobbyGameMode::TryStartStageRoute(APlayerController* RequestingPlayer)
 {
-    return TryStartRouteDefinition(RequestingPlayer, StageRouteDefinition);
+    return TryStartRouteDefinition(
+        RequestingPlayer,
+        StageRouteDefinition,
+        false);
 }
 
 // 준비 완료 로비에서 TestRoute를 선택해 멀티플레이 테스트 시작
 bool ACMLobbyGameMode::TryStartTestStageRoute(
     APlayerController* RequestingPlayer)
 {
-    return TryStartRouteDefinition(RequestingPlayer, TestStageRouteDefinition);
+    return TryStartRouteDefinition(
+        RequestingPlayer,
+        TestStageRouteDefinition,
+        true);
 }
 
 // 준비 완료 로비에서 전달받은 Route를 등록하고 첫 스테이지 맵으로 이동
 bool ACMLobbyGameMode::TryStartRouteDefinition(
     APlayerController* RequestingPlayer,
-    UCMStageRouteDefinition* RouteDefinition)
+    UCMStageRouteDefinition* RouteDefinition,
+    bool bTestRoute)
 {
     ACMLobbyGameState* LobbyState = CachedLobbyGameState;
     UCMStageRouteSubsystem* StageRoute = GetGameInstance()
@@ -138,7 +150,10 @@ bool ACMLobbyGameMode::TryStartRouteDefinition(
     if (!HasAuthority() || bStageRouteStartInProgress || !IsValid(RequestingPlayer)
         || !RequestingPlayer->IsLocalController()
         || !LobbyState || LobbyState->GetLobbyPhase() != ECMLobbyPhase::Waiting
-        || !LobbyState->CanStartGame() || !StageRoute || !RouteDefinition)
+        || (bTestRoute
+            ? !LobbyState->CanStartTestGame()
+            : !LobbyState->CanStartGame())
+        || !StageRoute || !RouteDefinition)
     {
         return false;
     }
@@ -150,6 +165,9 @@ bool ACMLobbyGameMode::TryStartRouteDefinition(
             *GetPathNameSafe(RouteDefinition), *GetNameSafe(RequestingPlayer));
         return false;
     }
+
+    StageRoute->SetSoloTestMode(
+        bTestRoute && LobbyState->GetLobbyPlayerCount() == 1);
 
     const FCMStageRouteEntry* FirstStage = StageRoute->GetCurrentStage();
     const FString MapPackageName = FirstStage
