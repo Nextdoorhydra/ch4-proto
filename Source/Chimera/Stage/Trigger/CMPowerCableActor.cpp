@@ -5,6 +5,7 @@
 #include "Components/SplineComponent.h"
 #include "Components/SplineMeshComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Stage/Trigger/Data/CMPowerCableDefinition.h"
 #include "Stage/Trigger/Component/CMPowerSocketComponent.h"
 
 ACMPowerCableActor::ACMPowerCableActor()
@@ -12,6 +13,7 @@ ACMPowerCableActor::ACMPowerCableActor()
     PrimaryActorTick.bCanEverTick = true;
     CableSpline = CreateDefaultSubobject<USplineComponent>(TEXT("CableSpline"));
     SetRootComponent(CableSpline);
+    CableSpline->SetMobility(EComponentMobility::Movable);
     CableSpline->SetClosedLoop(false);
     bReplicates = true;
     SetReplicateMovement(true);
@@ -24,6 +26,7 @@ void ACMPowerCableActor::BeginPlay()
     if (HasAuthority())
     {
         CableStartLocation = GetActorLocation();
+        bCableStartLocationInitialized = true;
     }
 
     if (UGameInstance* GameInstance = GetWorld()
@@ -37,6 +40,10 @@ void ACMPowerCableActor::BeginPlay()
         }
     }
 
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Power cable visual init. Cable=%s Definition=%s LoadGroup=%s"),
+        *GetName(), *CableDefinition.ToSoftObjectPath().ToString(),
+        *LoadGroupId.ToString());
     RefreshCableVisualState();
 }
 
@@ -58,6 +65,15 @@ void ACMPowerCableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ACMPowerCableActor::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+
+    if (bCableStartLocationInitialized && !bCableHasBeenMoved
+        && FVector::DistSquared(GetActorLocation(), CableStartLocation)
+            > FMath::Square(0.1f))
+    {
+        bCableHasBeenMoved = true;
+        bHasCachedVisualEndpoint = false;
+    }
+
     UpdateCableVisual();
 }
 
@@ -65,7 +81,9 @@ FVector ACMPowerCableActor::GetCableEndLocation() const
 {
     return ConnectedSocket
         ? ConnectedSocket->GetComponentLocation()
-        : GetActorLocation();
+        : bCableStartLocationInitialized && !bCableHasBeenMoved
+            ? CableStartLocation + GetActorForwardVector() * InitialCableLength
+            : GetActorLocation();
 }
 
 bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
@@ -134,6 +152,7 @@ void ACMPowerCableActor::OnRep_ConnectedSocket()
 
 void ACMPowerCableActor::OnRep_CableStartLocation()
 {
+    bCableStartLocationInitialized = true;
     bHasCachedVisualEndpoint = false;
     UpdateCableVisual();
 }
@@ -153,8 +172,8 @@ void ACMPowerCableActor::HandleLoadGroupFinished(
     {
         bCableVisualFailed = true;
         UE_LOG(LogChimeraStageLoad, Error,
-            TEXT("Power cable visual load failed. Cable=%s Mesh=%s LoadGroup=%s"),
-            *GetName(), *CableMesh.ToSoftObjectPath().ToString(),
+            TEXT("Power cable visual load failed. Cable=%s Definition=%s LoadGroup=%s"),
+            *GetName(), *CableDefinition.ToSoftObjectPath().ToString(),
             *LoadGroupId.ToString());
         return;
     }
@@ -163,7 +182,7 @@ void ACMPowerCableActor::HandleLoadGroupFinished(
 
 void ACMPowerCableActor::RefreshCableVisualState()
 {
-    if (CableMesh.IsNull() || bCableVisualReady || bCableVisualFailed)
+    if (CableDefinition.IsNull() || bCableVisualReady || bCableVisualFailed)
     {
         return;
     }
@@ -187,6 +206,10 @@ void ACMPowerCableActor::RefreshCableVisualState()
 
     const ECMStageLoadGroupState State = Coordinator->GetLoadGroupState(
         LoadGroupId);
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Power cable load state. Cable=%s Group=%s State=%d Definition=%s"),
+        *GetName(), *LoadGroupId.ToString(), static_cast<int32>(State),
+        *CableDefinition.ToSoftObjectPath().ToString());
     if (State == ECMStageLoadGroupState::Ready)
     {
         TryBuildCableVisual();
@@ -200,9 +223,15 @@ void ACMPowerCableActor::RefreshCableVisualState()
 
 bool ACMPowerCableActor::TryBuildCableVisual()
 {
-    UStaticMesh* LoadedMesh = CableMesh.Get();
+    UCMPowerCableDefinition* LoadedDefinition = CableDefinition.Get();
+    UStaticMesh* LoadedMesh = LoadedDefinition
+        ? LoadedDefinition->CableMesh.Get() : nullptr;
     if (!LoadedMesh || !CableSpline)
     {
+        UE_LOG(LogChimeraStageLoad, Error,
+            TEXT("Power cable visual could not resolve loaded Definition. Cable=%s Definition=%s LoadGroup=%s"),
+            *GetName(), *CableDefinition.ToSoftObjectPath().ToString(),
+            *LoadGroupId.ToString());
         return false;
     }
 
@@ -216,6 +245,7 @@ bool ACMPowerCableActor::TryBuildCableVisual()
         {
             continue;
         }
+        SplineMesh->SetMobility(EComponentMobility::Movable);
         SplineMesh->SetStaticMesh(LoadedMesh);
         SplineMesh->SetForwardAxis(ESplineMeshAxis::X, false);
         SplineMesh->SetupAttachment(CableSpline);
@@ -223,6 +253,9 @@ bool ACMPowerCableActor::TryBuildCableVisual()
         SplineMesh->RegisterComponent();
         CableMeshes.Add(SplineMesh);
     }
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Power cable visual created. Cable=%s Mesh=%s Segments=%d"),
+        *GetName(), *GetNameSafe(LoadedMesh), CableMeshes.Num());
     UpdateCableVisual();
     return !CableMeshes.IsEmpty();
 }
@@ -283,8 +316,8 @@ void ACMPowerCableActor::UpdateCableVisual()
         const FVector2D ThicknessScale(
             CableThicknessScale,
             CableThicknessScale);
-        CableMeshes[Index]->SetStartScale(ThicknessScale, false);
-        CableMeshes[Index]->SetEndScale(ThicknessScale, false);
+        CableMeshes[Index]->SetStartScale(ThicknessScale, true);
+        CableMeshes[Index]->SetEndScale(ThicknessScale, true);
     }
 }
 
