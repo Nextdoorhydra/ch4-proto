@@ -280,6 +280,11 @@ void ACMPowerCableActor::UpdateCableVisual()
                 EndDistance, ESplineCoordinateSpace::Local);
         CableMeshes[Index]->SetStartAndEnd(
             Start, StartTangent, End, EndTangent, true);
+        const FVector2D ThicknessScale(
+            CableThicknessScale,
+            CableThicknessScale);
+        CableMeshes[Index]->SetStartScale(ThicknessScale, false);
+        CableMeshes[Index]->SetEndScale(ThicknessScale, false);
     }
 }
 

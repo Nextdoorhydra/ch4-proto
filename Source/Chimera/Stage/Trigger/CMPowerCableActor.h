@@ -82,6 +82,10 @@ protected:
         Category = "Chimera|Power|Visual", meta = (ClampMin = "0.0"))
     float CableSag = 0.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Visual", meta = (ClampMin = "0.01"))
+    float CableThicknessScale = 1.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
     FName PowerChannel = NAME_None;
 
