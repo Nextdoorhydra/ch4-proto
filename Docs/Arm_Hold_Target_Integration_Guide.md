@@ -13,6 +13,65 @@
 
 대상 코드는 `Source/Chimera/Parts/Arm/CMArmHoldTarget.h`의 계약만 구현하면 된다.
 
+### 현재 구현 상태
+
+- 구현 완료: 팔 탐색/우선순위, 지면 fallback, 손 IK, Physics Handle,
+  해제 및 공격 억제
+- 구현 완료: `ACMArmHoldableBox`, `BP_ArmHoldableBox` 물리 이동 예제
+- 연동 가이드만 제공: `ACMPowerCableActor`, `ACMLeverBase`
+
+즉 전선과 레버 담당자는 아래 섹션을 따라 각 대상 클래스에
+`ICMArmHoldTarget`을 연결해야 한다.
+
+## 현재 팔 구현 구조
+
+연동 전에 대상 담당자가 알아야 할 팔 쪽 흐름은 다음과 같다.
+
+```text
+홀드 입력
+  -> UCMLineBodyMovementCoordinator::TryBeginArmAnchor()
+  -> 팔 앞 Sphere Sweep
+  -> ICMArmHoldTarget 후보의 QueryArmHold()
+  -> Priority 내림차순, 거리 오름차순 선택
+  -> BeginArmHold()
+  -> bUsePhysicsHandle에 따라 대상 이동 방식 결정
+  -> ACMArmPart::BeginInteractableHold()
+```
+
+- 대상이 하나도 승인하지 않으면 기존 지면 Constraint로 fallback한다.
+- `bUsePhysicsHandle == true`면 팔 시스템이 `UPhysicsHandleComponent`를 생성하고
+  잡은 지점을 현재 몸통 마디의 로컬 좌표로 저장한다. 서버 물리
+  갱신마다 이 좌표를 월드 목표점으로 변환하여 물체만 손을 따라오게 한다.
+- Physics Handle은 `GrabComponentAtLocation()`을 사용하므로 위치만 추적하고
+  물체 회전은 잡은 지점을 중심으로 자유롭다.
+- `bUsePhysicsHandle == false`면 팔은 손 IK와 홀드 수명만 관리하고,
+  전선·버튼·논리 레버 같은 대상이 자신의 동작을 처리한다.
+- 해제 시 `EndArmHold()`와 팔 홀드 상태를 정리하고 Physics Handle/지면
+  Constraint를 파괴하며, 이 입력을 디폴트 암 공격으로 연결하지 않는다.
+
+관련 파일:
+
+- `Source/Chimera/Movement/CMLineBodyMovementCoordinator.cpp`: 탐색, 선택,
+  Physics Handle, 지면 fallback, 해제
+- `Source/Chimera/Parts/Arm/CMArmPart.cpp`: 복제 홀드 상태와 움직이는
+  `TargetComponent` 기준 손 IK 좌표
+- `Source/Chimera/Animation/CMPartAnimInstance.cpp`: 기존 손 IK 경로에 지면/상호작
+  홀드 상태 전달
+
+## 대상 유형별 선택
+
+| 대상 | `TargetComponent` | `bUsePhysicsHandle` | 동작 담당 |
+| --- | --- | --- | --- |
+| 상자, 떨어진 파츠 등 물리 물체 | 물리 시뮬레이션 컴포넌트 | `true` | 팔 Physics Handle |
+| 현재 비물리 전선 끝 | 끝점 Hold Volume | `false` | 전선 액터의 서버 이동 |
+| 논리 레버·버튼 | 손잡이 Hold Volume | `false` | 대상의 이동량/상태 로직 |
+| 물리 Hinge 레버 | 물리 레버 Mesh | `true` | 레버 Constraint + 팔 Physics Handle |
+
+`bUsePhysicsHandle=true`인 `TargetComponent`는 반드시 유효한 Physics Body가 있고
+`IsSimulatingPhysics()`가 `true`여야 한다. Hold Volume은 Sweep 탐색용으로
+사용할 수 있지만 Physics Handle의 `TargetComponent`로는 실제 물리 Mesh를
+반환해야 한다.
+
 ## 공통 인터페이스
 
 ```cpp
@@ -76,6 +135,83 @@ Sweep에 잡히는 `UPrimitiveComponent`가 없으면 후보가 될 수 없다.
 - 팔 홀드 Sweep과 겹칠 수 있는 Collision Response
 - 액터 자체가 `ICMArmHoldTarget` 구현
 - 디폴트 팔의 기본 탐색값: `HoldRange = 120`, `HoldRadius = 40`
+
+## 물리 이동 물체 담당 구현
+
+상자·떨어진 파츠처럼 실제 물리 물체를 옮길 때는 대상을 팔과
+Constraint로 직접 묶지 않고 Physics Handle을 요청한다. 현재 검증 예제는
+`ACMArmHoldableBox`와 `BP_ArmHoldableBox`이다.
+
+### 1. 물리 컴포넌트
+
+```cpp
+PhysicsMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+PhysicsMesh->SetSimulatePhysics(true);
+PhysicsMesh->SetEnableGravity(true);
+SetReplicateMovement(true);
+PhysicsMesh->SetIsReplicated(true);
+```
+
+질량과 Damping은 대상 액터의 게임플레이 값으로 관리한다. 팔 시스템은
+잡힌 물체의 질량을 바꾸거나 양손 보너스 힘을 추가하지 않는다.
+
+### 2. QueryArmHold
+
+```cpp
+const FVector ArmLocation = ArmPart->GetPartMesh()
+    ? ArmPart->GetPartMesh()->GetComponentLocation()
+    : ArmPart->GetActorLocation();
+FVector HoldLocation = PhysicsMesh->Bounds.Origin;
+PhysicsMesh->GetClosestPointOnCollision(ArmLocation, HoldLocation);
+
+OutSpec.Priority = 100;
+OutSpec.HoldLocation = HoldLocation;
+OutSpec.HoldNormal = (ArmLocation - HoldLocation)
+    .GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+OutSpec.TargetComponent = PhysicsMesh;
+OutSpec.bUsePhysicsHandle = true;
+return PhysicsMesh->IsSimulatingPhysics() && !HoldingArm.IsValid();
+```
+
+`HoldLocation`은 팔과 가까운 충돌 표면을 사용하면 중심을 잡는 것보다
+손 표현이 자연스럽다. Physics Handle은 이 지점을 옮기며 물체 회전은
+제한하지 않는다.
+
+### 3. BeginArmHold / EndArmHold
+
+대상은 누가 잡고 있는지만 소유한다. Physics Handle의 생성·갱신·해제는
+팔 시스템이 담당한다.
+
+```cpp
+bool AMyHoldableActor::BeginArmHold_Implementation(ACMArmPart* ArmPart)
+{
+    if (!HasAuthority() || !IsValid(ArmPart) || HoldingArm.IsValid())
+    {
+        return false;
+    }
+
+    HoldingArm = ArmPart;
+    ForceNetUpdate();
+    return true;
+}
+
+void AMyHoldableActor::EndArmHold_Implementation(ACMArmPart* ArmPart)
+{
+    if (HasAuthority() && HoldingArm.Get() == ArmPart)
+    {
+        HoldingArm.Reset();
+        ForceNetUpdate();
+    }
+}
+```
+
+### 물리 물체 완료 조건
+
+- 잡기 전에 물리 시뮬레이션이 활성화되어 있다.
+- 잡으면 물체가 손 목표점을 따라오고 키메라는 물체에 고정되지 않는다.
+- 물체가 벽에 걸려도 키메라 몸통에 하드 Constraint 반력이 전달되지 않는다.
+- 놓으면 Physics Handle이 제거되고 물체는 기존 물리 상태를 유지한다.
+- 팔 공격이 발생하지 않고 서버/클라이언트에서 물체 위치가 일치한다.
 
 ## 전선 담당 구현
 
@@ -226,6 +362,10 @@ float MaximumCableLength = 0.0f; // 0은 무제한
 목표는 물리 Hinge가 아니라 잡은 팔의 앞뒤 이동을 레버 축에 투영하여 양방향
 레버를 구동하는 것이다. 키메라 전체가 Chaos 물리이므로 몸통과 레버를 하드
 Constraint로 연결하지 않는다.
+
+이 섹션은 현재 `ACMLeverBase`를 물리 액터로 바꾸지 않고 적용할 수 있는
+안정적인 논리 구동형이다. 실제 회전 물리가 필요하면 아래의
+`Physics Handle + Hinge 레버` 대안을 선택한다. 두 방식을 동시에 적용하지 않는다.
 
 ### 1. 인터페이스와 홀드 볼륨 추가
 
@@ -406,6 +546,49 @@ void ACMLeverBase::EndArmHold_Implementation(ACMArmPart* ArmPart)
 - 레버를 잡고 놓은 입력은 디폴트 암 공격으로 이어지지 않는다.
 - `LeverAlpha`와 최종 Stage 상태가 리슨 서버 및 원격 클라이언트에서 동일하다.
 
+## Physics Handle + Hinge 레버 대안
+
+레버의 물리적인 무게감과 반동이 필요하면 손과 레버를 하드 Constraint로
+묶지 않고 다음과 같이 역할을 나눈다.
+
+```text
+World/LeverBase
+  -> Physics Constraint: 레버의 이동 잠금, 회전 1축만 Limited
+  -> Simulating LeverMesh
+  -> Arm Physics Handle: 손 목표점으로 LeverMesh를 당김
+```
+
+- `LeverMesh`만 물리 시뮬레이션하고 레버 베이스는 고정한다.
+- 레버의 Physics Constraint가 회전축, 양끝 Angular Limit, Damping을 결정한다.
+- 팔은 위치만 추적하므로 레버의 회전 자유도와 부딪히지 않는다.
+- 레버와 키메라 몸통을 Constraint로 연결하지 않는다. 레버가 키메라의
+  앙커가 되어 전신을 당기거나 회전시키는 경로가 없어야 한다.
+
+Query에서는 탐색용 Hold Volume의 위치를 잡는 지점으로 사용하되,
+Physics Handle이 잡을 대상으로는 실제 `LeverMesh`를 반환한다.
+
+```cpp
+OutSpec.Priority = 100;
+OutSpec.HoldLocation = ArmHoldVolume->GetComponentLocation();
+OutSpec.HoldNormal = (ArmLocation - OutSpec.HoldLocation)
+    .GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+OutSpec.TargetComponent = LeverMesh;
+OutSpec.bUsePhysicsHandle = true;
+return LeverMesh->IsSimulatingPhysics() && !HoldingArm.IsValid();
+```
+
+서버는 레버의 Constraint Angle이 임계값을 넘을 때 `PressButton()`/
+`ReleaseButton()`을 각각 한 번만 호출한다. 끝에서 떨림이 생기면 팔의
+Physics Handle보다 먼저 레버 Constraint의 Angular Limit과 Damping을 조정한다.
+
+### 물리 Hinge 레버 완료 조건
+
+- 키메라가 앞뒤로 이동하면 레버가 허용된 회전축으로만 움직인다.
+- Angular Limit 밖으로 빠지거나 레버 전체가 이동하지 않는다.
+- 레버가 벽에 고정된 앙커처럼 키메라 몸통을 당기지 않는다.
+- 레버 각도가 임계값을 넘을 때만 Stage 상태가 한 번 전환된다.
+- 놓으면 Physics Handle이 해제되고 레버 자체 Constraint는 유지된다.
+
 ## 통합 테스트 순서
 
 1. 대상 없이 홀드하여 기존 지면 짚기가 유지되는지 확인한다.
@@ -413,6 +596,11 @@ void ACMLeverBase::EndArmHold_Implementation(ACMArmPart* ArmPart)
 3. 두 대상이 겹칠 때 높은 Priority, 같은 Priority에서는 가까운 대상이 선택되는지
    확인한다.
 4. 대상 홀드 해제 후 팔 공격이 발생하지 않는지 확인한다.
-5. 홀드 중 팔이 파괴될 때 `EndArmHold()`가 실행되고, 대상이 먼저 파괴될 때는
+5. Physics Handle 물체를 잡고 다리를 움직일 때 물체는 손을 따라오고
+   키메라가 물체를 앙커로 회전하지 않는지 확인한다.
+6. Physics Handle 물체가 벽에 걸린 상태에서도 키메라 전신에 폭발적인
+   속도나 회전이 생기지 않는지 확인한다.
+7. 홀드 중 팔이 파괴될 때 `EndArmHold()`가 실행되고, 대상이 먼저 파괴될 때는
    대상의 `EndPlay()` 정리가 실행되는지 확인한다.
-6. 리슨 서버와 원격 클라이언트에서 손 목표, 전선 위치, 레버 상태를 비교한다.
+8. 리슨 서버와 원격 클라이언트에서 손 목표, 물리 물체, 전선 위치,
+   레버 상태를 비교한다.
