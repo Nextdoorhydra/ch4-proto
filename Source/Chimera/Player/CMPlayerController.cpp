@@ -1070,6 +1070,12 @@ void ACMPlayerController::SetSoloControlKeyPressed(
         return;
     }
 
+    if (bPressed && KeyIndex < CMControl::MaxKeysPerPlayer
+        && VisionInputComponent)
+    {
+        VisionInputComponent->SetActiveControlSlot(KeyIndex);
+    }
+
     ServerSetSoloControlKeyPressed(
         KeyIndex,
         bPressed,

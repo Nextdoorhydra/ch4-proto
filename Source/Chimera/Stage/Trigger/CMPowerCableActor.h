@@ -7,6 +7,7 @@
 #include "CMPowerCableActor.generated.h"
 
 class UCMPowerSocketComponent;
+class UCMPowerCableDefinition;
 class USplineComponent;
 class USplineMeshComponent;
 class UStaticMesh;
@@ -68,7 +69,7 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Visual")
-    TSoftObjectPtr<UStaticMesh> CableMesh;
+    TSoftObjectPtr<UCMPowerCableDefinition> CableDefinition;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Visual")
@@ -81,6 +82,14 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Visual", meta = (ClampMin = "0.0"))
     float CableSag = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Visual", meta = (ClampMin = "0.01"))
+    float CableThicknessScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Visual", meta = (ClampMin = "0.0"))
+    float InitialCableLength = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
     FName PowerChannel = NAME_None;
@@ -120,6 +129,8 @@ protected:
 
     bool bCableVisualReady = false;
     bool bCableVisualFailed = false;
+    bool bCableHasBeenMoved = false;
+    bool bCableStartLocationInitialized = false;
     bool bHasCachedVisualEndpoint = false;
     FVector CachedVisualEndpoint = FVector::ZeroVector;
 };
