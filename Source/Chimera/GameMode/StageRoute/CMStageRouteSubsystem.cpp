@@ -44,6 +44,7 @@ void UCMStageRouteSubsystem::ResetStageRoute()
     StageRouteDefinition = nullptr;
     CurrentStageIndex = INDEX_NONE;
     PendingStageIndex = INDEX_NONE;
+    bSoloTestMode = false;
 }
 
 // RouteDefinition에 저장된 현재 스테이지 반복 정책 반환

@@ -38,6 +38,7 @@ protected:
         ACMChimera* SharedChimera);
 
     bool IsGameplayMap() const;
+    bool IsSoloTestMode() const;
     void AssignPlayerSlots();
     void AssignPlayerColors();
     ACMChimera* EnsureSharedChimera();
