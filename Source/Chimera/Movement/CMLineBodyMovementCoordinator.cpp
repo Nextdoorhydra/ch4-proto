@@ -4,17 +4,14 @@
 #include "AbilitySystemComponent.h"
 #include "Player/CMControlTypes.h"
 #include "DrawDebugHelpers.h"
-#include "GameMode/CMGameState.h"
 #include "Parts/Arm/CMArmPart.h"
 #include "Parts/Leg/CMLegPart.h"
 #include "Player/CMChimera.h"
-#include "Player/CMControlBody.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "TimerManager.h"
 
@@ -1103,11 +1100,8 @@ float UCMLineBodyMovementCoordinator::GetPlayerCountSpeedMultiplier(
     const ACMChimera& Chimera
 ) const
 {
-    const ACMGameState* GameState = Chimera.GetWorld()
-        ? Chimera.GetWorld()->GetGameState<ACMGameState>()
-        : nullptr;
     const int32 PlayerCount = FMath::Clamp(
-        GameState ? GameState->GetLobbyPlayerCount() : 1,
+        Chimera.ActiveSegmentCount / CMControl::SegmentsPerPlayer,
         1,
         CMControl::MaxPlayers
     );
@@ -1134,34 +1128,12 @@ float UCMLineBodyMovementCoordinator::GetPerControlImpulseMultiplier(
     const ACMChimera& Chimera
 ) const
 {
-    int32 AssignedControlCount = 0;
-    if (Chimera.GetWorld())
-    {
-        for (TActorIterator<ACMControlBody> It(Chimera.GetWorld());
-            It;
-            ++It)
-        {
-            const ACMControlBody* ControlBody = *It;
-            const ACMPlayerState* PlayerState = ControlBody
-                ? ControlBody->GetPlayerState<ACMPlayerState>()
-                : nullptr;
-            // 죽은 마디를 소유한 플레이어는 ControlBody 자체는 월드에 남아 있지만
-            // 더 이상 Q/W/E/R을 누를 수 없습니다. 해당 4칸을 힘 분배 인원에
-            // 포함하면 살아 있는 플레이어의 실제 입력 힘까지 불필요하게 줄어듭니다.
-            if (PlayerState
-                && !PlayerState->IsOnlyASpectator()
-                && ControlBody->IsControlInputEnabled())
-            {
-                AssignedControlCount +=
-                    ControlBody->GetEnabledControlCount();
-            }
-        }
-    }
-
     constexpr float SinglePlayerControlCount = 4.0f;
+    const int32 TotalControlCount = Chimera.ActiveSegmentCount
+        * CMControl::PartSlotsPerSegment;
     return GetPlayerCountSpeedMultiplier(Chimera)
         * SinglePlayerControlCount
-        / FMath::Max(static_cast<float>(AssignedControlCount), 1.0f);
+        / FMath::Max(static_cast<float>(TotalControlCount), 1.0f);
 }
 
 void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
