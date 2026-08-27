@@ -4,15 +4,19 @@
 #include "AbilitySystemComponent.h"
 #include "Player/CMControlTypes.h"
 #include "DrawDebugHelpers.h"
+#include "Parts/Arm/CMArmHoldTarget.h"
 #include "Parts/Arm/CMArmPart.h"
 #include "Parts/Leg/CMLegPart.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/World.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
+#include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraMovement, Log, All);
@@ -598,6 +602,203 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         return bAlreadyAnchored;
     }
 
+    const auto CreateGroundConstraint = [&Chimera, SegmentBody](
+        const FVector& HoldLocation)
+    {
+        UPhysicsConstraintComponent* Constraint =
+            NewObject<UPhysicsConstraintComponent>(&Chimera);
+        if (!Constraint)
+        {
+            return static_cast<UPhysicsConstraintComponent*>(nullptr);
+        }
+
+        Chimera.AddInstanceComponent(Constraint);
+        Constraint->RegisterComponent();
+        Constraint->SetWorldLocation(HoldLocation);
+        Constraint->SetDisableCollision(true);
+        Constraint->SetLinearXLimit(
+            ELinearConstraintMotion::LCM_Locked,
+            0.0f);
+        Constraint->SetLinearYLimit(
+            ELinearConstraintMotion::LCM_Locked,
+            0.0f);
+        Constraint->SetLinearZLimit(
+            ELinearConstraintMotion::LCM_Locked,
+            0.0f);
+        Constraint->SetAngularSwing1Limit(
+            EAngularConstraintMotion::ACM_Free,
+            0.0f);
+        Constraint->SetAngularSwing2Limit(
+            EAngularConstraintMotion::ACM_Free,
+            0.0f);
+        Constraint->SetAngularTwistLimit(
+            EAngularConstraintMotion::ACM_Free,
+            0.0f);
+        Constraint->SetConstrainedComponents(
+            SegmentBody,
+            NAME_None,
+            nullptr,
+            NAME_None);
+        return Constraint;
+    };
+
+    struct FArmHoldCandidate
+    {
+        TObjectPtr<AActor> TargetActor;
+        FCMArmHoldSpec Spec;
+        float DistanceSquared = 0.0f;
+    };
+
+    TArray<FArmHoldCandidate> Candidates;
+    if (UWorld* World = Chimera.GetWorld())
+    {
+        const FVector Start = ArmPart.GetPartMesh()
+            ? ArmPart.GetPartMesh()->GetComponentLocation()
+            : PartSlot->GetComponentLocation();
+        FVector HoldDirection = ArmPart.GetPartMesh()
+            ? ArmPart.GetPartMesh()->GetForwardVector()
+            : PartSlot->GetForwardVector();
+        if (const USceneComponent* SegmentComponent =
+                PartSlot->GetAttachParent())
+        {
+            const FVector OutwardDirection = FVector::VectorPlaneProject(
+                PartSlot->GetComponentLocation()
+                    - SegmentComponent->GetComponentLocation(),
+                SegmentComponent->GetUpVector()).GetSafeNormal();
+            if (!OutwardDirection.IsNearlyZero())
+            {
+                HoldDirection = OutwardDirection;
+            }
+        }
+        HoldDirection = HoldDirection.GetSafeNormal();
+
+        TArray<FHitResult> InteractionHits;
+        FCollisionQueryParams QueryParams(
+            SCENE_QUERY_STAT(CMArmHoldTargets),
+            false,
+            &Chimera);
+        QueryParams.AddIgnoredActor(&ArmPart);
+        World->SweepMultiByObjectType(
+            InteractionHits,
+            Start,
+            Start + HoldDirection * ArmPart.GetHoldRange(),
+            FQuat::Identity,
+            FCollisionObjectQueryParams(
+                FCollisionObjectQueryParams::AllObjects),
+            FCollisionShape::MakeSphere(ArmPart.GetHoldRadius()),
+            QueryParams);
+
+        TSet<AActor*> QueriedActors;
+        for (const FHitResult& Hit : InteractionHits)
+        {
+            AActor* TargetActor = Hit.GetActor();
+            if (!TargetActor || QueriedActors.Contains(TargetActor)
+                || !TargetActor->Implements<UCMArmHoldTarget>())
+            {
+                continue;
+            }
+            QueriedActors.Add(TargetActor);
+
+            FCMArmHoldSpec Spec;
+            if (!ICMArmHoldTarget::Execute_QueryArmHold(
+                    TargetActor,
+                    &ArmPart,
+                    Spec)
+                || (Spec.bUsePhysicsHandle && !Spec.TargetComponent))
+            {
+                continue;
+            }
+
+            FArmHoldCandidate& Candidate = Candidates.AddDefaulted_GetRef();
+            Candidate.TargetActor = TargetActor;
+            Candidate.Spec = Spec;
+            Candidate.DistanceSquared = FVector::DistSquared(
+                Start,
+                Spec.HoldLocation);
+        }
+    }
+
+    Candidates.Sort([](
+        const FArmHoldCandidate& Left,
+        const FArmHoldCandidate& Right)
+    {
+        return Left.Spec.Priority != Right.Spec.Priority
+            ? Left.Spec.Priority > Right.Spec.Priority
+            : Left.DistanceSquared < Right.DistanceSquared;
+    });
+
+    for (const FArmHoldCandidate& Candidate : Candidates)
+    {
+        AActor* TargetActor = Candidate.TargetActor.Get();
+        if (!IsValid(TargetActor)
+            || !ICMArmHoldTarget::Execute_BeginArmHold(
+                TargetActor,
+                &ArmPart))
+        {
+            continue;
+        }
+
+        UPhysicsHandleComponent* PhysicsHandle = nullptr;
+        if (Candidate.Spec.bUsePhysicsHandle)
+        {
+            PhysicsHandle = NewObject<UPhysicsHandleComponent>(&Chimera);
+            if (PhysicsHandle)
+            {
+                Chimera.AddInstanceComponent(PhysicsHandle);
+                PhysicsHandle->RegisterComponent();
+                PhysicsHandle->GrabComponentAtLocation(
+                    Candidate.Spec.TargetComponent,
+                    NAME_None,
+                    Candidate.Spec.HoldLocation);
+            }
+            if (!PhysicsHandle
+                || PhysicsHandle->GetGrabbedComponent()
+                    != Candidate.Spec.TargetComponent)
+            {
+                if (PhysicsHandle)
+                {
+                    PhysicsHandle->DestroyComponent();
+                }
+                ICMArmHoldTarget::Execute_EndArmHold(
+                    TargetActor,
+                    &ArmPart);
+                continue;
+            }
+        }
+
+        FActiveArmAnchor& Anchor = ActiveArmAnchors.AddDefaulted_GetRef();
+        Anchor.ArmPart = &ArmPart;
+        Anchor.InteractionTarget = TargetActor;
+        Anchor.TargetComponent = Candidate.Spec.TargetComponent;
+        Anchor.PhysicsHandle = PhysicsHandle;
+        Anchor.PartSlotAddress = PartSlotAddress;
+        Anchor.PhysicsHandleTargetInSegmentSpace =
+            SegmentBody->GetComponentTransform().InverseTransformPosition(
+                Candidate.Spec.HoldLocation);
+        Anchor.SegmentIndex = SegmentIndex;
+        Anchor.bInteractable = true;
+        Anchor.bHasTargetComponent = Candidate.Spec.TargetComponent != nullptr;
+        Anchor.bRequiresPhysicsHandle = Candidate.Spec.bUsePhysicsHandle;
+        ArmPart.BeginInteractableHold(
+            Candidate.Spec.TargetComponent,
+            Candidate.Spec.HoldLocation,
+            Candidate.Spec.HoldNormal);
+        if (ArmPart.GetAnchorStaminaCostPerSecond() > UE_SMALL_NUMBER)
+        {
+            Chimera.PauseStaminaRegeneration();
+        }
+
+        UE_LOG(LogChimeraMovement, Log,
+            TEXT("[Arm Interaction Hold Started] Part=%s Target=%s Slot=(%d,%d) Priority=%d PhysicsHandle=%s"),
+            *GetNameSafe(&ArmPart),
+            *GetNameSafe(TargetActor),
+            PartSlotAddress.SegmentIndex,
+            PartSlotAddress.PartSlotIndex,
+            Candidate.Spec.Priority,
+            PhysicsHandle ? TEXT("true") : TEXT("false"));
+        return true;
+    }
+
     FHitResult GroundHit;
     if (!TraceGroundAtPoint(
         Chimera,
@@ -613,47 +814,12 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         return false;
     }
 
-    UPhysicsConstraintComponent* Constraint =
-        NewObject<UPhysicsConstraintComponent>(&Chimera);
+    UPhysicsConstraintComponent* Constraint = CreateGroundConstraint(
+        GroundHit.ImpactPoint);
     if (!Constraint)
     {
         return false;
     }
-
-    Chimera.AddInstanceComponent(Constraint);
-    Constraint->RegisterComponent();
-    Constraint->SetWorldLocation(GroundHit.ImpactPoint);
-    Constraint->SetDisableCollision(true);
-    Constraint->SetLinearXLimit(
-        ELinearConstraintMotion::LCM_Locked,
-        0.0f
-    );
-    Constraint->SetLinearYLimit(
-        ELinearConstraintMotion::LCM_Locked,
-        0.0f
-    );
-    Constraint->SetLinearZLimit(
-        ELinearConstraintMotion::LCM_Locked,
-        0.0f
-    );
-    Constraint->SetAngularSwing1Limit(
-        EAngularConstraintMotion::ACM_Free,
-        0.0f
-    );
-    Constraint->SetAngularSwing2Limit(
-        EAngularConstraintMotion::ACM_Free,
-        0.0f
-    );
-    Constraint->SetAngularTwistLimit(
-        EAngularConstraintMotion::ACM_Free,
-        0.0f
-    );
-    Constraint->SetConstrainedComponents(
-        SegmentBody,
-        NAME_None,
-        nullptr,
-        NAME_None
-    );
 
     FActiveArmAnchor& Anchor = ActiveArmAnchors.AddDefaulted_GetRef();
     Anchor.ArmPart = &ArmPart;
@@ -677,6 +843,18 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         *GroundHit.ImpactPoint.ToCompactString(),
         ArmPart.GetAnchorStaminaCostPerSecond());
     return true;
+}
+
+bool UCMLineBodyMovementCoordinator::IsArmHoldingInteractable(
+    const FCMPartSlotAddress& PartSlotAddress
+) const
+{
+    return ActiveArmAnchors.ContainsByPredicate(
+        [&PartSlotAddress](const FActiveArmAnchor& Anchor)
+        {
+            return Anchor.PartSlotAddress == PartSlotAddress
+                && Anchor.bInteractable;
+        });
 }
 
 void UCMLineBodyMovementCoordinator::EndArmAnchor(
@@ -914,6 +1092,7 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
 
     RemoveInvalidArmAnchors(Chimera);
     ApplyArmAnchorStaminaDrain(Chimera);
+    UpdatePhysicsHandles(Chimera);
 
     // A Step is a sustained ground reaction, so its Force is supplied every
     // server physics frame before the existing whole-body speed cap runs.
@@ -980,6 +1159,27 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
     }
 }
 
+void UCMLineBodyMovementCoordinator::UpdatePhysicsHandles(
+    ACMChimera& Chimera)
+{
+    for (FActiveArmAnchor& Anchor : ActiveArmAnchors)
+    {
+        UPhysicsHandleComponent* PhysicsHandle = Anchor.PhysicsHandle.Get();
+        UStaticMeshComponent* SegmentBody =
+            Chimera.BodySegments.IsValidIndex(Anchor.SegmentIndex)
+                ? Chimera.BodySegments[Anchor.SegmentIndex]
+                : nullptr;
+        if (!PhysicsHandle || !SegmentBody)
+        {
+            continue;
+        }
+
+        PhysicsHandle->SetTargetLocation(
+            SegmentBody->GetComponentTransform().TransformPosition(
+                Anchor.PhysicsHandleTargetInSegmentSpace));
+    }
+}
+
 void UCMLineBodyMovementCoordinator::ApplyArmAnchorStaminaDrain(
     ACMChimera& Chimera
 )
@@ -1042,7 +1242,16 @@ void UCMLineBodyMovementCoordinator::RemoveInvalidArmAnchors(
         const ACMArmPart* ArmPart = Anchor.ArmPart.Get();
         if (!IsValid(ArmPart)
             || !ArmPart->IsOperational()
-            || !Anchor.Constraint.IsValid()
+            || !ArmPart->IsHolding()
+            || (!Anchor.bInteractable && !Anchor.Constraint.IsValid())
+            || (Anchor.bRequiresPhysicsHandle
+                && (!Anchor.PhysicsHandle.IsValid()
+                    || Anchor.PhysicsHandle->GetGrabbedComponent()
+                        != Anchor.TargetComponent.Get()))
+            || (Anchor.bInteractable
+                && !Anchor.InteractionTarget.IsValid())
+            || (Anchor.bHasTargetComponent
+                && !Anchor.TargetComponent.IsValid())
             || !Chimera.IsSegmentAlive(Anchor.SegmentIndex))
         {
             DestroyArmAnchor(AnchorIndex);
@@ -1058,6 +1267,15 @@ void UCMLineBodyMovementCoordinator::DestroyArmAnchor(int32 AnchorIndex)
     }
 
     const FActiveArmAnchor Anchor = ActiveArmAnchors[AnchorIndex];
+    if (Anchor.bInteractable)
+    {
+        if (AActor* InteractionTarget = Anchor.InteractionTarget.Get())
+        {
+            ICMArmHoldTarget::Execute_EndArmHold(
+                InteractionTarget,
+                Anchor.ArmPart.Get());
+        }
+    }
     if (ACMArmPart* ArmPart = Anchor.ArmPart.Get())
     {
         ArmPart->EndGroundAnchor();
@@ -1067,7 +1285,11 @@ void UCMLineBodyMovementCoordinator::DestroyArmAnchor(int32 AnchorIndex)
         Constraint->BreakConstraint();
         Constraint->DestroyComponent();
     }
-
+    if (UPhysicsHandleComponent* PhysicsHandle = Anchor.PhysicsHandle.Get())
+    {
+        PhysicsHandle->ReleaseComponent();
+        PhysicsHandle->DestroyComponent();
+    }
     UE_LOG(LogChimeraMovement, Log,
         TEXT("[Arm Anchor Ended] Part=%s Slot=(%d,%d)"),
         *GetNameSafe(Anchor.ArmPart.Get()),
@@ -1173,11 +1395,13 @@ void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
             continue;
         }
 
-        // 접지점의 XY 오프셋은 좌우 다리의 자연스러운 Yaw를 만들지만,
-        // 지면 높이에서 강한 수평 Force를 가하면 무게중심과의 Z 레버 암이
-        // Pitch/Roll 토크를 만들어 몸통을 띄운다. 적용 높이만 COM에 맞춰
-        // 평면 회전은 유지하고 불필요한 부양 토크를 제거한다.
-        FVector ForceApplicationPoint = Step.GroundPoint;
+        // 현재 슬롯의 XY 오프셋으로 좌우 다리의 자연스러운 Yaw를 유지한다.
+        // 시작 시점의 월드 접지점을 계속 사용하면 몸통 이동에 따라 레버 암이
+        // 무한히 커지므로, 적용점은 슬롯을 따라가고 높이만 COM에 맞춘다.
+        const UCMPartSlotComponent* PartSlot = LegPart->GetAttachedPartSlot();
+        FVector ForceApplicationPoint = PartSlot
+            ? PartSlot->GetComponentLocation()
+            : Step.GroundPoint;
         ForceApplicationPoint.Z = SegmentBody->GetCenterOfMass().Z;
         SegmentBody->AddForceAtLocation(
             Step.PushForce,

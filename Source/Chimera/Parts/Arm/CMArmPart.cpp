@@ -1,6 +1,7 @@
 #include "Parts/Arm/CMArmPart.h"
 
 #include "Ability/CMArmGameplayAbility.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
 #include "DrawDebugHelpers.h"
@@ -37,7 +38,8 @@ void ACMArmPart::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACMArmPart, bSwinging);
-    DOREPLIFETIME(ACMArmPart, bGroundAnchored);
+    DOREPLIFETIME(ACMArmPart, HoldType);
+    DOREPLIFETIME(ACMArmPart, HeldComponent);
     DOREPLIFETIME(ACMArmPart, GroundAnchorLocation);
     DOREPLIFETIME(ACMArmPart, GroundAnchorNormal);
     DOREPLIFETIME(ACMArmPart, SwingStartTime);
@@ -99,6 +101,26 @@ float ACMArmPart::GetSwingPhase() const
         : 0.0f;
 }
 
+FVector ACMArmPart::GetGroundAnchorLocation() const
+{
+    const FVector StoredLocation = GroundAnchorLocation;
+    return HoldType == ECMArmHoldType::Interactable
+        && IsValid(HeldComponent)
+        ? HeldComponent->GetComponentTransform().TransformPosition(
+            StoredLocation)
+        : StoredLocation;
+}
+
+FVector ACMArmPart::GetGroundAnchorNormal() const
+{
+    const FVector StoredNormal = GroundAnchorNormal;
+    return HoldType == ECMArmHoldType::Interactable
+        && IsValid(HeldComponent)
+        ? HeldComponent->GetComponentTransform().TransformVectorNoScale(
+            StoredNormal).GetSafeNormal(SMALL_NUMBER, FVector::UpVector)
+        : StoredNormal;
+}
+
 void ACMArmPart::BeginGroundAnchor(
     const FVector Location,
     const FVector Normal
@@ -108,7 +130,8 @@ void ACMArmPart::BeginGroundAnchor(
     {
         return;
     }
-    bGroundAnchored = true;
+    HoldType = ECMArmHoldType::Ground;
+    HeldComponent = nullptr;
     GroundAnchorLocation = Location;
     GroundAnchorNormal = Normal.GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
     OnGroundAnchorStateChanged.Broadcast(
@@ -118,17 +141,54 @@ void ACMArmPart::BeginGroundAnchor(
     ForceNetUpdate();
 }
 
-void ACMArmPart::EndGroundAnchor()
+void ACMArmPart::BeginInteractableHold(
+    UPrimitiveComponent* TargetComponent,
+    const FVector Location,
+    const FVector Normal
+)
 {
-    if (!HasAuthority() || !bGroundAnchored)
+    if (!HasAuthority())
     {
         return;
     }
-    bGroundAnchored = false;
+
+    HoldType = ECMArmHoldType::Interactable;
+    HeldComponent = TargetComponent;
+    if (HeldComponent)
+    {
+        const FTransform ComponentTransform = HeldComponent->GetComponentTransform();
+        GroundAnchorLocation = ComponentTransform.InverseTransformPosition(Location);
+        GroundAnchorNormal = ComponentTransform.InverseTransformVectorNoScale(
+            Normal).GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+    }
+    else
+    {
+        GroundAnchorLocation = Location;
+        GroundAnchorNormal = Normal.GetSafeNormal(
+            SMALL_NUMBER,
+            FVector::UpVector);
+    }
+    OnGroundAnchorStateChanged.Broadcast(
+        true,
+        GetGroundAnchorLocation(),
+        GetGroundAnchorNormal());
+    ForceNetUpdate();
+}
+
+void ACMArmPart::EndGroundAnchor()
+{
+    if (!HasAuthority() || HoldType == ECMArmHoldType::None)
+    {
+        return;
+    }
+    const FVector LastHoldLocation = GetGroundAnchorLocation();
+    const FVector LastHoldNormal = GetGroundAnchorNormal();
+    HoldType = ECMArmHoldType::None;
+    HeldComponent = nullptr;
     OnGroundAnchorStateChanged.Broadcast(
         false,
-        GroundAnchorLocation,
-        GroundAnchorNormal);
+        LastHoldLocation,
+        LastHoldNormal);
     ForceNetUpdate();
 }
 
@@ -413,9 +473,9 @@ void ACMArmPart::OnRep_Swinging()
 void ACMArmPart::OnRep_GroundAnchor()
 {
     OnGroundAnchorStateChanged.Broadcast(
-        bGroundAnchored,
-        GroundAnchorLocation,
-        GroundAnchorNormal);
+        IsHolding(),
+        GetGroundAnchorLocation(),
+        GetGroundAnchorNormal());
 }
 
 void ACMArmPart::HandlePartDied()

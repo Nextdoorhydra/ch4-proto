@@ -12,6 +12,8 @@ class ACMLegPart;
 class ACMPlayerState;
 class AActor;
 class UPhysicsConstraintComponent;
+class UPhysicsHandleComponent;
+class UPrimitiveComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 
@@ -43,16 +45,20 @@ public:
     /** Stops only the active push owned by this Leg, if one exists. */
     void CancelLegStep(ACMLegPart* LegPart);
 
-    /** Pins a basic Arm slot to walkable ground while its control is held. */
+    /** Holds an interactable first, otherwise pins the Arm to walkable ground. */
     bool TryBeginArmAnchor(
         ACMChimera& Chimera,
         ACMArmPart& ArmPart
     );
 
-    /** Removes any held Arm anchor owned by the specified physical slot. */
+    /** Ends the interaction or ground hold owned by the physical Arm slot. */
     void EndArmAnchor(
         const struct FCMPartSlotAddress& PartSlotAddress
     );
+
+    bool IsArmHoldingInteractable(
+        const struct FCMPartSlotAddress& PartSlotAddress
+    ) const;
 
     /** Applies an immediate, non-grounded impulse from an Arm slot. */
     bool TryActivateArm(
@@ -118,6 +124,7 @@ private:
     ) const;
 
     void ApplyActiveLegSteps(ACMChimera& Chimera);
+    void UpdatePhysicsHandles(ACMChimera& Chimera);
     void ApplyArmAnchorStaminaDrain(ACMChimera& Chimera);
     void RemoveInvalidArmAnchors(ACMChimera& Chimera);
     void DestroyArmAnchor(int32 AnchorIndex);
@@ -152,9 +159,16 @@ private:
     struct FActiveArmAnchor
     {
         TWeakObjectPtr<ACMArmPart> ArmPart;
+        TWeakObjectPtr<AActor> InteractionTarget;
+        TWeakObjectPtr<UPrimitiveComponent> TargetComponent;
         TWeakObjectPtr<UPhysicsConstraintComponent> Constraint;
+        TWeakObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
         struct FCMPartSlotAddress PartSlotAddress;
+        FVector PhysicsHandleTargetInSegmentSpace = FVector::ZeroVector;
         int32 SegmentIndex = INDEX_NONE;
+        bool bInteractable = false;
+        bool bHasTargetComponent = false;
+        bool bRequiresPhysicsHandle = false;
     };
 
     // Each remaining input keeps its original expiry even after partial use.

@@ -107,6 +107,11 @@ public:
         const FCMPartSlotAddress& PartSlotAddress
     ) const;
 
+    /** Release attacks are suppressed when the basic Arm used an interaction hold. */
+    bool ShouldActivateBasicArmOnRelease(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
+
     void ClearPressedControlParts();
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,

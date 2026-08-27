@@ -71,7 +71,9 @@ void UCMPartAnimInstance::NativeUpdateAnimation(const float DeltaSeconds)
 
     if (const ACMArmPart* ArmPart = Cast<ACMArmPart>(PartActor))
     {
-        bArmGroundAnchored = ArmPart->IsGroundAnchored();
+        // Keep the existing AnimBP variable compatible while allowing the
+        // same hand IK path to represent ground and interactable holds.
+        bArmGroundAnchored = ArmPart->IsHolding();
         bArmSwinging = ArmPart->IsSwinging();
         ArmHandTargetLocation = WorldLocationToComponent(
             ArmPart->GetGroundAnchorLocation());
