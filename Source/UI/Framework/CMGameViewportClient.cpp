@@ -2,6 +2,7 @@
 
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
+#include "GameMode/Play/CMPlayGameState.h"
 #include "InputCoreTypes.h"
 #include "InputKeyEventArgs.h"
 #include "UI/NKMUIActivatableWidget.h"
@@ -9,8 +10,9 @@
 
 UCMGameViewportClient::UCMGameViewportClient()
 {
-    OptionWidgetClass = TSoftClassPtr<UNKMUIActivatableWidget>(FSoftObjectPath(
-        TEXT("/Game/Chimera/UI/Option/WBP_CMOption.WBP_CMOption_C")));
+    EscapeMenuWidgetClass = TSoftClassPtr<UNKMUIActivatableWidget>(
+        FSoftObjectPath(TEXT(
+            "/Game/Chimera/UI/Menu/WBP_CMEscapeMenu.WBP_CMEscapeMenu_C")));
 }
 
 bool UCMGameViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
@@ -21,6 +23,13 @@ bool UCMGameViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
     }
 
     if (EventArgs.Key != EKeys::Escape || EventArgs.Event != IE_Pressed)
+    {
+        return false;
+    }
+
+    UWorld* CurrentWorld = GetWorld();
+    if (!CurrentWorld
+        || !CurrentWorld->GetGameState<ACMPlayGameState>())
     {
         return false;
     }
@@ -40,21 +49,22 @@ bool UCMGameViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
         return false;
     }
 
-    OpenOptionsForLocalPlayer(LocalPlayer);
+    OpenEscapeMenuForLocalPlayer(LocalPlayer);
     return true;
 }
 
-void UCMGameViewportClient::OpenOptionsForLocalPlayer(ULocalPlayer* LocalPlayer)
+void UCMGameViewportClient::OpenEscapeMenuForLocalPlayer(
+    ULocalPlayer* LocalPlayer)
 {
-    if (ActiveOptionWidget.IsValid()
-        && ActiveOptionWidget->IsActivated())
+    if (ActiveEscapeMenuWidget.IsValid()
+        && ActiveEscapeMenuWidget->IsActivated())
     {
-        ActiveOptionWidget->DeactivateWidget();
-        ActiveOptionWidget.Reset();
+        ActiveEscapeMenuWidget->DeactivateWidget();
+        ActiveEscapeMenuWidget.Reset();
         return;
     }
 
-    if (bOptionRequestPending || !LocalPlayer)
+    if (bEscapeMenuRequestPending || !LocalPlayer)
     {
         return;
     }
@@ -68,7 +78,7 @@ void UCMGameViewportClient::OpenOptionsForLocalPlayer(ULocalPlayer* LocalPlayer)
         return;
     }
 
-    bOptionRequestPending = true;
+    bEscapeMenuRequestPending = true;
     PendingLocalPlayer = LocalPlayer;
     UIManager->InitializePolicyWithResult(
         LocalPlayer,
@@ -87,26 +97,26 @@ void UCMGameViewportClient::HandlePolicyInitialized(ENKMUIAsyncResult Result)
         || !UIManager
         || !PendingLocalPlayer.IsValid())
     {
-        bOptionRequestPending = false;
+        bEscapeMenuRequestPending = false;
         PendingLocalPlayer.Reset();
         return;
     }
 
     FNKMUIWidgetPushCompleted OnPushed;
-    OnPushed.BindDynamic(this, &ThisClass::HandleOptionPushed);
+    OnPushed.BindDynamic(this, &ThisClass::HandleEscapeMenuPushed);
     UIManager->PushWidgetAsyncWithResult(
         UITags::UI_Layer_Modal,
-        OptionWidgetClass,
+        EscapeMenuWidgetClass,
         OnPushed);
 }
 
-void UCMGameViewportClient::HandleOptionPushed(
+void UCMGameViewportClient::HandleEscapeMenuPushed(
     ENKMUIAsyncResult Result,
     UNKMUIActivatableWidget* Widget)
 {
-    bOptionRequestPending = false;
+    bEscapeMenuRequestPending = false;
     PendingLocalPlayer.Reset();
-    ActiveOptionWidget = Result == ENKMUIAsyncResult::Succeeded
+    ActiveEscapeMenuWidget = Result == ENKMUIAsyncResult::Succeeded
         ? Widget
         : nullptr;
 }

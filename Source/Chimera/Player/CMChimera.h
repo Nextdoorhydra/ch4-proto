@@ -119,6 +119,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     TArray<FCMBodySegmentHealthState> GetSegmentHealthStates() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stamina")
+    float GetStamina() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stamina")
+    float GetMaxStamina() const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     bool AreAllSegmentsDead() const;
 
@@ -148,6 +154,11 @@ public:
         const FCMPartSlotAddress& PartSlotAddress
     ) const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
+    bool IsPartSlotPressed(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
+
     /** Server-authoritative attachment entry point for pickup/UI systems. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Part Slots")
@@ -173,7 +184,7 @@ public:
     );
 
     /** Cancels the sustained push owned by one attached Leg. */
-    void CancelLegStep(const ACMLegPart* LegPart);
+    void CancelLegStep(ACMLegPart* LegPart);
 
     /** Server-side production entry point shared by concrete Arm abilities. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,

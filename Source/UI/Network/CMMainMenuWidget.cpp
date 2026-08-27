@@ -136,6 +136,11 @@ void UCMMainMenuWidget::NativeConstruct()
 
 void UCMMainMenuWidget::NativeDestruct()
 {
+    if (ActiveOptionWidget.IsValid())
+    {
+        ActiveOptionWidget->OnDeactivated().RemoveAll(this);
+        ActiveOptionWidget.Reset();
+    }
     if (NetworkSubsystem)
     {
         NetworkSubsystem->OnStateChanged.RemoveDynamic(
@@ -256,6 +261,13 @@ void UCMMainMenuWidget::HandleOperationCompleted(
 
 void UCMMainMenuWidget::HandleOptionsClicked()
 {
+    if (bOptionRequestPending
+        || (ActiveOptionWidget.IsValid()
+            && ActiveOptionWidget->IsActivated()))
+    {
+        return;
+    }
+
     UGameInstance* GameInstance = GetGameInstance();
     UNKMUIManagerSubsystem* UIManager = GameInstance
         ? GameInstance->GetSubsystem<UNKMUIManagerSubsystem>()
@@ -267,6 +279,7 @@ void UCMMainMenuWidget::HandleOptionsClicked()
         return;
     }
 
+    bOptionRequestPending = true;
     UIManager->InitializePolicyWithResult(
         LocalPlayer,
         FNKMUIPolicyInitializationCompleted::CreateUObject(
@@ -278,6 +291,7 @@ void UCMMainMenuWidget::HandleUIPolicyInitialized(ENKMUIAsyncResult Result)
 {
     if (Result != ENKMUIAsyncResult::Succeeded)
     {
+        bOptionRequestPending = false;
         OnOptionsRequested();
         return;
     }
@@ -287,11 +301,46 @@ void UCMMainMenuWidget::HandleUIPolicyInitialized(ENKMUIAsyncResult Result)
         if (UNKMUIManagerSubsystem* UIManager =
             GameInstance->GetSubsystem<UNKMUIManagerSubsystem>())
         {
-            UIManager->PushWidgetAsync(
+            FNKMUIWidgetPushCompleted OnPushed;
+            OnPushed.BindDynamic(this, &ThisClass::HandleOptionPushed);
+            UIManager->PushWidgetAsyncWithResult(
                 UITags::UI_Layer_Modal,
-                OptionWidgetClass);
+                OptionWidgetClass,
+                OnPushed);
+            return;
         }
     }
+
+    bOptionRequestPending = false;
+    OnOptionsRequested();
+}
+
+void UCMMainMenuWidget::HandleOptionPushed(
+    ENKMUIAsyncResult Result,
+    UNKMUIActivatableWidget* Widget)
+{
+    bOptionRequestPending = false;
+    ActiveOptionWidget = Result == ENKMUIAsyncResult::Succeeded
+        ? Cast<UCMOptionWidget>(Widget)
+        : nullptr;
+
+    if (ActiveOptionWidget.IsValid())
+    {
+        VisibilityBeforeOptions = GetVisibility();
+        SetVisibility(ESlateVisibility::Collapsed);
+        ActiveOptionWidget->OnDeactivated().AddUObject(
+            this, &ThisClass::HandleOptionClosed);
+    }
+}
+
+void UCMMainMenuWidget::HandleOptionClosed()
+{
+    if (ActiveOptionWidget.IsValid())
+    {
+        ActiveOptionWidget->OnDeactivated().RemoveAll(this);
+        ActiveOptionWidget.Reset();
+    }
+    SetVisibility(VisibilityBeforeOptions);
 }
 
 void UCMMainMenuWidget::HandleCreateRoomClicked()

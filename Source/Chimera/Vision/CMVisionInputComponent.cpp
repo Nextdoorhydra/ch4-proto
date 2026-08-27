@@ -239,6 +239,12 @@ void UCMVisionInputComponent::ServerUpdateVisionTarget_Implementation(
             AimDirection,
             AimRotationDegrees
         );
+        HeadPart->SetProceduralLookRotation(FRotator(
+            0.0f,
+            FMath::FindDeltaAngleDegrees(
+                HeadPart->GetActorRotation().Yaw,
+                AimRotationDegrees),
+            0.0f));
     }
 }
 

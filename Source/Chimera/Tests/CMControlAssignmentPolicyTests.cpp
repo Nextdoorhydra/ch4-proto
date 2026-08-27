@@ -187,4 +187,55 @@ bool FChimeraControlAssignmentFullShuffleTest::RunTest(
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FChimeraSoloTestControlMappingTest,
+    "Chimera.SoloTest.ControlMapping",
+    EAutomationTestFlags::EditorContext
+        | EAutomationTestFlags::EngineFilter
+)
+
+bool FChimeraSoloTestControlMappingTest::RunTest(
+    const FString& Parameters)
+{
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < CMControl::SoloTestSegmentCount;
+        ++SegmentIndex)
+    {
+        const FCMPartSlotAddress LeftAddress =
+            CMControl::GetSoloTestPartSlotAddress(SegmentIndex);
+        TestEqual(
+            FString::Printf(TEXT("Left key %d segment"), SegmentIndex),
+            LeftAddress.SegmentIndex,
+            SegmentIndex);
+        TestEqual(
+            FString::Printf(TEXT("Left key %d side"), SegmentIndex),
+            LeftAddress.PartSlotIndex,
+            0);
+
+        const int32 RightKeyIndex =
+            SegmentIndex + CMControl::SoloTestSegmentCount;
+        const FCMPartSlotAddress RightAddress =
+            CMControl::GetSoloTestPartSlotAddress(RightKeyIndex);
+        TestEqual(
+            FString::Printf(TEXT("Right key %d segment"), SegmentIndex),
+            RightAddress.SegmentIndex,
+            SegmentIndex);
+        TestEqual(
+            FString::Printf(TEXT("Right key %d side"), SegmentIndex),
+            RightAddress.PartSlotIndex,
+            1);
+    }
+
+    TestFalse(
+        TEXT("Negative solo key index is invalid"),
+        CMControl::IsValidPartSlot(
+            CMControl::GetSoloTestPartSlotAddress(-1)));
+    TestFalse(
+        TEXT("Past-end solo key index is invalid"),
+        CMControl::IsValidPartSlot(
+            CMControl::GetSoloTestPartSlotAddress(
+                CMControl::SoloTestKeyCount)));
+    return true;
+}
+
 #endif

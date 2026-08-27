@@ -4,17 +4,14 @@
 #include "AbilitySystemComponent.h"
 #include "Player/CMControlTypes.h"
 #include "DrawDebugHelpers.h"
-#include "GameMode/CMGameState.h"
 #include "Parts/Arm/CMArmPart.h"
 #include "Parts/Leg/CMLegPart.h"
 #include "Player/CMChimera.h"
-#include "Player/CMControlBody.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "TimerManager.h"
 
@@ -43,8 +40,7 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
         || MovementImpulse <= 0.0f
         || SegmentIndex < 0
         || SegmentIndex >= Chimera.ActiveSegmentCount
-        || !Chimera.BodySegments.IsValidIndex(SegmentIndex)
-        || !Chimera.IsSegmentAlive(SegmentIndex))
+        || !Chimera.BodySegments.IsValidIndex(SegmentIndex))
     {
         UE_LOG(LogChimeraMovement, Warning,
             TEXT("[Leg Step Rejected] Preconditions Part=%s Authority=%s Operational=%s Slot=%s SlotOwner=%s Impulse=%.1f Segment=%d ActiveSegments=%d Alive=%s"),
@@ -156,6 +152,11 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     Step.GroundNormal = GroundHit.ImpactNormal;
     Step.PushForce = PushDirection * PushForceMagnitude;
     Step.EndTime = Chimera.GetWorld()->GetTimeSeconds() + PushDuration;
+    LegPart.BeginProceduralStep(
+        bReverseMovement,
+        GroundHit.ImpactPoint,
+        GroundHit.ImpactNormal,
+        PushDuration);
 
     // 개별 Step Force는 해당 마디의 회전과 접지 이동을 담당한다.
     // 같은 시간창에 좌우 다리가 함께 눌렸을 때만 기존 Rolling Match가
@@ -224,7 +225,7 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
 }
 
 void UCMLineBodyMovementCoordinator::CancelLegStep(
-    const ACMLegPart* LegPart
+    ACMLegPart* LegPart
 )
 {
     if (!LegPart)
@@ -238,6 +239,10 @@ void UCMLineBodyMovementCoordinator::CancelLegStep(
             return Step.LegPart.Get() == LegPart;
         }
     );
+    if (RemovedCount > 0)
+    {
+        LegPart->EndProceduralStep();
+    }
     if (RemovedCount > 0)
     {
         UE_LOG(LogChimeraMovement, Log,
@@ -655,6 +660,9 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
     Anchor.Constraint = Constraint;
     Anchor.PartSlotAddress = PartSlotAddress;
     Anchor.SegmentIndex = SegmentIndex;
+    ArmPart.BeginGroundAnchor(
+        GroundHit.ImpactPoint,
+        GroundHit.ImpactNormal);
     if (ArmPart.GetAnchorStaminaCostPerSecond() > UE_SMALL_NUMBER)
     {
         Chimera.PauseStaminaRegeneration();
@@ -1050,6 +1058,10 @@ void UCMLineBodyMovementCoordinator::DestroyArmAnchor(int32 AnchorIndex)
     }
 
     const FActiveArmAnchor Anchor = ActiveArmAnchors[AnchorIndex];
+    if (ACMArmPart* ArmPart = Anchor.ArmPart.Get())
+    {
+        ArmPart->EndGroundAnchor();
+    }
     if (UPhysicsConstraintComponent* Constraint = Anchor.Constraint.Get())
     {
         Constraint->BreakConstraint();
@@ -1088,11 +1100,8 @@ float UCMLineBodyMovementCoordinator::GetPlayerCountSpeedMultiplier(
     const ACMChimera& Chimera
 ) const
 {
-    const ACMGameState* GameState = Chimera.GetWorld()
-        ? Chimera.GetWorld()->GetGameState<ACMGameState>()
-        : nullptr;
     const int32 PlayerCount = FMath::Clamp(
-        GameState ? GameState->GetLobbyPlayerCount() : 1,
+        Chimera.ActiveSegmentCount / CMControl::SegmentsPerPlayer,
         1,
         CMControl::MaxPlayers
     );
@@ -1119,34 +1128,12 @@ float UCMLineBodyMovementCoordinator::GetPerControlImpulseMultiplier(
     const ACMChimera& Chimera
 ) const
 {
-    int32 AssignedControlCount = 0;
-    if (Chimera.GetWorld())
-    {
-        for (TActorIterator<ACMControlBody> It(Chimera.GetWorld());
-            It;
-            ++It)
-        {
-            const ACMControlBody* ControlBody = *It;
-            const ACMPlayerState* PlayerState = ControlBody
-                ? ControlBody->GetPlayerState<ACMPlayerState>()
-                : nullptr;
-            // 죽은 마디를 소유한 플레이어는 ControlBody 자체는 월드에 남아 있지만
-            // 더 이상 Q/W/E/R을 누를 수 없습니다. 해당 4칸을 힘 분배 인원에
-            // 포함하면 살아 있는 플레이어의 실제 입력 힘까지 불필요하게 줄어듭니다.
-            if (PlayerState
-                && !PlayerState->IsOnlyASpectator()
-                && ControlBody->IsControlInputEnabled())
-            {
-                AssignedControlCount +=
-                    ControlBody->GetEnabledControlCount();
-            }
-        }
-    }
-
     constexpr float SinglePlayerControlCount = 4.0f;
+    const int32 TotalControlCount = Chimera.ActiveSegmentCount
+        * CMControl::PartSlotsPerSegment;
     return GetPlayerCountSpeedMultiplier(Chimera)
         * SinglePlayerControlCount
-        / FMath::Max(static_cast<float>(AssignedControlCount), 1.0f);
+        / FMath::Max(static_cast<float>(TotalControlCount), 1.0f);
 }
 
 void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
@@ -1165,8 +1152,7 @@ void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
             && IsValid(LegPart)
             && LegPart->IsOperational()
             && IsValid(SegmentBody)
-            && SegmentBody->IsSimulatingPhysics()
-            && Chimera.IsSegmentAlive(Step.SegmentIndex);
+            && SegmentBody->IsSimulatingPhysics();
         if (!bCanContinue)
         {
             UE_LOG(LogChimeraMovement, Verbose,
@@ -1176,6 +1162,10 @@ void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
                 LegPart && LegPart->IsOperational()
                     ? TEXT("true")
                     : TEXT("false"));
+            if (LegPart)
+            {
+                LegPart->EndProceduralStep();
+            }
             ActiveLegSteps.RemoveAtSwap(
                 StepIndex,
                 EAllowShrinking::No
@@ -1396,6 +1386,13 @@ void UCMLineBodyMovementCoordinator::EndPlay(
     }
     PendingLeftInputs.Reset();
     PendingRightInputs.Reset();
+    for (const FActiveLegStep& Step : ActiveLegSteps)
+    {
+        if (ACMLegPart* LegPart = Step.LegPart.Get())
+        {
+            LegPart->EndProceduralStep();
+        }
+    }
     ActiveLegSteps.Reset();
     for (int32 AnchorIndex = ActiveArmAnchors.Num() - 1;
         AnchorIndex >= 0;

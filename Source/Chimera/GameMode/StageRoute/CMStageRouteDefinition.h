@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "GameplayTagContainer.h"
 
 #include "CMStageRouteDefinition.generated.h"
 
@@ -30,6 +31,10 @@ struct FCMStageRouteEntry
     // 해당 스테이지의 Entry, Background, Result 그룹을 제공하는 Schedule PDA
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage")
     FPrimaryAssetId LoadScheduleId;
+
+    // 각 클라이언트가 이 스테이지에서 재생할 BGM 식별자
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage|Audio")
+    FGameplayTag StageBGMTag;
 
     // 스테이지 진행에 필요한 식별자와 맵, 로드 Schedule이 모두 설정됐는지 확인
     bool IsValid() const

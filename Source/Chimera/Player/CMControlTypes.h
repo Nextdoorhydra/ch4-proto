@@ -45,6 +45,9 @@ namespace CMControl
     constexpr int32 PartSlotsPerSegment = 2;
     constexpr int32 SegmentsPerPlayer = 2;
     constexpr int32 MaxKeysPerPlayer = 4;
+    constexpr int32 SoloTestSegmentCount = 8;
+    constexpr int32 SoloTestKeyCount =
+        SoloTestSegmentCount * PartSlotsPerSegment;
     constexpr int32 MaxPlayers = 8;
     constexpr int32 MaxSegments = MaxPlayers * SegmentsPerPlayer;
     constexpr int32 MaxPartSlots =
@@ -102,5 +105,19 @@ namespace CMControl
     inline bool IsRightPartSlot(const FCMPartSlotAddress& Address)
     {
         return Address.PartSlotIndex == 1;
+    }
+
+    inline FCMPartSlotAddress GetSoloTestPartSlotAddress(int32 KeyIndex)
+    {
+        FCMPartSlotAddress Address;
+        if (KeyIndex >= 0 && KeyIndex < SoloTestKeyCount)
+        {
+            const bool bRightSide = KeyIndex >= SoloTestSegmentCount;
+            Address.SegmentIndex = bRightSide
+                ? KeyIndex - SoloTestSegmentCount
+                : KeyIndex;
+            Address.PartSlotIndex = bRightSide ? 1 : 0;
+        }
+        return Address;
     }
 }

@@ -19,16 +19,16 @@ public:
     virtual bool InputKey(const FInputKeyEventArgs& EventArgs) override;
 
 private:
-    void OpenOptionsForLocalPlayer(ULocalPlayer* LocalPlayer);
+    void OpenEscapeMenuForLocalPlayer(ULocalPlayer* LocalPlayer);
     void HandlePolicyInitialized(ENKMUIAsyncResult Result);
 
     UFUNCTION()
-    void HandleOptionPushed(
+    void HandleEscapeMenuPushed(
         ENKMUIAsyncResult Result,
         UNKMUIActivatableWidget* Widget);
 
-    TSoftClassPtr<UNKMUIActivatableWidget> OptionWidgetClass;
-    TWeakObjectPtr<UNKMUIActivatableWidget> ActiveOptionWidget;
+    TSoftClassPtr<UNKMUIActivatableWidget> EscapeMenuWidgetClass;
+    TWeakObjectPtr<UNKMUIActivatableWidget> ActiveEscapeMenuWidget;
     TWeakObjectPtr<ULocalPlayer> PendingLocalPlayer;
-    bool bOptionRequestPending = false;
+    bool bEscapeMenuRequestPending = false;
 };

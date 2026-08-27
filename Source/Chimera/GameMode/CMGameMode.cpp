@@ -3,6 +3,7 @@
 #include "Game/CMControlAssignmentPolicy.h"
 #include "GameMode/CMGameState.h"
 #include "GameMode/Play/CMPlayGameMode.h"
+#include "GameMode/StageRoute/CMStageRouteSubsystem.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPlayerState.h"
@@ -36,6 +37,10 @@ void ACMGameMode::BeginPlay()
 
     if (IsGameplayMap())
     {
+        if (ACMGameState* CMGameState = GetGameState<ACMGameState>())
+        {
+            CMGameState->SetSoloTestMode(IsSoloTestMode());
+        }
         EnsureSharedChimera();
     }
 }
@@ -307,6 +312,37 @@ bool ACMGameMode::IsGameplayMap() const
     return !GameMapName.IsEmpty() && CurrentMapName == GameMapName;
 }
 
+bool ACMGameMode::IsSoloTestMode() const
+{
+    const UCMStageRouteSubsystem* StageRoute = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>()
+        : nullptr;
+    if (StageRoute && StageRoute->IsSoloTestMode())
+    {
+        return true;
+    }
+
+#if WITH_EDITOR
+    const UWorld* World = GetWorld();
+    if (!World || World->WorldType != EWorldType::PIE)
+    {
+        return false;
+    }
+
+    if (GetNetMode() == NM_Standalone)
+    {
+        return true;
+    }
+
+    const ACMGameState* CMGameState = GetGameState<ACMGameState>();
+    return GetNetMode() == NM_ListenServer
+        && CMGameState
+        && CMGameState->GetLobbyPlayerCount() == 1;
+#else
+    return false;
+#endif
+}
+
 // 월드의 기존 공용 키메라를 찾거나 서버에서 새로 생성하여 GameState에 등록
 ACMChimera* ACMGameMode::EnsureSharedChimera()
 {
@@ -464,10 +500,15 @@ void ACMGameMode::RebalanceControlAssignments(
         }
     }
 
-    const int32 RequestedPlayerCount = ExcludedPlayerState
-        ? CMGameState->SharedChimera->GetActiveSegmentCount()
+    const bool bSoloTestMode = IsSoloTestMode();
+    CMGameState->SetSoloTestMode(bSoloTestMode);
+    const int32 RequestedPlayerCount = bSoloTestMode
+        ? CMControl::SoloTestSegmentCount
             / CMControl::SegmentsPerPlayer
-        : Players.Num();
+        : ExcludedPlayerState
+            ? CMGameState->SharedChimera->GetActiveSegmentCount()
+                / CMControl::SegmentsPerPlayer
+            : Players.Num();
     CMGameState->SharedChimera->SetActiveSegmentCountForPlayers(
         RequestedPlayerCount
     );

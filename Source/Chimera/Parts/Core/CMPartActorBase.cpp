@@ -1,7 +1,7 @@
 #include "Parts/Core/CMPartActorBase.h"
 
 #include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
 #include "Data/Part/CMPartTierTableRow.h"
 #include "Engine/DataTable.h"
@@ -23,7 +23,7 @@ ACMPartActorBase::ACMPartActorBase()
     SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
     SetRootComponent(SceneRoot);
 
-    PartMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PartMesh"));
+    PartMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("PartMesh"));
     PartMesh->SetupAttachment(SceneRoot);
 
     BattleComponent = CreateDefaultSubobject<UCMBattleComponent>(
@@ -114,6 +114,7 @@ void ACMPartActorBase::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPartActorBase, MovementImpulseMultiplier);
     DOREPLIFETIME(ACMPartActorBase, PartRowName);
     DOREPLIFETIME(ACMPartActorBase, TierRowName);
+    DOREPLIFETIME(ACMPartActorBase, Tier);
     DOREPLIFETIME(ACMPartActorBase, PartStateTags);
     DOREPLIFETIME(ACMPartActorBase, bDead);
     DOREPLIFETIME(ACMPartActorBase, bDisabled);
@@ -230,6 +231,8 @@ void ACMPartActorBase::ApplyPartData(
 
 bool ACMPartActorBase::InitializeFromPartData()
 {
+    Tier = CMPartTier::FromRowName(TierRowName);
+
     if (PartDataTable.IsNull() || PartTierDataTable.IsNull()
         || PartRowName.IsNone() || TierRowName.IsNone())
     {
