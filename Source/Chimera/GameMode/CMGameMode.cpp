@@ -324,9 +324,20 @@ bool ACMGameMode::IsSoloTestMode() const
 
 #if WITH_EDITOR
     const UWorld* World = GetWorld();
-    return World
-        && World->WorldType == EWorldType::PIE
-        && GetNetMode() == NM_Standalone;
+    if (!World || World->WorldType != EWorldType::PIE)
+    {
+        return false;
+    }
+
+    if (GetNetMode() == NM_Standalone)
+    {
+        return true;
+    }
+
+    const ACMGameState* CMGameState = GetGameState<ACMGameState>();
+    return GetNetMode() == NM_ListenServer
+        && CMGameState
+        && CMGameState->GetLobbyPlayerCount() == 1;
 #else
     return false;
 #endif
@@ -489,7 +500,9 @@ void ACMGameMode::RebalanceControlAssignments(
         }
     }
 
-    const int32 RequestedPlayerCount = IsSoloTestMode()
+    const bool bSoloTestMode = IsSoloTestMode();
+    CMGameState->SetSoloTestMode(bSoloTestMode);
+    const int32 RequestedPlayerCount = bSoloTestMode
         ? CMControl::SoloTestSegmentCount
             / CMControl::SegmentsPerPlayer
         : ExcludedPlayerState
