@@ -68,6 +68,11 @@ public:
         meta = (ClampMin = "1.0"))
     float MaskBoundsPadding = 1.05f;
 
+    /** World-space width of the visibility mask's soft boundary. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask",
+        meta = (ClampMin = "0.0"))
+    float VisionEdgeSoftness = 30.0f;
+
     /** High surfaces flatter than this are treated as ceilings. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -77,6 +82,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
         meta = (ClampMin = "0.0"))
     float VisionHeightTolerance = 2.0f;
+
+    /** Maximum height difference below the vision source that remains visible. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
+        meta = (ClampMin = "0.0"))
+    float VisionBelowHeightAllowance = 1000.0f;
 
     /** Object types treated as walls. WorldStatic excludes Pawns and Parts. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion")

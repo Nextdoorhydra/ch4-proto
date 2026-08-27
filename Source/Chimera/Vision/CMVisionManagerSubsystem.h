@@ -36,6 +36,7 @@ struct FCMVisionRaySample
 struct FCMVisionSourceMaskData
 {
     FVector Origin = FVector::ZeroVector;
+    float NearVisionRadius = 0.0f;
     TArray<FCMVisionRaySample> Rays;
     TArray<FCMVisionRaySample> NearVisionRays;
     FLinearColor VisionTint = FLinearColor::Transparent;
