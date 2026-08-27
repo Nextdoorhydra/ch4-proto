@@ -27,6 +27,18 @@ void ACMGameState::GetLifetimeReplicatedProps(
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(ACMGameState, SharedChimera);
+    DOREPLIFETIME(ACMGameState, bSoloTestMode);
+}
+
+void ACMGameState::SetSoloTestMode(bool bEnabled)
+{
+    if (!HasAuthority() || bSoloTestMode == bEnabled)
+    {
+        return;
+    }
+
+    bSoloTestMode = bEnabled;
+    ForceNetUpdate();
 }
 
 // 서버에서 공용 키메라 참조를 변경하고 즉시 복제 요청

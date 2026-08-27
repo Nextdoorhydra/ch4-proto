@@ -13,6 +13,7 @@ void ACMLobbyGameState::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMLobbyGameState, LobbyPhase);
     DOREPLIFETIME(ACMLobbyGameState, ReadyPlayerCount);
     DOREPLIFETIME(ACMLobbyGameState, bCanStartGame);
+    DOREPLIFETIME(ACMLobbyGameState, bCanStartTestGame);
 }
 
 // 서버에서 로비 Phase를 변경하고 클라이언트 갱신 요청
@@ -31,7 +32,8 @@ void ACMLobbyGameState::SetLobbyPhase(ECMLobbyPhase NewPhase)
 // 서버에서 Ready 집계와 게임 시작 가능 여부 갱신
 void ACMLobbyGameState::SetLobbySummary(
     int32 NewReadyCount,
-    bool bNewCanStart
+    bool bNewCanStart,
+    bool bNewCanStartTest
 )
 {
     if (!HasAuthority())
@@ -41,13 +43,15 @@ void ACMLobbyGameState::SetLobbySummary(
 
     NewReadyCount = FMath::Max(0, NewReadyCount);
     if (ReadyPlayerCount == NewReadyCount
-        && bCanStartGame == bNewCanStart)
+        && bCanStartGame == bNewCanStart
+        && bCanStartTestGame == bNewCanStartTest)
     {
         return;
     }
 
     ReadyPlayerCount = NewReadyCount;
     bCanStartGame = bNewCanStart;
+    bCanStartTestGame = bNewCanStartTest;
     OnRep_LobbyState();
     ForceNetUpdate();
 }

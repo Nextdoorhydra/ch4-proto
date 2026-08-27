@@ -386,6 +386,8 @@ void UCMNetworkTestWidget::ApplyConnectionUI(
         ? GetWorld()->GetGameState<ACMLobbyGameState>()
         : nullptr;
     const bool bCanStartGame = LobbyState && LobbyState->CanStartGame();
+    const bool bCanStartTestGame =
+        LobbyState && LobbyState->CanStartTestGame();
     const bool bIdle = !NetworkSubsystem
         || NetworkSubsystem->GetCurrentOperation()
             == EListenServerOperation::None;
@@ -452,7 +454,7 @@ void UCMNetworkTestWidget::ApplyConnectionUI(
                 : ESlateVisibility::Collapsed
         );
         Btn_StartTestGame->SetIsEnabled(
-            bLobby && bHost && bIdle && bCanStartGame);
+            bLobby && bHost && bIdle && bCanStartTestGame);
     }
     if (Btn_Ready)
     {
