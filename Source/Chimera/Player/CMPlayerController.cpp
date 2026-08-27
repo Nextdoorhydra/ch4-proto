@@ -27,8 +27,8 @@ namespace
     const FKey SoloTestControlKeys[CMControl::SoloTestKeyCount] = {
         EKeys::Q, EKeys::W, EKeys::E, EKeys::R,
         EKeys::A, EKeys::S, EKeys::D, EKeys::F,
-        EKeys::U, EKeys::I, EKeys::O, EKeys::P,
-        EKeys::H, EKeys::J, EKeys::K, EKeys::L
+        EKeys::P, EKeys::O, EKeys::I, EKeys::U,
+        EKeys::L, EKeys::K, EKeys::J, EKeys::H
     };
 
     int32 FindSoloTestControlKeyIndex(const FKey Key)
