@@ -102,8 +102,13 @@ public:
         bool bPressed
     );
 
-    /** True only for the standard Arm; SpringArm keeps press activation. */
+    // SpringArm을 제외한 디폴트 암 슬롯인지 확인한다.
     bool IsBasicArmPartSlot(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
+
+    // 디폴트 암이 상호작 대상을 잡았다면 해제 공격을 억제한다.
+    bool ShouldActivateBasicArmOnRelease(
         const FCMPartSlotAddress& PartSlotAddress
     ) const;
 

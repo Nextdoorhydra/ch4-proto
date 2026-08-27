@@ -6,6 +6,16 @@
 
 #include "CMArmPart.generated.h"
 
+class UPrimitiveComponent;
+
+UENUM(BlueprintType)
+enum class ECMArmHoldType : uint8
+{
+    None,
+    Ground,
+    Interactable
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
     FCMArmSwingStateChangedSignature,
     bool,
@@ -77,18 +87,34 @@ public:
     FGuid GetCurrentSwingAttackId() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
-    bool IsGroundAnchored() const { return bGroundAnchored; }
+    bool IsGroundAnchored() const { return HoldType == ECMArmHoldType::Ground; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
-    FVector GetGroundAnchorLocation() const { return GroundAnchorLocation; }
+    bool IsHolding() const { return HoldType != ECMArmHoldType::None; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
-    FVector GetGroundAnchorNormal() const { return GroundAnchorNormal; }
+    ECMArmHoldType GetHoldType() const { return HoldType; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
+    FVector GetGroundAnchorLocation() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
+    FVector GetGroundAnchorNormal() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Hold")
+    float GetHoldRange() const { return HoldRange; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Hold")
+    float GetHoldRadius() const { return HoldRadius; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm|Animation")
     float GetSwingPhase() const;
 
     void BeginGroundAnchor(FVector Location, FVector Normal);
+    void BeginInteractableHold(
+        UPrimitiveComponent* TargetComponent,
+        FVector Location,
+        FVector Normal);
     void EndGroundAnchor();
 
     /** Called by the authoritative Arm GA at the start of one swing. */
@@ -147,6 +173,14 @@ protected:
         meta = (ClampMin = "0.0"))
     float AttackRadius = 30.0f;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm|Hold",
+        meta = (ClampMin = "0.0"))
+    float HoldRange = 120.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm|Hold",
+        meta = (ClampMin = "0.0"))
+    float HoldRadius = 40.0f;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Arm|Debug")
     bool bDrawSwingDebug = true;
@@ -181,7 +215,10 @@ private:
     bool bSwinging = false;
 
     UPROPERTY(ReplicatedUsing = OnRep_GroundAnchor)
-    bool bGroundAnchored = false;
+    ECMArmHoldType HoldType = ECMArmHoldType::None;
+
+    UPROPERTY(ReplicatedUsing = OnRep_GroundAnchor)
+    TObjectPtr<UPrimitiveComponent> HeldComponent;
 
     UPROPERTY(ReplicatedUsing = OnRep_GroundAnchor)
     FVector_NetQuantize10 GroundAnchorLocation = FVector::ZeroVector;

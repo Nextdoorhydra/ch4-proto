@@ -1116,7 +1116,8 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
         {
             const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
             const bool bActivateOnRelease =
-                SharedChimera->IsBasicArmPartSlot(ReleasedPartSlot);
+                SharedChimera->ShouldActivateBasicArmOnRelease(
+                    ReleasedPartSlot);
             SharedChimera->SetPartSlotPressed(ReleasedPartSlot, false);
             if (bActivateOnRelease)
             {
