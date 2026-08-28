@@ -5,6 +5,8 @@
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Parts/Head/CMHeadPartActor.h"
@@ -69,10 +71,24 @@ void UCMCameraOcclusionComponent::TickComponent(
     {
         const TArray<FVector2D>* ScreenCenters =
             CurrentOccluders.Find(State.Component.Get());
+        const bool bWasOccluding = State.bOccluding;
         State.bOccluding = ScreenCenters != nullptr;
         if (ScreenCenters)
         {
             State.ScreenCenters = *ScreenCenters;
+        }
+        if (bWasOccluding != State.bOccluding)
+        {
+            UE_LOG(
+                LogTemp,
+                Display,
+                TEXT("[Camera Occlusion] %s %s. Centers=%d"),
+                State.Component.IsValid()
+                    ? *State.Component->GetPathName()
+                    : TEXT("<invalid component>"),
+                State.bOccluding ? TEXT("occlusion started") : TEXT("occlusion ended"),
+                State.ScreenCenters.Num()
+            );
         }
     }
 
@@ -324,13 +340,55 @@ UCMCameraOcclusionComponent::FindOrAddFadeState(
                 OriginalMaterial
             );
         bHasMaterial |= NewState.DynamicMaterials[MaterialIndex] != nullptr;
+        const UMaterialInstance* MaterialInstance =
+            Cast<UMaterialInstance>(OriginalMaterial);
+        const UMaterial* BaseMaterial = OriginalMaterial
+            ? OriginalMaterial->GetMaterial()
+            : nullptr;
+        UE_LOG(
+            LogTemp,
+            Display,
+            TEXT("[Camera Occlusion] %s slot %d: source=%s (%s), path=%s, parent=%s, blend=%d, dither=%s, MID=%s"),
+            *Component.GetPathName(),
+            MaterialIndex,
+            *GetNameSafe(OriginalMaterial),
+            OriginalMaterial
+                ? *OriginalMaterial->GetClass()->GetName()
+                : TEXT("<none>"),
+            OriginalMaterial
+                ? *OriginalMaterial->GetPathName()
+                : TEXT("<none>"),
+            MaterialInstance && MaterialInstance->Parent
+                ? *MaterialInstance->Parent->GetPathName()
+                : TEXT("<none>"),
+            BaseMaterial ? static_cast<int32>(BaseMaterial->GetBlendMode()) : -1,
+            BaseMaterial && BaseMaterial->DitherOpacityMask
+                ? TEXT("true")
+                : TEXT("false"),
+            NewState.DynamicMaterials[MaterialIndex]
+                ? *NewState.DynamicMaterials[MaterialIndex]->GetPathName()
+                : TEXT("<failed>")
+        );
     }
 
     if (!bHasMaterial)
     {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("[Camera Occlusion] Trace hit %s, but no dynamic material could be created."),
+            *Component.GetPathName()
+        );
         return nullptr;
     }
 
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("[Camera Occlusion] Fade state created for %s with %d material slot(s)."),
+        *Component.GetPathName(),
+        MaterialCount
+    );
     return &FadeStates.Add_GetRef(MoveTemp(NewState));
 }
 
@@ -347,6 +405,7 @@ void UCMCameraOcclusionComponent::UpdateFadeStates(float DeltaTime)
         }
 
         const float TargetFade = State.bOccluding ? 1.0f : 0.0f;
+        const float PreviousFade = State.Fade;
         const float FadeSpeed = State.bOccluding
             ? Config.FadeOutSpeed
             : Config.FadeInSpeed;
@@ -397,7 +456,42 @@ void UCMCameraOcclusionComponent::UpdateFadeStates(float DeltaTime)
             );
             Material->SetScalarParameterValue(
                 EdgeSoftnessParameterName,
+            Config.EdgeSoftness
+            );
+        }
+
+        if (State.bOccluding
+            && PreviousFade < KINDA_SMALL_NUMBER
+            && State.Fade > PreviousFade)
+        {
+            UE_LOG(
+                LogTemp,
+                Display,
+                TEXT("[Camera Occlusion] Applying fade to %s: Fade=%.3f, Center=(%.3f,%.3f), Radius=%.3f, MinOpacity=%.3f, Edge=%.3f"),
+                *State.Component->GetPathName(),
+                State.Fade,
+                State.ScreenCenters.IsValidIndex(0)
+                    ? State.ScreenCenters[0].X
+                    : 10.0f,
+                State.ScreenCenters.IsValidIndex(0)
+                    ? State.ScreenCenters[0].Y
+                    : 10.0f,
+                Config.ScreenFadeRadius,
+                Config.MinimumOpacity,
                 Config.EdgeSoftness
+            );
+        }
+
+        if (State.bOccluding
+            && PreviousFade < 0.99f
+            && State.Fade >= 0.99f)
+        {
+            UE_LOG(
+                LogTemp,
+                Display,
+                TEXT("[Camera Occlusion] Fade reached full strength for %s: Fade=%.3f"),
+                *State.Component->GetPathName(),
+                State.Fade
             );
         }
 

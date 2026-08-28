@@ -127,7 +127,7 @@ ACMChimera::ACMChimera()
     CameraBoom->CameraLagMaxDistance = CameraLagMaxDistance;
     CameraBoom->bEnableCameraRotationLag = bEnableCameraRotationLag;
     CameraBoom->CameraRotationLagSpeed = CameraRotationLagSpeed;
-    CameraBoom->bDoCollisionTest = true;
+    CameraBoom->bDoCollisionTest = false;
     CameraBoom->ProbeChannel = ECC_Camera;
 
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(
@@ -749,7 +749,7 @@ void ACMChimera::ApplyBlueprintSettings()
             bEnableCameraRotationLag;
         CameraBoom->CameraRotationLagSpeed =
             CameraRotationLagSpeed;
-        CameraBoom->bDoCollisionTest = true;
+        CameraBoom->bDoCollisionTest = false;
         CameraBoom->ProbeChannel = ECC_Camera;
     }
 

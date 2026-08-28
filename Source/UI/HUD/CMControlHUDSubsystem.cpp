@@ -37,9 +37,22 @@ void UCMControlHUDSubsystem::Tick(float DeltaTime)
 {
     ULocalPlayer* LocalPlayer = GetLocalPlayer();
     UWorld* World = GetWorld();
+    if (!LocalPlayer
+        || !World
+        || World->GetNetMode() == NM_DedicatedServer
+        || !LocalPlayer->ViewportClient)
+    {
+        return;
+    }
+
     APlayerController* PlayerController = LocalPlayer && World
         ? LocalPlayer->GetPlayerController(World)
         : nullptr;
+    if (!PlayerController || !PlayerController->IsLocalController())
+    {
+        return;
+    }
+
     ACMControlBody* ControlBody = PlayerController
         ? PlayerController->GetPawn<ACMControlBody>()
         : nullptr;
