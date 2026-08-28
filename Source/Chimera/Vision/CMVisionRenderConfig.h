@@ -99,6 +99,15 @@ public:
         meta = (ClampMin = "0.0"))
     float OccluderSurfaceRevealDistance = 100.0f;
 
+    /** Minimum depth used to stabilize thin or single-sided occluder meshes. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion",
+        meta = (ClampMin = "0.0"))
+    float MinimumOccluderThickness = 5.0f;
+
+    /** Actor or component tag used to exclude an object from vision occlusion. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion")
+    FName VisionOccluderIgnoreTag = TEXT("NoVisionOccluder");
+
     /** Reserved stencil value used to apply the world mask only to walls. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion",
         meta = (ClampMin = "1", ClampMax = "255"))

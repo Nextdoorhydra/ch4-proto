@@ -9,6 +9,7 @@
 #include "Engine/Canvas.h"
 #include "Engine/CanvasRenderTarget2D.h"
 #include "Engine/Texture2D.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -1086,7 +1087,7 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
     );
     FCollisionQueryParams QueryParams(
         SCENE_QUERY_STAT(CMVisionOcclusion),
-        false
+        true
     );
     const AActor* SourceOwner = VisionSource.GetOwner();
     QueryParams.AddIgnoredActor(SourceOwner);
@@ -1106,14 +1107,44 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
         return DesiredEnd;
     }
 
-    FHitResult Hit;
-    if (!World->LineTraceSingleByObjectType(
-        Hit,
+    TArray<FHitResult> Hits;
+    if (!World->LineTraceMultiByObjectType(
+        Hits,
         TraceStart,
         TraceEnd,
         ObjectQueryParams,
         QueryParams
     ))
+    {
+        return DesiredEnd;
+    }
+
+    FHitResult Hit;
+    for (const FHitResult& Candidate : Hits)
+    {
+        if (!Candidate.bBlockingHit)
+        {
+            continue;
+        }
+
+        const AActor* HitActor = Candidate.GetActor();
+        const UPrimitiveComponent* HitComponent = Candidate.GetComponent();
+        const bool bIgnored = RenderConfig->VisionOccluderIgnoreTag != NAME_None
+            && ((HitActor && HitActor->ActorHasTag(
+                RenderConfig->VisionOccluderIgnoreTag
+            )) || (HitComponent && HitComponent->ComponentHasTag(
+                RenderConfig->VisionOccluderIgnoreTag
+            )));
+        if (bIgnored)
+        {
+            continue;
+        }
+
+        Hit = Candidate;
+        break;
+    }
+
+    if (!Hit.IsValidBlockingHit())
     {
         return DesiredEnd;
     }
@@ -1128,6 +1159,20 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
     if (const UPrimitiveComponent* HitComponent = Hit.GetComponent())
     {
         const FBoxSphereBounds Bounds = HitComponent->Bounds;
+        const float GeometricThickness = 2.0f * FMath::Min3(
+            Bounds.BoxExtent.X,
+            Bounds.BoxExtent.Y,
+            Bounds.BoxExtent.Z
+        );
+        const float RequiredThickness = FMath::Max(
+            RenderConfig->MinimumOccluderThickness
+                - GeometricThickness,
+            0.0f
+        );
+        OccluderDistance = FMath::Max(
+            OccluderDistance,
+            Hit.Distance + RequiredThickness
+        );
         const float TopHeight = Bounds.Origin.Z + Bounds.BoxExtent.Z;
         const float LowObstacleTopRevealHeight = FMath::Max(
             FMath::Max(
