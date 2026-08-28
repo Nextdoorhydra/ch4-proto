@@ -109,6 +109,13 @@ protected:
         meta = (ClampMin = "0.0"))
     float PullStopDistance = 100.0f;
 
+    // Reaching the anchor is the normal exit. This timeout is only a safety
+    // net for corners or obstacles that make the anchor unreachable.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Spring Arm|Pull",
+        meta = (ClampMin = "0.0"))
+    float PullMaxDuration = 3.0f;
+
 private:
     bool LaunchHook();
     float GetAutomaticSweepPhase() const;
@@ -130,4 +137,5 @@ private:
     FCMPartSlotAddress PullTargetSlot;
     FVector PullAnchorLocation = FVector::ZeroVector;
     FTimerHandle PullTimerHandle;
+    double PullStartTimeSeconds = 0.0;
 };
