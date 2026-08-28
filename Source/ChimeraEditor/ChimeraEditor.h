@@ -10,6 +10,9 @@ public:
     virtual void ShutdownModule() override;
 
 private:
+	void RegisterMenus();
+	void ConvertSelectedMaterials(const TArray<struct FAssetData>& SelectedAssets);
+	void ConvertMaterialsUnderFolders(const TArray<FString>& SelectedPackagePaths);
 	void OnGoogleSheetCacheUpdated(class UGoogleSheetConfig& Config);
 	FDelegateHandle GoogleSheetCacheUpdatedHandle;
 	class IConsoleObject* DataForgeMcpCommand = nullptr;

@@ -17,7 +17,10 @@ public class ChimeraEditor : ModuleRules
                 "GoogleSheetLoader", 
 				"AsyncPDALoader",
 				"PropertyEditor",
-                "UnrealEd"
+				"UnrealEd",
+				"ContentBrowser",
+				"ToolMenus",
+				"MaterialEditor"
             }
         );
 
