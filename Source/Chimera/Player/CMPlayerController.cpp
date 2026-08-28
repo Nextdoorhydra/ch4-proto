@@ -95,12 +95,10 @@ void ACMPlayerController::RequestCheatKillAllSegments()
 
 void ACMPlayerController::RequestCheatRespawnAtCheckpoint()
 {
-#if !UE_BUILD_SHIPPING
     if (IsLocalController())
     {
         ServerCheatRespawnAtCheckpoint();
     }
-#endif
 }
 
 void ACMPlayerController::RequestCheatKillSegment(int32 SegmentIndex)
@@ -186,10 +184,9 @@ void ACMPlayerController::RequestCheatClearLegParts()
     }
 }
 
-// Non-Shipping 콘솔 명령이 화살표 디버그 이동을 켜거나 끄는 진입점
+// 콘솔 명령이 화살표 디버그 이동을 켜거나 끄는 진입점
 void ACMPlayerController::SetCheatDebugMovementEnabled(bool bEnabled)
 {
-#if !UE_BUILD_SHIPPING
     if (!IsLocalController())
     {
         return;
@@ -208,43 +205,34 @@ void ACMPlayerController::SetCheatDebugMovementEnabled(bool bEnabled)
         TEXT("[Cheat] Arrow-key debug movement %s for %s."),
         bEnabled ? TEXT("enabled") : TEXT("disabled"),
         *GetName());
-#endif
 }
 
 // 공용 키메라를 독점 이동할 수 있는 로컬 호스트인지 확인
 bool ACMPlayerController::CanControlTestAreas() const
 {
-#if !UE_BUILD_SHIPPING
     return IsLocalController()
         && HasAuthority()
         && (GetNetMode() == NM_ListenServer || GetNetMode() == NM_Standalone)
         && IsValid(FindTestAreaManager());
-#else
-    return false;
-#endif
 }
 
 // Test Area Manager가 수집한 UI 목록 반환
 TArray<FCMTestAreaInfo> ACMPlayerController::GetAvailableTestAreas() const
 {
-#if !UE_BUILD_SHIPPING
     if (const ACMTestAreaManager* Manager = FindTestAreaManager())
     {
         return Manager->GetAvailableAreas();
     }
-#endif
     return {};
 }
 
 // 로컬 UI 선택을 서버의 호스트 검증 RPC로 전달
 void ACMPlayerController::RequestTeleportToTestArea(FName AreaId)
 {
-#if !UE_BUILD_SHIPPING
     if (IsLocalController() && !AreaId.IsNone())
     {
         ServerRequestTeleportToTestArea(AreaId);
     }
-#endif
 }
 
 // 현재 월드의 유일한 TestAreaManager 검색
@@ -260,7 +248,6 @@ ACMTestAreaManager* ACMPlayerController::FindTestAreaManager() const
 // 원격 참가자의 공용 몸통 이동을 거부하고 호스트 요청만 처리
 void ACMPlayerController::ServerRequestTeleportToTestArea_Implementation(FName AreaId)
 {
-#if !UE_BUILD_SHIPPING
     if (!IsLocalController()
         || (GetNetMode() != NM_ListenServer && GetNetMode() != NM_Standalone))
     {
@@ -274,7 +261,6 @@ void ACMPlayerController::ServerRequestTeleportToTestArea_Implementation(FName A
     {
         Manager->TeleportToArea(AreaId);
     }
-#endif
 }
 
 void ACMPlayerController::ServerRequestRetryGame_Implementation()
@@ -346,7 +332,6 @@ void ACMPlayerController::BeginPlay()
 
 void ACMPlayerController::ServerCheatKillAllSegments_Implementation()
 {
-#if !UE_BUILD_SHIPPING
     ACMChimera* SharedChimera = GetSharedChimera();
     if (!SharedChimera)
     {
@@ -371,12 +356,10 @@ void ACMPlayerController::ServerCheatKillAllSegments_Implementation()
             );
         }
     }
-#endif
 }
 
 void ACMPlayerController::ServerCheatRespawnAtCheckpoint_Implementation()
 {
-#if !UE_BUILD_SHIPPING
     ACMPlayGameMode* GameMode = GetWorld()
         ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>()
         : nullptr;
@@ -389,14 +372,12 @@ void ACMPlayerController::ServerCheatRespawnAtCheckpoint_Implementation()
 
     UE_LOG(LogChimeraPlayerController, Warning,
         TEXT("[Cheat] CM.Checkpoint restored the latest checkpoint."));
-#endif
 }
 
 void ACMPlayerController::ServerCheatKillSegment_Implementation(
     int32 SegmentIndex
 )
 {
-#if !UE_BUILD_SHIPPING
     ACMChimera* SharedChimera = GetSharedChimera();
     if (!SharedChimera)
     {
@@ -425,12 +406,10 @@ void ACMPlayerController::ServerCheatKillSegment_Implementation(
         SegmentIndex,
         SegmentStates[SegmentIndex].Health
     );
-#endif
 }
 
 void ACMPlayerController::ServerCheatSpawnRandomParts_Implementation()
 {
-#if !UE_BUILD_SHIPPING
     if (ACMChimera* SharedChimera = GetSharedChimera())
     {
         UE_LOG(LogChimeraPlayerController, Warning,
@@ -438,7 +417,6 @@ void ACMPlayerController::ServerCheatSpawnRandomParts_Implementation()
             *GetName());
         SharedChimera->SpawnRandomDebugParts();
     }
-#endif
 }
 
 void ACMPlayerController::ServerCheatAttachPart_Implementation(
@@ -446,7 +424,6 @@ void ACMPlayerController::ServerCheatAttachPart_Implementation(
     FName PartName
 )
 {
-#if !UE_BUILD_SHIPPING
     if (ACMChimera* SharedChimera = GetSharedChimera())
     {
         UE_LOG(LogChimeraPlayerController, Warning,
@@ -459,14 +436,12 @@ void ACMPlayerController::ServerCheatAttachPart_Implementation(
             PartName
         );
     }
-#endif
 }
 
 void ACMPlayerController::ServerCheatFillAllSlotsWithPart_Implementation(
     FName PartName
 )
 {
-#if !UE_BUILD_SHIPPING
     if (ACMChimera* SharedChimera = GetSharedChimera())
     {
         UE_LOG(LogChimeraPlayerController, Warning,
@@ -475,12 +450,10 @@ void ACMPlayerController::ServerCheatFillAllSlotsWithPart_Implementation(
             *GetName());
         SharedChimera->FillAllDebugSlotsWithPart(PartName);
     }
-#endif
 }
 
 void ACMPlayerController::ServerCheatClearRandomParts_Implementation()
 {
-#if !UE_BUILD_SHIPPING
     if (ACMChimera* SharedChimera = GetSharedChimera())
     {
         UE_LOG(LogChimeraPlayerController, Warning,
@@ -488,7 +461,6 @@ void ACMPlayerController::ServerCheatClearRandomParts_Implementation()
             *GetName());
         SharedChimera->ClearRandomDebugParts();
     }
-#endif
 }
 
 // 화살표 입력을 서버 공용 키메라의 개발용 물리 이동으로 전달
@@ -496,19 +468,16 @@ void ACMPlayerController::ServerApplyCheatDebugMovement_Implementation(
     float ForwardInput,
     float TurnInput)
 {
-#if !UE_BUILD_SHIPPING
     if (ACMChimera* SharedChimera = GetSharedChimera())
     {
         SharedChimera->ApplyDebugMovementInput(
             FMath::Clamp(ForwardInput, -1.0f, 1.0f),
             FMath::Clamp(TurnInput, -1.0f, 1.0f));
     }
-#endif
 }
 
 void ACMPlayerController::ServerCheatSpawnLegParts_Implementation()
 {
-#if !UE_BUILD_SHIPPING
     if (ACMChimera* SharedChimera = GetSharedChimera())
     {
         UE_LOG(LogChimeraPlayerController, Warning,
@@ -516,12 +485,10 @@ void ACMPlayerController::ServerCheatSpawnLegParts_Implementation()
             *GetName());
         SharedChimera->SpawnTestLegParts();
     }
-#endif
 }
 
 void ACMPlayerController::ServerCheatClearLegParts_Implementation()
 {
-#if !UE_BUILD_SHIPPING
     if (ACMChimera* SharedChimera = GetSharedChimera())
     {
         UE_LOG(LogChimeraPlayerController, Warning,
@@ -529,7 +496,6 @@ void ACMPlayerController::ServerCheatClearLegParts_Implementation()
             *GetName());
         SharedChimera->ClearTestLegParts();
     }
-#endif
 }
 
 void ACMPlayerController::EndPlay(
@@ -554,7 +520,6 @@ void ACMPlayerController::ServerCheatDamageSegment_Implementation(
     float Damage
 )
 {
-#if !UE_BUILD_SHIPPING
     ACMChimera* SharedChimera = GetSharedChimera();
     const TArray<FCMBodySegmentHealthState> SegmentStates = SharedChimera
         ? SharedChimera->GetSegmentHealthStates()
@@ -576,7 +541,6 @@ void ACMPlayerController::ServerCheatDamageSegment_Implementation(
         SegmentIndex,
         Damage,
         *GetName());
-#endif
 }
 
 void ACMPlayerController::ServerCheatDamagePart_Implementation(
@@ -584,7 +548,6 @@ void ACMPlayerController::ServerCheatDamagePart_Implementation(
     float Damage
 )
 {
-#if !UE_BUILD_SHIPPING
     ACMChimera* SharedChimera = GetSharedChimera();
     const int32 ActiveSlotCount = SharedChimera
         ? SharedChimera->GetActiveSegmentCount()
@@ -618,7 +581,6 @@ void ACMPlayerController::ServerCheatDamagePart_Implementation(
         *Part->GetName(),
         Damage,
         *GetName());
-#endif
 }
 
 void ACMPlayerController::SetupInputComponent()
@@ -761,7 +723,6 @@ void ACMPlayerController::SetupInputComponent()
             *GetName());
     }
 
-#if !UE_BUILD_SHIPPING
     // 기존 Q/W/E/R Mapping Context와 분리된 개발 전용 화살표 입력
     InputComponent->BindKey(EKeys::Up, IE_Pressed,
         this, &ThisClass::DebugMoveForwardPressed);
@@ -779,7 +740,6 @@ void ACMPlayerController::SetupInputComponent()
         this, &ThisClass::DebugTurnRightPressed);
     InputComponent->BindKey(EKeys::Right, IE_Released,
         this, &ThisClass::DebugTurnRightReleased);
-#endif
 }
 
 // 활성화된 로컬 화살표 상태를 서버에 낮은 신뢰도의 연속 입력으로 전달
@@ -787,7 +747,6 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
 
-#if !UE_BUILD_SHIPPING
     if (!IsLocalController() || !bCheatDebugMovementEnabled)
     {
         return;
@@ -804,7 +763,6 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
     {
         ServerApplyCheatDebugMovement(ForwardInput, TurnInput);
     }
-#endif
 }
 
 void ACMPlayerController::HandleSharedChimeraChanged()

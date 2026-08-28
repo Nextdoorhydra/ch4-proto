@@ -12,8 +12,6 @@
 #include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
 
-#if !UE_BUILD_SHIPPING
-
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraVisionDebug, Log, All);
 
 namespace CMVisionDebugCommands
@@ -452,4 +450,3 @@ FAutoConsoleCommandWithWorldAndArgs VisionDebugDisableCommand(
 );
 }
 
-#endif

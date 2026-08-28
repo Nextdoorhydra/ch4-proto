@@ -604,7 +604,6 @@ bool ACMPlayGameMode::TryRetryGame(APlayerController* RequestingPlayer)
 
 bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
 {
-#if !UE_BUILD_SHIPPING
     if (!HasAuthority())
     {
         return false;
@@ -613,9 +612,6 @@ bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
     GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
     bCheckpointRespawnPending = false;
     return RespawnAtActiveCheckpoint();
-#else
-    return false;
-#endif
 }
 
 void ACMPlayGameMode::ScheduleCheckpointRespawn()
