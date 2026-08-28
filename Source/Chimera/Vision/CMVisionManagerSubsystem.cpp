@@ -53,14 +53,12 @@ namespace
         TEXT("VisionHeightTolerance")
     );
 
-#if !UE_BUILD_SHIPPING
     TAutoConsoleVariable<int32> CVarVisionDebugDraw(
         TEXT("CM.Vision.DebugDraw"),
         0,
         TEXT("Draws slot vision origins (green), component locations (red), and aim rays (cyan)."),
         ECVF_Cheat
     );
-#endif
 }
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraVisionManager, Log, All);
@@ -188,7 +186,6 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
         );
     }
 
-#if !UE_BUILD_SHIPPING
     if (CVarVisionDebugDraw.GetValueOnGameThread() != 0)
     {
         for (const UCMVisionComponent* VisionSource : ActiveSources)
@@ -225,7 +222,6 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
             );
         }
     }
-#endif
 
     BaseVisibilityMask->UpdateResource();
     OccluderVisibilityMask->UpdateResource();

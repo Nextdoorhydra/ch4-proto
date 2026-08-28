@@ -336,7 +336,6 @@ void ACMChimera::ApplyDebugMovementInput(
     float ForwardInput,
     float TurnInput)
 {
-#if !UE_BUILD_SHIPPING
     if (!HasAuthority())
     {
         return;
@@ -396,7 +395,6 @@ void ACMChimera::ApplyDebugMovementInput(
                 true);
         }
     }
-#endif
 }
 
 void ACMChimera::GetLifetimeReplicatedProps(

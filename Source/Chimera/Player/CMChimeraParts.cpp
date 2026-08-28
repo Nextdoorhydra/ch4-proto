@@ -232,7 +232,6 @@ bool ACMChimera::IsSpringArmPulling() const
     return ActiveSpringArmPull.IsValid();
 }
 
-#if !UE_BUILD_SHIPPING
 void ACMChimera::ActivateDebugLegPart(
     const FCMPartSlotAddress& PartSlotAddress,
     ACMPlayerState* ContributingPlayerState
@@ -244,7 +243,6 @@ void ACMChimera::ActivateDebugLegPart(
         false
     );
 }
-#endif
 
 UCMPartSlotComponent* ACMChimera::GetPartSlotComponent(
     const FCMPartSlotAddress& PartSlotAddress
@@ -309,7 +307,6 @@ AActor* ACMChimera::DetachPartFromSlot(
     return PartSlot ? PartSlot->DetachPart() : nullptr;
 }
 
-#if !UE_BUILD_SHIPPING
 namespace
 {
 const FName CheatSpawnedRandomPartTag(TEXT("CM.CheatSpawnedRandomPart"));
@@ -740,7 +737,6 @@ void ACMChimera::ClearTestLegParts()
         TEXT("[Test Leg Parts Cleared] Removed %d cheat-spawned Leg Parts."),
         RemovedCount);
 }
-#endif
 
 void ACMChimera::SetPartSlotPressed(
     const FCMPartSlotAddress& PartSlotAddress,

@@ -237,7 +237,6 @@ public:
     /** True while one SpringArm owns the Chimera pull. */
     bool IsSpringArmPulling() const;
     
-#if !UE_BUILD_SHIPPING
     /** Attaches registered production Part Blueprints to empty active slots. */
     void SpawnRandomDebugParts();
 
@@ -261,7 +260,6 @@ public:
         const FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState
     );
-#endif
 
     // GameMode/GameState may bind to this without CMChimera deciding the
     // project-wide defeat flow itself.

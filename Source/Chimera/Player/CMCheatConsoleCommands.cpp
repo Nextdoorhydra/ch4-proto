@@ -3,8 +3,6 @@
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
 
-#if !UE_BUILD_SHIPPING
-
 namespace CMCheatConsoleCommands
 {
 ACMPlayerController* FindLocalController(UWorld* World)
@@ -349,5 +347,3 @@ CM_REGISTER_SEGMENT_DEATH_COMMAND(15);
 
 #undef CM_REGISTER_SEGMENT_DEATH_COMMAND
 }
-
-#endif
