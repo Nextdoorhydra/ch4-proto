@@ -12,7 +12,11 @@ public class CameraOcclusionEditor : ModuleRules
             "Engine",
             "UnrealEd",
             "AssetRegistry",
-            "MaterialEditor"
+            "MaterialEditor",
+            "ContentBrowser",
+            "ToolMenus",
+            "Slate",
+            "SlateCore"
         });
     }
 }

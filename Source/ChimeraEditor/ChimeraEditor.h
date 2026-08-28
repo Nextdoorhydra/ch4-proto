@@ -10,7 +10,6 @@ public:
     virtual void ShutdownModule() override;
 
 private:
-	void RegisterMenus();
 	void OnGoogleSheetCacheUpdated(class UGoogleSheetConfig& Config);
 	FDelegateHandle GoogleSheetCacheUpdatedHandle;
 	class IConsoleObject* DataForgeMcpCommand = nullptr;

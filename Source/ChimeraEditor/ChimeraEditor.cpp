@@ -2,8 +2,6 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AsyncLoad/CMAsyncLoadScheduleEntryCustomization.h"
-#include "CameraOcclusionMaterialConverter.h"
-#include "ContentBrowserMenuContexts.h"
 #include "DataForgeCore.h"
 #include "DataForge/DataForgeMcpCommands.h"
 #include "DataForgeAssetLayoutProfile.h"
@@ -297,8 +295,6 @@ namespace
 
 void FChimeraEditorModule::StartupModule()
 {
-	UToolMenus::RegisterStartupCallback(
-		FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FChimeraEditorModule::RegisterMenus));
 
 	// AsyncPDALoader catalog 항목을 Chimera의 LoadGroup 드롭다운 방식으로 표시
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
@@ -315,8 +311,6 @@ void FChimeraEditorModule::StartupModule()
 
 void FChimeraEditorModule::ShutdownModule()
 {
-	UToolMenus::UnRegisterStartupCallback(this);
-	UToolMenus::UnregisterOwner(this);
 
 	// Editor 모듈 재로드 시 중복 customization 등록 방지
 	if (FModuleManager::Get().IsModuleLoaded(TEXT("PropertyEditor")))
@@ -330,65 +324,6 @@ void FChimeraEditorModule::ShutdownModule()
 	UGoogleSheetConfig::OnCacheUpdated().Remove(GoogleSheetCacheUpdatedHandle);
 	FDataForgeSourceAdapterRegistry::Get().Unregister(TEXT("GoogleSheetCache"));
 	FDataForgeSourceAdapterRegistry::Get().Unregister(TEXT("MultiSource"));
-}
-
-void FChimeraEditorModule::RegisterMenus()
-{
-	FToolMenuOwnerScoped OwnerScoped(this);
-
-	UToolMenu* AssetMenu = UToolMenus::Get()->ExtendMenu(TEXT("ContentBrowser.AssetContextMenu"));
-	FToolMenuSection& AssetSection = AssetMenu->FindOrAddSection(
-		TEXT("ChimeraCameraOcclusion"),
-		LOCTEXT("CameraOcclusionSection", "Chimera Camera Occlusion"));
-	AssetSection.AddDynamicEntry(
-		TEXT("CameraOcclusionSelectedMaterials"),
-		FNewToolMenuSectionDelegate::CreateLambda([](FToolMenuSection& Section)
-		{
-			const UContentBrowserAssetContextMenuContext* Context =
-				Section.FindContext<UContentBrowserAssetContextMenuContext>();
-			if (!Context || Context->SelectedAssets.IsEmpty() || !Context->bCanBeModified)
-			{
-				return;
-			}
-
-			const TArray<FAssetData> SelectedAssets = Context->SelectedAssets;
-			Section.AddMenuEntry(
-				TEXT("ConvertSelectedMaterials"),
-				LOCTEXT("ConvertSelectedMaterialsLabel", "Convert Selected Materials"),
-				LOCTEXT("ConvertSelectedMaterialsTooltip", "Add Camera Occlusion support to the selected materials."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([SelectedAssets]()
-				{
-					FCameraOcclusionMaterialConverter::ConvertSelectedMaterials(SelectedAssets);
-				})));
-		}));
-
-	UToolMenu* FolderMenu = UToolMenus::Get()->ExtendMenu(TEXT("ContentBrowser.FolderContextMenu"));
-	FToolMenuSection& FolderSection = FolderMenu->FindOrAddSection(
-		TEXT("ChimeraCameraOcclusion"),
-		LOCTEXT("CameraOcclusionFolderSection", "Chimera Camera Occlusion"));
-	FolderSection.AddDynamicEntry(
-		TEXT("CameraOcclusionFolderMaterials"),
-		FNewToolMenuSectionDelegate::CreateLambda([](FToolMenuSection& Section)
-		{
-			const UContentBrowserFolderContext* Context =
-				Section.FindContext<UContentBrowserFolderContext>();
-			if (!Context || Context->SelectedPackagePaths.IsEmpty() || !Context->bCanBeModified)
-			{
-				return;
-			}
-
-			const TArray<FString> SelectedPaths = Context->SelectedPackagePaths;
-			Section.AddMenuEntry(
-				TEXT("ConvertFolderMaterials"),
-				LOCTEXT("ConvertFolderMaterialsLabel", "Convert Materials Under Folder"),
-				LOCTEXT("ConvertFolderMaterialsTooltip", "Recursively add Camera Occlusion support to materials under the selected folders."),
-				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([SelectedPaths]()
-				{
-					FCameraOcclusionMaterialConverter::ConvertMaterialsUnderFolders(SelectedPaths);
-				})));
-		}));
 }
 
 void FChimeraEditorModule::OnGoogleSheetCacheUpdated(UGoogleSheetConfig& Config)
