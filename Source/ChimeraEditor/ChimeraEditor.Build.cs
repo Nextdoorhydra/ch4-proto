@@ -4,7 +4,7 @@ public class ChimeraEditor : ModuleRules
 {
     public ChimeraEditor(ReadOnlyTargetRules Target) : base(Target)
     {
-		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+        PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicIncludePaths.Add(ModuleDirectory);
 
         PublicDependencyModuleNames.AddRange(
