@@ -6,7 +6,6 @@ public class ChimeraEditor : ModuleRules
     {
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicIncludePaths.Add(ModuleDirectory);
-		PrivateIncludePaths.Add(ModuleDirectory + "/../CameraOcclusionEditor");
 
         PublicDependencyModuleNames.AddRange(
             new string[]
@@ -17,11 +16,7 @@ public class ChimeraEditor : ModuleRules
                 "DataForgeEditor",
                 "GoogleSheetLoader", 
 				"AsyncPDALoader",
-				"PropertyEditor",
-				"UnrealEd",
-				"ContentBrowser",
-				"ToolMenus",
-				"MaterialEditor"
+				"PropertyEditor"
             }
         );
 
@@ -30,7 +25,6 @@ public class ChimeraEditor : ModuleRules
             {
                 "CoreUObject",
                 "Engine",
-                "CameraOcclusionEditor",
                 "AssetRegistry",
 				"InputCore",
 				"Json",

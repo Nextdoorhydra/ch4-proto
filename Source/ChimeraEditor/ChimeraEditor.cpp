@@ -21,25 +21,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
-#include "Materials/Material.h"
-#include "Materials/MaterialExpressionAdd.h"
-#include "Materials/MaterialExpressionComponentMask.h"
-#include "Materials/MaterialExpressionConstant.h"
-#include "Materials/MaterialExpressionDistance.h"
-#include "Materials/MaterialExpressionLinearInterpolate.h"
-#include "Materials/MaterialExpressionMaterialFunctionCall.h"
-#include "Materials/MaterialExpressionMin.h"
-#include "Materials/MaterialExpressionMultiply.h"
-#include "Materials/MaterialExpressionParameter.h"
-#include "Materials/MaterialExpressionScalarParameter.h"
-#include "Materials/MaterialExpressionScreenPosition.h"
-#include "Materials/MaterialExpressionSmoothStep.h"
-#include "Materials/MaterialExpressionVectorParameter.h"
-#include "Materials/MaterialFunction.h"
-#include "MaterialEditingLibrary.h"
 #include "PropertyEditorModule.h"
-#include "ToolMenus.h"
-#include "UObject/SavePackage.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Engine/DataTable.h"
 #include "Engine/Texture2D.h"
@@ -295,7 +277,6 @@ namespace
 
 void FChimeraEditorModule::StartupModule()
 {
-
 	// AsyncPDALoader catalog 항목을 Chimera의 LoadGroup 드롭다운 방식으로 표시
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 	PropertyEditor.RegisterCustomPropertyTypeLayout(
@@ -311,7 +292,6 @@ void FChimeraEditorModule::StartupModule()
 
 void FChimeraEditorModule::ShutdownModule()
 {
-
 	// Editor 모듈 재로드 시 중복 customization 등록 방지
 	if (FModuleManager::Get().IsModuleLoaded(TEXT("PropertyEditor")))
 	{
