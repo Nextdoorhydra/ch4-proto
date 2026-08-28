@@ -1,5 +1,7 @@
 #include "Parts/Arm/CMArmPart.h"
 
+#include "Combat/CMCombatHitTarget.h"
+
 #include "Ability/CMArmGameplayAbility.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
@@ -256,12 +258,16 @@ void ACMArmPart::DetectSwingTargets()
             SwingDetectionTimerHandle))
     {
         const FVector SafeForward = ForwardDirection.GetSafeNormal();
-        const float HalfAngle = FMath::Atan2(AttackRadius, AttackRange);
+        const float DebugRange = AttackRange
+            + DismemberableTargetHitTolerance;
+        const float DebugRadius = AttackRadius
+            + DismemberableTargetHitTolerance;
+        const float HalfAngle = FMath::Atan2(DebugRadius, DebugRange);
         DrawDebugCone(
             World,
             Origin,
             SafeForward,
-            AttackRange,
+            DebugRange,
             HalfAngle,
             HalfAngle,
             24,
@@ -274,7 +280,7 @@ void ACMArmPart::DetectSwingTargets()
         DrawDebugDirectionalArrow(
             World,
             Origin,
-            Origin + SafeForward * AttackRange,
+            Origin + SafeForward * DebugRange,
             20.0f,
             FColor::Yellow,
             false,
@@ -303,7 +309,8 @@ void ACMArmPart::DetectSwingTargets()
         Origin,
         FQuat::Identity,
         ObjectQueryParams,
-        FCollisionShape::MakeSphere(AttackRange),
+        FCollisionShape::MakeSphere(
+            AttackRange + DismemberableTargetHitTolerance),
         QueryParams
     );
 
@@ -328,12 +335,16 @@ void ACMArmPart::DetectSwingTargets()
                 TargetLocation);
         const bool bOriginInsideTarget = ClosestPointDistance == 0.0f
             && TargetComponent->Bounds.GetBox().IsInsideOrOn(Origin);
+        const float TargetTolerance =
+            TargetActor->Implements<UCMDismemberableTarget>()
+                ? DismemberableTargetHitTolerance
+                : 0.0f;
         if (!bOriginInsideTarget && !IsInsideSwingSector(
                 Origin,
                 ForwardDirection,
                 TargetLocation,
-                AttackRange,
-                AttackRadius))
+                AttackRange + TargetTolerance,
+                AttackRadius + TargetTolerance))
         {
             continue;
         }
@@ -353,16 +364,31 @@ void ACMArmPart::DetectSwingTargets()
                 TargetActor,
                 Request);
         }
+        bool bCombatHitAccepted = false;
+        if (TargetActor->Implements<UCMCombatHitTarget>())
+        {
+            FCMCombatHitRequest Request;
+            Request.Attacker = GetOwner();
+            Request.SourcePart = this;
+            Request.AttackId = CurrentSwingAttackId;
+            Request.ImpactPoint = TargetLocation;
+            Request.ImpactDirection = ForwardDirection;
+            bCombatHitAccepted =
+                ICMCombatHitTarget::Execute_ReceiveCombatHit(
+                    TargetActor,
+                    Request);
+        }
         OnSwingTargetDetected.Broadcast(TargetActor, TargetLocation);
 
         UE_LOG(LogChimeraArm, Log,
-            TEXT("[Arm Swing Target] Part=%s Target=%s Dismemberable=%s Severed=%d Impact=%s"),
+            TEXT("[Arm Swing Target] Part=%s Target=%s Dismemberable=%s Severed=%d CombatAccepted=%s Impact=%s"),
             *GetName(),
             *GetNameSafe(TargetActor),
             TargetActor->Implements<UCMDismemberableTarget>()
                 ? TEXT("true")
                 : TEXT("false"),
             SeveredPartCount,
+            bCombatHitAccepted ? TEXT("true") : TEXT("false"),
             *TargetLocation.ToCompactString());
     }
 
