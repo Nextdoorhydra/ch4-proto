@@ -4,6 +4,7 @@
 #include "Parts/Arm/CMArmPart.h"
 #include "Parts/Arm/CMSpringArmPart.h"
 #include "Parts/Core/CMPartActorBase.h"
+#include "Parts/Head/CMHeadPartActor.h"
 #include "Parts/Leg/CMLegPart.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMPartSlotComponent.h"
@@ -378,6 +379,16 @@ UClass* LoadTestSpringArmPartClass()
     return TestSpringArmPartClass.LoadSynchronous();
 }
 
+UClass* LoadTestHeadPartClass()
+{
+    static TSoftClassPtr<ACMHeadPartActor> TestHeadPartClass(
+        FSoftObjectPath(
+            TEXT("/Game/Chimera/Character/Part/Head/BluePrint/BP_CMHead01HeadPart.BP_CMHead01HeadPart_C")
+        )
+    );
+    return TestHeadPartClass.LoadSynchronous();
+}
+
 bool ResolveNamedDebugPart(
     FName PartName,
     FDebugPartSpawnOption& OutPartOption
@@ -391,6 +402,11 @@ bool ResolveNamedDebugPart(
     if (PartName == TEXT("SpringArm"))
     {
         OutPartOption.PartClass = LoadTestSpringArmPartClass();
+        return OutPartOption.PartClass != nullptr;
+    }
+    if (PartName == TEXT("DefaultHead"))
+    {
+        OutPartOption.PartClass = LoadTestHeadPartClass();
         return OutPartOption.PartClass != nullptr;
     }
 
@@ -518,7 +534,7 @@ bool ACMChimera::SpawnDebugPartAtSlot(
     if (!ResolveNamedDebugPart(PartName, PartOption))
     {
         UE_LOG(LogChimeraLineBody, Warning,
-            TEXT("[Attach Part Failed] Unknown Part=%s. Use DefaultArm, SpringArm, or LegTier1..5."),
+            TEXT("[Attach Part Failed] Unknown Part=%s. Use DefaultArm, DefaultHead, SpringArm, or LegTier1..5."),
             *PartName.ToString());
         return false;
     }
