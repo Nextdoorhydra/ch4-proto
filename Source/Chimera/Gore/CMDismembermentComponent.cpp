@@ -87,7 +87,8 @@ bool UCMDismembermentComponent::SeverBodyPart(
         BodyPart,
         HitLocation,
         Impulse,
-        nullptr);
+        nullptr,
+        true);
 }
 
 bool UCMDismembermentComponent::SeverBodyPartWithReward(
@@ -105,7 +106,21 @@ bool UCMDismembermentComponent::SeverBodyPartWithReward(
         BodyPart,
         HitLocation,
         Impulse,
-        PartClass);
+        PartClass,
+        true);
+}
+
+bool UCMDismembermentComponent::ConsumeBodyPart(
+    const ECMBodyPart BodyPart,
+    const FVector HitLocation
+)
+{
+    return SeverBodyPartInternal(
+        BodyPart,
+        HitLocation,
+        FVector::ZeroVector,
+        nullptr,
+        false);
 }
 
 bool UCMDismembermentComponent::ConfigureLeaderPose()
@@ -179,7 +194,8 @@ bool UCMDismembermentComponent::SeverBodyPartInternal(
     const ECMBodyPart BodyPart,
     const FVector HitLocation,
     const FVector Impulse,
-    const TSubclassOf<ACMPartActorBase> RewardPartClass
+    const TSubclassOf<ACMPartActorBase> RewardPartClass,
+    const bool bSpawnDetachedPart
 )
 {
     AActor* Owner = GetOwner();
@@ -201,15 +217,15 @@ bool UCMDismembermentComponent::SeverBodyPartInternal(
     USkeletalMeshComponent* AttachedMesh = Part
         ? FindPartMesh(Part->ComponentName)
         : nullptr;
-    USkeletalMesh* DetachedMesh = Part
+    USkeletalMesh* DetachedMesh = Part && bSpawnDetachedPart
         ? Part->DetachedMesh.LoadSynchronous()
         : nullptr;
-    UPhysicsAsset* DetachedPhysicsAsset = Part
+    UPhysicsAsset* DetachedPhysicsAsset = Part && bSpawnDetachedPart
         ? Part->DetachedPhysicsAsset.LoadSynchronous()
         : nullptr;
     UWorld* World = GetWorld();
-    if (!Part || !AttachedMesh || !DetachedMesh ||
-        !DetachedPhysicsAsset || !World)
+    if (!Part || !AttachedMesh || !World
+        || (bSpawnDetachedPart && (!DetachedMesh || !DetachedPhysicsAsset)))
     {
         UE_LOG(LogCMDismemberment, Error,
             TEXT("[Dismemberment] Cannot sever part %d on '%s': required mesh data is missing."),
@@ -223,7 +239,11 @@ bool UCMDismembermentComponent::SeverBodyPartInternal(
 
     AActor* DetachedActor = nullptr;
     USkeletalMeshComponent* DetachedComponent = nullptr;
-    if (RewardPartClass)
+    if (!bSpawnDetachedPart)
+    {
+        // Ripper attacks consume this part, so no detached actor is created.
+    }
+    else if (RewardPartClass)
     {
         ACMDroppedPartActor* DroppedPart =
             World->SpawnActorDeferred<ACMDroppedPartActor>(
@@ -283,13 +303,17 @@ bool UCMDismembermentComponent::SeverBodyPartInternal(
         DetachedActor = CosmeticPart;
         DetachedActor->Tags.AddUnique(TEXT("CM.CosmeticDetachedBodyPart"));
     }
-    DetachedActor->Tags.AddUnique(TEXT("CM.DetachedBodyPart"));
+    if (DetachedActor)
+    {
+        DetachedActor->Tags.AddUnique(TEXT("CM.DetachedBodyPart"));
+    }
 
-    UCMBloodTransferComponent* BloodTransfer =
-        NewObject<UCMBloodTransferComponent>(
+    UCMBloodTransferComponent* BloodTransfer = DetachedActor
+        ? NewObject<UCMBloodTransferComponent>(
             DetachedActor,
-            TEXT("BloodTransfer"));
-    if (BloodTransfer)
+            TEXT("BloodTransfer"))
+        : nullptr;
+    if (DetachedActor && BloodTransfer)
     {
         DetachedActor->AddInstanceComponent(BloodTransfer);
         BloodTransfer->InitializeTransfer(DetachedComponent, BloodDefinitionId);
@@ -300,7 +324,10 @@ bool UCMDismembermentComponent::SeverBodyPartInternal(
     AttachedMesh->SetHiddenInGame(true, true);
     *State = ECMBodyPartState::Severed;
     SeveredPartMask |= GetBodyPartBit(BodyPart);
-    DetachedPartActors.Add(BodyPart, DetachedActor);
+    if (DetachedActor)
+    {
+        DetachedPartActors.Add(BodyPart, DetachedActor);
+    }
 
     const FVector BurstDirection = AppliedImpulse.GetSafeNormal(
         SMALL_NUMBER,

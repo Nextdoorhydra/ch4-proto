@@ -1,6 +1,7 @@
 #include "Aggressive/Ripper/Learning/CMRipperLearningInferenceCoordinator.h"
 
 #include "Aggressive/Ripper/CMRipperPawn.h"
+#include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Aggressive/Common/Learning/CMAggressiveLearningInteractor.h"
@@ -40,6 +41,13 @@ bool ACMRipperLearningInferenceCoordinator::StartInferencePath(ACMRipperPawn* In
     {
         return false;
     }
+    if (GetOwner() != InInferenceAgent)
+    {
+        if (UCMAggressiveBehaviorComponent* Behavior = InInferenceAgent->FindComponentByClass<UCMAggressiveBehaviorComponent>())
+        {
+            Behavior->SetBehaviorEnabled(false);
+        }
+    }
 
     InferenceAgent = InInferenceAgent;
     LearningManager->SetMaxAgentNum(1);
@@ -58,20 +66,41 @@ bool ACMRipperLearningInferenceCoordinator::StartInferencePath(ACMRipperPawn* In
 
     ActiveWorldGoal = WorldGoal;
     ActiveAcceptanceRadius = FMath::Max(AcceptanceRadius, 0.0f);
+    bInferenceRunning = true;
     InferenceAgent->OnPathMoveCompleted.AddUniqueDynamic(this, &ThisClass::HandlePathMoveCompleted);
     if (!InferenceAgent->StartPathMoveToLocation(ActiveWorldGoal, ActiveAcceptanceRadius))
     {
         FinishInference(ECMRipperMoveResult::Failed, false);
+
         return false;
     }
 
-    bInferenceRunning = true;
+    if (!bInferenceRunning || !Policy || !InferenceAgent)
+        return true;
     InferenceStartTime = GetWorld()->GetTimeSeconds();
     StuckRecoveryAttemptCount = 0;
     ResetStuckProgress();
     Policy->RunInference(0.0f);
     GetWorldTimerManager().SetTimer(InferenceTimerHandle, this, &ThisClass::RunInferenceStep, FMath::Max(DecisionInterval, 0.01f), true);
     UE_LOG(LogCMRipperInference, Display, TEXT("Ripper AI 저장 정책 경로 추론을 시작했습니다. 목적지: %s"), *WorldGoal.ToCompactString());
+
+    return true;
+}
+
+bool ACMRipperLearningInferenceCoordinator::UpdateInferenceGoal(const FVector WorldGoal)
+{
+    if (!bInferenceRunning || bRecoveringFromStuck || !InferenceAgent)
+    {
+        return false;
+    }
+    ActiveWorldGoal = WorldGoal;
+    if (!InferenceAgent->StartPathMoveToLocation(ActiveWorldGoal, ActiveAcceptanceRadius))
+    {
+        return false;
+    }
+    bWaitingForChaseTargetMove = false;
+    ResetStuckProgress();
+
     return true;
 }
 
@@ -95,6 +124,7 @@ bool ACMRipperLearningInferenceCoordinator::StartChasingTestTarget(ACMRipperPawn
 
     NextChasePathRefreshTime = GetWorld()->GetTimeSeconds() + FMath::Max(ChasePathRefreshInterval, 0.05f);
     UE_LOG(LogCMRipperInference, Display, TEXT("Ripper AI가 추격 테스트 목표 추적을 시작했습니다. 목표: %s"), *ChaseTarget->GetActorLocation().ToCompactString());
+
     return true;
 }
 
@@ -126,6 +156,7 @@ bool ACMRipperLearningInferenceCoordinator::InitializeInferenceObjects()
 
     ULearningAgentsInteractor* BaseInteractor = Interactor;
     Policy = ULearningAgentsPolicy::MakePolicy(Manager, BaseInteractor, ULearningAgentsPolicy::StaticClass(), TEXT("RipperInferencePolicy"));
+
     return Policy && CMAggressiveLearningSnapshot::LoadInferenceNetworks(ECMAggressiveLearningSnapshotProfile::Ripper, *Policy);
 }
 
@@ -150,6 +181,7 @@ bool ACMRipperLearningInferenceCoordinator::UpdateChaseTargetPath()
     bWaitingForChaseTargetMove = false;
     ResetStuckProgress();
     UE_LOG(LogCMRipperInference, Display, TEXT("추격 테스트 목표 이동을 감지해 Ripper AI 경로를 갱신했습니다. 새 목표: %s"), *ActiveWorldGoal.ToCompactString());
+
     return true;
 }
 
@@ -165,6 +197,7 @@ bool ACMRipperLearningInferenceCoordinator::UpdateStuckDetection()
     if (!MovementGoal.WorldLocation.Equals(LastStuckPathPoint, 1.0f))
     {
         ResetStuckProgress();
+
         return true;
     }
 
@@ -215,6 +248,7 @@ bool ACMRipperLearningInferenceCoordinator::BeginStuckRecovery()
     if (StuckRecoveryAttemptCount >= FMath::Max(MaximumStuckRecoveryAttempts, 1))
     {
         UE_LOG(LogCMRipperInference, Warning, TEXT("Ripper AI가 최대 벽 이탈 복구 횟수를 초과했습니다."));
+
         return false;
     }
 
@@ -240,6 +274,7 @@ bool ACMRipperLearningInferenceCoordinator::BeginStuckRecovery()
     RecoveryEndTime = World->GetTimeSeconds() + FMath::Max(RecoveryDuration, 0.1f);
     bRecoveringFromStuck = true;
     UE_LOG(LogCMRipperInference, Display, TEXT("Ripper AI가 벽 바깥쪽 복구 이동을 시작했습니다. 복구: %d/%d, 시작: %s, 목표: %s"), StuckRecoveryAttemptCount, FMath::Max(MaximumStuckRecoveryAttempts, 1), *RecoveryStartLocation.ToCompactString(), *RecoveryTargetLocation.ToCompactString());
+
     return true;
 }
 
@@ -257,6 +292,7 @@ bool ACMRipperLearningInferenceCoordinator::UpdateStuckRecovery()
     if (World->GetTimeSeconds() < RecoveryEndTime)
     {
         ApplyStuckRecoveryImpulse();
+
         return true;
     }
 
@@ -283,6 +319,7 @@ bool ACMRipperLearningInferenceCoordinator::RebuildPathAfterStuckRecovery()
     ResetStuckProgress();
     StuckRecoveryAttemptCount = 0;
     UE_LOG(LogCMRipperInference, Display, TEXT("Ripper AI가 벽에서 누적 %.1fcm 이탈한 뒤 최종 목적지 경로를 다시 생성했습니다."), CumulativeRecoveryDistance);
+
     return true;
 }
 
@@ -380,6 +417,7 @@ bool ACMRipperLearningInferenceCoordinator::FindStuckRecoveryLocation(FVector& O
 
             OutRecoveryLocation = ProjectedLocation.Location;
             OutRecoveryDirection = (TraceEnd - BodyLocation).GetSafeNormal2D();
+
             return !OutRecoveryDirection.IsNearlyZero();
         }
     }
@@ -496,12 +534,14 @@ void ACMRipperLearningInferenceCoordinator::RunInferenceStep()
     if (!bInferenceRunning || !World || !Policy || !InferenceAgent)
     {
         FinishInference(ECMRipperMoveResult::Failed, true);
+
         return;
     }
 
     if (!bChasingTestTarget && World->GetTimeSeconds() - InferenceStartTime >= FMath::Max(MaximumInferenceSeconds, 0.1f))
     {
         FinishInference(ECMRipperMoveResult::TimedOut, true);
+
         return;
     }
 
@@ -509,12 +549,14 @@ void ACMRipperLearningInferenceCoordinator::RunInferenceStep()
     {
         if (!UpdateStuckRecovery())
             FinishInference(ECMRipperMoveResult::Failed, true);
+
         return;
     }
 
     if (bChasingTestTarget && !IsValid(ChaseTarget))
     {
         FinishInference(ECMRipperMoveResult::Failed, true);
+
         return;
     }
     if (bChasingTestTarget && World->GetTimeSeconds() >= NextChasePathRefreshTime)
@@ -530,6 +572,7 @@ void ACMRipperLearningInferenceCoordinator::RunInferenceStep()
     if (!UpdateStuckDetection())
     {
         FinishInference(ECMRipperMoveResult::Failed, true);
+
         return;
     }
     if (bRecoveringFromStuck)
@@ -539,6 +582,7 @@ void ACMRipperLearningInferenceCoordinator::RunInferenceStep()
     if (!MovementCommand || !MovementCommand->HasMovementGoal())
     {
         FinishInference(ECMRipperMoveResult::Failed, true);
+
         return;
     }
     Policy->RunInference(0.0f);

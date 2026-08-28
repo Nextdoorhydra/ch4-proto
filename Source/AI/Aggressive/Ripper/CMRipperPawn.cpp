@@ -3,9 +3,11 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "Aggressive/Common/Movement/CMAIFixedLegActuatorComponent.h"
+#include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -18,7 +20,7 @@ namespace CMRipperBody
     constexpr float LegHalfHeight = 25.0f;
     constexpr int32 LeftLegIndex = 1;
     constexpr float BalancedYawLeverArm = 110.0f;
-}
+} // namespace CMRipperBody
 
 // T자 몸통과 전방·좌측·우측 다리 및 학습 이동 컴포넌트를 생성한다.
 ACMRipperPawn::ACMRipperPawn()
@@ -27,6 +29,10 @@ ACMRipperPawn::ACMRipperPawn()
     PrimaryActorTick.bStartWithTickEnabled = false;
     bReplicates = true;
     SetReplicateMovement(true);
+    ConfiguredKnockbackDistanceCm = 100.0f;
+
+    Behavior = CreateDefaultSubobject<UCMAggressiveBehaviorComponent>(TEXT("Behavior"));
+    Behavior->ConfigureProfile(ECMAggressiveBehaviorProfile::Ripper);
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
@@ -47,6 +53,10 @@ ACMRipperPawn::ACMRipperPawn()
     PathMovement->SetIntermediatePathPointTolerances(130.0f, 220.0f);
     PathMovement->SetMaximumPathSegmentLength(600.0f);
     PathMovement->SetRebuildPathWhenIntermediatePointPassed(true);
+
+    Sight = CreateDefaultSubobject<UCMAggressiveSightComponent>(TEXT("Sight"));
+    Sight->SetupAttachment(PhysicsRoot);
+    Sight->SetSightDefaults(1000.0f, 70.0f, 180.0f);
 
     LegActuationSettings.ImpulseMagnitude = 20000.0f;
     LegActuationSettings.CooldownSeconds = 0.08f;
@@ -108,6 +118,7 @@ int32 ACMRipperPawn::ActivateLegs(const TArray<int32>& LegIndices)
 
     if (ActivatedCount > 0)
         LegActuator->LimitPlanarSpeed(PhysicsRoot, MaxPlanarSpeed);
+
     return ActivatedCount;
 }
 
@@ -132,6 +143,7 @@ bool ACMRipperPawn::StartPathMoveToLocation(FVector WorldGoal, float AcceptanceR
     if (!PathMovement || !MovementCommand)
         return false;
     PathMovement->SetPolicyControlEnabled(true);
+
     return PathMovement->StartPathMove(WorldGoal, AcceptanceRadius);
 }
 
@@ -142,6 +154,11 @@ void ACMRipperPawn::StopPathMove()
         PathMovement->StopPathMove();
     if (MovementCommand)
         MovementCommand->ClearMovementGoal();
+}
+
+void ACMRipperPawn::StopAggressiveMovementForReaction()
+{
+    StopPathMove();
 }
 
 // 정책 행동 스키마에 사용할 고정 다리 수를 반환한다.

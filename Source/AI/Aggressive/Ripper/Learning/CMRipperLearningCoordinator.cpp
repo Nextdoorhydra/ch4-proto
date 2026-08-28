@@ -1,6 +1,7 @@
 #include "Aggressive/Ripper/Learning/CMRipperLearningCoordinator.h"
 
 #include "Aggressive/Ripper/CMRipperPawn.h"
+#include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "EngineUtils.h"
 #include "Aggressive/Common/Learning/CMAggressiveLearningInteractor.h"
@@ -45,6 +46,7 @@ bool ACMRipperLearningCoordinator::StartTraining(ACMRipperPawn* InTrainingAgent)
 {
     TArray<ACMRipperPawn*> Agents;
     Agents.Add(InTrainingAgent);
+
     return StartTrainingAgents(Agents);
 }
 
@@ -72,7 +74,13 @@ bool ACMRipperLearningCoordinator::StartTrainingAgents(const TArray<ACMRipperPaw
 
     TrainingAgents.Reset(InTrainingAgents.Num());
     for (ACMRipperPawn* Agent : InTrainingAgents)
+    {
+        if (UCMAggressiveBehaviorComponent* Behavior = Agent->FindComponentByClass<UCMAggressiveBehaviorComponent>())
+        {
+            Behavior->SetBehaviorEnabled(false);
+        }
         TrainingAgents.Add(Agent);
+    }
 
     LearningManager->SetMaxAgentNum(TrainingAgents.Num());
     if (!InitializeLearningObjects())
@@ -95,6 +103,7 @@ bool ACMRipperLearningCoordinator::StartTrainingAgents(const TArray<ACMRipperPaw
     if (TrainingAgentIds.Contains(INDEX_NONE))
     {
         LearningManager->RemoveAllAgents();
+
         return false;
     }
 
@@ -112,6 +121,7 @@ bool ACMRipperLearningCoordinator::StartTrainingAgents(const TArray<ACMRipperPaw
     LearningManager->SetComponentTickEnabled(true);
     GetWorldTimerManager().SetTimer(TrainingTimerHandle, this, &ThisClass::RunTrainingStep, FMath::Max(DecisionInterval, 0.01f), true);
     UE_LOG(LogCMRipperLearning, Display, TEXT("Ripper AI PPO 학습을 시작했습니다. 에이전트: %d개, 판단 주기: %.2f초, PPO 수집량: %d"), TrainingAgentIds.Num(), DecisionInterval, MaximumRecordedStepsPerIteration);
+
     return true;
 }
 
@@ -125,6 +135,7 @@ bool ACMRipperLearningCoordinator::StartTrainingAllAgents()
     TArray<ACMRipperPawn*> Agents;
     for (TActorIterator<ACMRipperPawn> It(World); It; ++It)
         Agents.Add(*It);
+
     return StartTrainingAgents(Agents);
 }
 
@@ -168,6 +179,7 @@ bool ACMRipperLearningCoordinator::SaveTrainingSnapshots()
     const bool bSaved = CMAggressiveLearningSnapshot::SaveTrainingNetworks(ECMAggressiveLearningSnapshotProfile::Ripper, *Policy, *Critic, Directory);
     if (bSaved)
         UE_LOG(LogCMRipperLearning, Display, TEXT("Ripper AI 최신 학습 스냅샷을 저장했습니다: %s"), *Directory);
+
     return bSaved;
 }
 
@@ -240,6 +252,7 @@ bool ACMRipperLearningCoordinator::InitializeLearningObjects()
     const int32 TwoFullEpisodeDecisionCount = FMath::CeilToInt(RewardSettings.MaxEpisodeSeconds / FMath::Max(DecisionInterval, 0.01f)) * TrainingAgents.Num() * 2;
     TrainerSettings.MaximumRecordedStepsPerIteration = FMath::Max(MaximumRecordedStepsPerIteration, TwoFullEpisodeDecisionCount);
     PPOTrainer = ULearningAgentsPPOTrainer::MakePPOTrainer(Manager, BaseInteractor, BaseEnvironment, BasePolicy, BaseCritic, Communicator, ULearningAgentsPPOTrainer::StaticClass(), TEXT("RipperPPOTrainer"), TrainerSettings);
+
     return PPOTrainer != nullptr;
 }
 
@@ -261,6 +274,7 @@ void ACMRipperLearningCoordinator::RunTrainingStep()
     if (!PPOTrainer || PPOTrainer->HasTrainingFailed())
     {
         StopTraining();
+
         return;
     }
 
@@ -291,7 +305,9 @@ void ACMRipperLearningCoordinator::LogTrainingProgressIfNeeded()
     const FCMAggressiveMovementGoal Goal = MovementCommand->GetMovementGoal();
     const float Distance = FVector::Dist2D(Body->GetComponentLocation(), Goal.WorldLocation);
     const float Reward = TrainingEnvironment->HasReward(AgentId) ? TrainingEnvironment->GetReward(AgentId) : 0.0f;
-    UE_LOG(LogCMRipperLearning, Display, TEXT("Ripper AI 학습 상태 - 전체 판단: %lld, 방향: %s, 거리: %.1fcm, 보상: %.4f, 정책 갱신: %s"), TotalAgentDecisionCount, CMAggressiveDirection::GetKoreanDisplayName(Goal.LocalDirection), Distance, Reward, bHasReceivedPolicyUpdate ? TEXT("완료") : TEXT("대기"));
+    UE_LOG(
+        LogCMRipperLearning, Display, TEXT("Ripper AI 학습 상태 - 전체 판단: %lld, 방향: %s, 거리: %.1fcm, 보상: %.4f, 정책 갱신: %s"), TotalAgentDecisionCount, CMAggressiveDirection::GetKoreanDisplayName(Goal.LocalDirection), Distance, Reward, bHasReceivedPolicyUpdate ? TEXT("완료") : TEXT("대기")
+    );
 }
 
 // 설정된 시간이 되면 최신 Ripper AI 학습 네트워크를 저장한다.

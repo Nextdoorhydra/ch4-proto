@@ -39,6 +39,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Aggressive AI|Ripper|Inference")
     bool StartInferencePath(ACMRipperPawn* InInferenceAgent, FVector WorldGoal, float AcceptanceRadius = 50.0f);
 
+    UFUNCTION(BlueprintCallable, Category = "Aggressive AI|Ripper|Inference")
+    bool UpdateInferenceGoal(FVector WorldGoal);
+
     UFUNCTION(BlueprintCallable, Category = "Aggressive AI|Ripper|Inference|Chase Test")
     bool StartChasingTestTarget(ACMRipperPawn* InInferenceAgent, ACMAggressiveChaseTestTarget* InChaseTarget, float AcceptanceRadius = 50.0f);
 
@@ -86,7 +89,7 @@ protected:
     float StuckMinimumAngularProgressDegrees = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Inference|Recovery", meta = (ClampMin = "0.1"))
-    float StuckMaximumNoProgressSeconds = 1.5f;
+    float StuckMaximumNoProgressSeconds = 4.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Inference|Recovery", meta = (ClampMin = "0.1"))
     float StuckMaximumNoDistanceProgressSeconds = 4.0f;

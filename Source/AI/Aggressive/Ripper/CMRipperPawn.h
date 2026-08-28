@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Pawn.h"
+#include "Aggressive/Common/Core/CMAggressivePawnBase.h"
 
 #include "Aggressive/Common/Core/CMAggressiveAITypes.h"
 #include "Aggressive/Common/Core/CMAggressiveMovementAgent.h"
@@ -9,16 +9,18 @@
 #include "CMRipperPawn.generated.h"
 
 class UBoxComponent;
+class UCMAggressiveBehaviorComponent;
 class UCMAIFixedLegActuatorComponent;
 class UCMAggressiveMovementCommandComponent;
 class UCMAggressiveOmnidirectionalPathComponent;
+class UCMAggressiveSightComponent;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 
 /** 큐브 세 개와 다리 세 개를 사용해 회전과 가속을 학습하는 Ripper AI다. */
 UCLASS()
-class AI_API ACMRipperPawn : public APawn, public ICMAggressiveMovementAgent, public ICMAggressiveLegActuationAgent
+class AI_API ACMRipperPawn : public ACMAggressivePawnBase, public ICMAggressiveMovementAgent, public ICMAggressiveLegActuationAgent
 {
     GENERATED_BODY()
 
@@ -43,6 +45,7 @@ public:
     virtual UPrimitiveComponent* GetAggressiveMovementBody() const override;
     virtual FVector GetAggressiveNavigationReferenceLocation() const override;
     virtual void HandleAggressivePathMoveCompleted(ECMAggressivePathMoveResult Result) override;
+    virtual void StopAggressiveMovementForReaction() override;
     UBoxComponent* GetPhysicsRoot() const;
     UCMAIFixedLegActuatorComponent* GetLegActuator() const;
     UCMAggressiveMovementCommandComponent* GetMovementCommand() const;
@@ -57,6 +60,9 @@ public:
     FCMAggressivePathMoveCompletedSignature OnPathMoveCompleted;
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Behavior")
+    TObjectPtr<UCMAggressiveBehaviorComponent> Behavior;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Body")
     TObjectPtr<UBoxComponent> PhysicsRoot;
 
@@ -68,6 +74,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Movement")
     TObjectPtr<UCMAggressiveOmnidirectionalPathComponent> PathMovement;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Sight")
+    TObjectPtr<UCMAggressiveSightComponent> Sight;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Body")
     TArray<TObjectPtr<UBoxComponent>> BodyCollisions;
