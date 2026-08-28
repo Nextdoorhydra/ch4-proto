@@ -1,5 +1,6 @@
 #include "Player/CMChimera.h"
 
+#include "Components/BoxComponent.h"
 #include "Player/CMControlBody.h"
 #include "EngineUtils.h"
 
@@ -74,6 +75,51 @@ bool ACMChimera::IsSegmentAlive(int32 SegmentIndex) const
 {
     return SegmentHealthStates.IsValidIndex(SegmentIndex)
         && !SegmentHealthStates[SegmentIndex].bDead;
+}
+
+int32 ACMChimera::GetSegmentIndexFromHurtbox(
+    const UPrimitiveComponent* HitComponent
+) const
+{
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < SegmentHurtboxes.Num();
+        ++SegmentIndex)
+    {
+        if (SegmentHurtboxes[SegmentIndex] == HitComponent)
+        {
+            return SegmentIndex;
+        }
+    }
+    return INDEX_NONE;
+}
+
+int32 ACMChimera::GetSegmentIndexFromDamageComponent(
+    const UPrimitiveComponent* HitComponent
+) const
+{
+    const int32 HurtboxIndex = GetSegmentIndexFromHurtbox(HitComponent);
+    if (HurtboxIndex != INDEX_NONE)
+    {
+        return HurtboxIndex;
+    }
+
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < BodySegments.Num();
+        ++SegmentIndex)
+    {
+        if (BodySegments[SegmentIndex] == HitComponent)
+        {
+            return SegmentIndex;
+        }
+    }
+    return INDEX_NONE;
+}
+
+UBoxComponent* ACMChimera::GetSegmentHurtbox(int32 SegmentIndex) const
+{
+    return SegmentHurtboxes.IsValidIndex(SegmentIndex)
+        ? SegmentHurtboxes[SegmentIndex]
+        : nullptr;
 }
 
 TArray<FCMBodySegmentHealthState> ACMChimera::GetSegmentHealthStates() const

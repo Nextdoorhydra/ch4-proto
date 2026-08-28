@@ -1,5 +1,7 @@
 #include "Parts/Core/CMPartActorBase.h"
 
+#include "Collision/CMCollisionChannels.h"
+#include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
@@ -25,6 +27,30 @@ ACMPartActorBase::ACMPartActorBase()
 
     PartMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("PartMesh"));
     PartMesh->SetupAttachment(SceneRoot);
+    PartMesh->SetCollisionResponseToChannel(
+        CMCollision::WeaponTrace,
+        ECR_Ignore
+    );
+
+    DamageHurtbox = CreateDefaultSubobject<UBoxComponent>(
+        TEXT("DamageHurtbox")
+    );
+    DamageHurtbox->SetupAttachment(SceneRoot);
+    DamageHurtbox->SetBoxExtent(FVector(50.0f));
+    DamageHurtbox->SetCollisionProfileName(TEXT("CMHurtbox"));
+    DamageHurtbox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    DamageHurtbox->SetCollisionObjectType(CMCollision::ChimeraHurtbox);
+    DamageHurtbox->SetCollisionResponseToAllChannels(ECR_Ignore);
+    DamageHurtbox->SetCollisionResponseToChannel(
+        ECC_WorldDynamic,
+        ECR_Overlap
+    );
+    DamageHurtbox->SetCollisionResponseToChannel(
+        CMCollision::WeaponTrace,
+        ECR_Block
+    );
+    DamageHurtbox->SetGenerateOverlapEvents(true);
+    DamageHurtbox->SetCanEverAffectNavigation(false);
 
     BattleComponent = CreateDefaultSubobject<UCMBattleComponent>(
         TEXT("BattleComponent")
