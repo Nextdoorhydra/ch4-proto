@@ -2,11 +2,13 @@
 
 #include "Engine/AssetManager.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/World.h"
 #include "UI/NKMUIActivatableWidget.h"
 #include "UI/NKMUIExtensionData.h"
 #include "UI/NKMUIPolicy.h"
 #include "UI/NKMUIRootLayout.h"
 #include "UI/NKMUIManagerSettings.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectHash.h"
 
 bool UNKMUIManagerSubsystem::ShouldCreateSubsystem(UObject* Outer) const
@@ -26,6 +28,9 @@ bool UNKMUIManagerSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 void UNKMUIManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	PostLoadMapHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(
+		this,
+		&ThisClass::HandlePostLoadMap);
 
 	TArray<TSoftObjectPtr<UNKMUIExtensionData>> ExtensionAssets;
 	GetConfiguredExtensionDataAssets(ExtensionAssets);
@@ -40,6 +45,12 @@ void UNKMUIManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UNKMUIManagerSubsystem::Deinitialize()
 {
+	if (PostLoadMapHandle.IsValid())
+	{
+		FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(PostLoadMapHandle);
+		PostLoadMapHandle.Reset();
+	}
+
 	ResetPolicy();
 	for (TPair<FSoftObjectPath, TSharedPtr<FStreamableHandle>>& Pair : RetainedWidgetClassHandles)
 	{
@@ -72,7 +83,10 @@ void UNKMUIManagerSubsystem::InitializePolicyWithResult(
 		bPolicyInitializationInFlight ? TEXT("true") : TEXT("false"));
 	if (CurrentPolicy)
 	{
-		OnComplete.ExecuteIfBound(ENKMUIAsyncResult::Succeeded);
+		OnComplete.ExecuteIfBound(
+			CurrentPolicy->RestoreLayoutToPlayerScreen()
+				? ENKMUIAsyncResult::Succeeded
+				: ENKMUIAsyncResult::NotReady);
 		return;
 	}
 	if (!IsValid(LocalPlayer))
@@ -339,6 +353,33 @@ void UNKMUIManagerSubsystem::HandleWidgetClassLoaded(int32 RequestId)
 	Request.Completion.ExecuteIfBound(
 		Widget ? ENKMUIAsyncResult::Succeeded : ENKMUIAsyncResult::NotReady,
 		Widget);
+}
+
+void UNKMUIManagerSubsystem::HandlePostLoadMap(UWorld* LoadedWorld)
+{
+	if (!LoadedWorld
+		|| !LoadedWorld->IsGameWorld()
+		|| LoadedWorld->GetGameInstance() != GetGameInstance()
+		|| LoadedWorld->GetNetMode() == NM_DedicatedServer
+		|| !CurrentPolicy)
+	{
+		return;
+	}
+
+	if (CurrentPolicy->RestoreLayoutToPlayerScreen())
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("[NKMUI] RootLayout restored after map load. World=%s NetMode=%d"),
+			*GetNameSafe(LoadedWorld),
+			static_cast<int32>(LoadedWorld->GetNetMode()));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[NKMUI] RootLayout restore failed after map load. World=%s NetMode=%d"),
+			*GetNameSafe(LoadedWorld),
+			static_cast<int32>(LoadedWorld->GetNetMode()));
+	}
 }
 
 void UNKMUIManagerSubsystem::ClearLayer(FGameplayTag LayerTag)

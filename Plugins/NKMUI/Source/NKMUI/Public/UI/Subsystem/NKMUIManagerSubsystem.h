@@ -9,6 +9,7 @@
 #include "NKMUIManagerSubsystem.generated.h"
 
 class ULocalPlayer;
+class UWorld;
 class UNKMUIActivatableWidget;
 class UNKMUIExtensionData;
 class UNKMUIPolicy;
@@ -144,6 +145,7 @@ private:
 	void UnregisterExtensionHandles(const FSoftObjectPath& DataPath);
 	void ReleaseRetainedWidgetClasses(const FSoftObjectPath& DataPath);
 	void HandleWidgetClassLoaded(int32 RequestId);
+	void HandlePostLoadMap(UWorld* LoadedWorld);
 	void TrackLifecycleHandle(const TSharedPtr<FStreamableHandle>& Handle);
 	void PruneCompletedLifecycleHandles();
 	void CancelOutstandingRequests(ENKMUIAsyncResult Result);
@@ -168,6 +170,7 @@ private:
 	TSet<FSoftObjectPath> RegisteredExtensionDataPaths;
 
 	FNKMUIOnGameplayHUDVisibilityChanged GameplayHUDVisibilityChanged;
+	FDelegateHandle PostLoadMapHandle;
 	uint64 LifecycleGeneration = 1;
 	uint64 NextExtensionRequestId = 1;
 	int32 NextRequestId = 1;
