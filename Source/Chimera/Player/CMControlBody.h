@@ -86,6 +86,9 @@ public:
     /** Called by the authoritative Chimera when one Segment is destroyed. */
     void HandleSegmentDestroyed(int32 DestroyedSegmentIndex);
 
+    // 체크포인트 복귀 시 사망으로 잠긴 Q/W/E/R 입력 복구
+    void RestoreControlsAfterRespawn();
+
     void ClearPressedControlSlots();
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Control Body")

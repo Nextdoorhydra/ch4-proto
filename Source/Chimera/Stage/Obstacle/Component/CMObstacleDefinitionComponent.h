@@ -13,8 +13,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
     UCMObstacleDefinition*, LoadedDefinition);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMObstacleDefinitionFailedSignature);
 
-UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
-// 배치된 장애물의 Soft Definition을 LoadGroup 완료 결과와 연결
+UCLASS(ClassGroup = (Chimera))
+// 기존 BP 호환 로딩용이며 신규 장애물은 직접 설정과 룸 스트리밍을 사용
 class CHIMERA_API UCMObstacleDefinitionComponent : public UActorComponent
 {
     GENERATED_BODY()

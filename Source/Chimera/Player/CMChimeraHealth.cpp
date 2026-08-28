@@ -146,6 +146,28 @@ bool ACMChimera::AreAllSegmentsDead() const
     return true;
 }
 
+void ACMChimera::RestoreForCheckpointRespawn()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    ClearPressedControlParts();
+    for (FCMBodySegmentHealthState& SegmentState : SegmentHealthStates)
+    {
+        SegmentState.Health = SegmentState.MaxHealth;
+        SegmentState.bDead = false;
+    }
+    bAllSegmentsDeathNotified = false;
+
+    for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
+    {
+        It->RestoreControlsAfterRespawn();
+    }
+    ForceNetUpdate();
+}
+
 void ACMChimera::InitializeSegmentHealth(float SegmentMaxHealth)
 {
     if (!HasAuthority())

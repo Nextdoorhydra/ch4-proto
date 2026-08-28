@@ -23,14 +23,11 @@ void FCMAsyncLoadScheduleEntryCustomization::CustomizeHeader(
 	FDetailWidgetRow& HeaderRow,
 	IPropertyTypeCustomizationUtils& Utils)
 {
-	const TSharedPtr<IPropertyHandle> AssetIdHandle = StructPropertyHandle->GetChildHandle(
-		GET_MEMBER_NAME_CHECKED(FAsyncLoadScheduleEntry, AssetId));
+	EntryHandle = StructPropertyHandle;
 	HeaderRow.NameContent()[StructPropertyHandle->CreatePropertyNameWidget()]
 	.ValueContent().MinDesiredWidth(320.0f)
 	[
-		AssetIdHandle.IsValid()
-			? AssetIdHandle->CreatePropertyValueWidget()
-			: StructPropertyHandle->CreatePropertyValueWidget()
+		SNew(STextBlock).Text(this, &FCMAsyncLoadScheduleEntryCustomization::GetAssetIdText)
 	];
 }
 
@@ -56,6 +53,13 @@ void FCMAsyncLoadScheduleEntryCustomization::CustomizeChildren(
 		}
 		return;
 	}
+
+	StructBuilder.AddCustomRow(LOCTEXT("AssetIdSearch", "Asset Id"))
+	.NameContent()[SNew(STextBlock).Text(LOCTEXT("AssetIdLabel", "Asset Id"))]
+	.ValueContent().MinDesiredWidth(320.0f)
+	[
+		SNew(STextBlock).Text(this, &FCMAsyncLoadScheduleEntryCustomization::GetAssetIdText)
+	];
 
 	GroupOptions.Add(MakeShared<FName>(NAME_None));
 	TSet<FName> UniqueGroupIds;
@@ -99,6 +103,28 @@ void FCMAsyncLoadScheduleEntryCustomization::CustomizeChildren(
 			SNew(STextBlock).Text(this, &FCMAsyncLoadScheduleEntryCustomization::GetSelectedGroupText)
 		]
 	];
+}
+
+// catalog Entry에 저장된 PrimaryAssetId를 사람이 읽을 수 있는 문자열로 표시
+FText FCMAsyncLoadScheduleEntryCustomization::GetAssetIdText() const
+{
+	if (!EntryHandle.IsValid())
+	{
+		return LOCTEXT("UnknownAssetId", "Unknown");
+	}
+
+	TArray<void*> RawData;
+	EntryHandle->AccessRawData(RawData);
+	if (RawData.Num() != 1 || !RawData[0])
+	{
+		return LOCTEXT("MultipleAssetIds", "Multiple Values");
+	}
+
+	const FAsyncLoadScheduleEntry* Entry =
+		static_cast<const FAsyncLoadScheduleEntry*>(RawData[0]);
+	return Entry->AssetId.IsValid()
+		? FText::FromString(Entry->AssetId.ToString())
+		: LOCTEXT("InvalidAssetId", "Unregistered Asset");
 }
 
 // 선택한 LoadGroupId 저장 후 Scope와 Timing을 즉시 다시 계산

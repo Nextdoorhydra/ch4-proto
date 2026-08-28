@@ -102,9 +102,6 @@ protected:
     TObjectPtr<UTextBlock> Txt_ToggleDetails;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UButton> Btn_Retry;
-
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UButton> Btn_GameLeave;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -183,9 +180,6 @@ private:
 
     UFUNCTION()
     void HandleToggleDetailsClicked();
-
-    UFUNCTION()
-    void HandleRetryClicked();
 
     UFUNCTION()
     void HandleGameLeaveClicked();

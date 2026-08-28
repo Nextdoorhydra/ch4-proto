@@ -11,8 +11,8 @@ class UNiagaraSystem;
 class USoundBase;
 class UStaticMesh;
 
-UCLASS(BlueprintType)
-// 장애물의 공용 외형 에셋과 위험 효과 설정을 비동기 로드 단위로 묶음
+UCLASS(Abstract, BlueprintType)
+// 기존 장애물 Definition 에셋의 호환 로딩만 유지하며 신규 장애물에는 사용하지 않음
 class CHIMERA_API UCMObstacleDefinition : public UPrimaryDataAssetBase
 {
     GENERATED_BODY()

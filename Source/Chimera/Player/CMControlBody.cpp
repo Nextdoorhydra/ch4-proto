@@ -492,6 +492,25 @@ void ACMControlBody::HandleSegmentDestroyed(int32 DestroyedSegmentIndex)
     }
 }
 
+void ACMControlBody::RestoreControlsAfterRespawn()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    ClearPressedControlSlots();
+    DisabledControlSlotMask = 0;
+    bControlInputEnabled = true;
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetParticipationState(
+            ECMPlayerParticipationState::Active);
+    }
+    OnRep_ControlState();
+    ForceNetUpdate();
+}
+
 void ACMControlBody::ClearPressedControlSlots()
 {
     if (!HasAuthority())

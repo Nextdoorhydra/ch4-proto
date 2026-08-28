@@ -73,6 +73,6 @@ struct CHIMERA_API FCMChimeraObstacleEffectConfig
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Obstacle|Gameplay",
-        meta = (EditCondition = "bEnabled", AssetBundles = "Gameplay"))
-    TSoftClassPtr<UGameplayEffect> GameplayEffectClass;
+        meta = (EditCondition = "bEnabled"))
+    TSubclassOf<UGameplayEffect> GameplayEffectClass;
 };

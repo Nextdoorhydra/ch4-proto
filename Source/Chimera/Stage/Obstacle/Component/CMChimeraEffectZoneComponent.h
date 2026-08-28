@@ -31,7 +31,7 @@ public:
         Category = "Chimera|Obstacle|Chimera Effect")
     void SetZoneEnabled(bool bEnabled);
 
-    // 비동기 준비가 끝난 GE 클래스와 Definition 정책 적용
+    // 장애물에 직접 설정된 GE 클래스와 적용 정책 저장
     void ConfigureChimeraEffect(
         const FCMChimeraObstacleEffectConfig& NewConfig,
         TSubclassOf<UGameplayEffect> NewGameplayEffectClass);

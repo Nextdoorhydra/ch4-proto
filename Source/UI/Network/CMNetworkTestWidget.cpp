@@ -112,13 +112,6 @@ void UCMNetworkTestWidget::NativeConstruct()
             &UCMNetworkTestWidget::HandleToggleDetailsClicked
         );
     }
-    if (Btn_Retry)
-    {
-        Btn_Retry->OnClicked.AddUniqueDynamic(
-            this,
-            &UCMNetworkTestWidget::HandleRetryClicked
-        );
-    }
     if (Btn_GameLeave)
     {
         Btn_GameLeave->OnClicked.AddUniqueDynamic(
@@ -460,15 +453,6 @@ void UCMNetworkTestWidget::ApplyConnectionUI(
     {
         Btn_Ready->SetIsEnabled(bLobby && bIdle);
     }
-    if (Btn_Retry)
-    {
-        Btn_Retry->SetVisibility(
-            bInGame && bHost
-                ? ESlateVisibility::Visible
-                : ESlateVisibility::Collapsed
-        );
-        Btn_Retry->SetIsEnabled(bInGame && bHost && bIdle);
-    }
     if (Btn_Host)
     {
         Btn_Host->SetIsEnabled(bOffline && bIdle);
@@ -693,21 +677,6 @@ void UCMNetworkTestWidget::HandleToggleDetailsClicked()
 
     bGameDetailsVisible = !bGameDetailsVisible;
     UpdateDetailsVisibility();
-}
-
-void UCMNetworkTestWidget::HandleRetryClicked()
-{
-    APlayerController* OwningPlayer = GetOwningPlayer();
-    if (!OwningPlayer && GetWorld())
-    {
-        OwningPlayer = GetWorld()->GetFirstPlayerController();
-    }
-
-    if (ACMPlayerController* PlayerController =
-        Cast<ACMPlayerController>(OwningPlayer))
-    {
-        PlayerController->RequestRetryGame();
-    }
 }
 
 void UCMNetworkTestWidget::HandleGameLeaveClicked()
