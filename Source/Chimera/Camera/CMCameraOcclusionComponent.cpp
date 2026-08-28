@@ -5,6 +5,7 @@
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -341,19 +342,29 @@ UCMCameraOcclusionComponent::FindOrAddFadeState(
         bHasMaterial |= NewState.DynamicMaterials[MaterialIndex] != nullptr;
         const UMaterialInstance* MaterialInstance =
             Cast<UMaterialInstance>(OriginalMaterial);
+        const UMaterial* BaseMaterial = OriginalMaterial
+            ? OriginalMaterial->GetMaterial()
+            : nullptr;
         UE_LOG(
             LogTemp,
             Display,
-            TEXT("[Camera Occlusion] %s slot %d: source=%s (%s), parent=%s, MID=%s"),
+            TEXT("[Camera Occlusion] %s slot %d: source=%s (%s), path=%s, parent=%s, blend=%d, dither=%s, MID=%s"),
             *Component.GetPathName(),
             MaterialIndex,
             *GetNameSafe(OriginalMaterial),
             OriginalMaterial
                 ? *OriginalMaterial->GetClass()->GetName()
                 : TEXT("<none>"),
+            OriginalMaterial
+                ? *OriginalMaterial->GetPathName()
+                : TEXT("<none>"),
             MaterialInstance && MaterialInstance->Parent
                 ? *MaterialInstance->Parent->GetPathName()
                 : TEXT("<none>"),
+            BaseMaterial ? static_cast<int32>(BaseMaterial->GetBlendMode()) : -1,
+            BaseMaterial && BaseMaterial->DitherOpacityMask
+                ? TEXT("true")
+                : TEXT("false"),
             NewState.DynamicMaterials[MaterialIndex]
                 ? *NewState.DynamicMaterials[MaterialIndex]->GetPathName()
                 : TEXT("<failed>")
@@ -456,9 +467,15 @@ void UCMCameraOcclusionComponent::UpdateFadeStates(float DeltaTime)
             UE_LOG(
                 LogTemp,
                 Display,
-                TEXT("[Camera Occlusion] Applying fade to %s: Fade=%.3f, Radius=%.3f, MinOpacity=%.3f, Edge=%.3f"),
+                TEXT("[Camera Occlusion] Applying fade to %s: Fade=%.3f, Center=(%.3f,%.3f), Radius=%.3f, MinOpacity=%.3f, Edge=%.3f"),
                 *State.Component->GetPathName(),
                 State.Fade,
+                State.ScreenCenters.IsValidIndex(0)
+                    ? State.ScreenCenters[0].X
+                    : 10.0f,
+                State.ScreenCenters.IsValidIndex(0)
+                    ? State.ScreenCenters[0].Y
+                    : 10.0f,
                 Config.ScreenFadeRadius,
                 Config.MinimumOpacity,
                 Config.EdgeSoftness

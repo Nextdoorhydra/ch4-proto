@@ -4,8 +4,9 @@ public class ChimeraEditor : ModuleRules
 {
     public ChimeraEditor(ReadOnlyTargetRules Target) : base(Target)
     {
-        PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicIncludePaths.Add(ModuleDirectory);
+		PrivateIncludePaths.Add(ModuleDirectory + "/../CameraOcclusionEditor");
 
         PublicDependencyModuleNames.AddRange(
             new string[]
@@ -29,6 +30,7 @@ public class ChimeraEditor : ModuleRules
             {
                 "CoreUObject",
                 "Engine",
+                "CameraOcclusionEditor",
                 "AssetRegistry",
 				"InputCore",
 				"Json",
