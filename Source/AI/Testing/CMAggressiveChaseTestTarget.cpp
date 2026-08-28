@@ -24,6 +24,7 @@ bool CMAggressiveChaseTest::IsTeleportCandidateWithinBounds(const FVector& Origi
     const float ClampedMaximumDistance = FMath::Max(MaximumDistance, ClampedMinimumDistance);
     const float PlanarDistance = FVector::Dist2D(OriginNavLocation, CandidateNavLocation);
     const float HeightDifference = FMath::Abs(CandidateNavLocation.Z - OriginNavLocation.Z);
+
     return PlanarDistance >= ClampedMinimumDistance && PlanarDistance <= ClampedMaximumDistance && HeightDifference <= FMath::Max(MaximumHeightDifference, 0.0f);
 }
 
@@ -75,6 +76,7 @@ bool ACMAggressiveChaseTestTarget::TeleportToRandomReachableLocationUsingAgent(F
     if (!HasAuthority() || !World || !NavigationSystem || !ContactTrigger)
     {
         UE_LOG(LogCMAggressiveChaseTest, Warning, TEXT("추격 테스트 목표가 순간이동할 월드 또는 NavMesh를 찾지 못했습니다."));
+
         return false;
     }
 
@@ -89,6 +91,7 @@ bool ACMAggressiveChaseTestTarget::TeleportToRandomReachableLocationUsingAgent(F
     if (!NavigationData)
     {
         UE_LOG(LogCMAggressiveChaseTest, Warning, TEXT("추격 테스트 목표가 사용할 전용 NavMesh를 찾지 못했습니다: %s"), *InNavigationAgentName.ToString());
+
         return false;
     }
 
@@ -96,6 +99,7 @@ bool ACMAggressiveChaseTestTarget::TeleportToRandomReachableLocationUsingAgent(F
     if (!NavigationSystem->ProjectPointToNavigation(GetActorLocation(), OriginNavLocation, FVector(100.0f, 100.0f, 200.0f), NavigationData))
     {
         UE_LOG(LogCMAggressiveChaseTest, Warning, TEXT("추격 테스트 목표의 현재 위치를 NavMesh에 투영하지 못했습니다."));
+
         return false;
     }
 
@@ -114,10 +118,12 @@ bool ACMAggressiveChaseTestTarget::TeleportToRandomReachableLocationUsingAgent(F
             continue;
 
         UE_LOG(LogCMAggressiveChaseTest, Display, TEXT("추격 테스트 목표가 안전한 NavMesh 위치로 순간이동했습니다. 위치: %s"), *CandidateLocation.ToCompactString());
+
         return true;
     }
 
     UE_LOG(LogCMAggressiveChaseTest, Warning, TEXT("5m 안에서 장애물과 겹치지 않는 추격 테스트 목표 위치를 찾지 못했습니다."));
+
     return false;
 }
 

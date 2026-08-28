@@ -44,4 +44,4 @@ namespace CMAggressiveLearningSnapshot
 
     /** 최신 폴더의 추론 네트워크 세 개를 호환성 검사 후 불러온다. */
     AI_API bool LoadInferenceNetworks(ECMAggressiveLearningSnapshotProfile Profile, ULearningAgentsPolicy& Policy);
-}
+} // namespace CMAggressiveLearningSnapshot

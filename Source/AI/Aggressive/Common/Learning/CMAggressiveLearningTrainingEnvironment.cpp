@@ -34,14 +34,19 @@ namespace
     {
         switch (Reason)
         {
-        case ECMAggressiveLearningEpisodeEndReason::Arrival: return TEXT("도착");
-        case ECMAggressiveLearningEpisodeEndReason::Overturned: return TEXT("전복");
-        case ECMAggressiveLearningEpisodeEndReason::Timeout: return TEXT("시간 초과");
-        case ECMAggressiveLearningEpisodeEndReason::PolicyUpdate: return TEXT("정책 업데이트");
-        default: return TEXT("없음");
+        case ECMAggressiveLearningEpisodeEndReason::Arrival:
+            return TEXT("도착");
+        case ECMAggressiveLearningEpisodeEndReason::Overturned:
+            return TEXT("전복");
+        case ECMAggressiveLearningEpisodeEndReason::Timeout:
+            return TEXT("시간 초과");
+        case ECMAggressiveLearningEpisodeEndReason::PolicyUpdate:
+            return TEXT("정책 업데이트");
+        default:
+            return TEXT("없음");
         }
     }
-}
+} // namespace
 
 // 목표 접근량과 과회전 및 남은 제한시간으로 한 판단 단계의 보상을 계산한다.
 float CMAggressiveLearningReward::CalculateMovementReward(float PreviousDistance, float CurrentDistance, float YawAngularVelocity, bool bReachedGoal, float EpisodeTime, const FCMAggressiveLearningRewardSettings& Settings)
@@ -61,6 +66,7 @@ float CMAggressiveLearningReward::CalculateFacingProgressReward(float PreviousAl
 {
     const float SafePreviousAlignment = FMath::Clamp(PreviousAlignment, -1.0f, 1.0f);
     const float SafeCurrentAlignment = FMath::Clamp(CurrentAlignment, -1.0f, 1.0f);
+
     return (SafeCurrentAlignment - SafePreviousAlignment) * FMath::Max(Settings.FacingProgressRewardScale, 0.0f);
 }
 
@@ -108,6 +114,7 @@ FVector CMAggressiveLearningGoal::ResolveWorldGoalLocation(const FTransform& Sta
     const FVector LocalDirection = CMAggressiveDirection::ToLocalUnitVector(Direction);
     const float BodyYawRadians = FMath::DegreesToRadians(StartTransform.Rotator().Yaw);
     const FQuat BodyYawRotation(FVector::UpVector, BodyYawRadians);
+
     return StartTransform.GetLocation() + BodyYawRotation.RotateVector(LocalDirection) * FMath::Max(GoalDistance, 0.0f);
 }
 
@@ -142,6 +149,7 @@ UCMAggressiveLearningTrainingEnvironment* UCMAggressiveLearningTrainingEnvironme
     TrainingEnvironment->HasInitialBodyTransform.Init(false, MaxAgentNum);
     TrainingEnvironment->HasPreviousGoalState.Init(false, MaxAgentNum);
     TrainingEnvironment->SetupTrainingEnvironment(InManager);
+
     return TrainingEnvironment->IsSetup() ? TrainingEnvironment : nullptr;
 }
 
@@ -190,6 +198,7 @@ void UCMAggressiveLearningTrainingEnvironment::GatherAgentReward_Implementation(
     if (!HasPreviousGoalState[AgentId] || !PreviousGoalLocations[AgentId].Equals(Goal.WorldLocation, UE_KINDA_SMALL_NUMBER))
     {
         UpdatePreviousGoalState(AgentId, *Body, *MovementCommand);
+
         return;
     }
 
@@ -279,7 +288,24 @@ void UCMAggressiveLearningTrainingEnvironment::LogEpisodeSummary(int32 AgentId, 
     const float EpisodeTime = GetEpisodeTime(AgentId);
     const float RecentArrivalRate = CMAggressiveLearningEpisode::CalculateArrivalRate(ArrivalHistory) * 100.0f;
     const float TotalArrivalRate = TotalNaturalEpisodeCounts[AgentId] > 0 ? static_cast<float>(TotalArrivalCounts[AgentId]) / static_cast<float>(TotalNaturalEpisodeCounts[AgentId]) * 100.0f : 0.0f;
-    UE_LOG(LogCMAggressiveLearningEpisode, Display, TEXT("공격적 AI 학습 에피소드 종료 - 에이전트: %d, 번호: %lld, 시작 방향: %s, 판단: %d, 경과: %.2f초, 누적 보상: %.4f, 최소 거리: %.1fcm, 종료 거리: %.1fcm, 종료 이유: %s, 최근 %d회 도착률: %.1f%%, 전체 %lld회 도착률: %.1f%%"), AgentId, EpisodeNumbers[AgentId], CMAggressiveDirection::GetKoreanDisplayName(EpisodeStartDirections[AgentId]), EpisodeStepCounts[AgentId], EpisodeTime, EpisodeCumulativeRewards[AgentId], EpisodeMinimumDistances[AgentId], EndDistance, GetEpisodeEndReasonName(EndReason), ArrivalHistory.Num(), RecentArrivalRate, TotalNaturalEpisodeCounts[AgentId], TotalArrivalRate);
+    UE_LOG(
+        LogCMAggressiveLearningEpisode,
+        Display,
+        TEXT("공격적 AI 학습 에피소드 종료 - 에이전트: %d, 번호: %lld, 시작 방향: %s, 판단: %d, 경과: %.2f초, 누적 보상: %.4f, 최소 거리: %.1fcm, 종료 거리: %.1fcm, 종료 이유: %s, 최근 %d회 도착률: %.1f%%, 전체 %lld회 도착률: %.1f%%"),
+        AgentId,
+        EpisodeNumbers[AgentId],
+        CMAggressiveDirection::GetKoreanDisplayName(EpisodeStartDirections[AgentId]),
+        EpisodeStepCounts[AgentId],
+        EpisodeTime,
+        EpisodeCumulativeRewards[AgentId],
+        EpisodeMinimumDistances[AgentId],
+        EndDistance,
+        GetEpisodeEndReasonName(EndReason),
+        ArrivalHistory.Num(),
+        RecentArrivalRate,
+        TotalNaturalEpisodeCounts[AgentId],
+        TotalArrivalRate
+    );
 }
 
 // 다음 에피소드가 사용할 누적 통계와 종료 원인을 초기화한다.

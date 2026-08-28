@@ -28,6 +28,9 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Movement")
     void SetPolicyMovementEnabled(bool bEnabled);
 
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Movement")
+    void SetMaximumSpeedMultiplier(float Multiplier);
+
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Movement")
     float GetMaximumSpeed() const;
 
@@ -46,6 +49,9 @@ private:
 
     UPROPERTY(VisibleInstanceOnly, Category = "Aggressive AI|Movement")
     FVector AccelerationInput = FVector::ZeroVector;
+
+    UPROPERTY(VisibleInstanceOnly, Category = "Aggressive AI|Movement")
+    float MaximumSpeedMultiplier = 1.0f;
 
     bool bPolicyMovementEnabled = true;
 };

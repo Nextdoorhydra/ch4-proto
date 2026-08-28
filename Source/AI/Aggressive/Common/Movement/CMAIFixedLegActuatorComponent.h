@@ -17,7 +17,7 @@ namespace CMAIFixedLegActuation
 
     /** 지정 위치의 임펄스가 만드는 월드 Z축 각운동량을 계산한다. */
     AI_API float CalculateYawAngularImpulse(const FVector& CenterOfMass, const FVector& ApplicationLocation, const FVector& WorldImpulse);
-}
+} // namespace CMAIFixedLegActuation
 
 /**
  * 고정된 물리량으로 임의 개수의 다리를 구동하는 공격적 AI 전용 컴포넌트다.

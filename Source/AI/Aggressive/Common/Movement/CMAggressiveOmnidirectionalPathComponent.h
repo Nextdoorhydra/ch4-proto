@@ -8,6 +8,8 @@
 #include "CMAggressiveOmnidirectionalPathComponent.generated.h"
 
 class ANavigationData;
+class ICMAggressiveMovementAgent;
+class UCMAggressiveMovementCommandComponent;
 class UNavigationSystemV1;
 struct FNavDataConfig;
 
@@ -16,7 +18,7 @@ namespace CMAggressiveOmnidirectionalPath
     /** 몸체가 경로점 반경에 도착했거나 가까운 중간 경로점을 통과했는지 반환한다. */
     AI_API bool ShouldAdvancePathPoint(const FVector& BodyLocation, const FVector& SegmentStart, const FVector& PathPoint, float AcceptanceRadius, float PassDetectionRadius, bool bFinalPathPoint);
 
-}
+} // namespace CMAggressiveOmnidirectionalPath
 
 /** 전용 NavMesh 경로점을 따라가며 코드 또는 정책에 로컬 8방향을 제공하는 컴포넌트다. */
 UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
@@ -82,6 +84,7 @@ public:
     void SetMinimumPathPointSpacing(float MinimumSpacing);
     void SetRebuildPathWhenIntermediatePointPassed(bool bEnabled);
     void SetLearningRequestedMoveDirection(ECMAggressiveMoveDirection Direction);
+    void RefreshPathDebug();
 
 protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement", meta = (ClampMin = "0.01"))
@@ -118,9 +121,6 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement")
     FName NavigationAgentName = NAME_None;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement|Debug")
-    bool bDrawPathDebug = true;
-
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement")
     bool bPolicyControlEnabled = false;
 
@@ -144,5 +144,10 @@ private:
     bool bPathMoving = false;
     uint32 PathDebugBatchId = 0;
     const ANavigationData* ActiveNavigationData = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCMAggressiveMovementCommandComponent> MovementCommand;
+
+    ICMAggressiveMovementAgent* CachedMovementAgent = nullptr;
     FTimerHandle PathUpdateTimerHandle;
 };

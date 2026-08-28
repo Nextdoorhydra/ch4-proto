@@ -5,7 +5,7 @@ namespace
     constexpr float DirectionSectorDegrees = 45.0f;
     constexpr float DirectionHalfSectorDegrees = DirectionSectorDegrees * 0.5f;
     constexpr float InverseSquareRootTwo = 0.70710678118f;
-}
+} // namespace
 
 // 몸통 로컬 평면 벡터를 가장 가까운 8방향으로 변환한다.
 ECMAggressiveMoveDirection CMAggressiveDirection::QuantizeLocalDirection8(const FVector& LocalDirection, float MinimumPlanarMagnitude)

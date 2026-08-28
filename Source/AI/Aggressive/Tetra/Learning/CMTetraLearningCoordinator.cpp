@@ -1,6 +1,7 @@
 #include "Aggressive/Tetra/Learning/CMTetraLearningCoordinator.h"
 
 #include "Aggressive/Tetra/CMTetraPawn.h"
+#include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "EngineUtils.h"
 #include "Aggressive/Tetra/Learning/CMTetraLearningInteractor.h"
@@ -41,6 +42,7 @@ bool ACMTetraLearningCoordinator::StartTraining(ACMTetraPawn* InTrainingAgent)
 {
     TArray<ACMTetraPawn*> Agents;
     Agents.Add(InTrainingAgent);
+
     return StartTrainingAgents(Agents);
 }
 
@@ -66,7 +68,13 @@ bool ACMTetraLearningCoordinator::StartTrainingAgents(const TArray<ACMTetraPawn*
 
     TrainingAgents.Reset(InTrainingAgents.Num());
     for (ACMTetraPawn* Agent : InTrainingAgents)
+    {
+        if (UCMAggressiveBehaviorComponent* Behavior = Agent->FindComponentByClass<UCMAggressiveBehaviorComponent>())
+        {
+            Behavior->SetBehaviorEnabled(false);
+        }
         TrainingAgents.Add(Agent);
+    }
 
     LearningManager->SetMaxAgentNum(TrainingAgents.Num());
     if (!InitializeLearningObjects())
@@ -88,6 +96,7 @@ bool ACMTetraLearningCoordinator::StartTrainingAgents(const TArray<ACMTetraPawn*
     if (TrainingAgentIds.Contains(INDEX_NONE))
     {
         LearningManager->RemoveAllAgents();
+
         return false;
     }
 
@@ -106,6 +115,7 @@ bool ACMTetraLearningCoordinator::StartTrainingAgents(const TArray<ACMTetraPawn*
     LearningManager->SetComponentTickEnabled(true);
     GetWorldTimerManager().SetTimer(TrainingTimerHandle, this, &ThisClass::RunTrainingStep, FMath::Max(DecisionInterval, 0.01f), true);
     UE_LOG(LogCMTetraLearning, Display, TEXT("Tetra AI CPU PPO 학습을 시작했습니다. 에이전트: %d개, 판단 주기: %.2f초, PPO 수집량: %d"), TrainingAgentIds.Num(), DecisionInterval, MaximumRecordedStepsPerIteration);
+
     return true;
 }
 
@@ -119,6 +129,7 @@ bool ACMTetraLearningCoordinator::StartTrainingAllAgents()
     TArray<ACMTetraPawn*> Agents;
     for (TActorIterator<ACMTetraPawn> It(World); It; ++It)
         Agents.Add(*It);
+
     return StartTrainingAgents(Agents);
 }
 
@@ -167,6 +178,7 @@ bool ACMTetraLearningCoordinator::SaveTrainingSnapshots()
     const bool bSaved = CMAggressiveLearningSnapshot::SaveTrainingNetworks(ECMAggressiveLearningSnapshotProfile::Tetra, *Policy, *Critic, Directory);
     if (bSaved)
         UE_LOG(LogCMTetraLearning, Display, TEXT("Tetra AI 최신 학습 스냅샷을 저장했습니다: %s"), *Directory);
+
     return bSaved;
 }
 
@@ -282,6 +294,7 @@ bool ACMTetraLearningCoordinator::InitializeLearningObjects()
     FLearningAgentsPPOTrainerSettings TrainerSettings;
     TrainerSettings.MaximumRecordedStepsPerIteration = FMath::Max(MaximumRecordedStepsPerIteration, 100);
     PPOTrainer = ULearningAgentsPPOTrainer::MakePPOTrainer(Manager, BaseInteractor, BaseEnvironment, BasePolicy, BaseCritic, Communicator, ULearningAgentsPPOTrainer::StaticClass(), TEXT("TetraPPOTrainer"), TrainerSettings);
+
     return PPOTrainer != nullptr;
 }
 
@@ -304,6 +317,7 @@ void ACMTetraLearningCoordinator::RunTrainingStep()
     if (!PPOTrainer || PPOTrainer->HasTrainingFailed())
     {
         StopTraining();
+
         return;
     }
 

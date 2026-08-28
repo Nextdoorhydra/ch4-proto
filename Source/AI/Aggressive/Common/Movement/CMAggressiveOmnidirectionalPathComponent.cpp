@@ -6,10 +6,12 @@
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
+#include "HAL/IConsoleManager.h"
 #include "NavigationData.h"
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
 #include "TimerManager.h"
+#include "UObject/UObjectIterator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCMAggressiveOmnidirectionalPath, Log, All);
 
@@ -17,6 +19,59 @@ namespace
 {
     constexpr float PathDebugHeight = 50.0f;
     constexpr float PathDebugLifetime = 3600.0f;
+
+#if !UE_BUILD_SHIPPING
+    bool bDrawAggressivePathDebug = false;
+
+    void SetAggressivePathDebugDraw(const TArray<FString>& Args, UWorld* World)
+    {
+        if (Args.Num() != 1)
+        {
+            UE_LOG(
+                LogCMAggressiveOmnidirectionalPath,
+                Display,
+                TEXT("Usage: CM.AI.AggressivePathDebug on|off "
+                     "(current: %s)"),
+                bDrawAggressivePathDebug ? TEXT("on") : TEXT("off")
+            );
+
+            return;
+        }
+
+        const FString& Value = Args[0];
+        if (Value.Equals(TEXT("on"), ESearchCase::IgnoreCase) || Value.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Value == TEXT("1"))
+        {
+            bDrawAggressivePathDebug = true;
+        }
+        else if (Value.Equals(TEXT("off"), ESearchCase::IgnoreCase) || Value.Equals(TEXT("false"), ESearchCase::IgnoreCase) || Value == TEXT("0"))
+        {
+            bDrawAggressivePathDebug = false;
+        }
+        else
+        {
+            UE_LOG(LogCMAggressiveOmnidirectionalPath, Warning, TEXT("Usage: CM.AI.AggressivePathDebug on|off"));
+
+            return;
+        }
+
+        for (TObjectIterator<UCMAggressiveOmnidirectionalPathComponent> It; It; ++It)
+        {
+            if (It->GetWorld() == World)
+            {
+                It->RefreshPathDebug();
+            }
+        }
+
+        UE_LOG(LogCMAggressiveOmnidirectionalPath, Log, TEXT("Aggressive AI path debug: %s"), bDrawAggressivePathDebug ? TEXT("on") : TEXT("off"));
+    }
+
+    FAutoConsoleCommandWithWorldAndArgs AggressivePathDebugCommand(
+        TEXT("CM.AI.AggressivePathDebug"),
+        TEXT("Draw aggressive AI navigation path points. Usage: "
+             "CM.AI.AggressivePathDebug on|off"),
+        FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetAggressivePathDebugDraw)
+    );
+#endif
 
     bool HasPassedPathPoint(const FVector& BodyLocation, const FVector& SegmentStart, const FVector& PathPoint)
     {
@@ -29,7 +84,7 @@ namespace
         BodyOffset.Z = 0.0f;
         return FVector::DotProduct(BodyOffset, SegmentDirection) >= 0.0f;
     }
-}
+} // namespace
 
 // 몸체가 반경 안에 있거나 가까운 중간 경로점의 진행 평면을 통과했는지 판정한다.
 bool CMAggressiveOmnidirectionalPath::ShouldAdvancePathPoint(const FVector& BodyLocation, const FVector& SegmentStart, const FVector& PathPoint, float AcceptanceRadius, float PassDetectionRadius, bool bFinalPathPoint)
@@ -62,12 +117,16 @@ void UCMAggressiveOmnidirectionalPathComponent::BeginPlay()
 {
     Super::BeginPlay();
     PathDebugBatchId = PointerHash(this);
+    CachedMovementAgent = Cast<ICMAggressiveMovementAgent>(GetOwner());
+    MovementCommand = GetOwner() ? GetOwner()->FindComponentByClass<UCMAggressiveMovementCommandComponent>() : nullptr;
 }
 
 // 컴포넌트 종료 시 경로 타이머와 디버그 표시를 제거한다.
 void UCMAggressiveOmnidirectionalPathComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     FinishPathMove(ECMAggressivePathMoveResult::Cancelled, false);
+    MovementCommand = nullptr;
+    CachedMovementAgent = nullptr;
     Super::EndPlay(EndPlayReason);
 }
 
@@ -75,7 +134,7 @@ void UCMAggressiveOmnidirectionalPathComponent::EndPlay(const EEndPlayReason::Ty
 bool UCMAggressiveOmnidirectionalPathComponent::StartPathMove(FVector WorldGoal, float AcceptanceRadius)
 {
     AActor* Owner = GetOwner();
-    ICMAggressiveMovementAgent* Agent = Cast<ICMAggressiveMovementAgent>(Owner);
+    ICMAggressiveMovementAgent* Agent = CachedMovementAgent;
     UWorld* World = GetWorld();
     if (!Owner || !Owner->HasAuthority() || !Agent || !World || !bPolicyControlEnabled)
     {
@@ -89,12 +148,14 @@ bool UCMAggressiveOmnidirectionalPathComponent::StartPathMove(FVector WorldGoal,
     if (FVector::DistSquared2D(Agent->GetAggressiveNavigationReferenceLocation(), WorldGoal) <= FMath::Square(FinalAcceptanceRadius))
     {
         Agent->HandleAggressivePathMoveCompleted(ECMAggressivePathMoveResult::ReachedGoal);
+
         return true;
     }
 
     if (!BuildNavigationPath(WorldGoal))
     {
         Agent->HandleAggressivePathMoveCompleted(ECMAggressivePathMoveResult::Failed);
+
         return false;
     }
 
@@ -103,12 +164,14 @@ bool UCMAggressiveOmnidirectionalPathComponent::StartPathMove(FVector WorldGoal,
     if (!UpdateMovementDirection())
     {
         FinishPathMove(ECMAggressivePathMoveResult::Failed, true);
+
         return false;
     }
 
     DrawPathDebug();
     World->GetTimerManager().SetTimer(PathUpdateTimerHandle, this, &ThisClass::UpdatePathMove, FMath::Max(PathUpdateInterval, 0.01f), true);
     UE_LOG(LogCMAggressiveOmnidirectionalPath, Display, TEXT("공격적 AI가 NavMesh 경로 방향 요청을 시작했습니다. 경로점: %d개, 목적지: %s"), ActivePathPoints.Num(), *WorldGoal.ToCompactString());
+
     return true;
 }
 
@@ -129,8 +192,6 @@ void UCMAggressiveOmnidirectionalPathComponent::PausePathMoveForRecovery()
     if (World)
         World->GetTimerManager().ClearTimer(PathUpdateTimerHandle);
 
-    AActor* Owner = GetOwner();
-    UCMAggressiveMovementCommandComponent* MovementCommand = Owner ? Owner->FindComponentByClass<UCMAggressiveMovementCommandComponent>() : nullptr;
     if (MovementCommand)
         MovementCommand->ClearMovementGoal();
     RequestedMoveDirection = ECMAggressiveMoveDirection::None;
@@ -182,6 +243,7 @@ FName UCMAggressiveOmnidirectionalPathComponent::GetNavigationAgentName() const
     return NavigationAgentName;
 }
 
+// 지정한 시작점과 목적지 사이의 완전한 전용 NavMesh 경로 길이를 계산한다.
 bool UCMAggressiveOmnidirectionalPathComponent::CalculateNavigationPathLength(FVector StartLocation, FVector WorldGoal, float& OutPathLength)
 {
     OutPathLength = 0.0f;
@@ -198,8 +260,7 @@ bool UCMAggressiveOmnidirectionalPathComponent::CalculateNavigationPathLength(FV
 
     FNavLocation ProjectedStart;
     FNavLocation ProjectedGoal;
-    if (!NavigationSystem->ProjectPointToNavigation(StartLocation, ProjectedStart, NavigationProjectionExtent, NavigationData)
-        || !NavigationSystem->ProjectPointToNavigation(WorldGoal, ProjectedGoal, NavigationProjectionExtent, NavigationData))
+    if (!NavigationSystem->ProjectPointToNavigation(StartLocation, ProjectedStart, NavigationProjectionExtent, NavigationData) || !NavigationSystem->ProjectPointToNavigation(WorldGoal, ProjectedGoal, NavigationProjectionExtent, NavigationData))
         return false;
 
     FPathFindingQuery Query(Owner, *NavigationData, ProjectedStart.Location, ProjectedGoal.Location);
@@ -214,6 +275,7 @@ bool UCMAggressiveOmnidirectionalPathComponent::CalculateNavigationPathLength(FV
         return false;
     for (int32 PointIndex = 1; PointIndex < PathPoints.Num(); ++PointIndex)
         OutPathLength += FVector::Dist2D(PathPoints[PointIndex - 1].Location, PathPoints[PointIndex].Location);
+
     return true;
 }
 
@@ -322,6 +384,7 @@ bool UCMAggressiveOmnidirectionalPathComponent::BuildNavigationPath(FVector Worl
     }
 
     const TArray<FNavPathPoint>& NavigationPathPoints = PathResult.Path->GetPathPoints();
+    // 긴 선분을 나눠 정책이 급격한 방향 변화 없이 중간 목표를 따라가게 한다.
     ActivePathPoints.Reset(NavigationPathPoints.Num());
     ActivePathPoints.Add(NavigationPathPoints[0].Location);
     for (int32 PathPointIndex = 1; PathPointIndex < NavigationPathPoints.Num(); ++PathPointIndex)
@@ -334,6 +397,7 @@ bool UCMAggressiveOmnidirectionalPathComponent::BuildNavigationPath(FVector Worl
             ActivePathPoints.Add(FMath::Lerp(SegmentStart, SegmentEnd, static_cast<float>(SegmentPartIndex) / static_cast<float>(SegmentPartCount)));
     }
 
+    // 시작점과 최종 목적지는 보존하고 중간점만 흔들어 반복 경로의 편향을 줄인다.
     const float JitterRadius = FMath::Max(IntermediatePathPointJitterRadius, 0.0f);
     if (JitterRadius > 0.0f)
     {
@@ -349,8 +413,10 @@ bool UCMAggressiveOmnidirectionalPathComponent::BuildNavigationPath(FVector Worl
         }
     }
 
+    // 연결 가능성을 검증하면서 몸체가 벽에 걸리지 않도록 중간점을 안쪽으로 민다.
     AdjustIntermediatePathPointsAwayFromWalls(*World, *NavigationSystem, *NavigationData);
 
+    // 직선 연결이 막히지 않는 범위에서 지나치게 가까운 점을 제거한다.
     const float MinimumSpacing = FMath::Max(MinimumPathPointSpacing, 0.0f);
     if (MinimumSpacing > 0.0f && ActivePathPoints.Num() > 2)
     {
@@ -386,10 +452,8 @@ bool UCMAggressiveOmnidirectionalPathComponent::BuildNavigationPath(FVector Worl
     return true;
 }
 
-void UCMAggressiveOmnidirectionalPathComponent::AdjustIntermediatePathPointsAwayFromWalls(
-    UWorld& World,
-    UNavigationSystemV1& NavigationSystem,
-    const ANavigationData& NavigationData)
+// 정적 장애물의 반발 방향으로 중간 경로점을 옮기되 양쪽 경로 연결을 보존한다.
+void UCMAggressiveOmnidirectionalPathComponent::AdjustIntermediatePathPointsAwayFromWalls(UWorld& World, UNavigationSystemV1& NavigationSystem, const ANavigationData& NavigationData)
 {
     const float WallClearance = FMath::Max(IntermediatePathPointWallClearance, 0.0f);
     if (WallClearance <= 0.0f || ActivePathPoints.Num() <= 2)
@@ -404,13 +468,7 @@ void UCMAggressiveOmnidirectionalPathComponent::AdjustIntermediatePathPointsAway
     {
         const FVector OriginalPoint = ActivePathPoints[PathPointIndex];
         TArray<FOverlapResult> Overlaps;
-        World.OverlapMultiByObjectType(
-            Overlaps,
-            OriginalPoint,
-            FQuat::Identity,
-            StaticObjects,
-            FCollisionShape::MakeSphere(WallClearance),
-            QueryParams);
+        World.OverlapMultiByObjectType(Overlaps, OriginalPoint, FQuat::Identity, StaticObjects, FCollisionShape::MakeSphere(WallClearance), QueryParams);
 
         FVector Repulsion = FVector::ZeroVector;
         for (const FOverlapResult& Overlap : Overlaps)
@@ -438,8 +496,8 @@ void UCMAggressiveOmnidirectionalPathComponent::AdjustIntermediatePathPointsAway
             if (!NavigationSystem.ProjectPointToNavigation(OriginalPoint + Repulsion * CandidateScale, ProjectedPoint, ProjectionExtent, &NavigationData))
                 continue;
             FVector HitLocation;
-            if (NavigationData.Raycast(ActivePathPoints[PathPointIndex - 1], ProjectedPoint.Location, HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner())
-                || NavigationData.Raycast(ProjectedPoint.Location, ActivePathPoints[PathPointIndex + 1], HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner()))
+            if (NavigationData.Raycast(ActivePathPoints[PathPointIndex - 1], ProjectedPoint.Location, HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner()) ||
+                NavigationData.Raycast(ProjectedPoint.Location, ActivePathPoints[PathPointIndex + 1], HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner()))
                 continue;
             ActivePathPoints[PathPointIndex] = ProjectedPoint.Location;
             break;
@@ -457,6 +515,7 @@ bool UCMAggressiveOmnidirectionalPathComponent::FindNavigationAgent(const UNavig
 
         OutAgentConfig = AgentConfig;
         OutNavigationData = NavigationSystem.GetNavDataForProps(AgentConfig);
+
         return OutNavigationData != nullptr;
     }
     return false;
@@ -466,8 +525,7 @@ bool UCMAggressiveOmnidirectionalPathComponent::FindNavigationAgent(const UNavig
 bool UCMAggressiveOmnidirectionalPathComponent::UpdateMovementDirection()
 {
     AActor* Owner = GetOwner();
-    ICMAggressiveMovementAgent* Agent = Cast<ICMAggressiveMovementAgent>(Owner);
-    UCMAggressiveMovementCommandComponent* MovementCommand = Owner ? Owner->FindComponentByClass<UCMAggressiveMovementCommandComponent>() : nullptr;
+    ICMAggressiveMovementAgent* Agent = CachedMovementAgent;
     UPrimitiveComponent* MovementBody = Agent ? Agent->GetAggressiveMovementBody() : nullptr;
     if (!Owner || !Agent || !MovementBody || !MovementCommand || !bPolicyControlEnabled || !ActivePathPoints.IsValidIndex(ActivePathPointIndex))
     {
@@ -482,16 +540,18 @@ bool UCMAggressiveOmnidirectionalPathComponent::UpdateMovementDirection()
     RequestedMoveDirection = MoveDirection;
     const bool bFinalPathPoint = ActivePathPointIndex == ActivePathPoints.Num() - 1;
     MovementCommand->SetMovementGoal(ActivePathPoints[ActivePathPointIndex], bFinalPathPoint ? FinalAcceptanceRadius : IntermediateAcceptanceRadius);
+
     return true;
 }
 
 // 타이머 시점마다 경로점 도착과 다음 8방향 이동 명령을 갱신한다.
 void UCMAggressiveOmnidirectionalPathComponent::UpdatePathMove()
 {
-    ICMAggressiveMovementAgent* Agent = Cast<ICMAggressiveMovementAgent>(GetOwner());
+    ICMAggressiveMovementAgent* Agent = CachedMovementAgent;
     if (!bPathMoving || !Agent || !ActivePathPoints.IsValidIndex(ActivePathPointIndex))
     {
         FinishPathMove(ECMAggressivePathMoveResult::Failed, true);
+
         return;
     }
 
@@ -502,18 +562,14 @@ void UCMAggressiveOmnidirectionalPathComponent::UpdatePathMove()
         const float AcceptanceRadius = bFinalPathPoint ? FinalAcceptanceRadius : IntermediateAcceptanceRadius;
         const FVector SegmentStart = ActivePathPointIndex > 0 ? ActivePathPoints[ActivePathPointIndex - 1] : BodyLocation;
         const FVector PathPoint = ActivePathPoints[ActivePathPointIndex];
-        if (!bFinalPathPoint
-            && bRebuildPathWhenIntermediatePointPassed
-            && FVector::DistSquared2D(BodyLocation, PathPoint) > FMath::Square(FMath::Max(AcceptanceRadius, 0.0f))
-            && HasPassedPathPoint(BodyLocation, SegmentStart, PathPoint))
+        // 긴 몸체가 경유지를 비껴 지나가면 남은 점을 건너뛰지 않고 현재 위치에서 안전하게 재탐색한다.
+        if (!bFinalPathPoint && bRebuildPathWhenIntermediatePointPassed && FVector::DistSquared2D(BodyLocation, PathPoint) > FMath::Square(FMath::Max(AcceptanceRadius, 0.0f)) && HasPassedPathPoint(BodyLocation, SegmentStart, PathPoint))
         {
             const FVector RebuildGoal = ActiveWorldGoal;
             const float RebuildAcceptanceRadius = FinalAcceptanceRadius;
-            UE_LOG(LogCMAggressiveOmnidirectionalPath, Display,
-                TEXT("공격적 AI가 중간 경유지 %d번을 지나쳐 현재 선두 위치에서 전체 경로를 다시 계산합니다. 지나친 경유지=%s"),
-                ActivePathPointIndex,
-                *PathPoint.ToCompactString());
+            UE_LOG(LogCMAggressiveOmnidirectionalPath, Display, TEXT("공격적 AI가 중간 경유지 %d번을 지나쳐 현재 선두 위치에서 전체 경로를 다시 계산합니다. 지나친 경유지=%s"), ActivePathPointIndex, *PathPoint.ToCompactString());
             StartPathMove(RebuildGoal, RebuildAcceptanceRadius);
+
             return;
         }
         if (!CMAggressiveOmnidirectionalPath::ShouldAdvancePathPoint(BodyLocation, SegmentStart, PathPoint, AcceptanceRadius, IntermediatePassDetectionRadius, bFinalPathPoint))
@@ -521,6 +577,7 @@ void UCMAggressiveOmnidirectionalPathComponent::UpdatePathMove()
         if (bFinalPathPoint)
         {
             FinishPathMove(ECMAggressivePathMoveResult::ReachedGoal, true);
+
             return;
         }
         ++ActivePathPointIndex;
@@ -538,9 +595,7 @@ void UCMAggressiveOmnidirectionalPathComponent::FinishPathMove(ECMAggressivePath
     if (World)
         World->GetTimerManager().ClearTimer(PathUpdateTimerHandle);
 
-    AActor* Owner = GetOwner();
-    ICMAggressiveMovementAgent* Agent = Cast<ICMAggressiveMovementAgent>(Owner);
-    UCMAggressiveMovementCommandComponent* MovementCommand = Owner ? Owner->FindComponentByClass<UCMAggressiveMovementCommandComponent>() : nullptr;
+    ICMAggressiveMovementAgent* Agent = CachedMovementAgent;
     if (MovementCommand)
         MovementCommand->ClearMovementGoal();
 
@@ -562,7 +617,7 @@ void UCMAggressiveOmnidirectionalPathComponent::DrawPathDebug()
 {
 #if !UE_BUILD_SHIPPING && ENABLE_DRAW_DEBUG
     ClearPathDebug();
-    if (!bDrawPathDebug)
+    if (!bDrawAggressivePathDebug)
         return;
 
     UWorld* World = GetWorld();
@@ -579,6 +634,11 @@ void UCMAggressiveOmnidirectionalPathComponent::DrawPathDebug()
             LineBatcher->DrawLine(DebugLocation, ActivePathPoints[PathPointIndex + 1] + FVector(0.0f, 0.0f, PathDebugHeight), FLinearColor::Green, 0, 4.0f, PathDebugLifetime, PathDebugBatchId);
     }
 #endif
+}
+
+void UCMAggressiveOmnidirectionalPathComponent::RefreshPathDebug()
+{
+    DrawPathDebug();
 }
 
 // 이 컴포넌트가 생성한 NavMesh 경로 디버그 표시만 제거한다.

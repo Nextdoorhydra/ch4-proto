@@ -18,7 +18,7 @@ namespace
 
     constexpr float PlanarVelocityScale = 600.0f;
     constexpr float YawAngularVelocityScale = 10.0f;
-}
+} // namespace
 
 // 지정한 다리 수로 이동 관측과 행동 스키마를 가진 Interactor를 생성한다.
 UCMAggressiveLearningInteractor* UCMAggressiveLearningInteractor::MakeAggressiveInteractor(ULearningAgentsManager*& InManager, int32 InLegCount, FName Name)
@@ -35,6 +35,7 @@ UCMAggressiveLearningInteractor* UCMAggressiveLearningInteractor::MakeAggressive
     Interactor->ActiveLegIndicesScratch.Reserve(InLegCount);
     Interactor->LegActivationSignalsScratch.Reserve(InLegCount);
     Interactor->SetupInteractor(InManager);
+
     return Interactor->IsSetup() ? Interactor : nullptr;
 }
 
@@ -42,11 +43,9 @@ UCMAggressiveLearningInteractor* UCMAggressiveLearningInteractor::MakeAggressive
 void UCMAggressiveLearningInteractor::SpecifyAgentObservation_Implementation(FLearningAgentsObservationSchemaElement& OutObservationSchemaElement, ULearningAgentsObservationSchema* InObservationSchema)
 {
     const FName ElementNames[] = {GoalDirectionTag, PlanarVelocityTag, YawAngularVelocityTag};
-    const FLearningAgentsObservationSchemaElement Elements[] = {
-        ULearningAgentsObservations::SpecifyEnumObservation(InObservationSchema, StaticEnum<ECMAggressiveMoveDirection>(), GoalDirectionTag),
-        ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, 2, PlanarVelocityScale, PlanarVelocityTag),
-        ULearningAgentsObservations::SpecifyFloatObservation(InObservationSchema, YawAngularVelocityScale, YawAngularVelocityTag)
-    };
+    const FLearningAgentsObservationSchemaElement Elements[] = {ULearningAgentsObservations::SpecifyEnumObservation(InObservationSchema, StaticEnum<ECMAggressiveMoveDirection>(), GoalDirectionTag),
+         ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, 2, PlanarVelocityScale, PlanarVelocityTag),
+         ULearningAgentsObservations::SpecifyFloatObservation(InObservationSchema, YawAngularVelocityScale, YawAngularVelocityTag)};
 
     OutObservationSchemaElement = ULearningAgentsObservations::SpecifyStructObservationFromArrayViews(InObservationSchema, MakeArrayView(ElementNames), MakeArrayView(Elements), MovementObservationTag);
 }
@@ -73,11 +72,9 @@ void UCMAggressiveLearningInteractor::GatherAgentObservation_Implementation(FLea
 
     const float PlanarVelocity[] = {static_cast<float>(LocalVelocity.X), static_cast<float>(LocalVelocity.Y)};
     const FName ElementNames[] = {GoalDirectionTag, PlanarVelocityTag, YawAngularVelocityTag};
-    const FLearningAgentsObservationObjectElement Elements[] = {
-        ULearningAgentsObservations::MakeEnumObservation(InObservationObject, StaticEnum<ECMAggressiveMoveDirection>(), static_cast<uint8>(GoalDirection), GoalDirectionTag),
-        ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, MakeArrayView(PlanarVelocity), PlanarVelocityTag),
-        ULearningAgentsObservations::MakeFloatObservation(InObservationObject, YawAngularVelocity, YawAngularVelocityTag)
-    };
+    const FLearningAgentsObservationObjectElement Elements[] = {ULearningAgentsObservations::MakeEnumObservation(InObservationObject, StaticEnum<ECMAggressiveMoveDirection>(), static_cast<uint8>(GoalDirection), GoalDirectionTag),
+         ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, MakeArrayView(PlanarVelocity), PlanarVelocityTag),
+         ULearningAgentsObservations::MakeFloatObservation(InObservationObject, YawAngularVelocity, YawAngularVelocityTag)};
 
     OutObservationObjectElement = ULearningAgentsObservations::MakeStructObservationFromArrayViews(InObservationObject, MakeArrayView(ElementNames), MakeArrayView(Elements), MovementObservationTag);
 }

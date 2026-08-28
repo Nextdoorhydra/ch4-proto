@@ -8,19 +8,12 @@
 // 몸통 로컬 입력 방향과 크기를 월드 평면 임펄스로 변환한다.
 FVector CMAIFixedLegActuation::CalculateWorldImpulse(const FTransform& BodyTransform, const FVector& LocalImpulseDirection, float ImpulseMagnitude)
 {
-    const FVector PlanarLocalDirection(
-        LocalImpulseDirection.X,
-        LocalImpulseDirection.Y,
-        0.0f
-    );
+    const FVector PlanarLocalDirection(LocalImpulseDirection.X, LocalImpulseDirection.Y, 0.0f);
     if (PlanarLocalDirection.IsNearlyZero() || ImpulseMagnitude <= 0.0f)
         return FVector::ZeroVector;
 
-    FVector WorldDirection = BodyTransform.TransformVectorNoScale(
-        PlanarLocalDirection.GetSafeNormal()
-    );
+    FVector WorldDirection = BodyTransform.TransformVectorNoScale(PlanarLocalDirection.GetSafeNormal());
     WorldDirection.Z = 0.0f;
-
     return WorldDirection.GetSafeNormal() * ImpulseMagnitude;
 }
 
@@ -57,6 +50,7 @@ void UCMAIFixedLegActuatorComponent::ResetCooldowns()
 bool UCMAIFixedLegActuatorComponent::IsLegReady(int32 LegIndex) const
 {
     const UWorld* World = GetWorld();
+
     return World && NextAvailableTimes.IsValidIndex(LegIndex) && World->GetTimeSeconds() >= NextAvailableTimes[LegIndex];
 }
 
@@ -72,12 +66,7 @@ bool UCMAIFixedLegActuatorComponent::TryActivateLeg(int32 LegIndex, UPrimitiveCo
         return false;
     }
 
-    const FVector WorldImpulse =
-        CMAIFixedLegActuation::CalculateWorldImpulse(
-            Body->GetComponentTransform(),
-            LocalImpulseDirection,
-            Settings.ImpulseMagnitude
-        );
+    const FVector WorldImpulse = CMAIFixedLegActuation::CalculateWorldImpulse(Body->GetComponentTransform(), LocalImpulseDirection, Settings.ImpulseMagnitude);
     if (WorldImpulse.IsNearlyZero())
         return false;
 
@@ -86,18 +75,13 @@ bool UCMAIFixedLegActuatorComponent::TryActivateLeg(int32 LegIndex, UPrimitiveCo
         return false;
 
     Body->AddImpulseAtLocation(WorldImpulse, GroundHit.ImpactPoint);
-    NextAvailableTimes[LegIndex] = World->GetTimeSeconds()
-        + FMath::Max(Settings.CooldownSeconds, 0.0f);
+    NextAvailableTimes[LegIndex] = World->GetTimeSeconds() + FMath::Max(Settings.CooldownSeconds, 0.0f);
 
     OutResult.LegIndex = LegIndex;
     OutResult.WorldImpulse = WorldImpulse;
     OutResult.ApplicationLocation = GroundHit.ImpactPoint;
-    OutResult.YawAngularImpulse =
-        CMAIFixedLegActuation::CalculateYawAngularImpulse(
-            Body->GetCenterOfMass(),
-            GroundHit.ImpactPoint,
-            WorldImpulse
-        );
+    OutResult.YawAngularImpulse = CMAIFixedLegActuation::CalculateYawAngularImpulse(Body->GetCenterOfMass(), GroundHit.ImpactPoint, WorldImpulse);
+
     return true;
 }
 
@@ -112,8 +96,7 @@ void UCMAIFixedLegActuatorComponent::LimitPlanarSpeed(UPrimitiveComponent* Body,
     if (PlanarVelocity.SizeSquared() <= FMath::Square(MaxPlanarSpeed))
         return;
 
-    const FVector LimitedPlanarVelocity =
-        PlanarVelocity.GetSafeNormal() * MaxPlanarSpeed;
+    const FVector LimitedPlanarVelocity = PlanarVelocity.GetSafeNormal() * MaxPlanarSpeed;
     Velocity.X = LimitedPlanarVelocity.X;
     Velocity.Y = LimitedPlanarVelocity.Y;
     Body->SetPhysicsLinearVelocity(Velocity);
@@ -130,13 +113,11 @@ bool UCMAIFixedLegActuatorComponent::FindGroundContact(const USceneComponent& Co
     }
 
     const FVector Start = ContactPoint.GetComponentLocation();
-    const FVector End = Start - FVector::UpVector
-        * FMath::Max(Settings.GroundContactDistance, 0.0f);
+    const FVector End = Start - FVector::UpVector * FMath::Max(Settings.GroundContactDistance, 0.0f);
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(Owner);
 
     if (!World->SweepSingleByChannel(OutHit, Start, End, FQuat::Identity, Settings.GroundTraceChannel, FCollisionShape::MakeSphere(Settings.GroundCheckRadius), QueryParams))
         return false;
-
     return OutHit.ImpactNormal.Z >= Settings.MinimumGroundNormalZ;
 }

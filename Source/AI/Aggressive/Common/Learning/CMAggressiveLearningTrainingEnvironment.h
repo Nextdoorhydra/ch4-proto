@@ -76,13 +76,13 @@ namespace CMAggressiveLearningReward
 
     /** 도착, 전복, 제한시간을 기준으로 에피소드 완료 상태를 결정한다. */
     AI_API ELearningAgentsCompletion ResolveEpisodeCompletion(bool bReachedGoal, float UprightDot, float EpisodeTime, const FCMAggressiveLearningRewardSettings& Settings);
-}
+} // namespace CMAggressiveLearningReward
 
 namespace CMAggressiveLearningGoal
 {
     /** 시작 자세를 기준으로 지정한 로컬 방향의 월드 목표 위치를 계산한다. */
     AI_API FVector ResolveWorldGoalLocation(const FTransform& StartTransform, ECMAggressiveMoveDirection Direction, float GoalDistance);
-}
+} // namespace CMAggressiveLearningGoal
 
 namespace CMAggressiveLearningEpisode
 {
@@ -91,7 +91,7 @@ namespace CMAggressiveLearningEpisode
 
     /** 최근 자연 종료 에피소드 기록에서 목표 도착 비율을 계산한다. */
     AI_API float CalculateArrivalRate(const TArray<uint8>& ArrivalHistory);
-}
+} // namespace CMAggressiveLearningEpisode
 
 /** 공격적 AI 이동 정책의 보상, 완료 판정, 물리 상태 초기화를 담당한다. */
 UCLASS(BlueprintType)

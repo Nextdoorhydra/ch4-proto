@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Pawn.h"
+#include "Aggressive/Common/Core/CMAggressivePawnBase.h"
 
 #include "Aggressive/Common/Core/CMAggressiveAITypes.h"
 #include "Aggressive/Common/Core/CMAggressiveMovementAgent.h"
@@ -9,16 +9,18 @@
 #include "CMTetraPawn.generated.h"
 
 class UBoxComponent;
+class UCMAggressiveBehaviorComponent;
 class UCMAggressiveAccelerationMovementComponent;
 class UCMAggressiveMovementCommandComponent;
 class UCMAggressiveOmnidirectionalPathComponent;
+class UCMAggressiveSightComponent;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 
 /** 큐브 몸통 하나와 시각 다리 네 개로 학습된 가속 이동을 수행하는 Tetra AI다. */
 UCLASS()
-class AI_API ACMTetraPawn : public APawn, public ICMAggressiveMovementAgent
+class AI_API ACMTetraPawn : public ACMAggressivePawnBase, public ICMAggressiveMovementAgent
 {
     GENERATED_BODY()
 
@@ -51,11 +53,15 @@ public:
     virtual UPrimitiveComponent* GetAggressiveMovementBody() const override;
     virtual FVector GetAggressiveNavigationReferenceLocation() const override;
     virtual void HandleAggressivePathMoveCompleted(ECMAggressivePathMoveResult Result) override;
+    virtual void StopAggressiveMovementForReaction() override;
 
     UPROPERTY(BlueprintAssignable, Category = "Aggressive AI|Tetra|Path Movement")
     FCMAggressivePathMoveCompletedSignature OnPathMoveCompleted;
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Behavior")
+    TObjectPtr<UCMAggressiveBehaviorComponent> Behavior;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Body")
     TObjectPtr<UBoxComponent> PhysicsRoot;
 
@@ -76,6 +82,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Movement")
     TObjectPtr<UCMAggressiveOmnidirectionalPathComponent> PathMovement;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Sight")
+    TObjectPtr<UCMAggressiveSightComponent> Sight;
 
 private:
     void AddVisualLeg(const TCHAR* Name, const FVector& RelativeContactLocation, UStaticMesh* CubeMesh);

@@ -14,8 +14,7 @@ class ULearningAgentsManager;
  * 바뀌면 해당 수에 맞는 새 Interactor와 정책을 만들어야 한다.
  */
 UCLASS(BlueprintType)
-class AI_API UCMAggressiveLearningInteractor
-    : public ULearningAgentsInteractor
+class AI_API UCMAggressiveLearningInteractor : public ULearningAgentsInteractor
 {
     GENERATED_BODY()
 

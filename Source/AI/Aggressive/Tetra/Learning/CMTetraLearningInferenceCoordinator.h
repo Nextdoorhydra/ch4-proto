@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Aggressive/Common/Core/CMAggressiveAITypes.h"
 
 #include "CMTetraLearningInferenceCoordinator.generated.h"
 
@@ -37,6 +38,21 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Tetra|Inference")
     bool StartInterference(ACMTetraPawn* InInferenceAgent, APawn* InTargetPlayer);
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Tetra|Inference")
+    bool StartInferencePath(ACMTetraPawn* InInferenceAgent, FVector WorldGoal, float AcceptanceRadius = 50.0f);
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Tetra|Inference")
+    bool UpdateInferenceGoal(FVector WorldGoal);
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Tetra|Inference")
+    void StopInferencePath();
+
+    UFUNCTION(BlueprintPure, Category = "Aggressive AI|Tetra|Inference")
+    bool IsInferencePathRunning() const
+    {
+        return bInferencePathRunning;
+    }
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Tetra|Inference")
     bool StartInterferenceWithNearestPlayer(ACMTetraPawn* InInferenceAgent);
@@ -100,7 +116,7 @@ protected:
     float ChaseRepathDistance = 75.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Inference|Stuck Recovery", meta = (ClampMin = "0.1"))
-    float StuckDetectionSeconds = 1.5f;
+    float StuckDetectionSeconds = 4.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Inference|Stuck Recovery", meta = (ClampMin = "0.0"))
     float StuckMovementDistance = 15.0f;
@@ -124,10 +140,15 @@ private:
     void ResetChaseProgress();
     void SetCodePlanarVelocity(FVector Direction, float Speed);
     void ApplyKnockbackToTarget();
+    void RunPathInferenceStep();
+    void FinishInferencePath();
     AActor* GetActiveTarget() const;
     APawn* FindNearestPlayerPawn(const ACMTetraPawn* ReferenceAgent) const;
     UFUNCTION()
     void HandleAgentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
+
+    UFUNCTION()
+    void HandleInferencePathCompleted(ECMAggressivePathMoveResult Result);
 
     UPROPERTY(Transient)
     TObjectPtr<UCMTetraLearningInteractor> Interactor;
@@ -146,5 +167,8 @@ private:
     double ChaseProgressStartTime = 0.0;
     float TestTargetAcceptanceRadius = 50.0f;
     bool bChasingTestTarget = false;
+    bool bInferencePathRunning = false;
+    FVector ActiveInferenceGoal = FVector::ZeroVector;
+    float ActiveInferenceAcceptanceRadius = 50.0f;
     FTimerHandle InterferenceTimerHandle;
 };

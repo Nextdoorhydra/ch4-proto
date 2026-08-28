@@ -33,6 +33,9 @@ public:
 
     // 경로 이동이 끝났을 때 선택적 완료 통지를 처리한다.
     virtual void HandleAggressivePathMoveCompleted(ECMAggressivePathMoveResult Result) {}
+
+    // 넉백 같은 GAS 반응이 기존 이동 구동을 선점할 때 호출한다.
+    virtual void StopAggressiveMovementForReaction() {}
 };
 
 /** 실제 다리 임펄스로 움직이는 공격적 AI만 구현하는 다리 구동 계약이다. */

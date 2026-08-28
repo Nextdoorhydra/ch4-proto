@@ -77,11 +77,9 @@ struct AI_API FCMAggressiveMovementGoal
     FVector WorldLocation = FVector::ZeroVector;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI")
-    ECMAggressiveMoveDirection LocalDirection =
-        ECMAggressiveMoveDirection::None;
+    ECMAggressiveMoveDirection LocalDirection = ECMAggressiveMoveDirection::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI",
-        meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI", meta = (ClampMin = "0.0"))
     float AcceptanceRadius = 0.0f;
 };
 
@@ -91,24 +89,19 @@ struct AI_API FCMAIFixedLegActuationSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI",
-        meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI", meta = (ClampMin = "0.0"))
     float ImpulseMagnitude = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI",
-        meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI", meta = (ClampMin = "0.0"))
     float CooldownSeconds = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI",
-        meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI", meta = (ClampMin = "0.0"))
     float GroundCheckRadius = 12.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI",
-        meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI", meta = (ClampMin = "0.0"))
     float GroundContactDistance = 8.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI",
-        meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float MinimumGroundNormalZ = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aggressive AI")
@@ -150,4 +143,4 @@ namespace CMAggressiveDirection
 
     /** 지정한 방향의 로그용 한글 이름을 반환한다. */
     AI_API const TCHAR* GetKoreanDisplayName(ECMAggressiveMoveDirection Direction);
-}
+} // namespace CMAggressiveDirection

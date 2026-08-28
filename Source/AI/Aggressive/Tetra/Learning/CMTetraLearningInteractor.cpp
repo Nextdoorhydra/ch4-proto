@@ -16,7 +16,7 @@ namespace
     const FName TetraPlanarVelocityTag(TEXT("PlanarVelocity"));
     const FName TetraMovementObservationTag(TEXT("TetraMovementObservation"));
     const FName TetraAccelerationActionTag(TEXT("AccelerationAction"));
-}
+} // namespace
 
 // Tetra AI 전용 관측과 행동 스키마를 가진 Interactor를 생성한다.
 UCMTetraLearningInteractor* UCMTetraLearningInteractor::MakeTetraInteractor(ULearningAgentsManager*& InManager, FName Name)
@@ -30,6 +30,7 @@ UCMTetraLearningInteractor* UCMTetraLearningInteractor::MakeTetraInteractor(ULea
         return nullptr;
 
     Interactor->SetupInteractor(InManager);
+
     return Interactor->IsSetup() ? Interactor : nullptr;
 }
 
@@ -47,11 +48,8 @@ FLearningAgentsPolicySettings UCMTetraLearningInteractor::GetPolicySettings()
 // 목표 방향과 현재 평면 속도를 관측으로 정의한다.
 void UCMTetraLearningInteractor::SpecifyAgentObservation_Implementation(FLearningAgentsObservationSchemaElement& OutObservationSchemaElement, ULearningAgentsObservationSchema* InObservationSchema)
 {
-    const FName ElementNames[] = { TetraGoalDirectionTag, TetraPlanarVelocityTag };
-    const FLearningAgentsObservationSchemaElement Elements[] = {
-        ULearningAgentsObservations::SpecifyEnumObservation(InObservationSchema, StaticEnum<ECMAggressiveMoveDirection>(), TetraGoalDirectionTag),
-        ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, 2, 1.0f, TetraPlanarVelocityTag)
-    };
+    const FName ElementNames[] = {TetraGoalDirectionTag, TetraPlanarVelocityTag};
+    const FLearningAgentsObservationSchemaElement Elements[] = {ULearningAgentsObservations::SpecifyEnumObservation(InObservationSchema, StaticEnum<ECMAggressiveMoveDirection>(), TetraGoalDirectionTag), ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, 2, 1.0f, TetraPlanarVelocityTag)};
     OutObservationSchemaElement = ULearningAgentsObservations::SpecifyStructObservationFromArrayViews(InObservationSchema, MakeArrayView(ElementNames), MakeArrayView(Elements), TetraMovementObservationTag);
 }
 
@@ -73,12 +71,10 @@ void UCMTetraLearningInteractor::GatherAgentObservation_Implementation(FLearning
         LocalVelocity = BodyYaw.UnrotateVector(Body->GetPhysicsLinearVelocity()) / SafeMaximumSpeed;
     }
 
-    const float PlanarVelocity[] = { static_cast<float>(LocalVelocity.X), static_cast<float>(LocalVelocity.Y) };
-    const FName ElementNames[] = { TetraGoalDirectionTag, TetraPlanarVelocityTag };
-    const FLearningAgentsObservationObjectElement Elements[] = {
-        ULearningAgentsObservations::MakeEnumObservation(InObservationObject, StaticEnum<ECMAggressiveMoveDirection>(), static_cast<uint8>(GoalDirection), TetraGoalDirectionTag),
-        ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, MakeArrayView(PlanarVelocity), TetraPlanarVelocityTag)
-    };
+    const float PlanarVelocity[] = {static_cast<float>(LocalVelocity.X), static_cast<float>(LocalVelocity.Y)};
+    const FName ElementNames[] = {TetraGoalDirectionTag, TetraPlanarVelocityTag};
+    const FLearningAgentsObservationObjectElement Elements[] = {ULearningAgentsObservations::MakeEnumObservation(InObservationObject, StaticEnum<ECMAggressiveMoveDirection>(), static_cast<uint8>(GoalDirection), TetraGoalDirectionTag),
+         ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, MakeArrayView(PlanarVelocity), TetraPlanarVelocityTag)};
     OutObservationObjectElement = ULearningAgentsObservations::MakeStructObservationFromArrayViews(InObservationObject, MakeArrayView(ElementNames), MakeArrayView(Elements), TetraMovementObservationTag);
 }
 

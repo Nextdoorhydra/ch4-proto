@@ -3,9 +3,11 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveAccelerationMovementComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
+#include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -23,6 +25,10 @@ ACMTetraPawn::ACMTetraPawn()
     PrimaryActorTick.bStartWithTickEnabled = false;
     bReplicates = true;
     SetReplicateMovement(true);
+    ConfiguredKnockbackDistanceCm = 200.0f;
+
+    Behavior = CreateDefaultSubobject<UCMAggressiveBehaviorComponent>(TEXT("Behavior"));
+    Behavior->ConfigureProfile(ECMAggressiveBehaviorProfile::Tetra);
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
@@ -49,6 +55,10 @@ ACMTetraPawn::ACMTetraPawn()
     PathMovement->SetNavigationAgentName(TEXT("TetraAI"));
     PathMovement->SetRebuildPathWhenIntermediatePointPassed(true);
 
+    Sight = CreateDefaultSubobject<UCMAggressiveSightComponent>(TEXT("Sight"));
+    Sight->SetupAttachment(PhysicsRoot);
+    Sight->SetSightDefaults(1000.0f, 100.0f, 180.0f);
+
     AddVisualLeg(TEXT("FrontLeft"), FVector(35.0f, -45.0f, -50.0f), CubeMeshAsset.Object);
     AddVisualLeg(TEXT("FrontRight"), FVector(35.0f, 45.0f, -50.0f), CubeMeshAsset.Object);
     AddVisualLeg(TEXT("RearLeft"), FVector(-35.0f, -45.0f, -50.0f), CubeMeshAsset.Object);
@@ -71,6 +81,7 @@ bool ACMTetraPawn::SetManualMoveDirection(ECMAggressiveMoveDirection Direction)
     const FVector LocalDirection = CMAggressiveDirection::ToLocalUnitVector(Direction);
     const float BodyYawRadians = FMath::DegreesToRadians(PhysicsRoot ? PhysicsRoot->GetComponentRotation().Yaw : GetActorRotation().Yaw);
     AccelerationMovement->SetAccelerationInput(FQuat(FVector::UpVector, BodyYawRadians).RotateVector(LocalDirection));
+
     return true;
 }
 
@@ -92,6 +103,12 @@ void ACMTetraPawn::StopPathMove()
 {
     if (PathMovement)
         PathMovement->StopPathMove();
+}
+
+void ACMTetraPawn::StopAggressiveMovementForReaction()
+{
+    StopPathMove();
+    StopManualMovement();
 }
 
 // Tetra AI 몸통을 구성하는 1m 큐브 수를 반환한다.

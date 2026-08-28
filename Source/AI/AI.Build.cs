@@ -9,13 +9,18 @@ public class AI : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new[]
 		{
+			"AIModule",
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"GameplayAbilities",
+			"GameplayTags",
+			"GameplayTasks",
 			"Learning",
 			"LearningAgents",
 			"LearningAgentsTraining",
 			"LearningTraining",
+			"MotionWarping",
 			"NavigationSystem",
 			"Shared",
 			"Chimera"

@@ -11,11 +11,7 @@ ECMAggressiveMoveDirection CMAggressiveMovementCommand::ResolveGoalDirection(con
     const float AcceptanceRadius = FMath::Max(Goal.AcceptanceRadius, 0.0f);
     if (WorldDirection.SizeSquared() <= FMath::Square(AcceptanceRadius))
         return ECMAggressiveMoveDirection::None;
-
-    return CMAggressiveDirection::QuantizeWorldDirection8(
-        WorldDirection,
-        BodyRotation
-    );
+    return CMAggressiveDirection::QuantizeWorldDirection8(WorldDirection, BodyRotation);
 }
 
 // 다리별 활성 신호에서 임계값 이상인 다리 인덱스를 선택한다.
@@ -40,6 +36,13 @@ UCMAggressiveMovementCommandComponent::UCMAggressiveMovementCommandComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
     PrimaryComponentTick.bStartWithTickEnabled = false;
+}
+
+void UCMAggressiveMovementCommandComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    LegActuationAgent = Cast<ICMAggressiveLegActuationAgent>(GetOwner());
+    CachedMovementAgent = Cast<ICMAggressiveMovementAgent>(GetOwner());
 }
 
 // 월드 위치와 허용 반경으로 이동 목표를 설정한다.
@@ -67,12 +70,8 @@ ECMAggressiveMoveDirection UCMAggressiveMovementCommandComponent::RefreshGoalDir
     if (!bHasMovementGoal || !TryGetBodyState(BodyLocation, BodyRotation))
         return MovementGoal.LocalDirection;
 
-    MovementGoal.LocalDirection =
-        CMAggressiveMovementCommand::ResolveGoalDirection(
-            BodyLocation,
-            BodyRotation,
-            MovementGoal
-        );
+    MovementGoal.LocalDirection = CMAggressiveMovementCommand::ResolveGoalDirection(BodyLocation, BodyRotation, MovementGoal);
+
     return MovementGoal.LocalDirection;
 }
 
@@ -80,7 +79,7 @@ ECMAggressiveMoveDirection UCMAggressiveMovementCommandComponent::RefreshGoalDir
 int32 UCMAggressiveMovementCommandComponent::ApplyLegActivationSignals(const TArray<float>& LegActivationSignals)
 {
     AActor* Owner = GetOwner();
-    ICMAggressiveLegActuationAgent* LegAgent = Cast<ICMAggressiveLegActuationAgent>(Owner);
+    ICMAggressiveLegActuationAgent* LegAgent = LegActuationAgent;
     if (!Owner || !Owner->HasAuthority() || !LegAgent)
     {
         return 0;
@@ -89,7 +88,6 @@ int32 UCMAggressiveMovementCommandComponent::ApplyLegActivationSignals(const TAr
     TArray<int32> ActiveLegIndices;
     if (!CMAggressiveMovementCommand::SelectActiveLegIndices(LegActivationSignals, LegAgent->GetLegCount(), LegActivationThreshold, ActiveLegIndices))
         return 0;
-
     return LegAgent->ActivateLegs(ActiveLegIndices);
 }
 
@@ -116,12 +114,13 @@ FCMAggressiveMovementGoal UCMAggressiveMovementCommandComponent::GetMovementGoal
 // 소유 Pawn의 몸통 위치와 회전을 가져온다.
 bool UCMAggressiveMovementCommandComponent::TryGetBodyState(FVector& OutLocation, FQuat& OutRotation) const
 {
-    const ICMAggressiveMovementAgent* Agent = Cast<ICMAggressiveMovementAgent>(GetOwner());
+    const ICMAggressiveMovementAgent* Agent = CachedMovementAgent;
     const UPrimitiveComponent* Body = Agent ? Agent->GetAggressiveMovementBody() : nullptr;
     if (!Body)
         return false;
 
     OutLocation = Body->GetComponentLocation();
     OutRotation = Body->GetComponentQuat();
+
     return true;
 }

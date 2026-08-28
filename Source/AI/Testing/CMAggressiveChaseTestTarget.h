@@ -13,7 +13,7 @@ namespace CMAggressiveChaseTest
 {
     /** NavMesh 후보가 순간이동 거리와 높이 범위 안에 있는지 반환한다. */
     AI_API bool IsTeleportCandidateWithinBounds(const FVector& OriginNavLocation, const FVector& CandidateNavLocation, float MinimumDistance, float MaximumDistance, float MaximumHeightDifference);
-}
+} // namespace CMAggressiveChaseTest
 
 /** 공격적 AI와 접촉하면 가까운 안전한 NavMesh 위치로 순간이동하는 추격 테스트 액터다. */
 UCLASS(BlueprintType)
