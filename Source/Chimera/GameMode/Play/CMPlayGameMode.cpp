@@ -4,13 +4,16 @@
 #include "GameMode/StageRoute/CMStageRouteDefinition.h"
 #include "GameMode/StageRoute/CMStageRouteSubsystem.h"
 #include "Stage/CMStageDirector.h"
+#include "Stage/Room/CMRoomStreamingController.h"
 #include "AsyncLoad/CMStageLoadLog.h"
 #include "AsyncLoad/CMStageLoadBarrierComponent.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerStart.h"
 #include "TimerManager.h"
 
 // 플레이 전용 GameState와 스테이지 간 Seamless Travel 설정
@@ -173,6 +176,7 @@ void ACMPlayGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
     StageLoadBarrier->CancelBarrier();
     GetWorldTimerManager().ClearTimer(StartingPresentationTimeoutHandle);
     GetWorldTimerManager().ClearTimer(StageLoopRestartTimerHandle);
+    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
     GetWorldTimerManager().ClearTimer(DirectStageJoinGraceTimerHandle);
     for (TPair<FString, FCMDisconnectedPlayerRecord>& Pair : DisconnectedPlayers)
     {
@@ -545,18 +549,157 @@ void ACMPlayGameMode::BindSharedChimeraEvents()
     {
         SharedChimera->OnAllSegmentsDead.AddUniqueDynamic(
             this, &ThisClass::HandleAllSegmentsDead);
+        UE_LOG(LogChimeraStageLoad, Display,
+            TEXT("공용 키메라 전체 사망 이벤트를 체크포인트 리스폰에 연결했습니다."));
+        return;
     }
+
+    UE_LOG(LogChimeraStageLoad, Warning,
+        TEXT("공용 키메라 전체 사망 이벤트를 연결하지 못했습니다. Authority=%d PlayState=%d SharedChimera=%d"),
+        HasAuthority(),
+        IsValid(PlayState),
+        IsValid(SharedChimera));
 }
 
-// 실제 플레이 중 모든 활성 Segment가 사망하면 전체 Defeat 확정
+// 실제 플레이 중 모든 활성 Segment가 사망하면 체크포인트 복귀 예약
 void ACMPlayGameMode::HandleAllSegmentsDead()
 {
-    const ACMPlayGameState* PlayState = CachedPlayGameState;
-    if (HasAuthority() && PlayState
-        && PlayState->GetPlayPhase() == ECMPlayPhase::Playing)
+    if (!HasAuthority())
     {
-        ConfirmGameDefeat();
+        return;
     }
+
+    const ACMPlayGameState* PlayState = CachedPlayGameState;
+    const int32 PhaseValue = PlayState
+        ? static_cast<int32>(PlayState->GetPlayPhase())
+        : INDEX_NONE;
+    if (!PlayState || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    {
+        UE_LOG(LogChimeraStageLoad, Error,
+            TEXT("전체 몸통 사망을 감지했지만 실제 플레이 단계가 아니어서 체크포인트 리스폰을 시작하지 않습니다. Phase=%d"),
+            PhaseValue);
+        return;
+    }
+
+    UE_LOG(LogChimeraStageLoad, Warning,
+        TEXT("전체 몸통 사망을 감지해 체크포인트 리스폰을 예약합니다. Phase=%d"),
+        PhaseValue);
+    ScheduleCheckpointRespawn();
+}
+
+bool ACMPlayGameMode::TryRetryGame(APlayerController* RequestingPlayer)
+{
+    if (!HasAuthority()
+        || GetNetMode() != NM_ListenServer
+        || !IsValid(RequestingPlayer)
+        || !RequestingPlayer->IsLocalController())
+    {
+        return false;
+    }
+
+    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
+    bCheckpointRespawnPending = false;
+    return RespawnAtActiveCheckpoint();
+}
+
+bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
+{
+#if !UE_BUILD_SHIPPING
+    if (!HasAuthority())
+    {
+        return false;
+    }
+
+    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
+    bCheckpointRespawnPending = false;
+    return RespawnAtActiveCheckpoint();
+#else
+    return false;
+#endif
+}
+
+void ACMPlayGameMode::ScheduleCheckpointRespawn()
+{
+    if (!HasAuthority() || bCheckpointRespawnPending)
+    {
+        return;
+    }
+
+    bCheckpointRespawnPending = true;
+    if (CheckpointRespawnDelay <= 0.0f)
+    {
+        RespawnAtActiveCheckpoint();
+        return;
+    }
+    GetWorldTimerManager().SetTimer(
+        CheckpointRespawnTimerHandle,
+        this,
+        &ThisClass::HandleCheckpointRespawnTimer,
+        CheckpointRespawnDelay,
+        false);
+}
+
+void ACMPlayGameMode::HandleCheckpointRespawnTimer()
+{
+    RespawnAtActiveCheckpoint();
+}
+
+bool ACMPlayGameMode::RespawnAtActiveCheckpoint()
+{
+    bCheckpointRespawnPending = false;
+
+    ACMPlayGameState* PlayState = CachedPlayGameState;
+    ACMChimera* SharedChimera = PlayState ? PlayState->SharedChimera : nullptr;
+    if (!HasAuthority() || !IsValid(SharedChimera))
+    {
+        return false;
+    }
+
+    ACMRoomStreamingController* RoomController = nullptr;
+    int32 ControllerCount = 0;
+    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
+    {
+        RoomController = *It;
+        ++ControllerCount;
+    }
+
+    FTransform CheckpointTransform;
+    bool bUsingRoomCheckpoint = ControllerCount == 1
+        && RoomController
+        && RoomController->TryGetActiveCheckpointTransform(CheckpointTransform);
+    if (!bUsingRoomCheckpoint)
+    {
+        APlayerStart* FallbackStart = nullptr;
+        for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
+        {
+            if (!FallbackStart)
+            {
+                FallbackStart = *It;
+            }
+            if (!SharedChimeraPlayerStartTag.IsNone()
+                && It->PlayerStartTag == SharedChimeraPlayerStartTag)
+            {
+                FallbackStart = *It;
+                break;
+            }
+        }
+        if (!FallbackStart)
+        {
+            UE_LOG(LogChimeraStageLoad, Error,
+                TEXT("체크포인트와 PlayerStart가 없어 리스폰할 수 없습니다."));
+            return false;
+        }
+        CheckpointTransform = FallbackStart->GetActorTransform();
+    }
+
+    SharedChimera->RestoreForCheckpointRespawn();
+    const bool bTeleported = SharedChimera->TeleportAssembly(CheckpointTransform);
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("키메라를 체크포인트로 복귀시켰습니다. Source=%s Room=%s Success=%d"),
+        bUsingRoomCheckpoint ? TEXT("RoomCheckpoint") : TEXT("PlayerStart"),
+        RoomController ? *RoomController->GetCurrentRoomId().ToString() : TEXT("None"),
+        bTeleported);
+    return bTeleported;
 }
 
 // 현재 요청과 성공 보고자를 검증하고 전원 완료 시 Blocking Phase를 해제

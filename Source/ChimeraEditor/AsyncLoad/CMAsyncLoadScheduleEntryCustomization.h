@@ -23,9 +23,11 @@ public:
 
 private:
 	void HandleGroupSelected(TSharedPtr<FName> SelectedGroup, ESelectInfo::Type SelectInfo);
+	FText GetAssetIdText() const;
 	FText GetSelectedGroupText() const;
 	bool ResolveChimeraSchedules(TSharedRef<IPropertyHandle> StructPropertyHandle);
 
+	TSharedPtr<IPropertyHandle> EntryHandle;
 	TSharedPtr<IPropertyHandle> GroupIdHandle;
 	TSharedPtr<IPropertyUtilities> PropertyUtilities;
 	TArray<TWeakObjectPtr<class UCMStageLoadSchedule>> Schedules;

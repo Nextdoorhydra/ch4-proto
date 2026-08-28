@@ -43,6 +43,10 @@ public:
     virtual void PostLogin(APlayerController* NewPlayer) override;
     virtual void Logout(AController* Exiting) override;
     virtual void RestartPlayer(AController* NewPlayer) override;
+    virtual bool TryRetryGame(APlayerController* RequestingPlayer) override;
+
+    // Non-Shipping 치트 요청에서 최신 활성 체크포인트로 즉시 복귀
+    bool TryCheatRespawnAtLatestCheckpoint();
 
     // 전역 플레이 Phase·제한 시간 변경 처리
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Game Flow")
@@ -129,6 +133,11 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Testing", meta = (ClampMin = "0.0"))
     float LoopingStageRestartDelay = 1.0f;
 
+    // 전멸 후 체크포인트로 복귀하기 전 연출 대기 시간
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Checkpoint", meta = (ClampMin = "0.0"))
+    float CheckpointRespawnDelay = 1.0f;
+
     // 에디터에서 Route를 직접 실행할 때 추가 플레이어 접속을 기다리는 시간, 0이면 즉시 시작
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Testing", meta = (ClampMin = "0.0"))
     float DirectStageJoinGracePeriod = 0.0f;
@@ -148,6 +157,10 @@ private:
 
     UFUNCTION()
     void HandleAllSegmentsDead();
+
+    bool RespawnAtActiveCheckpoint();
+    void ScheduleCheckpointRespawn();
+    void HandleCheckpointRespawnTimer();
 
     bool PublishStageLoadRequest(FPrimaryAssetId ScheduleId);
     bool StartStageLoadRequest(const FCMQueuedStageLoadRequest& Request);
@@ -201,9 +214,11 @@ private:
     TArray<FCMQueuedStageLoadRequest> QueuedStageLoadRequests;
     FTimerHandle StartingPresentationTimeoutHandle;
     FTimerHandle StageLoopRestartTimerHandle;
+    FTimerHandle CheckpointRespawnTimerHandle;
     FTimerHandle DirectStageJoinGraceTimerHandle;
     bool bStageLoadReady = false;
     bool bStageLoopRestartScheduled = false;
+    bool bCheckpointRespawnPending = false;
     bool bDirectStageRoute = false;
     bool bDirectStageJoinGraceElapsed = true;
     TMap<FString, FCMDisconnectedPlayerRecord> DisconnectedPlayers;

@@ -38,6 +38,14 @@ void KillAllSegments(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+void RespawnAtLatestCheckpoint(const TArray<FString>& Args, UWorld* World)
+{
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatRespawnAtCheckpoint();
+    }
+}
+
 void KillSegment(UWorld* World, int32 SegmentIndex)
 {
     if (ACMPlayerController* Controller = FindLocalController(World))
@@ -172,6 +180,14 @@ FAutoConsoleCommandWithWorldAndArgs KillAllSegmentsCommand(
     TEXT("Kills every living Chimera body segment on the server."),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &KillAllSegments
+    )
+);
+
+FAutoConsoleCommandWithWorldAndArgs RespawnAtLatestCheckpointCommand(
+    TEXT("CM.Checkpoint"),
+    TEXT("Restores the shared Chimera at the latest active room checkpoint."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &RespawnAtLatestCheckpoint
     )
 );
 
