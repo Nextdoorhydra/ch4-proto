@@ -7,11 +7,13 @@
 #include "CMHazardComponent.generated.h"
 
 class ACMPartActorBase;
+class ACMChimera;
+class UPrimitiveComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCMHazardTargetSignature, AActor*, TargetActor);
 
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
-// 접촉한 팔과 다리에 코드 기반 내구도 피해 및 런타임 상태 적용
+// 접촉한 팔/다리 또는 몸통 마디에 서버 권한으로 장애물 효과 적용
 class CHIMERA_API UCMHazardComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -20,10 +22,14 @@ public:
     UCMHazardComponent();
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Hazard")
-    void NotifyTargetEntered(AActor* TargetActor);
+    void NotifyTargetEntered(
+        AActor* TargetActor,
+        UPrimitiveComponent* TargetComponent = nullptr);
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Hazard")
-    void NotifyTargetExited(AActor* TargetActor);
+    void NotifyTargetExited(
+        AActor* TargetActor,
+        UPrimitiveComponent* TargetComponent = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Hazard")
     void SetHazardEnabled(bool bEnabled);
@@ -37,7 +43,7 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Hazard")
     FCMHazardTargetSignature OnTargetExited;
 
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Hazard")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Hazard")
     FCMPartObstacleEffectConfig PartEffect;
 
 private:
@@ -46,12 +52,26 @@ private:
         int32 OverlapCount = 0;
     };
 
-    ACMPartActorBase* ResolveSupportedPart(AActor* TargetActor) const;
+    struct FTrackedSegment
+    {
+        TWeakObjectPtr<ACMChimera> Chimera;
+        int32 SegmentIndex = INDEX_NONE;
+        int32 OverlapCount = 0;
+    };
+
+    ACMPartActorBase* ResolveSupportedPart(
+        AActor* TargetActor,
+        const UPrimitiveComponent* TargetComponent) const;
+    int32 ResolveBodySegment(
+        AActor* TargetActor,
+        const UPrimitiveComponent* TargetComponent) const;
     void ApplyConfiguredEffect(ACMPartActorBase& PartActor);
+    void ApplyConfiguredDamage(ACMChimera& Chimera, int32 SegmentIndex);
     void UpdatePeriodicTimer();
     void HandlePeriodicApplication();
 
     bool bHazardEnabled = true;
     TMap<TWeakObjectPtr<ACMPartActorBase>, FTrackedPart> TrackedParts;
+    TMap<TWeakObjectPtr<UPrimitiveComponent>, FTrackedSegment> TrackedSegments;
     FTimerHandle PeriodicTimerHandle;
 };
