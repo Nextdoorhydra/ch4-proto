@@ -15,6 +15,25 @@ void ACMPowerTriggerBase::BeginPlay()
         return;
     }
 
+    RequiredSockets.RemoveAll(
+        [](const TObjectPtr<UCMPowerSocketComponent>& Socket)
+        {
+            return !IsValid(Socket);
+        });
+
+    if (RequiredSockets.IsEmpty())
+    {
+        TArray<UCMPowerSocketComponent*> OwnedSockets;
+        GetComponents(OwnedSockets);
+        for (UCMPowerSocketComponent* Socket : OwnedSockets)
+        {
+            if (IsValid(Socket))
+            {
+                RequiredSockets.Add(Socket);
+            }
+        }
+    }
+
     for (UCMPowerSocketComponent* Socket : RequiredSockets)
     {
         if (Socket)

@@ -9,6 +9,7 @@
 #include "CMChimera.generated.h"
 
 class UStaticMeshComponent;
+class UBoxComponent;
 class USceneComponent;
 class UPhysicsConstraintComponent;
 class USpringArmComponent;
@@ -102,8 +103,13 @@ public:
         bool bPressed
     );
 
-    /** True only for the standard Arm; SpringArm keeps press activation. */
+    // SpringArm을 제외한 디폴트 암 슬롯인지 확인한다.
     bool IsBasicArmPartSlot(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
+
+    // 디폴트 암이 상호작 대상을 잡았다면 해제 공격을 억제한다.
+    bool ShouldActivateBasicArmOnRelease(
         const FCMPartSlotAddress& PartSlotAddress
     ) const;
 
@@ -115,6 +121,21 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     bool IsSegmentAlive(int32 SegmentIndex) const;
+
+    /** Returns the stable body Segment index represented by a hurtbox hit. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Health")
+    int32 GetSegmentIndexFromHurtbox(
+        const UPrimitiveComponent* HitComponent
+    ) const;
+
+    /** Returns the stable Segment index for either its body mesh or hurtbox. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Health")
+    int32 GetSegmentIndexFromDamageComponent(
+        const UPrimitiveComponent* HitComponent
+    ) const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Health")
+    UBoxComponent* GetSegmentHurtbox(int32 SegmentIndex) const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     TArray<FCMBodySegmentHealthState> GetSegmentHealthStates() const;
@@ -300,6 +321,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera")
     TArray<TObjectPtr<UStaticMeshComponent>> BodySegments;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
+        Category = "Chimera|Health")
+    TArray<TObjectPtr<UBoxComponent>> SegmentHurtboxes;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera")

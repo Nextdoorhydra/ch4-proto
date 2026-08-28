@@ -787,6 +787,16 @@ bool ACMChimera::IsBasicArmPartSlot(
         && !AttachedPart->IsA<ACMSpringArmPart>();
 }
 
+bool ACMChimera::ShouldActivateBasicArmOnRelease(
+    const FCMPartSlotAddress& PartSlotAddress
+) const
+{
+    return IsBasicArmPartSlot(PartSlotAddress)
+        && (!MovementCoordinator
+            || !MovementCoordinator->IsArmHoldingInteractable(
+                PartSlotAddress));
+}
+
 void ACMChimera::ClearPressedControlParts()
 {
     if (!HasAuthority())

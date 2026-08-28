@@ -1070,6 +1070,12 @@ void ACMPlayerController::SetSoloControlKeyPressed(
         return;
     }
 
+    if (bPressed && KeyIndex < CMControl::MaxKeysPerPlayer
+        && VisionInputComponent)
+    {
+        VisionInputComponent->SetActiveControlSlot(KeyIndex);
+    }
+
     ServerSetSoloControlKeyPressed(
         KeyIndex,
         bPressed,
@@ -1110,7 +1116,8 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
         {
             const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
             const bool bActivateOnRelease =
-                SharedChimera->IsBasicArmPartSlot(ReleasedPartSlot);
+                SharedChimera->ShouldActivateBasicArmOnRelease(
+                    ReleasedPartSlot);
             SharedChimera->SetPartSlotPressed(ReleasedPartSlot, false);
             if (bActivateOnRelease)
             {

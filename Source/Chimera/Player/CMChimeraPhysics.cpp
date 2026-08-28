@@ -1,5 +1,6 @@
 #include "Player/CMChimera.h"
 
+#include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 
@@ -94,6 +95,9 @@ void ACMChimera::ConfigureSegments()
     for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
     {
         UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        UBoxComponent* SegmentHurtbox = SegmentHurtboxes.IsValidIndex(Index)
+            ? SegmentHurtboxes[Index]
+            : nullptr;
         const bool bIsActive = Index < ActiveSegmentCount;
 
         if (!SegmentBody)
@@ -115,6 +119,14 @@ void ACMChimera::ConfigureSegments()
         );
         SegmentBody->SetMobility(EComponentMobility::Movable);
         SegmentBody->SetSimulatePhysics(bIsActive);
+        if (SegmentHurtbox)
+        {
+            SegmentHurtbox->SetCollisionEnabled(
+                bIsActive
+                    ? ECollisionEnabled::QueryOnly
+                    : ECollisionEnabled::NoCollision
+            );
+        }
         if (bIsActive)
         {
             ConfigureBodyRotationLock(SegmentBody);

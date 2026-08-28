@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Collision/CMCollisionChannels.h"
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 
@@ -58,7 +59,7 @@ public:
     float MaxDistance = 5000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Attack")
-    TEnumAsByte<ECollisionChannel> TraceChannel = ECC_Visibility;
+    TEnumAsByte<ECollisionChannel> TraceChannel = CMCollision::WeaponTrace;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Attack",
         meta = (EditCondition = "DeliveryMode == ECMAttackDeliveryMode::Projectile", EditConditionHides))

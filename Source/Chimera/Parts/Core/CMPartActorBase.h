@@ -11,6 +11,7 @@
 class UGameplayAbility;
 class UCMBattleComponent;
 class UCMPartStatusComponent;
+class UBoxComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
 class UDataTable;
@@ -96,6 +97,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     USkeletalMeshComponent* GetPartMesh() const { return PartMesh; }
 
+    /** Simple query-only collision used to identify this Part without bone lookup. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    UBoxComponent* GetDamageHurtbox() const { return DamageHurtbox; }
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     float GetHealth() const;
 
@@ -166,6 +171,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<USkeletalMeshComponent> PartMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UBoxComponent> DamageHurtbox;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMBattleComponent> BattleComponent;

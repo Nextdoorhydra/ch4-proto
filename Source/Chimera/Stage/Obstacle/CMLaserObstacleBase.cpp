@@ -18,11 +18,9 @@ ACMLaserObstacleBase::ACMLaserObstacleBase()
     BeamCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("BeamCollision"));
     BeamCollision->SetupAttachment(SceneRoot);
     BeamCollision->SetMobility(EComponentMobility::Movable);
+    BeamCollision->SetCollisionProfileName(TEXT("CMHazardOverlap"));
     BeamCollision->SetGenerateOverlapEvents(true);
     BeamCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    BeamCollision->SetCollisionResponseToAllChannels(ECR_Ignore);
-    BeamCollision->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-    BeamCollision->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Overlap);
 
     Hazard = CreateDefaultSubobject<UCMHazardComponent>(TEXT("Hazard"));
     BeamPresentation = CreateDefaultSubobject<UCMLaserBeamComponent>(TEXT("BeamPresentation"));
@@ -142,7 +140,7 @@ void ACMLaserObstacleBase::HandleBeamBeginOverlap(
 {
     if (Hazard)
     {
-        Hazard->NotifyTargetEntered(OtherActor);
+        Hazard->NotifyTargetEntered(OtherActor, OtherComponent);
     }
 }
 
@@ -155,7 +153,7 @@ void ACMLaserObstacleBase::HandleBeamEndOverlap(
 {
     if (Hazard)
     {
-        Hazard->NotifyTargetExited(OtherActor);
+        Hazard->NotifyTargetExited(OtherActor, OtherComponent);
     }
 }
 
