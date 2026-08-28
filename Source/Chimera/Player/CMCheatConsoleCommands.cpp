@@ -119,7 +119,7 @@ void AttachPart(const TArray<FString>& Args, UWorld* World)
     if (Args.Num() < 2)
     {
         UE_LOG(LogTemp, Warning,
-            TEXT("[Cheat Usage] CM.AttachPart <SlotNumber> <DefaultArm|SpringArm|LegTier1..5>"));
+            TEXT("[Cheat Usage] CM.AttachPart <SlotNumber> <DefaultArm|DefaultHead|SpringArm|LegTier1..5>"));
         return;
     }
 
@@ -128,6 +128,48 @@ void AttachPart(const TArray<FString>& Args, UWorld* World)
         Controller->RequestCheatAttachPart(
             FCString::Atoi(*Args[0]),
             FName(*Args[1])
+        );
+    }
+}
+
+void SetupTestParts(const TArray<FString>& Args, UWorld* World)
+{
+    ACMPlayerController* Controller = FindLocalController(World);
+    if (!Controller)
+    {
+        return;
+    }
+
+    struct FTestPartPlacement
+    {
+        int32 OneBasedSlotIndex;
+        FName PartName;
+    };
+
+    const FTestPartPlacement Placements[] = {
+        { 1, TEXT("LegTier3") },
+        { 2, TEXT("LegTier3") },
+        { 3, TEXT("DefaultArm") },
+        { 4, TEXT("DefaultArm") },
+        { 5, TEXT("LegTier3") },
+        { 6, TEXT("LegTier3") },
+        { 7, TEXT("DefaultHead") },
+        { 8, TEXT("DefaultHead") },
+        { 9, TEXT("SpringArm") },
+        { 10, TEXT("SpringArm") },
+        { 11, TEXT("LegTier3") },
+        { 12, TEXT("LegTier3") },
+        { 13, TEXT("DefaultHead") },
+        { 14, TEXT("DefaultHead") },
+        { 15, TEXT("LegTier3") },
+        { 16, TEXT("LegTier3") }
+    };
+
+    for (const FTestPartPlacement& Placement : Placements)
+    {
+        Controller->RequestCheatAttachPart(
+            Placement.OneBasedSlotIndex,
+            Placement.PartName
         );
     }
 }
@@ -213,9 +255,17 @@ FAutoConsoleCommandWithWorldAndArgs SpawnRandomPartsCommand(
 
 FAutoConsoleCommandWithWorldAndArgs AttachPartCommand(
     TEXT("CM.AttachPart"),
-    TEXT("Replaces a one-based slot Part. Usage: CM.AttachPart <SlotNumber> <DefaultArm|SpringArm|LegTier1..5>"),
+    TEXT("Replaces a one-based slot Part. Usage: CM.AttachPart <SlotNumber> <DefaultArm|DefaultHead|SpringArm|LegTier1..5>"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
         &AttachPart
+    )
+);
+
+FAutoConsoleCommandWithWorldAndArgs SetupTestPartsCommand(
+    TEXT("CM.Testpart"),
+    TEXT("Replaces slots 1-16 with the fixed four-player test Part layout."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &SetupTestParts
     )
 );
 
