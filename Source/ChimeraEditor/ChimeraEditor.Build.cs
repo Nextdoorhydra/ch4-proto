@@ -16,7 +16,8 @@ public class ChimeraEditor : ModuleRules
                 "DataForgeEditor",
                 "GoogleSheetLoader", 
 				"AsyncPDALoader",
-				"PropertyEditor"
+				"PropertyEditor",
+                "UnrealEd"
             }
         );
 
