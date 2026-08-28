@@ -320,6 +320,8 @@ void ACMChimera::Tick(float DeltaTime)
         MovementCoordinator->UpdateServerMovement(*this);
     }
 
+    UpdatePlanarKnockback(DeltaTime);
+
     UpdateReplicatedSegmentStates();
 }
 
@@ -500,6 +502,95 @@ void ACMChimera::ApplyPlanarKnockback(FVector WorldDirection, float Speed)
         UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
         if (Segment && Segment->IsSimulatingPhysics())
             Segment->AddImpulse(VelocityChange, NAME_None, true);
+    }
+}
+
+void ACMChimera::StartPlanarKnockback(
+    FVector WorldDirection,
+    const float DistanceCm
+)
+{
+    if (!HasAuthority() || BodySegments.IsEmpty() || DistanceCm <= 0.0f)
+    {
+        return;
+    }
+    WorldDirection.Z = 0.0f;
+    if (!WorldDirection.Normalize())
+    {
+        return;
+    }
+
+    UStaticMeshComponent* ReferenceBody = BodySegments[0];
+    if (!ReferenceBody || !ReferenceBody->IsSimulatingPhysics())
+    {
+        return;
+    }
+    bPlanarKnockbackActive = true;
+    PlanarKnockbackStartLocation = ReferenceBody->GetComponentLocation();
+    PlanarKnockbackDirection = WorldDirection;
+    PlanarKnockbackDistanceCm = DistanceCm;
+    PlanarKnockbackElapsedSeconds = 0.0f;
+    ApplyPlanarKnockback(
+        PlanarKnockbackDirection,
+        FMath::Max(DistanceCm / 0.35f, 300.0f));
+}
+
+void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
+{
+    if (!bPlanarKnockbackActive || BodySegments.IsEmpty())
+    {
+        return;
+    }
+    UStaticMeshComponent* ReferenceBody = BodySegments[0];
+    if (!ReferenceBody)
+    {
+        bPlanarKnockbackActive = false;
+        return;
+    }
+
+    PlanarKnockbackElapsedSeconds += DeltaTime;
+    const float Travel = FVector::DotProduct(
+        ReferenceBody->GetComponentLocation()
+            - PlanarKnockbackStartLocation,
+        PlanarKnockbackDirection);
+    if (Travel >= PlanarKnockbackDistanceCm
+        || PlanarKnockbackElapsedSeconds >= 0.75f)
+    {
+        bPlanarKnockbackActive = false;
+        const int32 SegmentCount = FMath::Min(
+            ActiveSegmentCount, BodySegments.Num());
+        for (int32 SegmentIndex = 0;
+            SegmentIndex < SegmentCount; ++SegmentIndex)
+        {
+            UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+            if (!Segment || !Segment->IsSimulatingPhysics())
+            {
+                continue;
+            }
+            const float VerticalSpeed =
+                Segment->GetPhysicsLinearVelocity().Z;
+            Segment->SetPhysicsLinearVelocity(
+                FVector::UpVector * VerticalSpeed);
+        }
+        return;
+    }
+
+    const float RemainingDistance = PlanarKnockbackDistanceCm - Travel;
+    const float Speed = FMath::Max(RemainingDistance / 0.2f, 150.0f);
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount, BodySegments.Num());
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < SegmentCount; ++SegmentIndex)
+    {
+        UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+        if (!Segment || !Segment->IsSimulatingPhysics())
+        {
+            continue;
+        }
+        const float VerticalSpeed = Segment->GetPhysicsLinearVelocity().Z;
+        Segment->SetPhysicsLinearVelocity(
+            PlanarKnockbackDirection * Speed
+                + FVector::UpVector * VerticalSpeed);
     }
 }
 
