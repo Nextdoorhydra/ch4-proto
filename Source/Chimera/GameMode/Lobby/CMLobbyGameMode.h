@@ -49,7 +49,8 @@ private:
     // 선택한 Route를 서버 런타임에 등록하고 첫 맵으로 이동
     bool TryStartRouteDefinition(
         APlayerController* RequestingPlayer,
-        UCMStageRouteDefinition* RouteDefinition);
+        UCMStageRouteDefinition* RouteDefinition,
+        bool bTestRoute);
 
     // 현재 로비 월드에서 반복 사용하는 LobbyGameState 참조
     UPROPERTY(Transient)

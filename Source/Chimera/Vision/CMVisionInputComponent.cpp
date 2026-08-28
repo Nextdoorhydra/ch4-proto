@@ -14,6 +14,24 @@ UCMVisionInputComponent::UCMVisionInputComponent()
     SetIsReplicatedByDefault(true);
 }
 
+void UCMVisionInputComponent::SetActiveControlSlot(int32 SlotIndex)
+{
+    if (SlotIndex < 0 || !FindHeadForControlSlot(SlotIndex))
+    {
+        return;
+    }
+
+    if (ActiveControlSlotIndex == SlotIndex)
+    {
+        return;
+    }
+
+    ClearLocalAimPredictions();
+    ActiveControlSlotIndex = SlotIndex;
+    bActiveHeadChanged = true;
+    ServerSetActiveControlSlot(SlotIndex);
+}
+
 void UCMVisionInputComponent::BeginPlay()
 {
     Super::BeginPlay();
@@ -167,7 +185,8 @@ void UCMVisionInputComponent::TickComponent(
     const bool bSendIntervalElapsed = !bHasSentWorldTarget
         || TimeSinceLastAimSend >= SendInterval;
     if (!bSendIntervalElapsed
-        || (!bTargetMoved && !bAimRotated && !bHeartbeatDue))
+        || (!bTargetMoved && !bAimRotated && !bHeartbeatDue
+            && !bActiveHeadChanged))
     {
         return;
     }
@@ -175,8 +194,19 @@ void UCMVisionInputComponent::TickComponent(
     LastSentWorldTarget = WorldTarget;
     LastSentAimRotationDegrees = LocalAimRotationDegrees;
     bHasSentWorldTarget = true;
+    bActiveHeadChanged = false;
     TimeSinceLastAimSend = 0.0f;
     ServerUpdateVisionTarget(WorldTarget, LocalAimRotationDegrees);
+}
+
+void UCMVisionInputComponent::ServerSetActiveControlSlot_Implementation(
+    int32 SlotIndex
+)
+{
+    if (SlotIndex >= 0 && FindHeadForControlSlot(SlotIndex))
+    {
+        ActiveControlSlotIndex = SlotIndex;
+    }
 }
 
 void UCMVisionInputComponent::ServerUpdateVisionTarget_Implementation(
@@ -220,7 +250,7 @@ void UCMVisionInputComponent::ServerUpdateVisionTarget_Implementation(
 
 void UCMVisionInputComponent::GetControlledHeadParts(
     TArray<ACMHeadPartActor*>& OutHeadParts
-) const
+)
 {
     OutHeadParts.Reset();
 
@@ -237,19 +267,52 @@ void UCMVisionInputComponent::GetControlledHeadParts(
         return;
     }
 
-    for (const FCMPartSlotAddress& SlotAddress
-        : ControlBody->GetControlSlots())
+    if (ActiveControlSlotIndex >= 0)
     {
-        UCMPartSlotComponent* PartSlot =
-            Chimera->GetPartSlotComponent(SlotAddress);
-        ACMHeadPartActor* HeadPart = PartSlot
-            ? Cast<ACMHeadPartActor>(PartSlot->GetAttachedPart())
-            : nullptr;
-        if (HeadPart)
+        if (ACMHeadPartActor* ActiveHead = FindHeadForControlSlot(
+                ActiveControlSlotIndex))
         {
-            OutHeadParts.AddUnique(HeadPart);
+            OutHeadParts.Add(ActiveHead);
+            return;
         }
     }
+
+    for (int32 SlotIndex = 0;
+        SlotIndex < ControlBody->GetControlSlots().Num();
+        ++SlotIndex)
+    {
+        if (ACMHeadPartActor* FirstHead = FindHeadForControlSlot(SlotIndex))
+        {
+            ActiveControlSlotIndex = SlotIndex;
+            OutHeadParts.Add(FirstHead);
+            return;
+        }
+    }
+}
+
+ACMHeadPartActor* UCMVisionInputComponent::FindHeadForControlSlot(
+    int32 SlotIndex
+) const
+{
+    const ACMPlayerController* PlayerController =
+        Cast<ACMPlayerController>(GetOwner());
+    const ACMControlBody* ControlBody = PlayerController
+        ? PlayerController->GetPawn<ACMControlBody>()
+        : nullptr;
+    ACMChimera* Chimera = ControlBody
+        ? ControlBody->GetSharedChimera()
+        : nullptr;
+    if (!ControlBody || !Chimera
+        || !ControlBody->GetControlSlots().IsValidIndex(SlotIndex))
+    {
+        return nullptr;
+    }
+
+    UCMPartSlotComponent* PartSlot = Chimera->GetPartSlotComponent(
+        ControlBody->GetControlSlots()[SlotIndex]);
+    return PartSlot
+        ? Cast<ACMHeadPartActor>(PartSlot->GetAttachedPart())
+        : nullptr;
 }
 
 void UCMVisionInputComponent::ReplaceLocalAimPredictions(

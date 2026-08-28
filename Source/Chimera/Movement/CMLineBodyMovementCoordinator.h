@@ -12,6 +12,8 @@ class ACMLegPart;
 class ACMPlayerState;
 class AActor;
 class UPhysicsConstraintComponent;
+class UPhysicsHandleComponent;
+class UPrimitiveComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 
@@ -43,16 +45,20 @@ public:
     /** Stops only the active push owned by this Leg, if one exists. */
     void CancelLegStep(ACMLegPart* LegPart);
 
-    /** Pins a basic Arm slot to walkable ground while its control is held. */
+    // 상호작 대상을 먼저 잡고, 없으면 기존처럼 다닐 수 있는 지면을 짚는다.
     bool TryBeginArmAnchor(
         ACMChimera& Chimera,
         ACMArmPart& ArmPart
     );
 
-    /** Removes any held Arm anchor owned by the specified physical slot. */
+    // 해당 팔 슬롯이 소유한 상호작 또는 지면 홀드를 끝낸다.
     void EndArmAnchor(
         const struct FCMPartSlotAddress& PartSlotAddress
     );
+
+    bool IsArmHoldingInteractable(
+        const struct FCMPartSlotAddress& PartSlotAddress
+    ) const;
 
     /** Applies an immediate, non-grounded impulse from an Arm slot. */
     bool TryActivateArm(
@@ -118,6 +124,7 @@ private:
     ) const;
 
     void ApplyActiveLegSteps(ACMChimera& Chimera);
+    void UpdatePhysicsHandles(ACMChimera& Chimera);
     void ApplyArmAnchorStaminaDrain(ACMChimera& Chimera);
     void RemoveInvalidArmAnchors(ACMChimera& Chimera);
     void DestroyArmAnchor(int32 AnchorIndex);
@@ -151,10 +158,18 @@ private:
 
     struct FActiveArmAnchor
     {
+        // 지면 짚기와 대상 홀드의 수명을 하나의 슬롯 단위로 관리한다.
         TWeakObjectPtr<ACMArmPart> ArmPart;
+        TWeakObjectPtr<AActor> InteractionTarget;
+        TWeakObjectPtr<UPrimitiveComponent> TargetComponent;
         TWeakObjectPtr<UPhysicsConstraintComponent> Constraint;
+        TWeakObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
         struct FCMPartSlotAddress PartSlotAddress;
+        FVector PhysicsHandleTargetInSegmentSpace = FVector::ZeroVector;
         int32 SegmentIndex = INDEX_NONE;
+        bool bInteractable = false;
+        bool bHasTargetComponent = false;
+        bool bRequiresPhysicsHandle = false;
     };
 
     // Each remaining input keeps its original expiry even after partial use.

@@ -263,6 +263,22 @@ UCMPartSlotComponent* ACMChimera::GetPartSlotComponent(
         : nullptr;
 }
 
+bool ACMChimera::IsPartSlotPressed(
+    const FCMPartSlotAddress& PartSlotAddress
+) const
+{
+    if (!CMControl::IsValidPartSlot(
+        PartSlotAddress,
+        ActiveSegmentCount))
+    {
+        return false;
+    }
+
+    const int32 FlatIndex =
+        CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    return (PressedPartSlotMask & (1u << FlatIndex)) != 0;
+}
+
 bool ACMChimera::AttachPartToSlot(
     const FCMPartSlotAddress& PartSlotAddress,
     AActor* PartActor
@@ -769,6 +785,16 @@ bool ACMChimera::IsBasicArmPartSlot(
     return AttachedPart
         && AttachedPart->IsA<ACMArmPart>()
         && !AttachedPart->IsA<ACMSpringArmPart>();
+}
+
+bool ACMChimera::ShouldActivateBasicArmOnRelease(
+    const FCMPartSlotAddress& PartSlotAddress
+) const
+{
+    return IsBasicArmPartSlot(PartSlotAddress)
+        && (!MovementCoordinator
+            || !MovementCoordinator->IsArmHoldingInteractable(
+                PartSlotAddress));
 }
 
 void ACMChimera::ClearPressedControlParts()

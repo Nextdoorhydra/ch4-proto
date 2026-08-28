@@ -25,7 +25,11 @@ public:
     ) const override;
 
     void SetSharedChimera(ACMChimera* NewSharedChimera);
+    void SetSoloTestMode(bool bEnabled);
     void NotifyLobbyRosterChanged();
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Testing")
+    bool IsSoloTestMode() const { return bSoloTestMode; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Lobby")
     int32 GetLobbyPlayerCount() const;
@@ -50,6 +54,9 @@ public:
     FChimeraLobbyRosterChanged OnLobbyRosterChanged;
 
 private:
+    UPROPERTY(Replicated)
+    bool bSoloTestMode = false;
+
     UFUNCTION()
     void OnRep_SharedChimera();
 

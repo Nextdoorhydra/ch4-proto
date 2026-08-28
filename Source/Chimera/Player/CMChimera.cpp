@@ -2,11 +2,13 @@
 
 #include "Ability/CMChimeraAttributeSet.h"
 #include "AbilitySystemComponent.h"
+#include "Collision/CMCollisionChannels.h"
 #include "Movement/CMLineBodyMovementCoordinator.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Camera/CameraComponent.h"
@@ -80,6 +82,10 @@ ACMChimera::ACMChimera()
     BodyMesh->SetLinearDamping(BodyLinearDamping);
     BodyMesh->SetAngularDamping(BodyAngularDamping);
     BodyMesh->SetCollisionProfileName(BodyCollisionProfile);
+    BodyMesh->SetCollisionResponseToChannel(
+        CMCollision::WeaponTrace,
+        ECR_Ignore
+    );
     BodyMesh->SetRelativeScale3D(FVector(SegmentScale));
     BodyMesh->SetIsReplicated(false);
 
@@ -159,6 +165,10 @@ ACMChimera::ACMChimera()
         SegmentBody->SetLinearDamping(BodyLinearDamping);
         SegmentBody->SetAngularDamping(BodyAngularDamping);
         SegmentBody->SetCollisionProfileName(BodyCollisionProfile);
+        SegmentBody->SetCollisionResponseToChannel(
+            CMCollision::WeaponTrace,
+            ECR_Ignore
+        );
 
         UCMPartSlotComponent* SegmentLeftFoot =
             CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -181,6 +191,31 @@ ACMChimera::ACMChimera()
         RightFootPoints.Add(SegmentRightFoot);
         PartSlotPoints.Add(SegmentLeftFoot);
         PartSlotPoints.Add(SegmentRightFoot);
+    }
+
+    for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
+    {
+        UBoxComponent* SegmentHurtbox =
+            CreateDefaultSubobject<UBoxComponent>(
+                *FString::Printf(TEXT("SegmentHurtbox_%d"), Index + 1)
+            );
+        SegmentHurtbox->SetupAttachment(BodySegments[Index]);
+        SegmentHurtbox->SetBoxExtent(FVector(50.0f, 40.0f, 37.0f));
+        SegmentHurtbox->SetCollisionProfileName(TEXT("CMHurtbox"));
+        SegmentHurtbox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        SegmentHurtbox->SetCollisionObjectType(CMCollision::ChimeraHurtbox);
+        SegmentHurtbox->SetCollisionResponseToAllChannels(ECR_Ignore);
+        SegmentHurtbox->SetCollisionResponseToChannel(
+            ECC_WorldDynamic,
+            ECR_Overlap
+        );
+        SegmentHurtbox->SetCollisionResponseToChannel(
+            CMCollision::WeaponTrace,
+            ECR_Block
+        );
+        SegmentHurtbox->SetGenerateOverlapEvents(true);
+        SegmentHurtbox->SetCanEverAffectNavigation(false);
+        SegmentHurtboxes.Add(SegmentHurtbox);
     }
 
     for (int32 PartSlotFlatIndex = 0;
@@ -269,31 +304,6 @@ void ACMChimera::BeginPlay()
     ConfigureSegments();
     ConfigureNetworkPhysics();
 
-    ControlMarkerMaterials.SetNum(ControlAssignmentMarkers.Num());
-    AppliedMarkerColorIndices.Init(
-        INDEX_NONE,
-        ControlAssignmentMarkers.Num()
-    );
-    AppliedMarkerSlotIndices.Init(
-        INDEX_NONE,
-        ControlAssignmentMarkers.Num()
-    );
-    AppliedMarkerPressedStates.Init(
-        false,
-        ControlAssignmentMarkers.Num()
-    );
-    for (int32 MarkerIndex = 0;
-        MarkerIndex < ControlAssignmentMarkers.Num();
-        ++MarkerIndex)
-    {
-        if (ControlAssignmentMarkers[MarkerIndex])
-        {
-            ControlMarkerMaterials[MarkerIndex] =
-                ControlAssignmentMarkers[MarkerIndex]
-                    ->CreateDynamicMaterialInstance(0);
-        }
-    }
-    UpdateControlAssignmentMarkers(0.0f);
 }
 
 void ACMChimera::OnConstruction(const FTransform& Transform)
@@ -305,9 +315,6 @@ void ACMChimera::OnConstruction(const FTransform& Transform)
 void ACMChimera::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // TargetOffset은 설정 변경 시에만 갱신하면 되어 Tick에서 다시 쓸 필요가 없다.
-    UpdateControlAssignmentMarkers(DeltaTime);
 
     if (!HasAuthority())
     {
@@ -643,6 +650,10 @@ void ACMChimera::ApplyBlueprintSettings()
         SegmentBody->SetLinearDamping(BodyLinearDamping);
         SegmentBody->SetAngularDamping(BodyAngularDamping);
         SegmentBody->SetCollisionProfileName(BodyCollisionProfile);
+        SegmentBody->SetCollisionResponseToChannel(
+            CMCollision::WeaponTrace,
+            ECR_Ignore
+        );
         if (BodySegmentMass > 0.0f)
         {
             SegmentBody->SetMassOverrideInKg(

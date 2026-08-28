@@ -670,6 +670,10 @@ void UCMVisionManagerSubsystem::BuildVisionRayCache(
         FCMVisionSourceMaskData& SourceData =
             CachedVisionMaskData.AddDefaulted_GetRef();
         SourceData.Origin = VisionSource->GetVisionOrigin();
+        SourceData.NearVisionRadius = FMath::Max(
+            VisionSource->GetNearVisionRadius(),
+            0.0f
+        );
         SourceData.VisionTint = VisionSource->GetVisionTint();
         SourceData.bRevealsWorld =
             VisionSource->GetVisionContribution()
@@ -929,9 +933,16 @@ void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
         CeilingSurfaceNormalZThresholdParameterName,
         RenderConfig->CeilingSurfaceNormalZThreshold
     );
+    const float LowObstacleTopRevealHeight = FMath::Max(
+        FMath::Max(
+            RenderConfig->VisionHeightTolerance,
+            RenderConfig->OccluderSurfaceRevealDistance
+        ),
+        RenderConfig->VisionBelowHeightAllowance
+    );
     PostProcessMaterialInstance->SetScalarParameterValue(
         VisionHeightToleranceParameterName,
-        RenderConfig->VisionHeightTolerance
+        LowObstacleTopRevealHeight
     );
 
     Camera->PostProcessSettings.AddBlendable(
@@ -1113,8 +1124,39 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
     }
 
     const FVector TraceDirection = (TraceEnd - TraceStart).GetSafeNormal();
+    float OccluderDistance = Hit.Distance;
+    if (const UPrimitiveComponent* HitComponent = Hit.GetComponent())
+    {
+        const FBoxSphereBounds Bounds = HitComponent->Bounds;
+        const float TopHeight = Bounds.Origin.Z + Bounds.BoxExtent.Z;
+        const float LowObstacleTopRevealHeight = FMath::Max(
+            FMath::Max(
+                RenderConfig->VisionHeightTolerance,
+                RenderConfig->OccluderSurfaceRevealDistance
+            ),
+            RenderConfig->VisionBelowHeightAllowance
+        );
+        const float VisionTopHeight = VisionSource.GetVisionOrigin().Z
+            + LowObstacleTopRevealHeight;
+        if (TopHeight <= VisionTopHeight)
+        {
+            const FVector PlanarDirection = TraceDirection.GetSafeNormal2D();
+            const float ProjectedCenter = FVector::DotProduct(
+                Bounds.Origin - TraceStart,
+                PlanarDirection
+            );
+            const float ProjectedExtent = FMath::Abs(PlanarDirection.X)
+                * Bounds.BoxExtent.X
+                + FMath::Abs(PlanarDirection.Y) * Bounds.BoxExtent.Y;
+            OccluderDistance = FMath::Max(
+                OccluderDistance,
+                FMath::Min(ProjectedCenter + ProjectedExtent,
+                    FVector::Distance(TraceStart, TraceEnd))
+            );
+        }
+    }
     const float RevealedDistance = FMath::Min(
-        Hit.Distance + FMath::Max(RevealDistance, 0.0f),
+        OccluderDistance + FMath::Max(RevealDistance, 0.0f),
         FVector::Distance(TraceStart, TraceEnd)
     );
     const FVector RevealedPoint = TraceStart
@@ -1262,10 +1304,18 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
         const FLinearColor DrawColor = bDrawVisionTint
             ? SourceData.VisionTint
             : FLinearColor(1.0f, EncodedHeight, 0.0f, 1.0f);
-        const auto AddMaskTriangle = [&Triangles, DrawColor](
+        const float NearRadiusPixels = SourceData.NearVisionRadius
+            * Width / FMath::Max(
+                MaskWorldHalfExtent * 2.0f,
+                1.0f
+            );
+        const auto AddMaskTriangle = [&Triangles](
             const FVector2D& A,
             const FVector2D& B,
-            const FVector2D& C)
+            const FVector2D& C,
+            const FLinearColor& ColorA,
+            const FLinearColor& ColorB,
+            const FLinearColor& ColorC)
         {
             FCanvasUVTri& Triangle = Triangles.AddDefaulted_GetRef();
             Triangle.V0_Pos = A;
@@ -1274,20 +1324,25 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             Triangle.V0_UV = FVector2D::ZeroVector;
             Triangle.V1_UV = FVector2D::ZeroVector;
             Triangle.V2_UV = FVector2D::ZeroVector;
-            Triangle.V0_Color = DrawColor;
-            Triangle.V1_Color = DrawColor;
-            Triangle.V2_Color = DrawColor;
+            Triangle.V0_Color = ColorA;
+            Triangle.V1_Color = ColorB;
+            Triangle.V2_Color = ColorC;
         };
         const auto AddRayTriangle = [
             this,
             &AddMaskTriangle,
+            DrawColor,
             OriginPixel,
             Width,
             Height,
             OutOccluders,
-            bUseRevealedEnds
+            bUseRevealedEnds,
+            bDrawVisionTint,
+            NearRadiusPixels
         ](const FCMVisionRaySample& RayA,
-            const FCMVisionRaySample& RayB)
+            const FCMVisionRaySample& RayB,
+            bool bSoftenEdgeA = false,
+            bool bSoftenEdgeB = false)
         {
             if (OutOccluders)
             {
@@ -1321,19 +1376,189 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
                 Height
             );
 
-            AddMaskTriangle(OriginPixel, PointAPixel, PointBPixel);
+            const bool bUseEdgeSoftness =
+                !bDrawVisionTint && RenderConfig->VisionEdgeSoftness > 0.0f;
+            if (!bUseEdgeSoftness)
+            {
+                AddMaskTriangle(
+                    OriginPixel,
+                    PointAPixel,
+                    PointBPixel,
+                    DrawColor,
+                    DrawColor,
+                    DrawColor
+                );
+            }
+            else
+            {
+                const float SoftnessPixels = RenderConfig->VisionEdgeSoftness
+                    * Width / FMath::Max(MaskWorldHalfExtent * 2.0f, 1.0f);
+                const float DistanceA = FVector2D::Distance(
+                    OriginPixel,
+                    PointAPixel
+                );
+                const float DistanceB = FVector2D::Distance(
+                    OriginPixel,
+                    PointBPixel
+                );
+                const float InnerDistanceA = FMath::Max(
+                    DistanceA - SoftnessPixels,
+                    0.0f
+                );
+                const float InnerDistanceB = FMath::Max(
+                    DistanceB - SoftnessPixels,
+                    0.0f
+                );
+                const FVector2D InnerPointA = FMath::IsNearlyZero(DistanceA)
+                    ? OriginPixel
+                    : FMath::Lerp(
+                        OriginPixel,
+                        PointAPixel,
+                        InnerDistanceA / DistanceA
+                    );
+                const FVector2D InnerPointB = FMath::IsNearlyZero(DistanceB)
+                    ? OriginPixel
+                    : FMath::Lerp(
+                        OriginPixel,
+                        PointBPixel,
+                        InnerDistanceB / DistanceB
+                    );
+                // The edge contributes no visibility at its outer boundary.
+                // Its alpha must also be zero; with alpha blending this lets
+                // another source's visibility remain visible underneath.
+                // Keep the visibility channel at one while fading alpha.
+                // This makes the source a true union: a feather cannot lower
+                // visibility that another source has already provided.
+                const FLinearColor EdgeColor(1.0f, DrawColor.G, 0.0f, 0.0f);
+                const auto AddAngularEdge = [
+                    &AddMaskTriangle,
+                    OriginPixel,
+                    DrawColor,
+                    EdgeColor,
+                    SoftnessPixels,
+                    NearRadiusPixels
+                ](
+                    const FVector2D& EdgePoint,
+                    const FVector2D& InteriorPoint,
+                    const FVector2D& EdgeInnerPoint,
+                    const FVector2D& InteriorInnerPoint
+                )
+                {
+                    const float EdgeLength = FVector2D::Distance(
+                        EdgeInnerPoint,
+                        InteriorInnerPoint
+                    );
+                    if (FMath::IsNearlyZero(EdgeLength))
+                    {
+                        return;
+                    }
+                    const float Inset = FMath::Min(
+                        SoftnessPixels / EdgeLength,
+                        0.5f
+                    );
+                    const FVector2D InsetPoint = FMath::Lerp(
+                        EdgeInnerPoint,
+                        InteriorInnerPoint,
+                        Inset
+                    );
+                    const FVector2D EdgeDirection = (
+                        EdgePoint - OriginPixel
+                    ).GetSafeNormal();
+                    const float EdgeDistance = FVector2D::Distance(
+                        OriginPixel,
+                        EdgePoint
+                    );
+                    const FVector2D FeatherStart = OriginPixel
+                        + EdgeDirection * FMath::Min(
+                            NearRadiusPixels,
+                            EdgeDistance
+                        );
+                    const FVector2D InteriorDirection = (
+                        InteriorPoint - OriginPixel
+                    ).GetSafeNormal();
+                    const FVector2D InteriorFeatherStart = OriginPixel
+                        + InteriorDirection * FMath::Min(
+                            NearRadiusPixels,
+                            FVector2D::Distance(
+                                OriginPixel,
+                                InteriorPoint
+                            )
+                        );
+                    const FVector2D InsetFeatherStart = FMath::Lerp(
+                        FeatherStart,
+                        InteriorFeatherStart,
+                        Inset
+                    );
+                    AddMaskTriangle(
+                        FeatherStart,
+                        EdgeInnerPoint,
+                        InsetPoint,
+                        EdgeColor,
+                        EdgeColor,
+                        DrawColor
+                    );
+                    AddMaskTriangle(
+                        FeatherStart,
+                        InsetPoint,
+                        InsetFeatherStart,
+                        EdgeColor,
+                        DrawColor,
+                        DrawColor
+                    );
+                };
+
+                if (bSoftenEdgeA)
+                {
+                    AddAngularEdge(
+                        PointAPixel,
+                        PointBPixel,
+                        InnerPointA,
+                        InnerPointB
+                    );
+                }
+                if (bSoftenEdgeB)
+                {
+                    AddAngularEdge(
+                        PointBPixel,
+                        PointAPixel,
+                        InnerPointB,
+                        InnerPointA
+                    );
+                }
+
+                // Fill the part inside the softened boundary.  The original
+                // full fan triangle is intentionally not drawn in this path,
+                // so this center triangle is required to keep the interior
+                // fully visible.
+                AddMaskTriangle(
+                    OriginPixel,
+                    InnerPointA,
+                    InnerPointB,
+                    DrawColor,
+                    DrawColor,
+                    DrawColor
+                );
+                AddMaskTriangle(
+                    InnerPointA,
+                    InnerPointB,
+                    PointAPixel,
+                    DrawColor,
+                    DrawColor,
+                    EdgeColor
+                );
+                AddMaskTriangle(
+                    PointAPixel,
+                    InnerPointB,
+                    PointBPixel,
+                    EdgeColor,
+                    DrawColor,
+                    EdgeColor
+                );
+            }
         };
 
-        for (int32 ArcIndex = 0;
-            ArcIndex < ArcSegmentCount;
-            ++ArcIndex)
-        {
-            AddRayTriangle(
-                SourceData.Rays[ArcIndex],
-                SourceData.Rays[ArcIndex + 1]
-            );
-        }
-
+        // Draw the near circle first so the cone pass can cover their
+        // overlapping area without leaving a seam at the junction.
         for (int32 RayIndex = 0;
             RayIndex < SourceData.NearVisionRays.Num();
             ++RayIndex)
@@ -1346,11 +1571,28 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             );
         }
 
+        for (int32 ArcIndex = 0;
+            ArcIndex < ArcSegmentCount;
+            ++ArcIndex)
+        {
+            AddRayTriangle(
+                SourceData.Rays[ArcIndex],
+                SourceData.Rays[ArcIndex + 1],
+                ArcIndex == 0,
+                ArcIndex == ArcSegmentCount - 1
+            );
+        }
+
         FCanvasTriangleItem TriangleItem(
             Triangles,
             MaskDrawTexture->GetResource()
         );
-        TriangleItem.BlendMode = SE_BLEND_Opaque;
+        // Visibility sources form a union.  Alpha blending preserves an
+        // already-visible pixel while allowing each source's feather to
+        // transition in over it, instead of replacing it with black.
+        TriangleItem.BlendMode = bDrawVisionTint
+            ? SE_BLEND_Opaque
+            : SE_BLEND_Translucent;
         Canvas->DrawItem(TriangleItem);
     }
 }

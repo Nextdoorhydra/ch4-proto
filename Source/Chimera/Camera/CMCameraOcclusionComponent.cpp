@@ -150,11 +150,19 @@ void UCMCameraOcclusionComponent::FindTargetLocations(
                 continue;
             }
 
+            bool bAddedHeadForControlBody = false;
+            FVector FirstSlotLocation = FVector::ZeroVector;
+            bool bHasFirstSlot = false;
             for (const FCMPartSlotAddress& SlotAddress
                 : ControlBody->GetControlSlots())
             {
                 const UCMPartSlotComponent* PartSlot =
                     Chimera->GetPartSlotComponent(SlotAddress);
+                if (PartSlot && !bHasFirstSlot)
+                {
+                    FirstSlotLocation = PartSlot->GetComponentLocation();
+                    bHasFirstSlot = true;
+                }
                 const ACMHeadPartActor* HeadPart = PartSlot
                     ? Cast<ACMHeadPartActor>(PartSlot->GetAttachedPart())
                     : nullptr;
@@ -169,7 +177,16 @@ void UCMCameraOcclusionComponent::FindTargetLocations(
                 OutTargetLocations.Add(VisionComponent
                     ? VisionComponent->GetVisionOrigin()
                     : HeadPart->GetActorLocation());
+                bAddedHeadForControlBody = true;
                 break;
+            }
+
+            if (!bAddedHeadForControlBody && bHasFirstSlot)
+            {
+                OutTargetLocations.Add(
+                    FirstSlotLocation
+                        + FVector(0.0f, 0.0f, Config.TargetHeightOffset)
+                );
             }
         }
     }
@@ -254,6 +271,14 @@ void UCMCameraOcclusionComponent::FindCurrentOccluders(
 
         for (const FHitResult& Hit : Hits)
         {
+            // The sweep radius can touch the floor around a grounded target.
+            // Keep walls and ceilings as occluders, but ignore upward-facing
+            // surfaces at or below the target height.
+            if (Hit.ImpactNormal.Z > 0.5f
+                && Hit.ImpactPoint.Z <= TargetLocation.Z + 1.0f)
+            {
+                continue;
+            }
             if (UPrimitiveComponent* Component = Hit.GetComponent())
             {
                 OutOccluders.FindOrAdd(Component).AddUnique(ScreenCenter);

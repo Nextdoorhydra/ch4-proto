@@ -62,10 +62,14 @@ public:
     // 현재 사용 중인 스테이지 경로 정의 반환
     UCMStageRouteDefinition* GetStageRouteDefinition() const { return StageRouteDefinition; }
 
+    void SetSoloTestMode(bool bEnabled) { bSoloTestMode = bEnabled; }
+    bool IsSoloTestMode() const { return bSoloTestMode; }
+
 private:
     UPROPERTY(Transient)
     TObjectPtr<UCMStageRouteDefinition> StageRouteDefinition;
 
     int32 CurrentStageIndex = INDEX_NONE;
     int32 PendingStageIndex = INDEX_NONE;
+    bool bSoloTestMode = false;
 };

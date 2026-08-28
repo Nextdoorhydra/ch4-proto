@@ -3,6 +3,7 @@
 #include "Combat/CMCombatHitTarget.h"
 
 #include "Ability/CMArmGameplayAbility.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
 #include "DrawDebugHelpers.h"
@@ -39,7 +40,8 @@ void ACMArmPart::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACMArmPart, bSwinging);
-    DOREPLIFETIME(ACMArmPart, bGroundAnchored);
+    DOREPLIFETIME(ACMArmPart, HoldType);
+    DOREPLIFETIME(ACMArmPart, HeldComponent);
     DOREPLIFETIME(ACMArmPart, GroundAnchorLocation);
     DOREPLIFETIME(ACMArmPart, GroundAnchorNormal);
     DOREPLIFETIME(ACMArmPart, SwingStartTime);
@@ -101,6 +103,28 @@ float ACMArmPart::GetSwingPhase() const
         : 0.0f;
 }
 
+FVector ACMArmPart::GetGroundAnchorLocation() const
+{
+    // 상호작 대상이 움직일 수 있으므로 저장된 로컬 지점을
+    // 매번 현재 컴포넌트 기준 월드 좌표로 복원한다.
+    const FVector StoredLocation = GroundAnchorLocation;
+    return HoldType == ECMArmHoldType::Interactable
+        && IsValid(HeldComponent)
+        ? HeldComponent->GetComponentTransform().TransformPosition(
+            StoredLocation)
+        : StoredLocation;
+}
+
+FVector ACMArmPart::GetGroundAnchorNormal() const
+{
+    const FVector StoredNormal = GroundAnchorNormal;
+    return HoldType == ECMArmHoldType::Interactable
+        && IsValid(HeldComponent)
+        ? HeldComponent->GetComponentTransform().TransformVectorNoScale(
+            StoredNormal).GetSafeNormal(SMALL_NUMBER, FVector::UpVector)
+        : StoredNormal;
+}
+
 void ACMArmPart::BeginGroundAnchor(
     const FVector Location,
     const FVector Normal
@@ -110,7 +134,8 @@ void ACMArmPart::BeginGroundAnchor(
     {
         return;
     }
-    bGroundAnchored = true;
+    HoldType = ECMArmHoldType::Ground;
+    HeldComponent = nullptr;
     GroundAnchorLocation = Location;
     GroundAnchorNormal = Normal.GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
     OnGroundAnchorStateChanged.Broadcast(
@@ -120,17 +145,57 @@ void ACMArmPart::BeginGroundAnchor(
     ForceNetUpdate();
 }
 
-void ACMArmPart::EndGroundAnchor()
+void ACMArmPart::BeginInteractableHold(
+    UPrimitiveComponent* TargetComponent,
+    const FVector Location,
+    const FVector Normal
+)
 {
-    if (!HasAuthority() || !bGroundAnchored)
+    if (!HasAuthority())
     {
         return;
     }
-    bGroundAnchored = false;
+
+    HoldType = ECMArmHoldType::Interactable;
+    HeldComponent = TargetComponent;
+    if (HeldComponent)
+    {
+        // 손 위치와 방향을 대상 로컬 공간에 저장해
+        // 물체가 움직이거나 회전해도 IK가 같은 표면을 따라간다.
+        const FTransform ComponentTransform = HeldComponent->GetComponentTransform();
+        GroundAnchorLocation = ComponentTransform.InverseTransformPosition(Location);
+        GroundAnchorNormal = ComponentTransform.InverseTransformVectorNoScale(
+            Normal).GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+    }
+    else
+    {
+        GroundAnchorLocation = Location;
+        GroundAnchorNormal = Normal.GetSafeNormal(
+            SMALL_NUMBER,
+            FVector::UpVector);
+    }
+    OnGroundAnchorStateChanged.Broadcast(
+        true,
+        GetGroundAnchorLocation(),
+        GetGroundAnchorNormal());
+    ForceNetUpdate();
+}
+
+void ACMArmPart::EndGroundAnchor()
+{
+    if (!HasAuthority() || HoldType == ECMArmHoldType::None)
+    {
+        return;
+    }
+    // 컴포넌트 참조를 비우기 전에 마지막 월드 손 좌표를 보존한다.
+    const FVector LastHoldLocation = GetGroundAnchorLocation();
+    const FVector LastHoldNormal = GetGroundAnchorNormal();
+    HoldType = ECMArmHoldType::None;
+    HeldComponent = nullptr;
     OnGroundAnchorStateChanged.Broadcast(
         false,
-        GroundAnchorLocation,
-        GroundAnchorNormal);
+        LastHoldLocation,
+        LastHoldNormal);
     ForceNetUpdate();
 }
 
@@ -439,9 +504,9 @@ void ACMArmPart::OnRep_Swinging()
 void ACMArmPart::OnRep_GroundAnchor()
 {
     OnGroundAnchorStateChanged.Broadcast(
-        bGroundAnchored,
-        GroundAnchorLocation,
-        GroundAnchorNormal);
+        IsHolding(),
+        GetGroundAnchorLocation(),
+        GetGroundAnchorNormal());
 }
 
 void ACMArmPart::HandlePartDied()

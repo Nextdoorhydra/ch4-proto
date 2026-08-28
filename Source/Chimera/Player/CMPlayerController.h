@@ -48,6 +48,9 @@ public:
     /** Console-command entry point using the zero-based body-segment index. */
     void RequestCheatKillSegment(int32 SegmentIndex);
 
+    void RequestCheatDamageSegment(int32 SegmentIndex, float Damage);
+    void RequestCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+
     void RequestCheatSpawnRandomParts();
     void RequestCheatAttachPart(int32 OneBasedSlotIndex, FName PartName);
     void RequestCheatFillAllSlotsWithPart(FName PartName);
@@ -123,6 +126,10 @@ private:
     void ReverseModifierReleased();
     void AdjustCameraDistance(const FInputActionValue& InputValue);
     void SetControlSlotPressed(int32 SlotIndex, bool bPressed);
+    void SoloControlKeyPressed(FKey Key);
+    void SoloControlKeyReleased(FKey Key);
+    void SetSoloControlKeyPressed(FKey Key, bool bPressed);
+    bool IsSoloTestMode() const;
     void DebugMoveForwardPressed();
     void DebugMoveForwardReleased();
     void DebugMoveBackwardPressed();
@@ -161,6 +168,12 @@ private:
     void ServerCheatKillSegment(int32 SegmentIndex);
 
     UFUNCTION(Server, Reliable)
+    void ServerCheatDamageSegment(int32 SegmentIndex, float Damage);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+
+    UFUNCTION(Server, Reliable)
     void ServerCheatSpawnRandomParts();
 
     UFUNCTION(Server, Reliable)
@@ -182,6 +195,13 @@ private:
     void ServerApplyCheatDebugMovement(float ForwardInput, float TurnInput);
 
     UFUNCTION(Server, Reliable)
+    void ServerSetSoloControlKeyPressed(
+        int32 KeyIndex,
+        bool bPressed,
+        bool bReverseMovement,
+        bool bDetachPart);
+
+    UFUNCTION(Server, Reliable)
     void ServerRequestTeleportToTestArea(FName AreaId);
 
     UPROPERTY(Transient)
@@ -197,5 +217,7 @@ private:
     bool bDebugMoveBackwardHeld = false;
     bool bDebugTurnLeftHeld = false;
     bool bDebugTurnRightHeld = false;
+
+    FCMPartSlotAddress SoloPressedPartSlots[CMControl::SoloTestKeyCount];
 
 };
