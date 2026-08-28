@@ -37,6 +37,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Aggressive AI|Centipede|Inference")
     bool StartInferencePath(ACMCentipedePawn* InInferenceAgent, FVector WorldGoal, float AcceptanceRadius = 120.0f);
 
+    UFUNCTION(BlueprintCallable, Category = "Aggressive AI|Centipede|Inference")
+    bool UpdateInferenceGoal(FVector WorldGoal);
+
     UFUNCTION(BlueprintCallable, Category = "Aggressive AI|Centipede|Inference|Chase Test")
     bool StartChasingTestTarget(ACMCentipedePawn* InInferenceAgent, ACMAggressiveChaseTestTarget* InChaseTarget, float AcceptanceRadius = 50.0f);
 
@@ -44,7 +47,10 @@ public:
     void StopInference();
 
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Centipede|Inference")
-    bool IsInferenceRunning() const { return bInferenceRunning; }
+    bool IsInferenceRunning() const
+    {
+        return bInferenceRunning;
+    }
 
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Centipede|Inference")
     FString GetSnapshotDirectory() const;
@@ -78,7 +84,7 @@ protected:
     float ProgressCheckInterval = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Inference|Recovery", meta = (ClampMin = "0.1"))
-    float MaximumNoProgressSeconds = 3.0f;
+    float MaximumNoProgressSeconds = 4.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Inference|Recovery", meta = (ClampMin = "0.0"))
     float MinimumProgressDistance = 15.0f;

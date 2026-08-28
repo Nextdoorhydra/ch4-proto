@@ -36,8 +36,9 @@ namespace
             return Direction;
         return static_cast<ECMAggressiveMoveDirection>((static_cast<uint8>(Direction) + 4) % 8);
     }
-}
+} // namespace
 
+// Centipede의 관절·세그먼트 관측과 여덟 다리 행동 스키마를 가진 Interactor를 생성한다.
 UCMCentipedeLearningInteractor* UCMCentipedeLearningInteractor::MakeCentipedeInteractor(ULearningAgentsManager*& InManager, FName Name)
 {
     if (!InManager)
@@ -47,25 +48,26 @@ UCMCentipedeLearningInteractor* UCMCentipedeLearningInteractor::MakeCentipedeInt
         return nullptr;
     Interactor->ActiveLegIndicesScratch.Reserve(CentipedeLegCount);
     Interactor->SetupInteractor(InManager);
+
     return Interactor->IsSetup() ? Interactor : nullptr;
 }
 
+// 목표 방향과 선두·관절·세그먼트 물리 상태로 구성된 관측 스키마를 정의한다.
 void UCMCentipedeLearningInteractor::SpecifyAgentObservation_Implementation(FLearningAgentsObservationSchemaElement& OutObservationSchemaElement, ULearningAgentsObservationSchema* InObservationSchema)
 {
     const FName Names[] = {CentipedeGoalDirectionTag, CentipedeHeadVelocityTag, CentipedeHeadYawVelocityTag, CentipedeJointAnglesTag, CentipedeTargetJointAnglesTag, CentipedeJointErrorsTag, CentipedeJointVelocitiesTag, CentipedeSegmentVelocitiesTag};
-    const FLearningAgentsObservationSchemaElement Elements[] = {
-        ULearningAgentsObservations::SpecifyEnumObservation(InObservationSchema, StaticEnum<ECMAggressiveMoveDirection>(), CentipedeGoalDirectionTag),
-        ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, 2, CentipedeVelocityScale, CentipedeHeadVelocityTag),
-        ULearningAgentsObservations::SpecifyFloatObservation(InObservationSchema, CentipedeYawVelocityScale, CentipedeHeadYawVelocityTag),
-        ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeJointCount, CentipedeJointAngleScale, CentipedeJointAnglesTag),
-        ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeJointCount, CentipedeJointAngleScale, CentipedeTargetJointAnglesTag),
-        ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeJointCount, CentipedeJointAngleScale, CentipedeJointErrorsTag),
-        ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeJointCount, CentipedeJointVelocityScale, CentipedeJointVelocitiesTag),
-        ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeSegmentVelocityCount, CentipedeVelocityScale, CentipedeSegmentVelocitiesTag)
-    };
+    const FLearningAgentsObservationSchemaElement Elements[] = {ULearningAgentsObservations::SpecifyEnumObservation(InObservationSchema, StaticEnum<ECMAggressiveMoveDirection>(), CentipedeGoalDirectionTag),
+         ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, 2, CentipedeVelocityScale, CentipedeHeadVelocityTag),
+         ULearningAgentsObservations::SpecifyFloatObservation(InObservationSchema, CentipedeYawVelocityScale, CentipedeHeadYawVelocityTag),
+         ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeJointCount, CentipedeJointAngleScale, CentipedeJointAnglesTag),
+         ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeJointCount, CentipedeJointAngleScale, CentipedeTargetJointAnglesTag),
+         ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeJointCount, CentipedeJointAngleScale, CentipedeJointErrorsTag),
+         ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeJointCount, CentipedeJointVelocityScale, CentipedeJointVelocitiesTag),
+         ULearningAgentsObservations::SpecifyContinuousObservation(InObservationSchema, CentipedeSegmentVelocityCount, CentipedeVelocityScale, CentipedeSegmentVelocitiesTag)};
     OutObservationSchemaElement = ULearningAgentsObservations::SpecifyStructObservationFromArrayViews(InObservationSchema, MakeArrayView(Names), MakeArrayView(Elements), CentipedeObservationTag);
 }
 
+// 진행 선두 기준으로 관절 순서와 속도 부호를 정규화해 정책 관측값을 수집한다.
 void UCMCentipedeLearningInteractor::GatherAgentObservation_Implementation(FLearningAgentsObservationObjectElement& OutObservationObjectElement, ULearningAgentsObservationObject* InObservationObject, int32 AgentId)
 {
     ACMCentipedePawn* Agent = Cast<ACMCentipedePawn>(GetAgent(AgentId));
@@ -87,6 +89,7 @@ void UCMCentipedeLearningInteractor::GatherAgentObservation_Implementation(FLear
     {
         Agent->RefreshJointTargets();
         Agent->GetJointState(JointAngles, TargetJointAngles, JointVelocities);
+        // 꼬리 진행도 머리 진행과 같은 논리적 관측 순서를 갖도록 인덱스와 부호를 뒤집는다.
         if (Agent->IsTailLeading())
         {
             const TArray<float> PhysicalJointAngles = JointAngles;
@@ -137,24 +140,24 @@ void UCMCentipedeLearningInteractor::GatherAgentObservation_Implementation(FLear
     }
 
     const FName Names[] = {CentipedeGoalDirectionTag, CentipedeHeadVelocityTag, CentipedeHeadYawVelocityTag, CentipedeJointAnglesTag, CentipedeTargetJointAnglesTag, CentipedeJointErrorsTag, CentipedeJointVelocitiesTag, CentipedeSegmentVelocitiesTag};
-    const FLearningAgentsObservationObjectElement Elements[] = {
-        ULearningAgentsObservations::MakeEnumObservation(InObservationObject, StaticEnum<ECMAggressiveMoveDirection>(), static_cast<uint8>(GoalDirection), CentipedeGoalDirectionTag),
-        ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, MakeArrayView(HeadVelocityValues), CentipedeHeadVelocityTag),
-        ULearningAgentsObservations::MakeFloatObservation(InObservationObject, HeadYawVelocity, CentipedeHeadYawVelocityTag),
-        ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, JointAngles, CentipedeJointAnglesTag),
-        ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, TargetJointAngles, CentipedeTargetJointAnglesTag),
-        ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, JointErrors, CentipedeJointErrorsTag),
-        ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, JointVelocities, CentipedeJointVelocitiesTag),
-        ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, SegmentVelocities, CentipedeSegmentVelocitiesTag)
-    };
+    const FLearningAgentsObservationObjectElement Elements[] = {ULearningAgentsObservations::MakeEnumObservation(InObservationObject, StaticEnum<ECMAggressiveMoveDirection>(), static_cast<uint8>(GoalDirection), CentipedeGoalDirectionTag),
+         ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, MakeArrayView(HeadVelocityValues), CentipedeHeadVelocityTag),
+         ULearningAgentsObservations::MakeFloatObservation(InObservationObject, HeadYawVelocity, CentipedeHeadYawVelocityTag),
+         ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, JointAngles, CentipedeJointAnglesTag),
+         ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, TargetJointAngles, CentipedeTargetJointAnglesTag),
+         ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, JointErrors, CentipedeJointErrorsTag),
+         ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, JointVelocities, CentipedeJointVelocitiesTag),
+         ULearningAgentsObservations::MakeContinuousObservationFromArrayView(InObservationObject, SegmentVelocities, CentipedeSegmentVelocitiesTag)};
     OutObservationObjectElement = ULearningAgentsObservations::MakeStructObservationFromArrayViews(InObservationObject, MakeArrayView(Names), MakeArrayView(Elements), CentipedeObservationTag);
 }
 
+// 여덟 다리를 한 판단에서 독립적으로 선택할 수 있는 행동 스키마를 정의한다.
 void UCMCentipedeLearningInteractor::SpecifyAgentAction_Implementation(FLearningAgentsActionSchemaElement& OutActionSchemaElement, ULearningAgentsActionSchema* InActionSchema)
 {
     OutActionSchemaElement = ULearningAgentsActions::SpecifyInclusiveDiscreteAction(InActionSchema, CentipedeLegCount, {}, CentipedeLegActionsTag);
 }
 
+// 선두 정렬을 우선 갱신하고 정책이 선택한 논리적 다리를 실제 몸통 다리에 적용한다.
 void UCMCentipedeLearningInteractor::PerformAgentAction_Implementation(const ULearningAgentsActionObject* InActionObject, const FLearningAgentsActionObjectElement& InActionObjectElement, int32 AgentId)
 {
     ActiveLegIndicesScratch.Reset();

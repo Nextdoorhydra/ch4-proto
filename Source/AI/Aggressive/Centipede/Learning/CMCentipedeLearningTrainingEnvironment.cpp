@@ -7,12 +7,9 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogCMCentipedeEpisode, Log, All);
 
-UCMCentipedeLearningTrainingEnvironment* UCMCentipedeLearningTrainingEnvironment::MakeCentipedeTrainingEnvironment(
-    ULearningAgentsManager*& InManager,
-    FCMAggressiveLearningRewardSettings InRewardSettings,
-    FCMAggressiveLearningGoalSettings InGoalSettings,
-    float InJointTrackingPenaltyScale,
-    FName Name)
+UCMCentipedeLearningTrainingEnvironment*
+// 이동 보상과 관절 추종 패널티를 결합한 Centipede 학습 환경을 생성한다.
+UCMCentipedeLearningTrainingEnvironment::MakeCentipedeTrainingEnvironment(ULearningAgentsManager*& InManager, FCMAggressiveLearningRewardSettings InRewardSettings, FCMAggressiveLearningGoalSettings InGoalSettings, float InJointTrackingPenaltyScale, FName Name)
 {
     if (!InManager)
         return nullptr;
@@ -32,6 +29,7 @@ UCMCentipedeLearningTrainingEnvironment* UCMCentipedeLearningTrainingEnvironment
     Environment->HasInitialState.Init(false, MaxAgentNum);
     Environment->HasPreviousState.Init(false, MaxAgentNum);
     Environment->SetupTrainingEnvironment(InManager);
+
     return Environment->IsSetup() ? Environment : nullptr;
 }
 
@@ -56,6 +54,7 @@ void UCMCentipedeLearningTrainingEnvironment::OnAgentsRemoved_Implementation(con
     }
 }
 
+// 목표 접근 보상에서 관절 목표 오차를 차감해 이동과 몸통 추종을 함께 학습시킨다.
 void UCMCentipedeLearningTrainingEnvironment::GatherAgentReward_Implementation(float& OutReward, int32 AgentId)
 {
     OutReward = 0.0f;
@@ -71,20 +70,16 @@ void UCMCentipedeLearningTrainingEnvironment::GatherAgentReward_Implementation(f
     if (!HasPreviousState[AgentId] || !PreviousGoalLocations[AgentId].Equals(Goal.WorldLocation, UE_KINDA_SMALL_NUMBER))
     {
         UpdatePreviousState(AgentId);
+
         return;
     }
 
-    OutReward = CMAggressiveLearningReward::CalculateMovementReward(
-        PreviousGoalDistances[AgentId],
-        CurrentDistance,
-        Head->GetPhysicsAngularVelocityInRadians().Z,
-        Command->HasReachedMovementGoal(),
-        GetEpisodeTime(AgentId),
-        RewardSettings);
+    OutReward = CMAggressiveLearningReward::CalculateMovementReward(PreviousGoalDistances[AgentId], CurrentDistance, Head->GetPhysicsAngularVelocityInRadians().Z, Command->HasReachedMovementGoal(), GetEpisodeTime(AgentId), RewardSettings);
     OutReward -= Agent->GetMeanNormalizedJointError() * JointTrackingPenaltyScale;
     PreviousGoalDistances[AgentId] = CurrentDistance;
 }
 
+// 목표 도착과 모든 세그먼트의 기립 상태 및 제한시간으로 에피소드 종료를 판정한다.
 void UCMCentipedeLearningTrainingEnvironment::GatherAgentCompletion_Implementation(ELearningAgentsCompletion& OutCompletion, int32 AgentId)
 {
     ACMCentipedePawn* Agent = GetCentipedeAgent(AgentId);
@@ -102,6 +97,7 @@ void UCMCentipedeLearningTrainingEnvironment::GatherAgentCompletion_Implementati
         PendingEndReasons[AgentId] = CMAggressiveLearningEpisode::ResolveEndReason(bReachedGoal, UprightDot, EpisodeTime, RewardSettings);
 }
 
+// 종료 결과를 집계하고 관절 몸체를 시작 자세로 되돌린 뒤 다음 목표를 설정한다.
 void UCMCentipedeLearningTrainingEnvironment::ResetAgentEpisode_Implementation(int32 AgentId)
 {
     ACMCentipedePawn* Agent = GetCentipedeAgent(AgentId);
@@ -120,11 +116,10 @@ ACMCentipedePawn* UCMCentipedeLearningTrainingEnvironment::GetCentipedeAgent(int
 
 float UCMCentipedeLearningTrainingEnvironment::GetSuccessRate() const
 {
-    return TotalCompletedEpisodeCount > 0
-        ? static_cast<float>(TotalSuccessfulEpisodeCount) / static_cast<float>(TotalCompletedEpisodeCount)
-        : 0.0f;
+    return TotalCompletedEpisodeCount > 0 ? static_cast<float>(TotalSuccessfulEpisodeCount) / static_cast<float>(TotalCompletedEpisodeCount) : 0.0f;
 }
 
+// 에이전트의 시작 머리 자세를 저장하고 첫 방향·곡률 학습 목표를 준비한다.
 void UCMCentipedeLearningTrainingEnvironment::CaptureInitialState(int32 AgentId)
 {
     ACMCentipedePawn* Agent = GetCentipedeAgent(AgentId);
@@ -141,6 +136,7 @@ void UCMCentipedeLearningTrainingEnvironment::CaptureInitialState(int32 AgentId)
     UpdatePreviousState(AgentId);
 }
 
+// 정책 갱신에 의한 중단은 제외하고 자연 종료 에피소드의 성공률을 누적한다.
 void UCMCentipedeLearningTrainingEnvironment::RecordPendingEpisodeResult(int32 AgentId)
 {
     if (!PendingEndReasons.IsValidIndex(AgentId))
@@ -153,15 +149,10 @@ void UCMCentipedeLearningTrainingEnvironment::RecordPendingEpisodeResult(int32 A
     ++TotalCompletedEpisodeCount;
     if (EndReason == ECMAggressiveLearningEpisodeEndReason::Arrival)
         ++TotalSuccessfulEpisodeCount;
-    UE_LOG(LogCMCentipedeEpisode, Display,
-        TEXT("Centipede AI 학습 결과 - 에이전트=%d 에피소드=%d 완료=%lld 성공=%lld 성공률=%.1f%%"),
-        AgentId,
-        EpisodeNumbers.IsValidIndex(AgentId) ? EpisodeNumbers[AgentId] : 0,
-        TotalCompletedEpisodeCount,
-        TotalSuccessfulEpisodeCount,
-        GetSuccessRate() * 100.0f);
+    UE_LOG(LogCMCentipedeEpisode, Display, TEXT("Centipede AI 학습 결과 - 에이전트=%d 에피소드=%d 완료=%lld 성공=%lld 성공률=%.1f%%"), AgentId, EpisodeNumbers.IsValidIndex(AgentId) ? EpisodeNumbers[AgentId] : 0, TotalCompletedEpisodeCount, TotalSuccessfulEpisodeCount, GetSuccessRate() * 100.0f);
 }
 
+// 여덟 이동 방향과 네 곡률 프로필을 순환하도록 다음 학습 목표를 설정한다.
 void UCMCentipedeLearningTrainingEnvironment::SetNextGoal(int32 AgentId)
 {
     ACMCentipedePawn* Agent = GetCentipedeAgent(AgentId);
@@ -176,6 +167,7 @@ void UCMCentipedeLearningTrainingEnvironment::SetNextGoal(int32 AgentId)
     NextDirectionIndices[AgentId] = (DirectionIndex + 1) % 8;
 }
 
+// 현재 목표와 선두 거리를 다음 판단의 진행 보상 기준으로 저장한다.
 void UCMCentipedeLearningTrainingEnvironment::UpdatePreviousState(int32 AgentId)
 {
     ACMCentipedePawn* Agent = GetCentipedeAgent(AgentId);

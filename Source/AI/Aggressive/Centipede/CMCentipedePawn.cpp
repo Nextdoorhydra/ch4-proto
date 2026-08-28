@@ -3,9 +3,11 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "Aggressive/Common/Movement/CMAIFixedLegActuatorComponent.h"
+#include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -20,14 +22,19 @@ namespace CMCentipedeBody
     constexpr float LegHalfHeight = 20.0f;
     constexpr float LegLateralOffset = 90.0f;
     constexpr float TrailSampleDistance = 20.0f;
-}
+} // namespace CMCentipedeBody
 
+// 네 개의 관절 몸통과 여덟 다리 및 양방향 시야·학습 이동 컴포넌트를 구성한다.
 ACMCentipedePawn::ACMCentipedePawn()
 {
     PrimaryActorTick.bCanEverTick = false;
     PrimaryActorTick.bStartWithTickEnabled = false;
     bReplicates = true;
     SetReplicateMovement(false);
+    ConfiguredKnockbackDistanceCm = 0.0f;
+
+    Behavior = CreateDefaultSubobject<UCMAggressiveBehaviorComponent>(TEXT("Behavior"));
+    Behavior->ConfigureProfile(ECMAggressiveBehaviorProfile::Centipede);
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
@@ -66,9 +73,19 @@ ACMCentipedePawn::ACMCentipedePawn()
         AddLeg(SegmentIndex, false, CubeMeshAsset.Object);
     }
 
+    HeadSight = CreateDefaultSubobject<UCMAggressiveSightComponent>(TEXT("HeadSight"));
+    HeadSight->SetupAttachment(HeadBody);
+    HeadSight->SetSightDefaults(1000.0f, 60.0f, 180.0f);
+
+    TailSight = CreateDefaultSubobject<UCMAggressiveSightComponent>(TEXT("TailSight"));
+    TailSight->SetupAttachment(BodySegments.Last());
+    TailSight->SetSightDefaults(1000.0f, 60.0f, 180.0f);
+    TailSight->SetSightForwardReversed(true);
+
     TargetJointAnglesDegrees.Init(0.0f, CMCentipedeBody::JointCount);
 }
 
+// 몸통 물리와 관절 제약 및 다리 구동 상태를 실제 월드 기준으로 초기화한다.
 void ACMCentipedePawn::BeginPlay()
 {
     Super::BeginPlay();
@@ -84,6 +101,7 @@ void ACMCentipedePawn::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Super::EndPlay(EndPlayReason);
 }
 
+// 진행 선두 방향과 정렬 상태를 반영해 지정한 다리에 이동 임펄스를 적용한다.
 bool ACMCentipedePawn::ActivateLeg(int32 LegIndex)
 {
     if (!HasAuthority() || !LegActuator || !LegBodies.IsValidIndex(LegIndex) || !LegContactPoints.IsValidIndex(LegIndex))
@@ -97,9 +115,11 @@ bool ACMCentipedePawn::ActivateLeg(int32 LegIndex)
     const bool bActivated = LegActuator->TryActivateLeg(LegIndex, LegBodies[LegIndex], LegContactPoints[LegIndex], LocalImpulseDirection, EffectiveSettings, Result);
     if (bActivated)
         LegActuator->LimitPlanarSpeed(LegBodies[LegIndex], MaxPlanarSpeed * MovementOutputScale);
+
     return bActivated;
 }
 
+// 정책이 선택한 여러 다리를 구동하고 모든 몸통 세그먼트의 평면 속도를 제한한다.
 int32 ACMCentipedePawn::ActivateLegs(const TArray<int32>& LegIndices)
 {
     if (!HasAuthority() || !LegActuator)
@@ -111,9 +131,11 @@ int32 ACMCentipedePawn::ActivateLegs(const TArray<int32>& LegIndices)
     const float MovementOutputScale = bAligningLeadingEnd ? FMath::Clamp(AlignmentMovementOutputScale, 0.0f, 1.0f) : 1.0f;
     for (UBoxComponent* Segment : BodySegments)
         LegActuator->LimitPlanarSpeed(Segment, MaxPlanarSpeed * MovementOutputScale);
+
     return ActivatedCount;
 }
 
+// 학습용 곡률을 해제하고 유리한 말단을 선두로 선택한 뒤 경로 이동을 시작한다.
 bool ACMCentipedePawn::StartPathMoveToLocation(FVector WorldGoal, float AcceptanceRadius)
 {
     if (!PathMovement || !MovementCommand)
@@ -122,6 +144,7 @@ bool ACMCentipedePawn::StartPathMoveToLocation(FVector WorldGoal, float Acceptan
     bAligningLeadingEnd = false;
     ResetHeadTrail();
     PathMovement->SetPolicyControlEnabled(true);
+
     return PathMovement->StartPathMove(WorldGoal, AcceptanceRadius);
 }
 
@@ -134,14 +157,27 @@ void ACMCentipedePawn::StopPathMove()
         MovementCommand->ClearMovementGoal();
 }
 
-int32 ACMCentipedePawn::GetLegCount() const { return LegContactPoints.Num(); }
-UPrimitiveComponent* ACMCentipedePawn::GetAggressiveMovementBody() const { return GetLeadingBody(); }
+void ACMCentipedePawn::StopAggressiveMovementForReaction()
+{
+    StopPathMove();
+}
+
+int32 ACMCentipedePawn::GetLegCount() const
+{
+    return LegContactPoints.Num();
+}
+UPrimitiveComponent* ACMCentipedePawn::GetAggressiveMovementBody() const
+{
+    return GetLeadingBody();
+}
 FVector ACMCentipedePawn::GetAggressiveNavigationReferenceLocation() const
 {
     const UBoxComponent* LeadingBody = GetLeadingBody();
+
     return LeadingBody ? LeadingBody->GetComponentLocation() : GetActorLocation();
 }
 
+// 머리와 꼬리의 완전한 경로 길이를 비교해 목적지에 유리한 진행 선두를 선택한다.
 void ACMCentipedePawn::PrepareAggressivePathMove(FVector WorldGoal)
 {
     if (!HasAuthority() || !PathMovement || !HeadBody || BodySegments.IsEmpty())
@@ -156,14 +192,18 @@ void ACMCentipedePawn::PrepareAggressivePathMove(FVector WorldGoal)
 
     const bool bUseTail = bHasTailPath && (!bHasHeadPath || TailPathLength < HeadPathLength);
     SetTailLeading(bUseTail);
-    UE_LOG(LogCMCentipedePawn, Display,
+    UE_LOG(
+        LogCMCentipedePawn,
+        Display,
         TEXT("Centipede AI가 말단별 경로 길이를 비교해 %s를 선두로 선택했습니다. 머리=%s 꼬리=%s 목표=%s"),
         bUseTail ? TEXT("꼬리") : TEXT("머리"),
         bHasHeadPath ? *FString::Printf(TEXT("%.1fcm"), HeadPathLength) : TEXT("경로 없음"),
         bHasTailPath ? *FString::Printf(TEXT("%.1fcm"), TailPathLength) : TEXT("경로 없음"),
-        *WorldGoal.ToCompactString());
+        *WorldGoal.ToCompactString()
+    );
 }
 
+// 경로 목표를 정리하고 Centipede 이동 완료 결과를 구독자에게 전달한다.
 void ACMCentipedePawn::HandleAggressivePathMoveCompleted(ECMAggressivePathMoveResult Result)
 {
     if (MovementCommand)
@@ -177,15 +217,44 @@ void ACMCentipedePawn::ResetLegActuation()
         LegActuator->ResetCooldowns();
 }
 
-int32 ACMCentipedePawn::GetBodySegmentCount() const { return BodySegments.Num(); }
-int32 ACMCentipedePawn::GetJointCount() const { return FMath::Max(BodySegments.Num() - 1, 0); }
-float ACMCentipedePawn::GetSegmentCenterSpacing() const { return SegmentCenterSpacing; }
-float ACMCentipedePawn::GetHorizontalBendLimitDegrees() const { return HorizontalBendLimitDegrees; }
-float ACMCentipedePawn::GetMaxPlanarSpeed() const { return MaxPlanarSpeed; }
-UBoxComponent* ACMCentipedePawn::GetHeadBody() const { return HeadBody; }
+int32 ACMCentipedePawn::GetBodySegmentCount() const
+{
+    return BodySegments.Num();
+}
+int32 ACMCentipedePawn::GetJointCount() const
+{
+    return FMath::Max(BodySegments.Num() - 1, 0);
+}
+float ACMCentipedePawn::GetSegmentCenterSpacing() const
+{
+    return SegmentCenterSpacing;
+}
+float ACMCentipedePawn::GetHorizontalBendLimitDegrees() const
+{
+    return HorizontalBendLimitDegrees;
+}
+float ACMCentipedePawn::GetMaxPlanarSpeed() const
+{
+    return MaxPlanarSpeed;
+}
+UBoxComponent* ACMCentipedePawn::GetHeadBody() const
+{
+    return HeadBody;
+}
 UBoxComponent* ACMCentipedePawn::GetLeadingBody() const
 {
     return bTailLeading && !BodySegments.IsEmpty() ? BodySegments.Last() : HeadBody;
+}
+
+FVector ACMCentipedePawn::GetLeadingTipLocation() const
+{
+    const UBoxComponent* LeadingBody = GetLeadingBody();
+    if (!LeadingBody)
+        return GetActorLocation();
+
+    const FVector TravelForward = bTailLeading ? -LeadingBody->GetForwardVector() : LeadingBody->GetForwardVector();
+
+    return LeadingBody->GetComponentLocation() + TravelForward * LeadingBody->GetScaledBoxExtent().X;
 }
 
 void ACMCentipedePawn::SetTailLeading(bool bInTailLeading)
@@ -203,18 +272,36 @@ void ACMCentipedePawn::SwapLeadingEnd()
 {
     SetTailLeading(!bTailLeading);
 }
-UCMAggressiveMovementCommandComponent* ACMCentipedePawn::GetMovementCommand() const { return MovementCommand; }
-UCMAggressiveOmnidirectionalPathComponent* ACMCentipedePawn::GetPathMovement() const { return PathMovement; }
-const TArray<TObjectPtr<UBoxComponent>>& ACMCentipedePawn::GetBodySegments() const { return BodySegments; }
-const TArray<TObjectPtr<UPhysicsConstraintComponent>>& ACMCentipedePawn::GetSegmentConstraints() const { return SegmentConstraints; }
-const TArray<TObjectPtr<UStaticMeshComponent>>& ACMCentipedePawn::GetBodyMeshes() const { return BodyMeshes; }
-const TArray<TObjectPtr<UStaticMeshComponent>>& ACMCentipedePawn::GetLegMeshes() const { return LegMeshes; }
+UCMAggressiveMovementCommandComponent* ACMCentipedePawn::GetMovementCommand() const
+{
+    return MovementCommand;
+}
+UCMAggressiveOmnidirectionalPathComponent* ACMCentipedePawn::GetPathMovement() const
+{
+    return PathMovement;
+}
+const TArray<TObjectPtr<UBoxComponent>>& ACMCentipedePawn::GetBodySegments() const
+{
+    return BodySegments;
+}
+const TArray<TObjectPtr<UPhysicsConstraintComponent>>& ACMCentipedePawn::GetSegmentConstraints() const
+{
+    return SegmentConstraints;
+}
+const TArray<TObjectPtr<UStaticMeshComponent>>& ACMCentipedePawn::GetBodyMeshes() const
+{
+    return BodyMeshes;
+}
+const TArray<TObjectPtr<UStaticMeshComponent>>& ACMCentipedePawn::GetLegMeshes() const
+{
+    return LegMeshes;
+}
 
+// 큰 방향 오차에서는 전 몸통을 회전시키고 정렬 완료 뒤 정책 다리 제어로 복귀한다.
 bool ACMCentipedePawn::UpdateLeadingEndAlignment()
 {
     UBoxComponent* LeadingBody = GetLeadingBody();
-    if (!HasAuthority() || !LeadingBody || !PathMovement || !PathMovement->IsPathMoving()
-        || !MovementCommand || !MovementCommand->HasMovementGoal())
+    if (!HasAuthority() || !LeadingBody || !PathMovement || !PathMovement->IsPathMoving() || !MovementCommand || !MovementCommand->HasMovementGoal())
     {
         bAligningLeadingEnd = false;
         return false;
@@ -233,6 +320,7 @@ bool ACMCentipedePawn::UpdateLeadingEndAlignment()
     TravelForward.Normalize();
     const float YawErrorDegrees = FMath::FindDeltaAngleDegrees(TravelForward.Rotation().Yaw, GoalDirection.Rotation().Yaw);
     const float AbsoluteYawError = FMath::Abs(YawErrorDegrees);
+    // 시작·종료 임계값을 분리해 경계 각도에서 정렬 상태가 반복 전환되는 것을 막는다.
     if (!bAligningLeadingEnd && AbsoluteYawError < FMath::Max(LeadingAlignmentStartAngleDegrees, 0.0f))
         return false;
     if (bAligningLeadingEnd && AbsoluteYawError <= FMath::Max(LeadingAlignmentStopAngleDegrees, 0.0f))
@@ -251,10 +339,7 @@ bool ACMCentipedePawn::UpdateLeadingEndAlignment()
 
     bAligningLeadingEnd = true;
     const float MaximumAngularSpeed = FMath::Max(LeadingAlignmentAngularSpeedDegreesPerSecond, 0.0f);
-    const float AngularSpeedDegrees = FMath::Clamp(
-        YawErrorDegrees * FMath::Max(LeadingAlignmentAngularSpeedGain, 0.0f),
-        -MaximumAngularSpeed,
-        MaximumAngularSpeed);
+    const float AngularSpeedDegrees = FMath::Clamp(YawErrorDegrees * FMath::Max(LeadingAlignmentAngularSpeedGain, 0.0f), -MaximumAngularSpeed, MaximumAngularSpeed);
     const float LastSegmentScale = FMath::Clamp(TrailingAlignmentAngularSpeedScale, 0.0f, 1.0f);
     for (int32 TraversalIndex = 0; TraversalIndex < BodySegments.Num(); ++TraversalIndex)
     {
@@ -272,6 +357,7 @@ bool ACMCentipedePawn::UpdateLeadingEndAlignment()
     return true;
 }
 
+// 선두 이동 궤적과 현재 목표를 이용해 각 관절의 부드러운 추종 각도를 갱신한다.
 void ACMCentipedePawn::RefreshJointTargets()
 {
     UBoxComponent* LeadingBody = GetLeadingBody();
@@ -279,6 +365,7 @@ void ACMCentipedePawn::RefreshJointTargets()
         return;
 
     UpdateHeadTrail();
+    // 선두 뒤의 누적 궤적을 세그먼트 간격으로 샘플링해 목표 중심선을 만든다.
     TArray<FVector, TInlineAllocator<CMCentipedeBody::SegmentCount>> TargetCenters;
     TargetCenters.SetNum(CMCentipedeBody::SegmentCount);
     TargetCenters[0] = LeadingBody->GetComponentLocation();
@@ -297,6 +384,7 @@ void ACMCentipedePawn::RefreshJointTargets()
         TargetYaws[SegmentIndex] = Direction.IsNearlyZero() ? BodySegments[PhysicalSegmentIndex]->GetComponentRotation().Yaw : Direction.Rotation().Yaw;
     }
 
+    // 첫 관절은 경로 목표 쪽으로 제한된 각도만 추가해 몸통 전체가 코너를 선행하게 한다.
     if (MovementCommand && MovementCommand->HasMovementGoal())
     {
         FVector GoalDirection = MovementCommand->GetMovementGoal().WorldLocation - TargetCenters[0];
@@ -315,27 +403,36 @@ void ACMCentipedePawn::RefreshJointTargets()
     for (int32 TraversalJointIndex = 0; TraversalJointIndex < CMCentipedeBody::JointCount; ++TraversalJointIndex)
     {
         float DesiredAngle = FMath::FindDeltaAngleDegrees(TargetYaws[TraversalJointIndex], TargetYaws[TraversalJointIndex + 1]);
+        // 학습 중에는 서로 다른 곡률 궤적을 반복해 직선 이동에만 과적합되지 않게 한다.
         if (TrainingCurveProfile > 0)
         {
             const float Amplitude = TrainingCurveProfile == 1 ? 20.0f : 35.0f;
             const float DirectionSign = TrainingCurveProfile == 3 ? -1.0f : 1.0f;
             DesiredAngle += DirectionSign * Amplitude * FMath::Sin(TimeSeconds * 1.6f - TraversalJointIndex * HALF_PI);
         }
+        // 꼬리 진행 시 논리적 진행 순서를 실제 관절 인덱스와 회전 부호로 다시 매핑한다.
         const int32 PhysicalJointIndex = bTailLeading ? CMCentipedeBody::JointCount - 1 - TraversalJointIndex : TraversalJointIndex;
         DesiredAngles[PhysicalJointIndex] = FMath::Clamp(bTailLeading ? -DesiredAngle : DesiredAngle, -OperatingBendLimitDegrees, OperatingBendLimitDegrees);
     }
 
+    // 목표 각도를 속도 제한 보간해 관절 드라이브의 급격한 방향 반전을 줄인다.
     const double CurrentTime = World ? World->GetTimeSeconds() : 0.0;
     const float DeltaSeconds = LastTargetUpdateTime > 0.0 ? static_cast<float>(CurrentTime - LastTargetUpdateTime) : 0.0f;
     for (int32 JointIndex = 0; JointIndex < DesiredAngles.Num(); ++JointIndex)
     {
-        TargetJointAnglesDegrees[JointIndex] = DeltaSeconds > 0.0f
-            ? FMath::FInterpConstantTo(TargetJointAnglesDegrees[JointIndex], DesiredAngles[JointIndex], DeltaSeconds, TargetJointAngleRateDegreesPerSecond)
-            : DesiredAngles[JointIndex];
+        if (DeltaSeconds > 0.0f)
+        {
+            TargetJointAnglesDegrees[JointIndex] = FMath::FInterpConstantTo(TargetJointAnglesDegrees[JointIndex], DesiredAngles[JointIndex], DeltaSeconds, TargetJointAngleRateDegreesPerSecond);
+        }
+        else
+        {
+            TargetJointAnglesDegrees[JointIndex] = DesiredAngles[JointIndex];
+        }
     }
     LastTargetUpdateTime = CurrentTime;
 }
 
+// 학습 관측과 보상 계산에 사용할 현재·목표 관절각 및 상대 각속도를 수집한다.
 void ACMCentipedePawn::GetJointState(TArray<float>& OutCurrentAnglesDegrees, TArray<float>& OutTargetAnglesDegrees, TArray<float>& OutAngularVelocitiesRadians) const
 {
     const int32 JointCount = GetJointCount();
@@ -366,6 +463,7 @@ float ACMCentipedePawn::GetMeanNormalizedJointError() const
     float ErrorSum = 0.0f;
     for (int32 JointIndex = 0; JointIndex < CurrentAngles.Num(); ++JointIndex)
         ErrorSum += FMath::Abs(FMath::FindDeltaAngleDegrees(CurrentAngles[JointIndex], Targets[JointIndex]));
+
     return FMath::Clamp(ErrorSum / (CurrentAngles.Num() * FMath::Max(OperatingBendLimitDegrees, 1.0f)), 0.0f, 2.0f);
 }
 
@@ -375,6 +473,7 @@ float ACMCentipedePawn::GetMinimumSegmentUprightDot() const
     for (const UBoxComponent* Segment : BodySegments)
         if (Segment)
             MinimumDot = FMath::Min(MinimumDot, FVector::DotProduct(Segment->GetUpVector(), FVector::UpVector));
+
     return MinimumDot;
 }
 
@@ -383,6 +482,7 @@ void ACMCentipedePawn::SetTrainingCurveProfile(int32 ProfileIndex)
     TrainingCurveProfile = FMath::Clamp(ProfileIndex, 0, 3);
 }
 
+// 학습 에피소드 시작 시 모든 세그먼트를 일렬 배치하고 물리·관절·다리 상태를 초기화한다.
 void ACMCentipedePawn::ResetArticulatedBody(const FTransform& HeadTransform)
 {
     bTailLeading = false;
@@ -405,6 +505,7 @@ void ACMCentipedePawn::ResetArticulatedBody(const FTransform& HeadTransform)
     ResetHeadTrail();
 }
 
+// 모든 몸통 세그먼트의 선속도와 각속도를 제거해 관절 몸체를 즉시 정지한다.
 void ACMCentipedePawn::StopArticulatedBodyMotion()
 {
     for (UBoxComponent* Segment : BodySegments)
@@ -440,6 +541,7 @@ UBoxComponent* ACMCentipedePawn::AddBodySegment(int32 SegmentIndex, UStaticMesh*
     Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Mesh->SetCanEverAffectNavigation(false);
     BodyMeshes.Add(Mesh);
+
     return Segment;
 }
 
@@ -496,6 +598,7 @@ void ACMCentipedePawn::ApplyBodySettings()
     }
 }
 
+// 인접 몸통을 제한된 수평 굽힘과 감쇠 드라이브를 가진 물리 관절로 연결한다.
 void ACMCentipedePawn::CreateSegmentConstraints()
 {
     DestroySegmentConstraints();
@@ -539,6 +642,7 @@ void ACMCentipedePawn::DestroySegmentConstraints()
     SegmentConstraints.Reset();
 }
 
+// 현재 진행 선두 뒤에 초기 직선 궤적을 만들어 관절 목표 샘플링을 준비한다.
 void ACMCentipedePawn::ResetHeadTrail()
 {
     HeadTrailPoints.Reset();
@@ -553,6 +657,7 @@ void ACMCentipedePawn::ResetHeadTrail()
         HeadTrailPoints.Add(Start + Backward * Distance);
 }
 
+// 선두 이동을 일정 거리 간격으로 기록하고 몸통 길이를 넘는 오래된 궤적을 제거한다.
 void ACMCentipedePawn::UpdateHeadTrail()
 {
     UBoxComponent* LeadingBody = GetLeadingBody();
@@ -561,6 +666,7 @@ void ACMCentipedePawn::UpdateHeadTrail()
     if (HeadTrailPoints.IsEmpty())
     {
         ResetHeadTrail();
+
         return;
     }
 
@@ -586,11 +692,13 @@ void ACMCentipedePawn::UpdateHeadTrail()
         HeadTrailPoints.RemoveAt(KeepCount, HeadTrailPoints.Num() - KeepCount, EAllowShrinking::No);
 }
 
+// 선두에서 지정한 누적 거리만큼 뒤에 있는 궤적 위치를 선형 보간한다.
 FVector ACMCentipedePawn::SampleHeadTrail(float DistanceBehindHead) const
 {
     if (HeadTrailPoints.IsEmpty())
     {
         const UBoxComponent* LeadingBody = GetLeadingBody();
+
         return LeadingBody ? LeadingBody->GetComponentLocation() : GetActorLocation();
     }
 

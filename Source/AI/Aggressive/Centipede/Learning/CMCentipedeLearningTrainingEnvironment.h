@@ -17,12 +17,8 @@ class AI_API UCMCentipedeLearningTrainingEnvironment : public ULearningAgentsTra
     GENERATED_BODY()
 
 public:
-    static UCMCentipedeLearningTrainingEnvironment* MakeCentipedeTrainingEnvironment(
-        ULearningAgentsManager*& InManager,
-        FCMAggressiveLearningRewardSettings InRewardSettings,
-        FCMAggressiveLearningGoalSettings InGoalSettings,
-        float InJointTrackingPenaltyScale,
-        FName Name = TEXT("CentipedeTrainingEnvironment"));
+    static UCMCentipedeLearningTrainingEnvironment*
+    MakeCentipedeTrainingEnvironment(ULearningAgentsManager*& InManager, FCMAggressiveLearningRewardSettings InRewardSettings, FCMAggressiveLearningGoalSettings InGoalSettings, float InJointTrackingPenaltyScale, FName Name = TEXT("CentipedeTrainingEnvironment"));
 
     virtual void OnAgentsAdded_Implementation(const TArray<int32>& AgentIds) override;
     virtual void OnAgentsRemoved_Implementation(const TArray<int32>& AgentIds) override;
@@ -30,8 +26,14 @@ public:
     virtual void GatherAgentCompletion_Implementation(ELearningAgentsCompletion& OutCompletion, int32 AgentId) override;
     virtual void ResetAgentEpisode_Implementation(int32 AgentId) override;
 
-    int64 GetCompletedEpisodeCount() const { return TotalCompletedEpisodeCount; }
-    int64 GetSuccessfulEpisodeCount() const { return TotalSuccessfulEpisodeCount; }
+    int64 GetCompletedEpisodeCount() const
+    {
+        return TotalCompletedEpisodeCount;
+    }
+    int64 GetSuccessfulEpisodeCount() const
+    {
+        return TotalSuccessfulEpisodeCount;
+    }
     float GetSuccessRate() const;
 
 private:

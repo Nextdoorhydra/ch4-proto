@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Pawn.h"
+#include "Aggressive/Common/Core/CMAggressivePawnBase.h"
 
 #include "Aggressive/Common/Core/CMAggressiveAITypes.h"
 #include "Aggressive/Common/Core/CMAggressiveMovementAgent.h"
@@ -9,9 +9,11 @@
 #include "CMCentipedePawn.generated.h"
 
 class UBoxComponent;
+class UCMAggressiveBehaviorComponent;
 class UCMAIFixedLegActuatorComponent;
 class UCMAggressiveMovementCommandComponent;
 class UCMAggressiveOmnidirectionalPathComponent;
+class UCMAggressiveSightComponent;
 class UPhysicsConstraintComponent;
 class USceneComponent;
 class UStaticMesh;
@@ -19,7 +21,7 @@ class UStaticMeshComponent;
 
 /** 180x120x120cm 몸통 네 마디와 여덟 다리로 움직이는 관절형 Centipede AI다. */
 UCLASS(BlueprintType)
-class AI_API ACMCentipedePawn : public APawn, public ICMAggressiveMovementAgent, public ICMAggressiveLegActuationAgent
+class AI_API ACMCentipedePawn : public ACMAggressivePawnBase, public ICMAggressiveMovementAgent, public ICMAggressiveLegActuationAgent
 {
     GENERATED_BODY()
 
@@ -46,6 +48,7 @@ public:
     virtual FVector GetAggressiveNavigationReferenceLocation() const override;
     virtual void PrepareAggressivePathMove(FVector WorldGoal) override;
     virtual void HandleAggressivePathMoveCompleted(ECMAggressivePathMoveResult Result) override;
+    virtual void StopAggressiveMovementForReaction() override;
     virtual void ResetLegActuation() override;
 
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Centipede|Body")
@@ -64,10 +67,16 @@ public:
     float GetMaxPlanarSpeed() const;
 
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Centipede|Movement")
-    bool IsTailLeading() const { return bTailLeading; }
+    bool IsTailLeading() const
+    {
+        return bTailLeading;
+    }
 
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Centipede|Movement")
-    bool IsAligningLeadingEnd() const { return bAligningLeadingEnd; }
+    bool IsAligningLeadingEnd() const
+    {
+        return bAligningLeadingEnd;
+    }
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Centipede|Movement")
     void SetTailLeading(bool bInTailLeading);
@@ -77,6 +86,10 @@ public:
 
     UBoxComponent* GetHeadBody() const;
     UBoxComponent* GetLeadingBody() const;
+
+    UFUNCTION(BlueprintPure, Category = "Aggressive AI|Centipede|Body")
+    FVector GetLeadingTipLocation() const;
+
     UCMAggressiveMovementCommandComponent* GetMovementCommand() const;
     UCMAggressiveOmnidirectionalPathComponent* GetPathMovement() const;
     const TArray<TObjectPtr<UBoxComponent>>& GetBodySegments() const;
@@ -107,6 +120,9 @@ public:
     FCMAggressivePathMoveCompletedSignature OnPathMoveCompleted;
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Behavior")
+    TObjectPtr<UCMAggressiveBehaviorComponent> Behavior;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Body")
     TObjectPtr<UBoxComponent> HeadBody;
 
@@ -118,6 +134,12 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Movement")
     TObjectPtr<UCMAggressiveOmnidirectionalPathComponent> PathMovement;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Sight")
+    TObjectPtr<UCMAggressiveSightComponent> HeadSight;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Sight")
+    TObjectPtr<UCMAggressiveSightComponent> TailSight;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Body")
     TArray<TObjectPtr<UBoxComponent>> BodySegments;

@@ -22,10 +22,16 @@ public:
     virtual void PerformAgentAction_Implementation(const ULearningAgentsActionObject* InActionObject, const FLearningAgentsActionObjectElement& InActionObjectElement, int32 AgentId) override;
 
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Centipede|Learning")
-    int32 GetConfiguredLegCount() const { return 8; }
+    int32 GetConfiguredLegCount() const
+    {
+        return 8;
+    }
 
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Centipede|Learning")
-    int32 GetConfiguredJointCount() const { return 3; }
+    int32 GetConfiguredJointCount() const
+    {
+        return 3;
+    }
 
 private:
     TArray<int32> ActiveLegIndicesScratch;

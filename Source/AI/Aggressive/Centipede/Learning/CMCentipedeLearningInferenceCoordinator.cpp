@@ -1,6 +1,7 @@
 #include "Aggressive/Centipede/Learning/CMCentipedeLearningInferenceCoordinator.h"
 
 #include "Aggressive/Centipede/CMCentipedePawn.h"
+#include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Components/BoxComponent.h"
 #include "Aggressive/Centipede/Learning/CMCentipedeLearningInteractor.h"
 #include "Aggressive/Common/Learning/CMAggressiveLearningSnapshot.h"
@@ -12,6 +13,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogCMCentipedeInference, Log, All);
 
+// Actor Tick 없이 Centipede 정책 추론과 정체 복구를 타이머로 관리한다.
 ACMCentipedeLearningInferenceCoordinator::ACMCentipedeLearningInferenceCoordinator()
 {
     PrimaryActorTick.bCanEverTick = false;
@@ -21,16 +23,26 @@ ACMCentipedeLearningInferenceCoordinator::ACMCentipedeLearningInferenceCoordinat
     LearningManager->PrimaryComponentTick.bStartWithTickEnabled = false;
 }
 
+// Actor 종료 시 실행 중인 정책·경로·관절 몸체 이동을 정리한다.
 void ACMCentipedeLearningInferenceCoordinator::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     FinishInference(ECMCentipedeMoveResult::Cancelled, false);
     Super::EndPlay(EndPlayReason);
 }
 
+// 저장 정책을 불러와 유리한 말단이 NavMesh 목적지를 따라가도록 추론을 시작한다.
 bool ACMCentipedeLearningInferenceCoordinator::StartInferencePath(ACMCentipedePawn* InInferenceAgent, FVector WorldGoal, float AcceptanceRadius)
 {
     if (bInferenceRunning || !IsValid(InInferenceAgent) || !LearningManager || LearningManager->GetAgentNum() > 0)
         return false;
+    // 외부 조정자가 제어하는 에이전트는 자체 행동 상태 머신과 이동 명령이 경쟁하지 않게 한다.
+    if (GetOwner() != InInferenceAgent)
+    {
+        if (UCMAggressiveBehaviorComponent* Behavior = InInferenceAgent->FindComponentByClass<UCMAggressiveBehaviorComponent>())
+        {
+            Behavior->SetBehaviorEnabled(false);
+        }
+    }
     InferenceAgent = InInferenceAgent;
     LearningManager->SetMaxAgentNum(1);
     if (!InitializeInferenceObjects())
@@ -47,16 +59,19 @@ bool ACMCentipedeLearningInferenceCoordinator::StartInferencePath(ACMCentipedePa
 
     ActiveWorldGoal = WorldGoal;
     ActiveAcceptanceRadius = FMath::Max(AcceptanceRadius, 0.0f);
+    bInferenceRunning = true;
     InferenceAgent->SetTailLeading(false);
     InferenceAgent->SetTrainingCurveProfile(0);
     InferenceAgent->OnPathMoveCompleted.AddUniqueDynamic(this, &ThisClass::HandlePathMoveCompleted);
     if (!InferenceAgent->StartPathMoveToLocation(ActiveWorldGoal, ActiveAcceptanceRadius))
     {
         FinishInference(ECMCentipedeMoveResult::Failed, false);
+
         return false;
     }
 
-    bInferenceRunning = true;
+    if (!bInferenceRunning || !Policy || !InferenceAgent)
+        return true;
     InferenceStartTime = GetWorld()->GetTimeSeconds();
     LastProgressCheckTime = InferenceStartTime;
     LastGoalDistance = FVector::Dist2D(InferenceAgent->GetAggressiveNavigationReferenceLocation(), ActiveWorldGoal);
@@ -64,9 +79,35 @@ bool ACMCentipedeLearningInferenceCoordinator::StartInferencePath(ACMCentipedePa
     LateralEscapeAttemptCount = 0;
     Policy->RunInference(0.0f);
     GetWorldTimerManager().SetTimer(InferenceTimerHandle, this, &ThisClass::RunInferenceStep, FMath::Max(DecisionInterval, 0.01f), true);
+
     return true;
 }
 
+// 측면 복구 중이 아닐 때 정책을 유지하며 최종 경로 목적지를 갱신한다.
+bool ACMCentipedeLearningInferenceCoordinator::UpdateInferenceGoal(const FVector WorldGoal)
+{
+    if (!bInferenceRunning || bPerformingLateralEscape || !InferenceAgent)
+    {
+        return false;
+    }
+    ActiveWorldGoal = WorldGoal;
+    if (!InferenceAgent->StartPathMoveToLocation(ActiveWorldGoal, ActiveAcceptanceRadius))
+    {
+        return false;
+    }
+    if (!bInferenceRunning || !InferenceAgent)
+    {
+        return true;
+    }
+    bWaitingForChaseTargetMove = false;
+    LastProgressCheckTime = GetWorld()->GetTimeSeconds();
+    LastGoalDistance = FVector::Dist2D(InferenceAgent->GetAggressiveNavigationReferenceLocation(), ActiveWorldGoal);
+    NoProgressSeconds = 0.0f;
+    LateralEscapeAttemptCount = 0;
+    return true;
+}
+
+// 이동하는 테스트 목표에 맞춰 경로를 반복 갱신하는 추격 추론을 시작한다.
 bool ACMCentipedeLearningInferenceCoordinator::StartChasingTestTarget(ACMCentipedePawn* InInferenceAgent, ACMAggressiveChaseTestTarget* InChaseTarget, float AcceptanceRadius)
 {
     if (bInferenceRunning || !IsValid(InInferenceAgent) || !IsValid(InChaseTarget))
@@ -84,6 +125,7 @@ bool ACMCentipedeLearningInferenceCoordinator::StartChasingTestTarget(ACMCentipe
 
     NextChasePathRefreshTime = GetWorld()->GetTimeSeconds() + FMath::Max(ChasePathRefreshInterval, 0.05f);
     UE_LOG(LogCMCentipedeInference, Display, TEXT("Centipede AI가 추격 테스트 목표 추적을 시작했습니다. 목표=%s"), *ChaseTarget->GetActorLocation().ToCompactString());
+
     return true;
 }
 
@@ -97,6 +139,7 @@ FString ACMCentipedeLearningInferenceCoordinator::GetSnapshotDirectory() const
     return CMAggressiveLearningSnapshot::GetLatestDirectory(ECMAggressiveLearningSnapshotProfile::Centipede);
 }
 
+// Centipede 관측·다리 행동 Interactor와 저장 정책을 단일 에이전트용으로 생성한다.
 bool ACMCentipedeLearningInferenceCoordinator::InitializeInferenceObjects()
 {
     ULearningAgentsManager* Manager = LearningManager;
@@ -105,9 +148,11 @@ bool ACMCentipedeLearningInferenceCoordinator::InitializeInferenceObjects()
         return false;
     ULearningAgentsInteractor* BaseInteractor = Interactor;
     Policy = ULearningAgentsPolicy::MakePolicy(Manager, BaseInteractor, ULearningAgentsPolicy::StaticClass(), TEXT("CentipedeInferencePolicy"));
+
     return Policy && CMAggressiveLearningSnapshot::LoadInferenceNetworks(ECMAggressiveLearningSnapshotProfile::Centipede, *Policy);
 }
 
+// 테스트 목표가 임계 거리 이상 이동했을 때 진행 통계를 초기화하고 경로를 다시 만든다.
 bool ACMCentipedeLearningInferenceCoordinator::UpdateChaseTargetPath()
 {
     UWorld* World = GetWorld();
@@ -122,6 +167,8 @@ bool ACMCentipedeLearningInferenceCoordinator::UpdateChaseTargetPath()
     ActiveWorldGoal = CurrentTargetLocation;
     if (!InferenceAgent->StartPathMoveToLocation(ActiveWorldGoal, ActiveAcceptanceRadius))
         return false;
+    if (!bInferenceRunning || !InferenceAgent)
+        return true;
 
     bWaitingForChaseTargetMove = false;
     LastProgressCheckTime = World->GetTimeSeconds();
@@ -129,9 +176,11 @@ bool ACMCentipedeLearningInferenceCoordinator::UpdateChaseTargetPath()
     NoProgressSeconds = 0.0f;
     LateralEscapeAttemptCount = 0;
     UE_LOG(LogCMCentipedeInference, Display, TEXT("추격 목표 이동을 감지해 Centipede AI 경로를 갱신했습니다. 새 목표=%s"), *ActiveWorldGoal.ToCompactString());
+
     return true;
 }
 
+// 몸통 축과 목표 방향을 기준으로 막히지 않은 측면을 골라 전신 정체 복구를 시작한다.
 bool ACMCentipedeLearningInferenceCoordinator::BeginLateralEscape()
 {
     UWorld* World = GetWorld();
@@ -142,6 +191,7 @@ bool ACMCentipedeLearningInferenceCoordinator::BeginLateralEscape()
     if (LateralEscapeAttemptCount >= FMath::Max(MaximumLateralEscapeAttempts, 1))
     {
         UE_LOG(LogCMCentipedeInference, Warning, TEXT("Centipede AI가 최대 측면 이탈 횟수를 초과했습니다."));
+
         return false;
     }
 
@@ -155,6 +205,7 @@ bool ACMCentipedeLearningInferenceCoordinator::BeginLateralEscape()
     if (FVector::DotProduct(PreferredDirection, GoalDirection) < 0.0f)
         PreferredDirection *= -1.0f;
 
+    // 첫 방향이 충분한 이탈을 만들지 못한 재시도에서는 반대쪽 공간을 검사한다.
     FVector EscapeDirection = LateralEscapeAttemptCount == 0 ? PreferredDirection : -LateralEscapeDirection;
     if (!CanMoveBodyLaterally(EscapeDirection))
     {
@@ -162,6 +213,7 @@ bool ACMCentipedeLearningInferenceCoordinator::BeginLateralEscape()
         if (LateralEscapeAttemptCount > 0 || !CanMoveBodyLaterally(EscapeDirection))
         {
             UE_LOG(LogCMCentipedeInference, Warning, TEXT("Centipede AI의 양쪽 측면 이탈 경로가 모두 정적 장애물에 막혔습니다."));
+
             return false;
         }
     }
@@ -174,14 +226,12 @@ bool ACMCentipedeLearningInferenceCoordinator::BeginLateralEscape()
     ++LateralEscapeAttemptCount;
     bPerformingLateralEscape = true;
     ApplyLateralEscapeVelocity();
-    UE_LOG(LogCMCentipedeInference, Display,
-        TEXT("Centipede AI가 말단 교대 대신 몸 전체의 측면 이탈을 시작했습니다. 시도=%d/%d 방향=%s"),
-        LateralEscapeAttemptCount,
-        FMath::Max(MaximumLateralEscapeAttempts, 1),
-        *LateralEscapeDirection.ToCompactString());
+    UE_LOG(LogCMCentipedeInference, Display, TEXT("Centipede AI가 말단 교대 대신 몸 전체의 측면 이탈을 시작했습니다. 시도=%d/%d 방향=%s"), LateralEscapeAttemptCount, FMath::Max(MaximumLateralEscapeAttempts, 1), *LateralEscapeDirection.ToCompactString());
+
     return true;
 }
 
+// 최소 이탈 거리를 확보할 때까지 전신 측면 속도를 유지하고 실패하면 반대쪽을 재시도한다.
 bool ACMCentipedeLearningInferenceCoordinator::UpdateLateralEscape()
 {
     UWorld* World = GetWorld();
@@ -194,6 +244,7 @@ bool ACMCentipedeLearningInferenceCoordinator::UpdateLateralEscape()
     if (World->GetTimeSeconds() < LateralEscapeEndTime)
     {
         ApplyLateralEscapeVelocity();
+
         return true;
     }
 
@@ -201,9 +252,11 @@ bool ACMCentipedeLearningInferenceCoordinator::UpdateLateralEscape()
     InferenceAgent->StopArticulatedBodyMotion();
     if (EscapeDistance >= FMath::Max(LateralEscapeMinimumDistance * 0.5f, 1.0f))
         return RebuildPathAfterLateralEscape();
+
     return BeginLateralEscape();
 }
 
+// 측면 이탈 위치에서 머리·꼬리 경로를 다시 비교하고 최종 목적지 추론을 재개한다.
 bool ACMCentipedeLearningInferenceCoordinator::RebuildPathAfterLateralEscape()
 {
     UWorld* World = GetWorld();
@@ -214,17 +267,18 @@ bool ACMCentipedeLearningInferenceCoordinator::RebuildPathAfterLateralEscape()
     InferenceAgent->StopArticulatedBodyMotion();
     if (!InferenceAgent->StartPathMoveToLocation(ActiveWorldGoal, ActiveAcceptanceRadius))
         return false;
+    if (!bInferenceRunning || !InferenceAgent)
+        return true;
 
     LastProgressCheckTime = World->GetTimeSeconds();
     LastGoalDistance = FVector::Dist2D(InferenceAgent->GetAggressiveNavigationReferenceLocation(), ActiveWorldGoal);
     NoProgressSeconds = 0.0f;
-    UE_LOG(LogCMCentipedeInference, Display,
-        TEXT("Centipede AI가 측면 이탈 후 머리·꼬리 경로를 다시 비교했습니다. 선택 선두=%s 목표=%s"),
-        InferenceAgent->IsTailLeading() ? TEXT("꼬리") : TEXT("머리"),
-        *ActiveWorldGoal.ToCompactString());
+    UE_LOG(LogCMCentipedeInference, Display, TEXT("Centipede AI가 측면 이탈 후 머리·꼬리 경로를 다시 비교했습니다. 선택 선두=%s 목표=%s"), InferenceAgent->IsTailLeading() ? TEXT("꼬리") : TEXT("머리"), *ActiveWorldGoal.ToCompactString());
+
     return true;
 }
 
+// 모든 몸통 세그먼트의 측면 탐색선이 정적 장애물을 피하는지 확인한다.
 bool ACMCentipedeLearningInferenceCoordinator::CanMoveBodyLaterally(const FVector& Direction) const
 {
     UWorld* World = GetWorld();
@@ -264,6 +318,7 @@ FVector ACMCentipedeLearningInferenceCoordinator::GetBodyCenter() const
     return ValidSegmentCount > 0 ? Center / static_cast<float>(ValidSegmentCount) : FVector::ZeroVector;
 }
 
+// 관절 형태를 보존하도록 모든 몸통 세그먼트에 같은 측면 평면 속도를 적용한다.
 void ACMCentipedeLearningInferenceCoordinator::ApplyLateralEscapeVelocity() const
 {
     if (!InferenceAgent || LateralEscapeDirection.IsNearlyZero())
@@ -281,17 +336,20 @@ void ACMCentipedeLearningInferenceCoordinator::ApplyLateralEscapeVelocity() cons
     }
 }
 
+// 제한시간·추격 갱신·진행 정체를 확인한 뒤 저장 정책 행동을 한 번 실행한다.
 void ACMCentipedeLearningInferenceCoordinator::RunInferenceStep()
 {
     UWorld* World = GetWorld();
     if (!bInferenceRunning || !World || !Policy || !InferenceAgent)
     {
         FinishInference(ECMCentipedeMoveResult::Failed, true);
+
         return;
     }
     if (!bChasingTestTarget && World->GetTimeSeconds() - InferenceStartTime >= FMath::Max(MaximumInferenceSeconds, 1.0f))
     {
         FinishInference(ECMCentipedeMoveResult::TimedOut, true);
+
         return;
     }
 
@@ -299,12 +357,14 @@ void ACMCentipedeLearningInferenceCoordinator::RunInferenceStep()
     if (bChasingTestTarget && !IsValid(ChaseTarget))
     {
         FinishInference(ECMCentipedeMoveResult::Failed, true);
+
         return;
     }
     if (bPerformingLateralEscape)
     {
         if (!UpdateLateralEscape())
             FinishInference(ECMCentipedeMoveResult::Failed, true);
+
         return;
     }
     if (bChasingTestTarget && CurrentTime >= NextChasePathRefreshTime)
@@ -312,19 +372,15 @@ void ACMCentipedeLearningInferenceCoordinator::RunInferenceStep()
         if (!UpdateChaseTargetPath())
         {
             FinishInference(ECMCentipedeMoveResult::Failed, true);
+
             return;
         }
     }
     if (bWaitingForChaseTargetMove)
         return;
 
-    if (InferenceAgent->IsAligningLeadingEnd())
-    {
-        LastProgressCheckTime = CurrentTime;
-        LastGoalDistance = FVector::Dist2D(InferenceAgent->GetAggressiveNavigationReferenceLocation(), ActiveWorldGoal);
-        NoProgressSeconds = 0.0f;
-    }
-    else if (CurrentTime - LastProgressCheckTime >= FMath::Max(ProgressCheckInterval, 0.1f))
+    // 일시적인 관절 흔들림이 아니라 누적된 목표 거리 감소량으로 정체를 판정한다.
+    if (CurrentTime - LastProgressCheckTime >= FMath::Max(ProgressCheckInterval, 0.1f))
     {
         const float CurrentDistance = FVector::Dist2D(InferenceAgent->GetAggressiveNavigationReferenceLocation(), ActiveWorldGoal);
         const float Elapsed = static_cast<float>(CurrentTime - LastProgressCheckTime);
@@ -340,6 +396,7 @@ void ACMCentipedeLearningInferenceCoordinator::RunInferenceStep()
             if (!BeginLateralEscape())
             {
                 FinishInference(ECMCentipedeMoveResult::Failed, true);
+
                 return;
             }
             return;
@@ -348,6 +405,7 @@ void ACMCentipedeLearningInferenceCoordinator::RunInferenceStep()
     Policy->RunInference(0.0f);
 }
 
+// 추론 타이머와 경로·관절 이동 및 학습 에이전트를 정리하고 선택적으로 결과를 알린다.
 void ACMCentipedeLearningInferenceCoordinator::FinishInference(ECMCentipedeMoveResult Result, bool bBroadcast)
 {
     const bool bWasRunning = bInferenceRunning;
@@ -358,7 +416,6 @@ void ACMCentipedeLearningInferenceCoordinator::FinishInference(ECMCentipedeMoveR
         InferenceAgent->OnPathMoveCompleted.RemoveDynamic(this, &ThisClass::HandlePathMoveCompleted);
         InferenceAgent->StopPathMove();
         InferenceAgent->StopArticulatedBodyMotion();
-        InferenceAgent->SetTailLeading(false);
     }
     if (LearningManager && LearningManager->GetAgentNum() > 0)
         LearningManager->RemoveAllAgents();
@@ -379,8 +436,10 @@ void ACMCentipedeLearningInferenceCoordinator::FinishInference(ECMCentipedeMoveR
         OnCentipedeMoveCompleted.Broadcast(Result);
 }
 
+// 경로 결과를 Centipede 결과로 변환하되 테스트 목표 도착은 다음 이동까지 대기한다.
 void ACMCentipedeLearningInferenceCoordinator::HandlePathMoveCompleted(ECMAggressivePathMoveResult Result)
 {
+    // 움직이는 테스트 목표는 현재 위치 도착을 추론 종료가 아닌 대기 상태로 취급한다.
     if (Result == ECMAggressivePathMoveResult::ReachedGoal && bChasingTestTarget)
     {
         bWaitingForChaseTargetMove = true;
