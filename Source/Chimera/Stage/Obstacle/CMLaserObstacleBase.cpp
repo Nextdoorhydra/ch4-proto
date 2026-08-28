@@ -12,6 +12,9 @@
 
 ACMLaserObstacleBase::ACMLaserObstacleBase()
 {
+    // 레이저 PrimaryMesh는 고체 장치가 아니라 빔 표현이므로 통과 가능해야 한다.
+    PrimaryMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
     LaserStart = CreateDefaultSubobject<USceneComponent>(TEXT("LaserStart"));
     LaserStart->SetupAttachment(SceneRoot);
 
