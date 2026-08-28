@@ -24,7 +24,7 @@ public:
         AController* InController
     ) override;
 
-    bool TryRetryGame(APlayerController* RequestingPlayer);
+    virtual bool TryRetryGame(APlayerController* RequestingPlayer);
 
 protected:
     // 하위 GameMode가 이탈 플레이어의 배정을 유예할지 결정

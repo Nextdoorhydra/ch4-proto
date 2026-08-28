@@ -5,6 +5,10 @@
 
 #include "CMStageDoorBase.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+    FCMDoorTransitionFinishedSignature,
+    bool, bIsOpen);
+
 UCLASS(Blueprintable)
 // Mechanism 활성 상태를 문의 열림과 닫힘 표현으로 연결
 class CHIMERA_API ACMStageDoorBase : public ACMStageDeviceBase
@@ -13,6 +17,13 @@ class CHIMERA_API ACMStageDoorBase : public ACMStageDeviceBase
 
 public:
     ACMStageDoorBase();
+
+    // 문 BP가 열림 또는 닫힘 애니메이션과 충돌 전환을 마친 시점에 호출
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Mechanism|Door")
+    void NotifyDoorTransitionFinished(bool bIsOpen);
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Mechanism|Door")
+    FCMDoorTransitionFinishedSignature OnDoorTransitionFinished;
 
 protected:
     virtual void HandleElementActiveChanged_Implementation(bool bIsActive) override;

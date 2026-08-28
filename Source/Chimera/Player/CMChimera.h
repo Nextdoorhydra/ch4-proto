@@ -149,6 +149,11 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     bool AreAllSegmentsDead() const;
 
+    // 체크포인트 리스폰을 위해 몸통 체력과 플레이어 입력 사망 상태 복구
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Health")
+    void RestoreForCheckpointRespawn();
+
     /** Keeps the active body count equal to the 4~8 participating players. */
     void SetActiveSegmentCountForPlayers(int32 PlayerCount);
 

@@ -5,6 +5,12 @@ ACMStageDoorBase::ACMStageDoorBase()
     bStartActive = false;
 }
 
+// 문 표현과 블로킹 충돌이 목표 상태에 도달했음을 대기 중인 룸 트리거에 전달
+void ACMStageDoorBase::NotifyDoorTransitionFinished(bool bIsOpen)
+{
+    OnDoorTransitionFinished.Broadcast(bIsOpen);
+}
+
 // Mechanism 활성 상태를 문의 열림 상태로 전달
 void ACMStageDoorBase::HandleElementActiveChanged_Implementation(bool bIsActive)
 {
