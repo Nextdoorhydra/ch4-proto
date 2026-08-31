@@ -60,6 +60,14 @@ public:
         TSubclassOf<ACMPartActorBase> PartClass
     );
 
+    /** Removes a body part without spawning a cosmetic or collectible actor. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Dismemberment")
+    bool ConsumeBodyPart(
+        ECMBodyPart BodyPart,
+        FVector HitLocation
+    );
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Dismemberment")
     bool IsCorpseRagdoll() const
     {
@@ -188,7 +196,8 @@ private:
         ECMBodyPart BodyPart,
         FVector HitLocation,
         FVector Impulse,
-        TSubclassOf<ACMPartActorBase> RewardPartClass
+        TSubclassOf<ACMPartActorBase> RewardPartClass,
+        bool bSpawnDetachedPart
     );
 
     const TArray<FCMDismembermentPartDefinition>&
