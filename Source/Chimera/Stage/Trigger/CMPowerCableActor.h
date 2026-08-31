@@ -3,11 +3,13 @@
 #include "CoreMinimal.h"
 #include "AsyncLoadCompleteMessage.h"
 #include "GameFramework/Actor.h"
+#include "Parts/Arm/CMArmHoldTarget.h"
 
 #include "CMPowerCableActor.generated.h"
 
 class UCMPowerSocketComponent;
 class UCMPowerCableDefinition;
+class UBoxComponent;
 class USplineComponent;
 class USplineMeshComponent;
 class UStaticMesh;
@@ -20,7 +22,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 
 /** Movable cable that can be connected to one matching power socket. */
 UCLASS()
-class CHIMERA_API ACMPowerCableActor : public AActor
+class CHIMERA_API ACMPowerCableActor : public AActor, public ICMArmHoldTarget
 {
     GENERATED_BODY()
 
@@ -51,6 +53,19 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FVector GetCableEndLocation() const;
 
+    virtual bool QueryArmHold_Implementation(
+        ACMArmPart* ArmPart,
+        FCMArmHoldSpec& OutSpec
+    ) const override;
+
+    virtual bool BeginArmHold_Implementation(
+        ACMArmPart* ArmPart
+    ) override;
+
+    virtual void EndArmHold_Implementation(
+        ACMArmPart* ArmPart
+    ) override;
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Power")
     FCMPowerCableConnectionChanged OnConnectionChanged;
 
@@ -67,6 +82,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
     TObjectPtr<USplineComponent> CableSpline;
 
+    /** Query-only volume used by the arm hold trace to find the cable. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
+    TObjectPtr<UBoxComponent> GrabVolume;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Visual")
     TSoftObjectPtr<UCMPowerCableDefinition> CableDefinition;
@@ -74,22 +93,6 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Visual")
     FName LoadGroupId = TEXT("Stage.Entry.Power");
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Power|Visual", meta = (ClampMin = "1"))
-    int32 VisualSegmentCount = 1;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Power|Visual", meta = (ClampMin = "0.0"))
-    float CableSag = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Power|Visual", meta = (ClampMin = "0.01"))
-    float CableThicknessScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Power|Visual", meta = (ClampMin = "0.0"))
-    float InitialCableLength = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
     FName PowerChannel = NAME_None;
@@ -126,6 +129,21 @@ protected:
     void RefreshCableVisualState();
     bool TryBuildCableVisual();
     void UpdateCableVisual();
+    void UpdateGrabVolume();
+    void EnsureCableMeshCount(int32 DesiredCount, UStaticMesh* Mesh);
+    void InitializeRope();
+    void SimulateRope(float DeltaSeconds);
+    void ExtendRopeTo(float RequestedLength);
+    void UpdateRopeNodeCount();
+    int32 GetVisualSegmentCount() const;
+    float GetCableSag() const;
+    float GetCableThicknessScale() const;
+    float GetInitialCableLength() const;
+    float GetRopeNodeSpacing() const;
+    float GetRopeGravityScale() const;
+    float GetRopeDamping() const;
+    int32 GetRopeConstraintIterations() const;
+    float GetRopeCollisionRadius() const;
 
     bool bCableVisualReady = false;
     bool bCableVisualFailed = false;
@@ -133,4 +151,8 @@ protected:
     bool bCableStartLocationInitialized = false;
     bool bHasCachedVisualEndpoint = false;
     FVector CachedVisualEndpoint = FVector::ZeroVector;
+    bool bRopeInitialized = false;
+    float SimulatedRopeLength = 0.0f;
+    TArray<FVector> RopePositions;
+    TArray<FVector> RopePreviousPositions;
 };

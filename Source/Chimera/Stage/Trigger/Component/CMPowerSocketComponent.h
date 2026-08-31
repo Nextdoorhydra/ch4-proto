@@ -50,7 +50,7 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power",
         meta = (ClampMin = "0.0"))
-    float ConnectionRadius = 75.0f;
+    float ConnectionRadius = 150.0f;
 
     UPROPERTY(ReplicatedUsing = OnRep_ConnectedCable, VisibleInstanceOnly,
         BlueprintReadOnly, Category = "Chimera|Power")
