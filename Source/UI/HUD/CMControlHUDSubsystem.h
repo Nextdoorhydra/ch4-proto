@@ -30,5 +30,7 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UCMControlHUDWidget> ControlHUDWidget;
 
+    TWeakObjectPtr<UWorld> ControlHUDWorld;
+
     bool bPolicyInitializationPending = false;
 };

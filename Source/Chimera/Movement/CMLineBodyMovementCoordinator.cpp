@@ -300,7 +300,6 @@ bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
     }
 
     float TotalMass = 0.0f;
-    FVector WeightedBodyCenter = FVector::ZeroVector;
     TArray<UStaticMeshComponent*> SimulatedSegments;
     for (int32 Index = 0; Index < Chimera.ActiveSegmentCount; ++Index)
     {
@@ -315,7 +314,6 @@ bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
 
         const float SegmentMass = FMath::Max(BodySegment->GetMass(), 0.01f);
         TotalMass += SegmentMass;
-        WeightedBodyCenter += BodySegment->GetCenterOfMass() * SegmentMass;
         SimulatedSegments.Add(BodySegment);
     }
     if (SimulatedSegments.IsEmpty() || TotalMass <= UE_SMALL_NUMBER)
@@ -323,8 +321,11 @@ bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
         return false;
     }
 
-    const FVector BodyCenter = WeightedBodyCenter / TotalMass;
-    const FVector AnchorOffset = AnchorLocation - BodyCenter;
+    // The hook only needs to bring its attached segment to the anchor. Using
+    // the whole chain's center makes long bodies pull forever at a wall.
+    UStaticMeshComponent* SourceSegment = Chimera.BodySegments[SegmentIndex];
+    const FVector AnchorOffset =
+        AnchorLocation - SourceSegment->GetCenterOfMass();
     if (AnchorOffset.Size() <= FMath::Max(StopDistance, 0.0f))
     {
         return false;

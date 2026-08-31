@@ -184,6 +184,11 @@ protected:
         meta = (ClampMin = "0.0"))
     float HoldRadius = 40.0f;
 
+    /** Extra forgiveness for characters that expose dismemberable body parts. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm",
+        meta = (ClampMin = "0.0", ForceUnits = "cm"))
+    float DismemberableTargetHitTolerance = 35.0f;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Arm|Debug")
     bool bDrawSwingDebug = true;

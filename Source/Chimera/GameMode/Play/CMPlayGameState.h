@@ -126,6 +126,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Game Flow")
     float GetPhaseRemainingTime() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Game Flow")
+    float GetCompletedStageTime() const { return CompletedStageTime; }
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Stage")
     ECMStagePresentationState GetStagePresentationState() const { return StagePresentationState; }
 
@@ -201,4 +204,8 @@ private:
     // Phase 제한 시간, 0이면 제한 없음
     UPROPERTY(ReplicatedUsing = OnRep_PlayState)
     float PhaseDuration = 0.0f;
+
+    // 직전 Playing Phase의 서버 기준 경과 시간
+    UPROPERTY(ReplicatedUsing = OnRep_PlayState)
+    float CompletedStageTime = 0.0f;
 };

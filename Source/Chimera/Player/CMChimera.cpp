@@ -127,7 +127,7 @@ ACMChimera::ACMChimera()
     CameraBoom->CameraLagMaxDistance = CameraLagMaxDistance;
     CameraBoom->bEnableCameraRotationLag = bEnableCameraRotationLag;
     CameraBoom->CameraRotationLagSpeed = CameraRotationLagSpeed;
-    CameraBoom->bDoCollisionTest = true;
+    CameraBoom->bDoCollisionTest = false;
     CameraBoom->ProbeChannel = ECC_Camera;
 
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(
@@ -328,6 +328,8 @@ void ACMChimera::Tick(float DeltaTime)
         MovementCoordinator->UpdateServerMovement(*this);
     }
 
+    UpdatePlanarKnockback(DeltaTime);
+
     UpdateReplicatedSegmentStates();
 }
 
@@ -336,7 +338,6 @@ void ACMChimera::ApplyDebugMovementInput(
     float ForwardInput,
     float TurnInput)
 {
-#if !UE_BUILD_SHIPPING
     if (!HasAuthority())
     {
         return;
@@ -396,7 +397,6 @@ void ACMChimera::ApplyDebugMovementInput(
                 true);
         }
     }
-#endif
 }
 
 void ACMChimera::GetLifetimeReplicatedProps(
@@ -490,6 +490,114 @@ float ACMChimera::AdjustLocalCameraDistance(float WheelInput)
         SafeMaximum
     );
     return CameraBoom->TargetArmLength;
+}
+
+void ACMChimera::ApplyPlanarKnockback(FVector WorldDirection, float Speed)
+{
+    if (!HasAuthority())
+        return;
+
+    WorldDirection.Z = 0.0f;
+    const FVector VelocityChange = WorldDirection.GetSafeNormal() * FMath::Max(Speed, 0.0f);
+    if (VelocityChange.IsNearlyZero())
+        return;
+
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    for (int32 SegmentIndex = 0; SegmentIndex < SegmentCount; ++SegmentIndex)
+    {
+        UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+        if (Segment && Segment->IsSimulatingPhysics())
+            Segment->AddImpulse(VelocityChange, NAME_None, true);
+    }
+}
+
+void ACMChimera::StartPlanarKnockback(
+    FVector WorldDirection,
+    const float DistanceCm
+)
+{
+    if (!HasAuthority() || BodySegments.IsEmpty() || DistanceCm <= 0.0f)
+    {
+        return;
+    }
+    WorldDirection.Z = 0.0f;
+    if (!WorldDirection.Normalize())
+    {
+        return;
+    }
+
+    UStaticMeshComponent* ReferenceBody = BodySegments[0];
+    if (!ReferenceBody || !ReferenceBody->IsSimulatingPhysics())
+    {
+        return;
+    }
+    bPlanarKnockbackActive = true;
+    PlanarKnockbackStartLocation = ReferenceBody->GetComponentLocation();
+    PlanarKnockbackDirection = WorldDirection;
+    PlanarKnockbackDistanceCm = DistanceCm;
+    PlanarKnockbackElapsedSeconds = 0.0f;
+    ApplyPlanarKnockback(
+        PlanarKnockbackDirection,
+        FMath::Max(DistanceCm / 0.35f, 300.0f));
+}
+
+void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
+{
+    if (!bPlanarKnockbackActive || BodySegments.IsEmpty())
+    {
+        return;
+    }
+    UStaticMeshComponent* ReferenceBody = BodySegments[0];
+    if (!ReferenceBody)
+    {
+        bPlanarKnockbackActive = false;
+        return;
+    }
+
+    PlanarKnockbackElapsedSeconds += DeltaTime;
+    const float Travel = FVector::DotProduct(
+        ReferenceBody->GetComponentLocation()
+            - PlanarKnockbackStartLocation,
+        PlanarKnockbackDirection);
+    if (Travel >= PlanarKnockbackDistanceCm
+        || PlanarKnockbackElapsedSeconds >= 0.75f)
+    {
+        bPlanarKnockbackActive = false;
+        const int32 SegmentCount = FMath::Min(
+            ActiveSegmentCount, BodySegments.Num());
+        for (int32 SegmentIndex = 0;
+            SegmentIndex < SegmentCount; ++SegmentIndex)
+        {
+            UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+            if (!Segment || !Segment->IsSimulatingPhysics())
+            {
+                continue;
+            }
+            const float VerticalSpeed =
+                Segment->GetPhysicsLinearVelocity().Z;
+            Segment->SetPhysicsLinearVelocity(
+                FVector::UpVector * VerticalSpeed);
+        }
+        return;
+    }
+
+    const float RemainingDistance = PlanarKnockbackDistanceCm - Travel;
+    const float Speed = FMath::Max(RemainingDistance / 0.2f, 150.0f);
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount, BodySegments.Num());
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < SegmentCount; ++SegmentIndex)
+    {
+        UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+        if (!Segment || !Segment->IsSimulatingPhysics())
+        {
+            continue;
+        }
+        const float VerticalSpeed = Segment->GetPhysicsLinearVelocity().Z;
+        Segment->SetPhysicsLinearVelocity(
+            PlanarKnockbackDirection * Speed
+                + FVector::UpVector * VerticalSpeed);
+    }
 }
 
 // 파츠와 ControlBody를 제외하고 활성 BodySegment 컴포넌트만 Volume과 비교
@@ -639,7 +747,7 @@ void ACMChimera::ApplyBlueprintSettings()
             bEnableCameraRotationLag;
         CameraBoom->CameraRotationLagSpeed =
             CameraRotationLagSpeed;
-        CameraBoom->bDoCollisionTest = true;
+        CameraBoom->bDoCollisionTest = false;
         CameraBoom->ProbeChannel = ECC_Camera;
     }
 

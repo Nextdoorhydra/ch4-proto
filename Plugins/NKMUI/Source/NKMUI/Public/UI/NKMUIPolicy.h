@@ -22,6 +22,7 @@ public:
 
 	virtual TSoftClassPtr<UNKMUIRootLayout> GetLayoutClass() const;
 	bool CreateLayout(ULocalPlayer* LocalPlayer);
+	bool RestoreLayoutToPlayerScreen();
 	UNKMUIActivatableWidget* PushWidgetToLayer(
 		FGameplayTag LayerTag,
 		TSubclassOf<UNKMUIActivatableWidget> WidgetClass);

@@ -397,6 +397,7 @@ void ACMSpringArmPart::StartBodyPull(
     PullTargetChimera = Chimera;
     PullTargetSlot = SlotAddress;
     PullAnchorLocation = AnchorLocation;
+    PullStartTimeSeconds = GetWorld()->GetTimeSeconds();
 
     // Apply once immediately so a close wall does not wait for the first
     // timer interval, then continue only while the pull remains active.
@@ -431,6 +432,19 @@ void ACMSpringArmPart::UpdateBodyPull()
         return;
     }
 
+    if (PullMaxDuration > 0.0f
+        && GetWorld()
+        && GetWorld()->GetTimeSeconds() - PullStartTimeSeconds
+            >= PullMaxDuration)
+    {
+        UE_LOG(LogChimeraSpringArm, Warning,
+            TEXT("[SpringArm Tether Timeout] Part=%s Duration=%.2f"),
+            *GetName(), PullMaxDuration);
+        StopBodyPull();
+        OnSpringArmFinished.Broadcast();
+        return;
+    }
+
     const float Interval = FMath::Max(PullUpdateInterval, 0.01f);
     const bool bStillPulling = Chimera->ApplySpringArmPull(
         PullTargetSlot,
@@ -461,6 +475,7 @@ void ACMSpringArmPart::StopBodyPull()
     PullTargetChimera.Reset();
     PullTargetSlot = FCMPartSlotAddress();
     PullAnchorLocation = FVector::ZeroVector;
+    PullStartTimeSeconds = 0.0;
 
     if (bWasPulling)
     {

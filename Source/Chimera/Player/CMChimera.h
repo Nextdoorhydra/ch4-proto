@@ -163,6 +163,14 @@ public:
     /** Changes only this process's camera component; the value is not replicated. */
     float AdjustLocalCameraDistance(float WheelInput);
 
+    /** 모든 활성 몸통 마디에 질량 독립적인 평면 넉백 속도를 더한다. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Movement")
+    void ApplyPlanarKnockback(FVector WorldDirection, float Speed);
+
+    /** Moves the active assembly by a measured planar knockback distance. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Movement")
+    void StartPlanarKnockback(FVector WorldDirection, float DistanceCm);
+
     // 지정 Volume과 모든 활성 몸통 물리 컴포넌트가 겹치는지 확인
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;
@@ -237,7 +245,6 @@ public:
     /** True while one SpringArm owns the Chimera pull. */
     bool IsSpringArmPulling() const;
     
-#if !UE_BUILD_SHIPPING
     /** Attaches registered production Part Blueprints to empty active slots. */
     void SpawnRandomDebugParts();
 
@@ -261,7 +268,6 @@ public:
         const FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState
     );
-#endif
 
     // GameMode/GameState may bind to this without CMChimera deciding the
     // project-wide defeat flow itself.
@@ -634,6 +640,7 @@ private:
     void ApplyBlueprintSettings();
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
+    void UpdatePlanarKnockback(float DeltaTime);
     void UpdateReplicatedSegmentStates();
     void ApplyReplicatedSegmentStates(float DeltaTime);
 
@@ -673,6 +680,11 @@ private:
     bool bHasReceivedSegmentStates = false;
     bool bAllSegmentsDeathNotified = false;
     float ConfiguredSegmentMaxHealth = 0.0f;
+    bool bPlanarKnockbackActive = false;
+    FVector PlanarKnockbackStartLocation = FVector::ZeroVector;
+    FVector PlanarKnockbackDirection = FVector::ForwardVector;
+    float PlanarKnockbackDistanceCm = 0.0f;
+    float PlanarKnockbackElapsedSeconds = 0.0f;
     
     TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
     FActiveGameplayEffectHandle StaminaRegenEffectHandle;

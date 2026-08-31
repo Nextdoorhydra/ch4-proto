@@ -1,5 +1,6 @@
 ﻿// Source/NetKarmaGame/UI/UIPolicy.cpp
 #include "UI/NKMUIPolicy.h"
+#include "Engine/GameInstance.h"
 #include "UI/NKMUIActivatableWidget.h"
 #include "UI/NKMUIRootLayout.h"
 #include "Widgets/CommonActivatableWidgetContainer.h"
@@ -27,15 +28,39 @@ bool UNKMUIPolicy::CreateLayout(ULocalPlayer* LocalPlayer)
 		return false;
 	}
 
+	UGameInstance* GameInstance = LocalPlayer->GetGameInstance();
+	if (!GameInstance)
+	{
+		return false;
+	}
+
 	OwningLocalPlayer = LocalPlayer;
-	RootLayoutInstance = CreateWidget<UNKMUIRootLayout>(LocalPlayer->GetWorld(), LoadedClass);
+	RootLayoutInstance = CreateWidget<UNKMUIRootLayout>(GameInstance, LoadedClass);
 	if (!RootLayoutInstance)
 	{
 		return false;
 	}
 
+	RootLayoutInstance->SetOwningLocalPlayer(LocalPlayer);
 	RootLayoutInstance->AddToPlayerScreen();
 	return true;
+}
+
+bool UNKMUIPolicy::RestoreLayoutToPlayerScreen()
+{
+	if (!IsValid(OwningLocalPlayer)
+		|| !OwningLocalPlayer->ViewportClient
+		|| !IsValid(RootLayoutInstance))
+	{
+		return false;
+	}
+
+	if (!RootLayoutInstance->IsInViewport())
+	{
+		RootLayoutInstance->AddToPlayerScreen();
+	}
+
+	return RootLayoutInstance->IsInViewport();
 }
 
 UNKMUIActivatableWidget* UNKMUIPolicy::PushWidgetToLayer(
