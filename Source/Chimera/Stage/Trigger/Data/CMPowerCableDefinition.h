@@ -54,4 +54,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "0.0"))
     float RopeCollisionRadius = 4.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "0.0"))
+    float RopeSleepMovementThreshold = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "1"))
+    int32 RopeSleepFrameCount = 20;
 };

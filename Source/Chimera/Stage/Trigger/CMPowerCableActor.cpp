@@ -78,6 +78,11 @@ void ACMPowerCableActor::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
+    if (bRopeSleeping && !IsGrabbed() && !IsConnected())
+    {
+        return;
+    }
+
     if (bCableStartLocationInitialized && !bCableHasBeenMoved
         && FVector::DistSquared(GetActorLocation(), CableStartLocation)
             > FMath::Square(0.1f))
@@ -169,6 +174,20 @@ float ACMPowerCableActor::GetRopeCollisionRadius() const
         : 4.0f;
 }
 
+float ACMPowerCableActor::GetRopeSleepMovementThreshold() const
+{
+    return CableDefinition.Get()
+        ? FMath::Max(CableDefinition->RopeSleepMovementThreshold, 0.0f)
+        : 0.5f;
+}
+
+int32 ACMPowerCableActor::GetRopeSleepFrameCount() const
+{
+    return CableDefinition.Get()
+        ? FMath::Max(CableDefinition->RopeSleepFrameCount, 1)
+        : 20;
+}
+
 void ACMPowerCableActor::InitializeRope()
 {
     if (bRopeInitialized || !bCableStartLocationInitialized)
@@ -252,6 +271,16 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
 {
     InitializeRope();
     if (!bRopeInitialized || RopePositions.Num() < 2)
+    {
+        return;
+    }
+
+    if (IsGrabbed())
+    {
+        bRopeSleeping = false;
+        RopeStableFrameCount = 0;
+    }
+    else if (bRopeSleeping)
     {
         return;
     }
@@ -382,6 +411,35 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
     {
         RopePositions.Last() = EndTarget;
     }
+
+    float MaxMovement = 0.0f;
+    for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
+    {
+        MaxMovement = FMath::Max(
+            MaxMovement,
+            FVector::Distance(
+                RopePositions[Index],
+                RopePreviousPositions[Index]));
+    }
+
+    if (!IsGrabbed()
+        && MaxMovement <= GetRopeSleepMovementThreshold())
+    {
+        ++RopeStableFrameCount;
+        if (RopeStableFrameCount >= GetRopeSleepFrameCount())
+        {
+            bRopeSleeping = true;
+            RopeStableFrameCount = 0;
+            for (int32 Index = 0; Index < RopePreviousPositions.Num(); ++Index)
+            {
+                RopePreviousPositions[Index] = RopePositions[Index];
+            }
+        }
+    }
+    else
+    {
+        RopeStableFrameCount = 0;
+    }
 }
 
 bool ACMPowerCableActor::QueryArmHold_Implementation(
@@ -466,6 +524,8 @@ bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
     }
 
     Grabber = InGrabber;
+    bRopeSleeping = false;
+    RopeStableFrameCount = 0;
     ForceNetUpdate();
     return true;
 }
@@ -478,6 +538,8 @@ void ACMPowerCableActor::ReleaseGrab()
     }
 
     Grabber = nullptr;
+    bRopeSleeping = false;
+    RopeStableFrameCount = 0;
     ForceNetUpdate();
 }
 

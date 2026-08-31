@@ -144,6 +144,8 @@ protected:
     float GetRopeDamping() const;
     int32 GetRopeConstraintIterations() const;
     float GetRopeCollisionRadius() const;
+    float GetRopeSleepMovementThreshold() const;
+    int32 GetRopeSleepFrameCount() const;
 
     bool bCableVisualReady = false;
     bool bCableVisualFailed = false;
@@ -152,6 +154,8 @@ protected:
     bool bHasCachedVisualEndpoint = false;
     FVector CachedVisualEndpoint = FVector::ZeroVector;
     bool bRopeInitialized = false;
+    bool bRopeSleeping = false;
+    int32 RopeStableFrameCount = 0;
     float SimulatedRopeLength = 0.0f;
     TArray<FVector> RopePositions;
     TArray<FVector> RopePreviousPositions;

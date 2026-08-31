@@ -4,6 +4,8 @@
 
 ACMPowerTriggerBase::ACMPowerTriggerBase()
 {
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
 }
 
 void ACMPowerTriggerBase::BeginPlay()
@@ -45,6 +47,23 @@ void ACMPowerTriggerBase::BeginPlay()
         }
     }
 
+    EvaluatePowerState();
+    bPendingInitialEvaluation = true;
+    SetActorTickEnabled(true);
+}
+
+void ACMPowerTriggerBase::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    if (!bPendingInitialEvaluation)
+    {
+        SetActorTickEnabled(false);
+        return;
+    }
+
+    bPendingInitialEvaluation = false;
+    SetActorTickEnabled(false);
     EvaluatePowerState();
 }
 
