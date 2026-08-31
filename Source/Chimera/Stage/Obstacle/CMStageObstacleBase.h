@@ -55,12 +55,12 @@ protected:
 
     // 접촉한 팔과 다리에 코드로 적용할 내구도 및 상태 설정
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Part Effect")
+        Category = "Chimera|Obstacle")
     FCMPartObstacleEffectConfig PartEffect;
 
     // 키메라 전체 ASC에 적용할 GameplayEffect 설정
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Chimera Effect")
+        Category = "Chimera|Obstacle")
     FCMChimeraObstacleEffectConfig ChimeraEffect;
 
 private:

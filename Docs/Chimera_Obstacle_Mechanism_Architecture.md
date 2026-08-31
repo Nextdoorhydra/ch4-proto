@@ -1,322 +1,206 @@
-# Chimera 장애물·Mechanism 구성 가이드
+# Chimera 장애물·버튼·퍼즐 구성 가이드
 
-## 장애물 제작 원칙
+기준: 2026-08-31 작업 트리의 C++ 구현. BP에 저장된 오버라이드는 코드 기본값과 다를 수 있다.
+이 문서는 기존 Soft ObstacleDefinition 제작 절차를 대체한다.
 
-단순 장애물은 기존처럼 BP에 에셋을 직접 지정할 수 있다. 일반 장애물은 레벨에 Shell BP를 직접 배치하고 외형·이펙트·사운드와 효과 설정을 `CMObstacleDefinition` PDA로 준비한다. 위치·회전·이동축·이동거리는 레벨 인스턴스가 관리한다.
+UI 담당자용 함수·이벤트·무게 조회 계약은 [버튼 UI 연동 가이드](Chimera_Button_UI_Integration.md)를 참고한다.
 
-```text
-레벨 배치 Shell
-├─ 위치·회전
-├─ PlacementId·GroupTags
-├─ 이동축·속도·거리
-└─ Soft ObstacleDefinition + LoadGroupId
+## 1. 현재 구조
 
-CMObstacleDefinition PDA
-├─ PrimaryMesh
-├─ Materials
-├─ NiagaraSystem
-├─ LoopSound
-├─ PartEffect
-│  ├─ 코드 기반 내구도 피해·파츠 상태
-│  └─ ApplicationPolicy·PeriodSeconds
-└─ ChimeraEffect
-   ├─ 공용 ASC GameplayEffectClass
-   └─ ApplicationPolicy·PeriodSeconds
-```
+- CMStageElementBase: 공통 활성화/비활성화/토글/초기화와 상태 복제.
+  - CMStageObstacleBase: 위험 효과·이동·힘·연출. CMLaserObstacleBase는 레이저 전용 자식.
+  - CMStageTriggerBase: Pulse/Activated/Deactivated 신호.
+    - CMStageButtonBase: CMBasicButtonBase, CMPressurePlateBase, CMLeverBase.
+    - CMVisionStoneBase: 시야 조건.
+    - CMPowerTriggerBase: 소켓 전원 조건.
+  - CMStageDeviceBase: 문 등의 장치.
+  - CMStagePuzzleController: 여러 입력/대상과 단계 관리.
+- CMRoomStreamingController: 룸 서브레벨 로드 관리 Actor.
+- CMRoomEntryTrigger: 몸통 진입 확인 Actor. 일반 버튼의 자식이 아니다.
 
-## 공통 장애물
+### 장애물 제작 원칙
 
-`ACMStageObstacleBase`를 부모로 블루프린트를 만들고 충돌 영역과 필요한 기능 컴포넌트를 조합한다. PDA 방식에서는 부모가 제공하는 `PrimaryMesh`, `PrimaryEffect`, `LoopAudio`, `ObstacleDefinition`을 사용한다. 액터에 포함된 `StageElement`의 `PlacementId`와 `GroupTags`를 지정하면 StageDirector가 Activate, Deactivate, Restart 명령을 전달할 수 있다.
+장애물 BP 또는 배치 인스턴스에 메시·머티리얼·Niagara·사운드·효과 수치를 직접 설정한다. 장애물별 Definition, LoadGroupId, Schedule Catalog 등록은 현재 제작 절차에 없다. 룸 서브레벨과 참조 에셋을 함께 로드한다.
 
-- 회전 칼날: Hazard + ObstacleMotion
-- 움직이는 칼날: Hazard + ObstacleMotion
-- 송곳: Hazard + ObstacleMotion
-- 레이저: Hazard
-- 독·감전·빙판 장판: Hazard + PartStatus
-- 키메라 전체 혼란·경직 영역: ChimeraEffectZone
-- 컨베이어·환풍구: ForceZone
+남아 있는 구형 Definition 에셋/호환 코드를 신규 제작 경로로 해석하지 않는다. 이 문서 작업은 기존 에셋을 삭제하지 않는다. Head/Vision 등 다른 기능의 PDA 비동기 로드까지 폐지한 것은 아니다. 구글시트 장애물 밸런스/스테이지 배율 설계도 구현 완료로 취급하지 않는다.
 
-충돌 영역의 BeginOverlap과 EndOverlap에서 각 컴포넌트의 `NotifyTargetEntered`, `NotifyTargetExited`를 호출합니다. 컴포넌트가 충돌 모양을 직접 소유하지 않으므로 장애물별 메시와 판정 영역을 자유롭게 구성할 수 있습니다.
+## 2. 상태와 제어 경로
 
-## 레벨에 장애물 적용하기
-
-### 1. 장애물 BP 준비
-
-1. `CMStageObstacleBase` 또는 전용 C++ 베이스를 부모로 BP를 만든다.
-2. Mesh·Collision과 Hazard·Motion·ForceZone 등 필요한 컴포넌트를 조합한다.
-3. 장애물이 처음부터 작동해야 하면 `Start Active`를 켜고, 트리거 이후 작동해야 하면 끈다.
-4. 한 액터만 직접 참조해 제어할 때는 `PlacementId`와 `GroupTags`를 비워도 된다.
-5. StageDirector가 ID로 찾거나 여러 액터를 함께 제어해야 할 때만 `PlacementId` 또는 `GroupTags`를 지정한다.
-6. 런타임 에셋을 비동기 준비하려면 `ObstacleDefinition`과 `LoadGroupId`를 설정한다. Definition을 사용하지 않는 테스트 BP는 BP에 에셋을 직접 넣어도 동작하지만 맵과 함께 로드된다.
-
-`Start Active`는 초기 상태만 결정한다. 이후 `Activate`, `Deactivate`, `Toggle`, `Reset` 명령은 `CMStageElementBase`를 통해 장애물, 트리거, 문 같은 장치에 동일한 방식으로 전달된다.
-
-### 2. 제어 방식 선택
-
-| 상황 | 권장 연결 방식 |
+| 목적 | 현재 API |
 |---|---|
-| 버튼 하나가 장애물 하나를 제어 | 버튼의 `TargetActor` 직접 참조 |
-| 여러 곳에서 같은 의미의 대상을 일괄 제어 | 대상의 `GroupTags`와 트리거의 `TargetGroup` |
-| 버튼·압력판 여러 개와 장애물·문·조명을 조합 | `CMStagePuzzleController` 직접 참조 |
-| 레벨 인스턴스 안에서 완결되는 퍼즐 | 컨트롤러와 구성 요소를 같은 레벨 인스턴스에 배치하고 직접 참조 |
+| 요소 작동 상태 | IsElementActive() |
+| 서버 요소 제어 | ActivateElement(), DeactivateElement(), ToggleElement(), ResetElement() |
+| 장애물용 동일 계약 | ActivateObstacle(), DeactivateObstacle(), ResetObstacle(), IsObstacleActive() |
+| 버튼 눌림 상태 | UCMActivationTriggerComponent::IsTriggered() |
 
-단순한 로컬 퍼즐에 고유 GameplayTag를 계속 만드는 것은 피한다. GameplayTag 그룹은 여러 퍼즐 또는 StageDirector에서 의미 기반으로 대상을 찾아야 할 때 사용하고, 한 퍼즐 내부의 구체적인 연결은 PuzzleController의 직접 참조를 사용한다.
+Start Active는 초기 **장치 작동 요청**이다. 버튼의 초기 눌림이 아니다. 버튼 ON과 대상 레이저 OFF는 동시에 성립할 수 있다.
 
-라이트도 퍼즐 대상이 되려면 `CMStageElementBase` 명령을 받을 수 있는 라이트 컨트롤러 또는 라이트 그룹 액터로 감싸야 한다. 일반 `PointLight` 액터를 그대로 PuzzleController의 Target으로 등록할 수는 없다.
+장애물 비활성화는 부착된 Motion/Hazard/StatusZone/ChimeraEffectZone/ForceZone과 기본 Niagara·반복 사운드를 정지한다. 공통 베이스는 외형 메시를 무조건 숨기거나 물리 Block을 제거하지 않는다. 레이저 등 전용 구현이 추가 표시/판정을 제어한다.
 
-## Soft Definition 로드 흐름
+### 직접 대상과 ID
 
-```text
-맵 로드
-→ Shell Actor 생성
-→ Definition 미준비 상태
-→ PrimaryMesh 숨김
-→ Motion·Hazard·ChimeraEffectZone·StatusZone·ForceZone 비활성
-→ Schedule이 LoadGroup 요청
-→ PDA와 Gameplay Bundle 준비
-→ DefinitionComponent가 완료 감지
-→ Mesh·Material·Niagara·Sound·PartEffect·ChimeraEffect 적용
-→ 기존 활성화 요청이 있으면 실제 장애물 작동
-```
+| 설정 | 실제 경로 |
+|---|---|
+| 트리거 TargetActor | 대상 StageElement의 PlacementId를 읽어 StageDirector에 명령 요청 |
+| TargetPlacementId | StageDirector에서 ID 검색 |
+| TargetGroup | StageDirector에서 GroupTags 검색 |
+| PuzzleController Commands.Targets | 대상 Element 함수 직접 호출 |
 
-Definition이 설정되지 않은 장애물은 BP 직접 참조 방식으로 간주해 기존 동작을 유지한다. Definition 또는 Bundle 에셋 로드 실패 시 동기 로드로 우회하지 않고 장애물을 숨김·비활성 상태로 유지하며 Error 로그를 출력한다.
+**트리거 TargetActor는 직접 함수 호출이 아니다.** 이 경로는 트리거와 대상의 StageElement 등록이 필요하다. 월드에 StageDirector가 정확히 하나 있어야 하며, 빈 PlacementId는 등록 오류, 중복 ID는 뒤의 등록이 실패한다. 버튼·장애물 등 타입이 달라도 같은 등록 공간이다.
 
-## PDA 장애물 제작 절차
+PuzzleController 직접 호출은 ID 검색에 의존하지 않지만, ID 누락에 따른 StageElement 등록 오류가 없어지는 것은 아니다. 레벨 인스턴스를 여러 번 배치해도 PlacementId가 자동으로 고유해진다고 가정하지 않는다.
 
-1. `CMStageObstacleBase`를 상속한 Shell BP를 만든다.
-2. 부모의 `PrimaryMesh`, `PrimaryEffect`, `LoopAudio`를 사용하고 실제 에셋은 BP에 직접 지정하지 않는다.
-3. Box·Sphere 등 판정 Collision과 Motion·Hazard·ChimeraEffectZone·ForceZone 중 필요한 컴포넌트를 추가한다.
-4. `/Game/Chimera/Environment/Obstacle/Data`에 `CMObstacleDefinition` Data Asset을 만든다.
-5. PDA의 Mesh·Material·Niagara·Sound와 PartEffect 또는 ChimeraEffect를 지정한다.
-6. 배치 BP의 `ObstacleDefinition.Definition`에 PDA를 Soft Reference로 지정한다.
-7. `ObstacleDefinition.LoadGroupId`에 Schedule의 그룹 ID를 지정한다.
-8. Stage Schedule의 Catalog에서 같은 PDA를 같은 GroupId에 배정하고 `Refresh And Rebuild Catalog`를 실행한다.
-9. 레벨 인스턴스의 PlacementId, 이동축, 속도, 이동거리와 Transform을 조정한다.
+TargetActor/TargetPlacementId/TargetGroup은 대상 목록 세 개가 아니라 선택 경로다. 의도한 경로만 채운다. 작은 룸 내부 퍼즐은 PuzzleController 직접 참조가 단순하다. 일반 PointLight는 그대로 대상이 될 수 없고 StageElement 기반 장치가 필요하다.
 
-```text
-시작 구역    S01.Entry           BeforeStageStart
-중반 장애물  S01.Area02.Hazards  Sequential 10
-후반 장애물  S01.Area03.Hazards  Sequential 20
-선택 분기    S01.BranchA.Hazards OnDemand
-```
+## 3. 장애물 배치
 
-모든 장애물을 BeforeStageStart에 넣으면 초기 로딩 분산 효과가 없으므로 실제 등장 순서대로 그룹을 나눈다. Shell BP가 PDA 에셋을 직접 하드 참조하면 맵 로드 때 함께 준비되므로 Soft Definition 외에는 같은 런타임 에셋을 BP 기본값에 중복 지정하지 않는다.
+1. CMStageObstacleBase 또는 CMLaserObstacleBase를 부모로 BP를 만든다.
+2. PrimaryMesh/PrimaryEffect/LoopAudio에 에셋을 지정한다. 메시 기본 머티리얼이 맞으면 별도 덮어쓰기는 불필요하다.
+3. 일반 장애물에는 판정 볼륨과 필요한 Hazard/Motion/ForceZone 등을 추가한다. 전용 부모에 있는 컴포넌트는 중복 추가하지 않는다.
+4. 일반 볼륨 Begin/EndOverlap에서 기능 컴포넌트의 NotifyTargetEntered/Exited를 호출한다. Hazard에는 OtherActor와 **OtherComp 모두** 전달한다. 레이저는 부모 연결을 사용한다.
+5. 액터의 Part Effect/Chimera Effect, Start Active를 설정한다.
+6. 해당 룸 서브레벨을 Current로 선택하고 배치한 뒤 퍼즐에 연결한다.
 
-## 컴포넌트 책임
+CMStageObstacleBase::ConfigureDirectEffects()는 BeginPlay에서 액터의 효과 설정을 부착 컴포넌트에 복사한다. **장애물 액터 설정이 원본**이다. Details에 비슷한 항목이 보여도 컴포넌트 런타임 복사본까지 따로 수정하지 않는다. 런타임 Details 수정의 자동 재적용·동기화는 보장하지 않는다.
 
-### CMLaserBeamComponent
+### 현재 Hazard 피해 계약
 
-시작점과 끝점을 받아 중앙 Pivot, 로컬 X축 기준 Mesh 길이와 Niagara의 `User.BeamStart`, `User.BeamEnd`를 갱신한다. 판정이나 데미지는 담당하지 않으며 고정 레이저, 카메라 Hitscan, 전기 Beam 표현에서 공용으로 사용한다.
+| 대상 | 판별 | 적용 |
+|---|---|---|
+| 팔·다리 | Part Actor + 정확히 GetDamageHurtbox()인 컴포넌트 | ApplyPartDamage() 및 유효 StatusTag의 파츠 상태 |
+| 몸통 마디 | GetSegmentIndexFromHurtbox(OtherComp) | ApplyDamageToSegment()로 해당 마디 직접 피해 |
+| 기타 메시/컴포넌트 | 위 조건 불충족 | 효과 대상 아님 |
 
-### CMAttackEmitterComponent
+이름은 PartEffect지만 **현재 몸통 마디 피해도 같은 Damage/Policy 설정을 사용한다.** 이 마디 피해는 GE가 아니다. MovementMultiplier/BlocksAbility 같은 파츠 상태를 몸통에 적용하는 경로는 아니다. 바닥/공기 장판을 분리하는 별도 대상 정책 옵션이 있다고 가정하지 않는다.
 
-서버에서 `Hitscan` 또는 `Projectile` 공격 방식을 실행한다. Hitscan은 즉시 Line Trace 결과를 `OnAttackResolved`로 전달하고, Projectile은 비동기 준비된 Soft Class만 생성한다. 실제 부위 데미지와 GE 적용은 파츠 피격 계약 확정 후 연결한다.
+| Part Effect 설정 | 의미 |
+|---|---|
+| Enabled | 효과 허용 |
+| Once On Enter | 최초 진입 한 번 |
+| Periodic While Overlapping | Period Seconds마다 적용. 첫 피해도 타이머 주기를 기다림 |
+| While Overlapping | 진입 시 피해/상태 적용, 마지막 이탈 시 발생원 상태 제거. 매 프레임 피해가 아님 |
+| Kill On Enter | 접촉 파츠 또는 마디에 처치량 피해 |
+| Damage Per Application | 한 번 적용할 피해량 |
+| Status Tag / Duration | 파츠 상태/지속시간. WhileOverlapping은 이탈 제거 방식 |
+| Movement Multiplier | 상태가 적용된 파츠의 이동 배율. 태그 없이 배율만 바꾸면 상태가 생성되지 않음 |
+| Blocks Ability | 해당 파츠 행동 차단 |
 
-### CMTargetScannerComponent
+파츠는 Actor별, 몸통은 Hurtbox Component별 오버랩 횟수를 추적한다. ChimeraEffect는 별도로 공용 ASC에 GameplayEffect를 적용한다. 단순 접촉 피해를 위해 GE를 만들 필요는 없다.
 
-서버 Timer에서 거리, 시야각, 벽 가림을 검사해 가장 가까운 대상을 선택한다. 공격 종류와 좌우 스캔 연출은 알지 않으며 `OnTargetAcquired`, `OnTargetLost`만 전달한다.
+### Collision
 
-## 고정 레이저 제작 절차
+- 외형 메시의 물리 Block과 효과 볼륨의 Overlap을 분리한다.
+- 양쪽 Generate Overlap Events와 채널 응답을 확인한다. ChimeraHurtbox가 볼륨에서 Ignore이면 효과가 전달되지 않는다.
+- 공통 PrimaryMesh는 Camera를 Ignore한다. 기존 BP 저장값은 따로 확인한다.
+- 장식용 회전체에는 Hazard/판정 볼륨이 필요 없다. 이동을 막을 외형 충돌까지 제거할지는 별도 결정이다.
 
-1. `CMLaserObstacleBase`를 상속한 BP를 만든다.
-2. 부모가 제공하는 `LaserStart`, `BeamCollision`, `Hazard`, `BeamPresentation`을 사용한다.
-3. `PrimaryMesh`에는 중앙 Pivot과 로컬 X축 길이를 가진 Beam Mesh를 지정한다.
-4. `BeamPresentation.MeshOriginalLength`에 원본 Mesh 길이를 cm 단위로 입력한다.
-5. `BeamPresentation.BeamThickness`, `MaxDistance`, `TraceChannel`을 설정한다.
-6. 고정 벽이면 `RefreshInterval=0`, 움직이는 문이 레이저를 가리면 0.05~0.1을 사용한다.
-7. 접촉 확인은 `Hazard.OnTargetEntered`에 Print를 연결한다.
-8. `StartActive=false`면 Stage 명령의 Activate 전까지 Mesh, Niagara, Collision이 모두 꺼진다.
+### 레이저·Motion·Force
 
-기존 BP에서 직접 만든 `LaserStart`, `BeamCollision`, `Hazard`와 `UpdateLaser` 그래프를 그대로 둔 채 부모를 변경하면 이름과 실행이 중복된다. 새 부모로 변경하기 전에 BP 컴포넌트와 Line Trace 그래프를 제거하거나, 새 자식 BP를 만들고 외형 설정만 옮긴다.
+레이저는 CMLaserObstacleBase의 LaserStart/BeamCollision/Hazard/BeamPresentation을 사용한다. 로컬 X축 Beam 길이에 맞춰 MeshOriginalLength, 두께, MaxDistance, TraceChannel을 설정한다. 정적 벽이면 RefreshInterval=0, 움직이는 차폐물이 있으면 갱신 주기를 준다. CMLaserBeamComponent는 표현, Hazard는 피해 담당이다. 액터 PartEffect의 Enabled와 피해량/주기를 설정한다. BP 자체 Trace/Overlap 그래프와 부모 처리를 중복 실행하지 않는다.
 
-### CMHazardComponent
+UCMObstacleMotionComponent는 Rotation(도/초), Linear(거리까지 이동 후 정지), PingPong(왕복)을 지원한다. MotionAxis는 초기 배치 회전 기준이다. 서버 Transform 갱신과 장애물 이동 복제를 사용한다. StartMotion/StopMotion/ReverseMotion/ResetMotion은 이동만 제어하며, Element 명령은 위험 효과·연출까지 함께 제어한다.
 
-접촉한 팔·다리 파츠만 추적해 `PartEffect`의 내구도 피해와 상태를 코드로 적용한다. `OnceOnEnter`, `PeriodicWhileOverlapping`, `WhileOverlapping`, `KillOnEnter` 정책을 지원하며 복수 콜리전 중복은 파츠별 오버랩 횟수로 방지한다.
+UCMForceZoneComponent는 LocalDirection/ForceStrength로 서버에서 영역 안 키메라에 지속 Force를 적용한다. 컨베이어/팬에 사용하며 회전 메시 연출과는 별개다.
 
-### CMPartStatusComponent
+## 4. 버튼 종류
 
-개별 파츠의 감전·경직·감속 상태를 관리한다. 같은 발생원의 같은 태그는 갱신하고, 여러 상태의 이동 배율은 곱한다. 행동 차단 상태는 해당 파츠의 `IsOperational`만 실패시켜 다른 파츠 GA에는 영향을 주지 않는다.
+### 기본 버튼 — CMBasicButtonBase
 
-### CMChimeraEffectZoneComponent
+- 서버 팔 스윙 범위 검사에서 정확히 HitVolume에 맞으면 NotifySwingHit()를 호출한다. 같은 팔의 같은 AttackId는 한 번만 처리한다.
+- 몸통 Overlap 임시 테스트 기능은 제거되었다. 팔이 가만히 닿는 것만으로도 누르지 않는다.
+- Toggle On Hit=true: 타격마다 눌림/해제 교대. BeginPlay에서 One Shot=false로 설정한다.
+- Toggle On Hit=false: Press를 시도하고 Pulse를 보낸다. 자동 Release는 없으므로 보통 최초 눌림 후 재입력이 상태를 바꾸지 않는다. One Shot 기본값은 true지만 이 분기가 저장값을 강제로 true로 덮지는 않는다.
+- 직접 연결의 Target/Release Command는 **런타임에 둘 다 Toggle로 강제**한다. 명시적인 Activate/Deactivate 동작은 PuzzleController에서 설정한다.
 
-키메라 전체에 영향을 주는 Definition의 Soft GE를 공용 ASC에 적용한다. `WhileOverlapping` 효과는 적용 Handle을 키메라별로 저장해 마지막 마디가 이탈하거나 장애물이 비활성화될 때 정확히 제거한다.
+One Shot은 한 번 활성화한 이력을 Reset까지 유지하여 재활성화를 막는다. One Shot을 끄는 것과 현재 눌림 해제는 별개다.
 
-### CMObstacleMotionComponent
+### 압력판 — CMPressurePlateBase
 
-Rotation, Linear, PingPong 종류와 축, 속도, 거리, 시작·정지·반전·초기화를 제공합니다. 서버에서 실제 Transform을 갱신하고 `CMStageObstacleBase`의 이동 복제를 통해 클라이언트에 반영합니다.
+1. PressureVolume 크기와 Query Only/Generate Overlap Events를 설정한다.
+2. 프로젝트 커스텀 ChimeraHurtbox 응답을 Overlap으로 확인한다. OverlapAllDynamic 이름만 믿지 않는다.
+3. Required Weight=100, Release Weight=90, One Shot=false로 테스트한다.
+4. 직접 연결이면 TargetActor와 고유 PlacementId를 준비한다. 눌러서 레이저를 끄려면 Target Command=Chimera.Stage.Command.Mechanism.Deactivate, Release Command=Chimera.Stage.Command.Mechanism.Activate.
+5. 복합 퍼즐이면 PuzzleController Triggers에 등록하고 직접 Target은 비운다.
 
-- Rotation: `Speed`를 초당 회전 각도로 사용합니다.
-- Linear: 최초 위치에서 `MoveDistance`만큼 이동한 뒤 정지합니다.
-- PingPong: 최초 위치와 `MoveDistance` 지점 사이를 계속 왕복합니다.
-- MotionAxis: 최초 배치 회전을 기준으로 하는 로컬 축입니다.
+OFF에서 CurrentWeight >= RequiredWeight이면 ON, ON에서 CurrentWeight < ReleaseWeight이면 OFF다. 정확히 90이면 유지하고 90 미만에서 해제한다.
 
-### CMStatusZoneComponent
+오버랩 Actor의 UCMMechanismWeightComponent를 합산한다. 서로 다른 팔/다리는 더하고 같은 Actor의 여러 콜리전은 한 번만 센다. 몸통에 붙은 모든 파츠를 자동 합산하지 않으며 몸통 마디 자체 무게는 포함하지 않는다.
 
-대상 진입·이탈과 상태 태그만 전달하는 기존 확장 지점입니다. 신규 파츠 장판은 `CMHazardComponent + CMPartStatusComponent`, 키메라 전체 GE 영역은 `CMChimeraEffectZoneComponent`를 사용합니다.
+팔/다리는 코드에서 무게 컴포넌트를 생성하고 FCMPartLegArmTableRow::Weight를 적용한다. CSV 열은 정확히 Weight이며 0 이상의 유한값이다. 기존 데이터가 0이면 합산에 기여하지 않는다.
 
-### CMForceZoneComponent
+UI는 공통 GetPresentationState()/OnPresentationStateChanged(State)를 사용한다. **현재·목표·해제 무게와 On/Off를 하나의 표시용 구조체로 복제한다.** GetCurrentWeight()/GetRequiredWeight()/GetReleaseWeight()도 클라이언트에서 해당 스냅샷을 조회한다. 기존 OnPressureChanged는 서버 이벤트로 유지한다. 초기 bReady 처리와 연결 예시는 [UI 문서](Chimera_Button_UI_Integration.md)를 참고한다.
 
-로컬 방향과 힘 세기를 보관하고 월드 방향을 계산합니다. 서버에서 키메라 전체 Force를 활성 몸통 마디의 질량 비율로 분배합니다.
+재계산은 서버 Begin/EndOverlap에서 한다. 안에서 무게만 변경하거나 Actor가 사라졌을 때 즉시 반영은 보장하지 않는다. Reset은 추적 목록을 비우고 이미 겹친 Actor를 재검색하지 않으므로 재진입 테스트가 필요하다.
 
-### CMObstacleDefinitionComponent
+### 레버 — CMLeverBase
 
-Soft Definition과 LoadGroupId를 보관한다. 로컬 Coordinator의 그룹 완료를 확인하고 이미 준비된 PDA만 `.Get()`으로 조회한다. 동기 로드는 사용하지 않는다. 성공 시 `OnDefinitionReady`, 실패 시 `OnDefinitionFailed`를 전달한다.
+- 움직일 메시를 LeverPivot 자식, 피벗을 회전 중심, ArmHoldVolume을 손잡이에 둔다. 논리 레버이며 손잡이 물리 시뮬레이션을 사용하지 않는다.
+- 일반 팔은 ICMArmHoldTarget으로 잡고 팔 Actor 이동을 LocalPullAxis에 투영한다.
+- LocalPullAxis는 입력 이동 방향, LocalRotationAxis는 표현 회전축이다. 수평 회전은 배치 회전을 고려해 회전축이 월드 Z가 되도록 설정한다.
+- FullTravelDistance는 Alpha -1→+1 전체 이동 거리. Alpha >= SwitchThreshold에서 Press, <= -SwitchThreshold에서 Release한다.
+- RotationHalfAngle=45, SwitchThreshold=.8이면 기본 배치 회전에 대한 목표 오프셋 ±36도에서 전환한다. 시각 보간 때문에 화면 각도는 다를 수 있다.
+- 키를 놓으면 마지막 ON/OFF 끝점으로 돌아간다. Hold에 소비한 입력을 놓을 때 추가 일반 스윙이 발생하지 않도록 처리한다.
+- 그랩 팔은 Pull 방향/세기로 양/음 상태를 선택한다. 처리한 대상이면 변화가 없어도 몸통 Pull로 우회하지 않는다.
+- RotationTransitionDuration은 양끝 간 시각 이동 시간(기본 .3초, 0은 즉시). 일반 Hold와 그랩 Pull 모두 같은 보간 경로를 사용한다.
+- OnLeverAlphaChanged는 논리 목표, OnLeverVisualAlphaChanged는 보간된 표현 값. On/Off는 IsTriggered가 기준이다.
 
-### CMStageObstacleBase 활성 조건
+시야석은 RequiredWatchingPlayers/VisionStoneMode/EvaluationInterval, 전원 트리거는 RequiredSockets/bRequireAllSockets로 설정한다. 개별 카운트/표현 이벤트의 클라이언트 복제를 공통 Trigger 상태 복제와 혼동하지 않는다.
 
-실제 장애물 활성 상태는 `활성화 요청 && Definition 준비 완료`다. Definition이 준비되기 전에 Activate 명령을 받으면 요청을 기억하고 로드 성공 후 작동한다. 비활성 상태에서는 Motion, Hazard, ChimeraEffectZone, StatusZone, ForceZone, 기본 Niagara와 반복 사운드를 함께 정지한다.
+## 5. PuzzleController
 
-## 에디터 프리뷰
+서버가 Trigger 신호를 구독하고 Step을 실행한다. 등록한 Trigger의 직접 Target 명령은 비활성화해 이중 실행을 막는다. 같은 Trigger를 여러 컨트롤러가 소유하기보다 한 컨트롤러의 여러 채널에 등록한다.
 
-현재 안전한 런타임 로드 경로를 우선 구현했다. PDA 에셋을 런타임 컴포넌트 기본값에 복사하면 하드 참조가 저장될 수 있으므로 에디터 프리뷰는 아직 제공하지 않는다. 후속 구현에서는 에디터 전용 Transient Preview Component를 사용해 저장 데이터와 런타임 Soft Reference를 분리한다.
+| 옵션 | 의미 |
+|---|---|
+| Any | 수락 신호 하나마다 실행 |
+| All + Latched | 각 입력이 한 번씩 수락되면 실행 후 누적 기록 비움. 순서 검사 아님 |
+| All + Simultaneous | Activated/Deactivated로 추적한 상태 평가. Pulse 무시 |
+| All Active / All Inactive / All Equal | 모두 ON / 모두 OFF / 모두 같은 상태 |
+| Accepted Signal | PulseOrActivated / ActivatedOnly / DeactivatedOnly / Any |
+| Steps → Commands | Activate / Deactivate / Toggle / Reset 및 대상 목록 |
+| Stop | 마지막 Step 후 종료 |
+| Loop | 마지막 Step 후 Step 0 |
+| Repeat Current | 마지막 Step에 머물며 반복. 여러 Step이면 앞 단계는 먼저 진행 |
+| Reset Targets with Puzzle | Reset 시 Commands 대상도 초기화 |
 
-## Stage Element 구성
+Simultaneous는 수락 여부와 별개로 ON/OFF를 추적하지만 실행을 일으킨 신호는 Accepted Signal을 통과해야 한다. 모두 OFF에서도 실행하려면 ActivatedOnly로 두면 안 된다. BeginPlay/Reset에서 현재 눌림을 재조회하지 않으며 초기 모두 OFF만으로 자동 실행하지 않는다.
 
-```text
-CMStageElementBase
-├─ CMStageObstacleBase
-│  ├─ Laser
-│  ├─ Blade
-│  └─ HazardVolume
-├─ CMStageTriggerBase
-│  ├─ CMStageButtonBase
-│  │  ├─ BasicButton
-│  │  ├─ PressurePlate
-│  │  └─ Lever
-│  └─ VisionStone
-└─ CMStageDeviceBase
-   ├─ Door
-   ├─ Bridge
-   └─ Elevator
-```
+| 목적 | 예시 |
+|---|---|
+| 토글 버튼 매 타격마다 여러 대상 반전 | Toggle On Hit=true; Any + Accepted Any; Step 0 Toggle; Repeat Current |
+| 모두 ON 또는 모두 OFF에서 반전 | All + Simultaneous + All Equal + Accepted Any; Toggle; Repeat Current |
+| 모두 ON이면 레이저 OFF, 모두 OFF이면 ON | 채널 A: AllActive + ActivatedOnly → Deactivate / 채널 B: AllInactive + DeactivatedOnly → Activate. 둘 다 All + Simultaneous + Repeat Current |
+| 버튼과 압력판을 한 번씩 충족 | All + Latched + PulseOrActivated |
+| 매 입력마다 다른 대상 제어 | Any + Accepted Any; Step 0/1/2에 명령; Loop 또는 Stop |
 
-`CMStageElementBase`는 활성화, 비활성화, 토글, 초기화와 네트워크 상태 복제의 공통 계약이다. StageDirector는 장애물과 장치를 따로 순회하지 않고 해당 서브레벨의 Stage Element를 동일한 방식으로 초기화할 수 있다.
+두 채널 예시는 혼합 상태에서 이전 대상 상태를 유지한다. 하나라도 풀리면 즉시 켜는 조건과 다르다. 토글 버튼에서 PulseOrActivated만 받으면 해제 타격은 실행하지 않아 매 두 번째 입력이 빠진 것처럼 보인다.
 
-### CMStageTriggerBase
+ResetPuzzle()은 채널 진행 기록과 선택한 대상들을 초기화하지만 Triggers 자체를 자동 Reset하지 않는다. 버튼/압력판 상태도 함께 초기화해야 한다. 정확한 입력 순서 검사·오답 처리는 별도 구현 대상이다.
 
-버튼, 압력판, 레버, 시야석의 공통 부모다. 유효한 입력을 받으면 다음 표준 신호를 발생시킨다.
+## 6. 룸 스트리밍
 
-- `Pulse`: 눌렀다는 순간 신호. `Toggle On Hit`을 끈 BasicButton의 신호다.
-- `Activated`: 압력판이 눌린 상태, 레버가 켜진 상태처럼 지속 상태가 시작됨.
-- `Deactivated`: 압력판에서 무게가 빠지거나 레버가 꺼지는 등 지속 상태가 끝남.
+1. 퍼시스턴트 Levels에 룸 맵을 등록하고 Streaming Method=Blueprint로 설정한다.
+2. 퍼시스턴트에 RoomStreamingController 하나를 배치하고 Rooms의 RoomId/Level을 순서대로 등록한다.
+3. 룸마다 같은 RoomId의 RoomEntryTrigger 하나를 둔다. 전체 몸통이 함께 들어갈 크기로 만든다.
+4. 뒤쪽 차단문은 해당 룸에 두고 EntryBlockerDoor에 연결한다. 퍼즐로 여는 앞쪽 문과 분리할 수 있다.
+5. 퍼즐 요소와 컨트롤러는 같은 룸에 두어 언로드 경계를 넘는 참조를 줄인다. 한 룸에 여러 퍼즐 컨트롤러를 둘 수 있다.
 
-트리거를 PuzzleController에 등록하면 컨트롤러가 해당 트리거의 직접 Target 명령을 비활성화한다. 같은 입력으로 직접 대상과 컨트롤러 대상이 두 번 실행되는 것을 막기 위한 처리다.
+현재 N: N/N+1 로드·표시, N+2 숨김 프리로드, 이전 및 그 외 룸 언로드. 클라이언트도 복제된 CurrentRoomIndex로 로컬 스트리밍을 적용한다. 다음 룸 장애물은 Start Active를 따르며 버튼으로 켤 대상은 false로 둔다.
 
-### CMBasicButtonBase
+진입 판정은 이벤트를 일으킨 **한 ACMChimera의 모든 활성 몸통 마디**다. 독립된 키메라 Actor 여러 개를 모두 기다리는 구현이 아니다. 차단문이 있고 활성 상태면 닫힘 완료를 기다린다. 문이 없거나 이미 비활성이면 즉시 Commit하므로 **문 미배치가 언로드를 막지는 않는다.**
 
-기본 버튼은 직접 연결 모드에서 대상의 현재 상태를 반대로 바꾸는 `Toggle`을 기본으로 사용한다. PuzzleController에는 버튼 설정에 따라 순간 또는 상태 신호를 보낸다.
+끝 범위를 넘는 룸은 요청하지 않는다. 다음 순서로 마지막 룸에 Commit하면 서버 OnFinalRoomCommitted가 발생하지만 이 이벤트 자체가 다음 스테이지 Travel은 아니다. 진입 트리거 누락/중복은 검증 경고를 확인한다.
 
-- `Toggle On Hit = false`: 한 번만 작동하고 `Pulse`를 보낸다. 내부 `One Shot`이 켜진다.
-- `Toggle On Hit = true`: 누를 때마다 ON/OFF가 바뀌고 각각 `Activated`, `Deactivated`를 보낸다. 내부 `One Shot`이 꺼진다.
-- Target과 Release Command 필드는 공통 부모 구조 때문에 보이지만 BasicButton은 런타임에 둘 다 `Toggle`로 사용한다.
+## 7. 확인 순서
 
-실제 팔 휘두르기의 Sphere/Box Sweep 타격 판정은 아직 연결되지 않았다. 에디터 임시 테스트에서는 `Allow Chimera Body Overlap For Testing`을 켜고 몸통이 버튼 HitVolume에 진입하도록 한다. 다시 작동시키려면 몸통 전체가 HitVolume을 벗어난 뒤 재진입해야 한다. 이 옵션은 실제 상호작용 구현이 완료되면 제거하거나 Non-Shipping 테스트 전용으로 제한한다.
+1. 서버 입력 → IsTriggered → 명령 전달 → IsObstacleActive 순으로 확인한다. Print만으로 대상 명령 성공을 판단하지 않는다.
+2. 직접 연결 오류: StageDirector 수, 빈/중복 PlacementId, 대상 ID, 명령 태그.
+3. 압력판: 서버 OnPressureChanged의 무게/Pressed. 문턱을 넘었다면 대상 연결을 확인.
+4. 퍼즐: LogChimeraPuzzle의 [Puzzle Step Executed], Accepted Signal, End Behavior.
+5. 피해: 액터 Enabled, OtherComp, ChimeraHurtbox 채널, 서버 권한.
+6. UI: OnButtonPressed/Released는 서버 게임 이벤트다. 서버/클라이언트 공통 표시는 GetPresentationState와 OnPresentationStateChanged를 사용한다.
+7. Reset/룸 재로드/지연 접속 상태 복원을 별도 검증한다.
 
-### CMStageDeviceBase
+## 코드 기준
 
-문, 다리, 엘리베이터처럼 퍼즐 결과를 표현하는 장치의 부모다. 활성 상태를 실제 열림, 연결, 이동 상태로 변환하는 Timeline·애니메이션·Collision 처리는 각 장치 자식이 담당한다.
-
-## 단일 버튼으로 장애물 토글하기
-
-1. 레벨에 BasicButton과 대상 장애물을 배치한다.
-2. 장애물의 `Start Active`로 처음 켜짐/꺼짐 상태를 정한다.
-3. 버튼의 `TargetActor`에 레벨에 배치된 장애물을 지정한다.
-4. 반복 토글이면 `Toggle On Hit`을 켜고, 일회성이면 끈다.
-5. 테스트 중에는 버튼 HitVolume에 유효 입력이 들어오는지 Print 또는 로그로 먼저 확인한다.
-6. 버튼을 누를 때마다 장애물의 전체 활성 상태가 반전되는지 확인한다.
-
-직접 참조를 사용하면 `TargetPlacementId`, `TargetGroup`, Target/Release Command Tag를 별도로 채울 필요가 없다. 장애물의 Motion만 끄는 것처럼 일부 기능만 제어하는 명령은 현재 공통 Toggle 범위가 아니므로 전용 장치 명령 또는 별도 컴포넌트 API로 확장한다.
-
-## 여러 대상을 그룹으로 제어하기
-
-1. 함께 제어할 각 Stage Element의 `GroupTags`에 같은 GameplayTag를 지정한다.
-2. 트리거의 `TargetGroup`에 같은 태그를 지정한다.
-3. 직접 참조와 그룹을 동시에 지정하지 않아 중복 명령을 피한다.
-
-그룹 태그는 `Stage01.Puzzle.PowerGrid`처럼 레벨 구현 순서가 아니라 의미를 표현하는 이름을 권장한다. 레벨 인스턴스 내부에서만 쓰는 작은 퍼즐은 그룹 태그보다 PuzzleController 직접 참조가 더 단순하다.
-
-## CMStagePuzzleController 적용
-
-PuzzleController는 여러 Trigger의 신호를 받아 하나 이상의 Stage Element에 단계별 명령을 실행하는 퍼즐 단위 관리자다. 서버에서 조건과 Step을 실행하며 현재 Step과 완료 상태를 복제한다. 대상 장애물과 장치는 각자의 활성 상태를 복제한다.
-
-### 주요 설정
-
-- `Puzzle Channels`: 서로 독립적으로 진행되는 퍼즐 채널 목록.
-- `Channel Id`: 에디터와 로그에서 구분할 이름.
-- `Triggers`: 이 채널에 입력을 보내는 버튼, 압력판, 레버 등의 직접 참조.
-- `Trigger Condition`
-  - `Any`: 등록된 Trigger 중 하나의 유효 신호만 와도 현재 Step 실행.
-  - `All`: 모든 Trigger가 조건을 충족해야 현재 Step 실행.
-- `All Condition Mode`
-  - `Latched`: 각 Trigger가 한 번씩 신호를 보냈으면 충족. 동시에 누를 필요가 없다.
-  - `Simultaneous`: 모든 Trigger의 현재 ON/OFF 상태가 `Simultaneous Match State`와 일치해야 충족.
-- `Simultaneous Match State`
-  - `All Active`: 모든 Trigger가 ON일 때 실행.
-  - `All Inactive`: 모든 Trigger가 OFF일 때 실행.
-  - `All Equal`: 모든 Trigger가 ON이거나 모두 OFF에 도달할 때마다 실행.
-- `Accepted Signal`
-  - `PulseOrActivated`: 일반 버튼과 압력판을 함께 쓰는 기본값.
-  - `ActivatedOnly`: 눌림/켜짐 상태만 인정.
-  - `DeactivatedOnly`: 해제/꺼짐 상태만 인정.
-  - `Any`: 모든 신호 인정.
-- `Steps`: 조건이 충족될 때 실행할 단계 목록.
-- `Commands`: 한 Step에서 실행할 `Activate`, `Deactivate`, `Toggle`, `Reset`과 직접 대상 목록.
-- `End Behavior`
-  - `Stop`: 마지막 Step 이후 채널 종료.
-  - `Loop`: 마지막 Step 이후 첫 Step으로 복귀.
-  - `RepeatCurrent`: 같은 Step을 계속 반복.
-
-### 예시 A: 버튼 하나로 여러 장애물 토글
-
-```text
-TriggerCondition = Any
-AcceptedSignal = PulseOrActivated
-Triggers = [Button01]
-Steps[0].Commands[0]
-  Command = Toggle
-  Targets = [Laser01, Blade01, Door01]
-EndBehavior = RepeatCurrent
-```
-
-### 예시 B: 같은 버튼을 누를 때마다 다른 단계 실행
-
-```text
-Steps[0] = Laser01 Deactivate
-Steps[1] = Blade01 Deactivate
-Steps[2] = ExitDoor Activate
-EndBehavior = Stop 또는 Loop
-```
-
-버튼의 `Toggle On Hit`을 켜야 여러 번 입력할 수 있다. `Loop`이면 마지막 입력 다음에 Step 0으로 돌아가고, `Stop`이면 마지막 Step 이후 추가 입력을 무시한다.
-
-### 예시 C: 버튼과 압력판을 모두 충족해야 실행
-
-```text
-Triggers = [Button01, PressurePlate01]
-TriggerCondition = All
-AllConditionMode = Latched
-AcceptedSignal = PulseOrActivated
-Steps[0] = Door01 Toggle
-```
-
-버튼과 압력판은 어느 순서로 작동해도 된다. 두 입력이 모두 들어오면 Step을 실행하고 채널의 누적 조건을 비우므로, 다음 실행에는 두 Trigger가 다시 신호를 보내야 한다.
-
-압력판 여러 개가 동시에 눌려 있는 동안만 실행해야 한다면 `All + Simultaneous + ActivatedOnly`를 사용한다. `Latched`는 순서를 강제하지 않는다. `ButtonA → ButtonC → ButtonB`처럼 정확한 입력 순서를 검사하고 틀리면 초기화하는 기능은 아직 구현 범위에 포함되지 않는다.
-
-여러 Toggle Button이 모두 ON일 때만 실행하고, 같은 버튼을 다시 눌러 OFF로 만들면 조건도 취소되게 하려면 각 버튼의 `Toggle On Hit`을 켜고 `All + Simultaneous + All Active + ActivatedOnly`를 사용한다.
-
-모든 버튼이 ON일 때 대상 장애물을 Toggle하고, 모든 버튼이 다시 OFF가 되었을 때 한 번 더 Toggle하려면 `All + Simultaneous + All Equal + Any`를 사용한다. 초기화 직후 모두 OFF인 상태만으로는 실행되지 않으며 실제 `Activated` 또는 `Deactivated` 신호로 모든 버튼이 같은 상태에 도달한 순간에만 실행된다. Step 하나를 계속 사용하려면 `End Behavior`는 `Repeat Current`로 설정한다.
-
-### 레벨 인스턴스에서 사용
-
-PuzzleController, Trigger, 장애물, 문, 라이트 컨트롤러를 같은 레벨 인스턴스에 넣고 컨트롤러가 내부 액터를 직접 참조하게 한다. 같은 레벨 인스턴스 에셋을 여러 번 배치하면 각 인스턴스의 내부 참조 관계도 함께 복제되므로 퍼즐 묶음을 재사용하기 좋다.
-
-인스턴스마다 데미지나 색을 다르게 조정해야 하면 공통 PDA는 유지하고 BP의 인스턴스 오버라이드 값으로 수치만 바꾼다. 구성 자체가 달라지거나 에셋 조합이 달라질 때 별도 레벨 인스턴스 또는 Definition 변형을 만든다.
-
-## 권장 구현 순서
-
-1. KillZone으로 Hazard의 몸통 마디 판별과 처치 연결
-2. 회전 칼날로 Motion의 서버 이동과 복제 방식 검증
-3. Hazard와 Motion을 조합한 회전 칼날 완성
-4. ForceZone으로 컨베이어와 바람의 물리 반응 검증
-5. GAS 정책 확정 후 StatusZone과 지속형 GE 연결
+Source/Chimera/Stage 아래 CMStageElementBase, CMStageElementComponent, CMStageDirector, Obstacle/CMStageObstacleBase, Obstacle/CMLaserObstacleBase, Obstacle/Component/CMHazardComponent, Trigger의 버튼·레버·압력판 및 ActivationTriggerComponent, Puzzle/CMStagePuzzleController, Room의 Controller/EntryTrigger 구현을 기준으로 한다.

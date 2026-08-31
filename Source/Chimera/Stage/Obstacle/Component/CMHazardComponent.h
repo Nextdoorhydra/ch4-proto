@@ -43,10 +43,12 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Hazard")
     FCMHazardTargetSignature OnTargetExited;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Hazard")
+private:
+    // 장애물 베이스에서 복사되는 런타임 값이며 Details에서는 직접 편집하지 않음
+    UPROPERTY(Transient, BlueprintReadOnly, Category = "Chimera|Hazard",
+        meta = (AllowPrivateAccess = "true"))
     FCMPartObstacleEffectConfig PartEffect;
 
-private:
     struct FTrackedPart
     {
         int32 OverlapCount = 0;

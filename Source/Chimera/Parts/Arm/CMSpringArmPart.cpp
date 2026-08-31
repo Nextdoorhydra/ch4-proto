@@ -291,6 +291,7 @@ void ACMSpringArmPart::ResolveHookHit(const FHitResult& Hit)
     UPrimitiveComponent* HitComponent = Hit.GetComponent();
     bool bPulledTarget = false;
     bool bHandledPullTarget = false;
+    ECMGrabPullResult PullResult = ECMGrabPullResult::Unhandled;
 
     if (HitActor)
     {
@@ -306,12 +307,13 @@ void ACMSpringArmPart::ResolveHookHit(const FHitResult& Hit)
 
         if (HitActor->Implements<UCMGrabPullTarget>())
         {
-            bHandledPullTarget = ICMGrabPullTarget::Execute_TryHandlePull(
+            PullResult = ICMGrabPullTarget::Execute_HandlePullWithResult(
                 HitActor,
                 this,
                 GetActorLocation(),
                 PullImpulse);
-            bPulledTarget = bHandledPullTarget;
+            bHandledPullTarget = PullResult != ECMGrabPullResult::Unhandled;
+            bPulledTarget = PullResult == ECMGrabPullResult::Applied;
         }
     }
 
@@ -326,6 +328,7 @@ void ACMSpringArmPart::ResolveHookHit(const FHitResult& Hit)
                 Hit.ImpactPoint
             );
             bPulledTarget = true;
+            PullResult = ECMGrabPullResult::Applied;
         }
     }
     else if (!bHandledPullTarget)
@@ -344,11 +347,13 @@ void ACMSpringArmPart::ResolveHookHit(const FHitResult& Hit)
     }
 
     OnHookResolved.Broadcast(HitActor, bPulledTarget);
+    OnPullTargetResolved.Broadcast(HitActor, PullResult);
     UE_LOG(LogChimeraSpringArm, Log,
         TEXT("[SpringArm Resolved] Part=%s Hit=%s Mode=%s Point=%s"),
         *GetName(),
         *GetNameSafe(HitActor),
-        bPulledTarget ? TEXT("TargetPull") : TEXT("BodyPull"),
+        bPulledTarget ? TEXT("TargetPull")
+            : bHandledPullTarget ? TEXT("HandledNoChange") : TEXT("BodyPull"),
         *Hit.ImpactPoint.ToCompactString());
 }
 
