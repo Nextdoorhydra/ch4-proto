@@ -743,11 +743,16 @@ void ACMChimera::SetPartSlotPressed(
         << CMControl::ToFlatPartSlotIndex(PartSlotAddress);
     if (bPressed)
     {
+        if ((PressedPartSlotMask & PartSlotBit) == 0)
+        {
+            InteractionConsumedPartSlotMask &= ~PartSlotBit;
+        }
         PressedPartSlotMask |= PartSlotBit;
     }
     else
     {
         PressedPartSlotMask &= ~PartSlotBit;
+        InteractionConsumedPartSlotMask &= ~PartSlotBit;
     }
 
     if (MovementCoordinator)
@@ -762,6 +767,10 @@ void ACMChimera::SetPartSlotPressed(
             if (ArmPart)
             {
                 MovementCoordinator->TryBeginArmAnchor(*this, *ArmPart);
+                if (MovementCoordinator->IsArmHoldingInteractable(PartSlotAddress))
+                {
+                    InteractionConsumedPartSlotMask |= PartSlotBit;
+                }
             }
         }
         else if (!bPressed)
@@ -791,7 +800,10 @@ bool ACMChimera::ShouldActivateBasicArmOnRelease(
     const FCMPartSlotAddress& PartSlotAddress
 ) const
 {
-    return IsBasicArmPartSlot(PartSlotAddress)
+    return CMControl::IsValidPartSlot(PartSlotAddress, ActiveSegmentCount)
+        && (InteractionConsumedPartSlotMask
+            & (1u << CMControl::ToFlatPartSlotIndex(PartSlotAddress))) == 0
+        && IsBasicArmPartSlot(PartSlotAddress)
         && (!MovementCoordinator
             || !MovementCoordinator->IsArmHoldingInteractable(
                 PartSlotAddress));
@@ -806,6 +818,7 @@ void ACMChimera::ClearPressedControlParts()
 
     const bool bHadPressedPart = PressedPartSlotMask != 0;
     PressedPartSlotMask = 0;
+    InteractionConsumedPartSlotMask = 0;
 
     for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
     {

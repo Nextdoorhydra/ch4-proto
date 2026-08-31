@@ -79,6 +79,9 @@ public:
     FCMLegStepStateChangedSignature OnStepStateChanged;
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism")
+    TObjectPtr<class UCMMechanismWeightComponent> MechanismWeightComponent;
+
     virtual void ApplyPartData(
         const FCMPartLegArmTableRow& PartRow
     ) override;

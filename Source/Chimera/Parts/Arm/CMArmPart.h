@@ -147,6 +147,9 @@ public:
     FCMArmAnchorStateChangedSignature OnGroundAnchorStateChanged;
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism")
+    TObjectPtr<class UCMMechanismWeightComponent> MechanismWeightComponent;
+
     virtual void BeginPlay() override;
     virtual void ApplyPartData(
         const FCMPartLegArmTableRow& PartRow

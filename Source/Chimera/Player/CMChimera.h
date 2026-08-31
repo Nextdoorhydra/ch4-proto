@@ -658,6 +658,12 @@ private:
     UPROPERTY(Replicated)
     uint32 PressedPartSlotMask = 0;
 
+    // Server-only history for the current key press, independent of anchor lifetime.
+    uint32 InteractionConsumedPartSlotMask = 0;
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCMLeverInteractionRegressionTest;
+#endif
+
     UPROPERTY(Transient)
     TArray<TObjectPtr<UMaterialInstanceDynamic>> ControlMarkerMaterials;
 

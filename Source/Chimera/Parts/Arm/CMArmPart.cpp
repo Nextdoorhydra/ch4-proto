@@ -10,6 +10,9 @@
 #include "Gore/CMDismemberableTarget.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Stage/Trigger/CMBasicButtonBase.h"
+#include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
+#include "Components/BoxComponent.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraArm, Log, All);
@@ -24,6 +27,8 @@ ACMArmPart::ACMArmPart()
     PartType = ECMPartSlotType::Arm;
     GrantedAbilityClass = UCMArmGameplayAbility::StaticClass();
     PartRowName = TEXT("DefaultArm");
+    MechanismWeightComponent = CreateDefaultSubobject<UCMMechanismWeightComponent>(TEXT("MechanismWeight"));
+    MechanismWeightComponent->MechanismWeight = 0.0f;
 }
 
 void ACMArmPart::BeginPlay()
@@ -386,6 +391,13 @@ void ACMArmPart::DetectSwingTargets()
             continue;
         }
 
+        // 버튼 장식 메쉬가 아닌 HitVolume이 실제 공격 범위에 들어와야 입력 처리
+        ACMBasicButtonBase* Button = Cast<ACMBasicButtonBase>(TargetActor);
+        if (Button && TargetComponent != Button->GetHitVolume())
+        {
+            continue;
+        }
+
         FVector TargetLocation = TargetComponent->Bounds.Origin;
         const float ClosestPointDistance =
             TargetComponent->GetClosestPointOnCollision(
@@ -404,6 +416,10 @@ void ACMArmPart::DetectSwingTargets()
         }
 
         DetectedActors.Add(TargetActor);
+        if (Button)
+        {
+            Button->NotifySwingHit(this, TargetComponent);
+        }
         int32 SeveredPartCount = 0;
         if (TargetActor->Implements<UCMDismemberableTarget>())
         {
@@ -490,6 +506,7 @@ void ACMArmPart::HandlePartDied()
 
 void ACMArmPart::ApplyPartData(const FCMPartLegArmTableRow& PartRow)
 {
+    MechanismWeightComponent->MechanismWeight = FMath::Max(PartRow.Weight, 0.0f);
     StaminaCost = FMath::Max(PartRow.StaminaCost, 0.0f);
     AnchorStaminaCostPerSecond = FMath::Max(
         PartRow.StaminaPerSecond,

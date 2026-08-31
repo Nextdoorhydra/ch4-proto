@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Parts/Arm/CMArmPart.h"
+#include "Stage/Trigger/CMGrabPullTarget.h"
 
 #include "CMSpringArmPart.generated.h"
 
@@ -18,6 +19,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(
     FCMSpringArmFinishedSignature
 );
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+    FCMSpringArmPullResultSignature, AActor*, HitActor, ECMGrabPullResult, Result);
 
 /** Arm variant that fires a hook and resolves one server-authoritative pull. */
 UCLASS(Blueprintable)
@@ -64,6 +68,9 @@ public:
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Spring Arm")
     FCMSpringArmHookResolvedSignature OnHookResolved;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Spring Arm")
+    FCMSpringArmPullResultSignature OnPullTargetResolved;
     
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Spring Arm")
     FCMSpringArmFinishedSignature OnSpringArmFinished;
