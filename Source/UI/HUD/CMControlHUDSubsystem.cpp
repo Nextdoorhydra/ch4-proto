@@ -29,6 +29,7 @@ void UCMControlHUDSubsystem::Deinitialize()
         }
         ControlHUDWidget = nullptr;
     }
+    ControlHUDWorld.Reset();
 
     Super::Deinitialize();
 }
@@ -41,6 +42,21 @@ void UCMControlHUDSubsystem::Tick(float DeltaTime)
         || !World
         || World->GetNetMode() == NM_DedicatedServer
         || !LocalPlayer->ViewportClient)
+    {
+        return;
+    }
+
+    if (!IsValid(ControlHUDWidget))
+    {
+        ControlHUDWidget = nullptr;
+        ControlHUDWorld.Reset();
+    }
+    else if (ControlHUDWorld.Get() != World)
+    {
+        ControlHUDWidget = nullptr;
+        ControlHUDWorld.Reset();
+    }
+    else
     {
         return;
     }
@@ -90,7 +106,7 @@ TStatId UCMControlHUDSubsystem::GetStatId() const
 
 bool UCMControlHUDSubsystem::IsTickable() const
 {
-    return !IsTemplate() && !ControlHUDWidget;
+    return !IsTemplate();
 }
 
 UWorld* UCMControlHUDSubsystem::GetTickableGameObjectWorld() const
@@ -145,6 +161,7 @@ void UCMControlHUDSubsystem::HandlePolicyInitialized(
         return;
     }
 
+    ControlHUDWorld = World;
     ControlHUDWidget->SetControlBody(ControlBody);
     UE_LOG(LogChimeraControlHUD, Log,
         TEXT("Control HUD pushed to NKM.UI.Layer.HUD. Controller=%s"),

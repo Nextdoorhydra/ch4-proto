@@ -83,6 +83,28 @@ void ACMPlayerController::RequestRetryGame()
     ServerRequestRetryGame();
 }
 
+bool ACMPlayerController::CanControlStageResult() const
+{
+    return IsLocalController()
+        && (GetNetMode() == NM_Standalone || HasAuthority());
+}
+
+void ACMPlayerController::RequestRestartCompletedStage()
+{
+    if (IsLocalController())
+    {
+        ServerRequestRestartCompletedStage();
+    }
+}
+
+void ACMPlayerController::RequestAdvanceCompletedStage()
+{
+    if (IsLocalController())
+    {
+        ServerRequestAdvanceCompletedStage();
+    }
+}
+
 void ACMPlayerController::RequestCheatKillAllSegments()
 {
     if (!IsLocalController())
@@ -271,6 +293,26 @@ void ACMPlayerController::ServerRequestRetryGame_Implementation()
     if (GameMode)
     {
         GameMode->TryRetryGame(this);
+    }
+}
+
+void ACMPlayerController::ServerRequestRestartCompletedStage_Implementation()
+{
+    if (ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>()
+        : nullptr)
+    {
+        GameMode->TryRestartCompletedStage(this);
+    }
+}
+
+void ACMPlayerController::ServerRequestAdvanceCompletedStage_Implementation()
+{
+    if (ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>()
+        : nullptr)
+    {
+        GameMode->TryAdvanceCompletedStage(this);
     }
 }
 
