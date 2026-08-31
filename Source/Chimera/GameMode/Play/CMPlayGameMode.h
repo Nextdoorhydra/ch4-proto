@@ -45,6 +45,9 @@ public:
     virtual void RestartPlayer(AController* NewPlayer) override;
     virtual bool TryRetryGame(APlayerController* RequestingPlayer) override;
 
+    bool TryRestartCompletedStage(APlayerController* RequestingPlayer);
+    bool TryAdvanceCompletedStage(APlayerController* RequestingPlayer);
+
     // Non-Shipping 치트 요청에서 최신 활성 체크포인트로 즉시 복귀
     bool TryCheatRespawnAtLatestCheckpoint();
 

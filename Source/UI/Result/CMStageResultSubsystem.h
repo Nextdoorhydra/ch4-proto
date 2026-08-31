@@ -4,14 +4,13 @@
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "Tickable.h"
 
-#include "CMControlHUDSubsystem.generated.h"
+#include "CMStageResultSubsystem.generated.h"
 
-class UCMControlHUDWidget;
+class UCMStageResultWidget;
 enum class ENKMUIAsyncResult : uint8;
 
-/** Pushes the local player's control HUD onto the NKMUI HUD layer. */
 UCLASS()
-class UI_API UCMControlHUDSubsystem
+class UI_API UCMStageResultSubsystem
     : public ULocalPlayerSubsystem
     , public FTickableGameObject
 {
@@ -26,11 +25,10 @@ public:
 
 private:
     void HandlePolicyInitialized(ENKMUIAsyncResult Result);
+    void RemoveResultWidget();
 
     UPROPERTY(Transient)
-    TObjectPtr<UCMControlHUDWidget> ControlHUDWidget;
-
-    TWeakObjectPtr<UWorld> ControlHUDWorld;
+    TObjectPtr<UCMStageResultWidget> ResultWidget;
 
     bool bPolicyInitializationPending = false;
 };

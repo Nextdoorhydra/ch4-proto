@@ -7,15 +7,20 @@
 
 class UBoxComponent;
 class UPrimitiveComponent;
+class ACMArmPart;
 
 UCLASS(Blueprintable)
-// 휘두르는 중인 팔 파츠가 타격 영역에 들어오면 작동하는 기본 버튼
+// 팔 스윙 탐지가 타격 영역을 감지하면 작동하는 기본 버튼
 class CHIMERA_API ACMBasicButtonBase : public ACMStageButtonBase
 {
     GENERATED_BODY()
 
 public:
     ACMBasicButtonBase();
+
+    // 서버의 팔 스윙 탐지에서만 호출하며 같은 공격은 버튼당 한 번만 처리
+    void NotifySwingHit(ACMArmPart* ArmPart, UPrimitiveComponent* HitComponent);
+    UBoxComponent* GetHitVolume() const { return HitVolume; }
 
 protected:
     virtual void BeginPlay() override;
@@ -29,22 +34,9 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Basic Button")
     bool bToggleOnHit = false;
 
-#if WITH_EDITORONLY_DATA
-    // 팔 Sweep 구현 전 버튼 명령 경로를 몸통 Overlap으로 확인하는 에디터 테스트 옵션
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Testing")
-    bool bAllowChimeraBodyOverlapForTesting = false;
-#endif
-
 private:
-    // 유효한 팔 타격과 몸통 테스트 입력에 동일한 반복/일회성 규칙 적용
-    void HandleValidButtonInput(AActor* TriggeringActor);
+    TMap<TWeakObjectPtr<ACMArmPart>, FGuid> LastSwingAttackIds;
 
-    UFUNCTION()
-    void HandleHitVolumeBeginOverlap(
-        UPrimitiveComponent* OverlappedComponent,
-        AActor* OtherActor,
-        UPrimitiveComponent* OtherComponent,
-        int32 OtherBodyIndex,
-        bool bFromSweep,
-        const FHitResult& SweepResult);
+    // 유효한 팔 타격에 반복/일회성 규칙 적용
+    void HandleValidButtonInput(AActor* TriggeringActor);
 };

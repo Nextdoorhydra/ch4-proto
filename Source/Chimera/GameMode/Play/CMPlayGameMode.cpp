@@ -947,15 +947,44 @@ bool ACMPlayGameMode::HandleResultPresentationFinished(
         MutablePlayState->SetStagePresentationState(ECMStagePresentationState::None);
     }
 
-    if (TryScheduleStageLoopRestart())
+    return true;
+}
+
+bool ACMPlayGameMode::TryRestartCompletedStage(
+    APlayerController* RequestingPlayer)
+{
+    const ACMPlayGameState* PlayState = CachedPlayGameState;
+    if (!HasAuthority()
+        || !PlayState
+        || PlayState->GetPlayPhase() != ECMPlayPhase::Completed
+        || !IsValid(RequestingPlayer)
+        || !RequestingPlayer->IsLocalController()
+        || bStageLoopRestartScheduled)
     {
-        return true;
+        return false;
     }
 
-    const bool bLastStage =
-        PlayState->GetCurrentStageIndex() + 1
-        >= PlayState->GetTotalStageCount();
-    if (bLastStage)
+    bStageLoopRestartScheduled = true;
+    SetPlayPhase(ECMPlayPhase::Loading);
+    RestartLoopingStage();
+    return true;
+}
+
+bool ACMPlayGameMode::TryAdvanceCompletedStage(
+    APlayerController* RequestingPlayer)
+{
+    const ACMPlayGameState* PlayState = CachedPlayGameState;
+    if (!HasAuthority()
+        || !PlayState
+        || PlayState->GetPlayPhase() != ECMPlayPhase::Completed
+        || !IsValid(RequestingPlayer)
+        || !RequestingPlayer->IsLocalController())
+    {
+        return false;
+    }
+
+    if (PlayState->GetCurrentStageIndex() + 1
+        >= PlayState->GetTotalStageCount())
     {
         SetPlayPhase(ECMPlayPhase::Victory);
         return true;
@@ -1168,6 +1197,7 @@ void ACMPlayGameMode::RestartLoopingStage()
         || !GetWorld()->ServerTravel(CurrentMapPackageName, false))
     {
         bStageLoopRestartScheduled = false;
+        SetPlayPhase(ECMPlayPhase::Completed);
         UE_LOG(LogChimeraStageLoad, Error,
             TEXT("반복 Route 스테이지 재시작에 실패했습니다. Map=%s"),
             *CurrentMapPackageName);
