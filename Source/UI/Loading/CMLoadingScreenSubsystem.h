@@ -4,14 +4,12 @@
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "Tickable.h"
 
-#include "CMControlHUDSubsystem.generated.h"
+#include "CMLoadingScreenSubsystem.generated.h"
 
-class UCMControlHUDWidget;
-enum class ENKMUIAsyncResult : uint8;
+class UCMLoadingScreenWidget;
 
-/** Pushes the local player's control HUD onto the NKMUI HUD layer. */
 UCLASS()
-class UI_API UCMControlHUDSubsystem
+class UI_API UCMLoadingScreenSubsystem
     : public ULocalPlayerSubsystem
     , public FTickableGameObject
 {
@@ -25,12 +23,11 @@ public:
     virtual UWorld* GetTickableGameObjectWorld() const override;
 
 private:
-    void HandlePolicyInitialized(ENKMUIAsyncResult Result);
+    void ShowLoadingScreen(UWorld* World);
+    void RemoveLoadingScreen();
 
     UPROPERTY(Transient)
-    TObjectPtr<UCMControlHUDWidget> ControlHUDWidget;
+    TObjectPtr<UCMLoadingScreenWidget> LoadingScreenWidget;
 
-    TWeakObjectPtr<UWorld> ControlHUDWorld;
-
-    bool bPolicyInitializationPending = false;
+    TWeakObjectPtr<UWorld> LoadingScreenWorld;
 };
