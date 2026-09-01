@@ -11,6 +11,7 @@
 #include "Components/ActorComponent.h"
 #include "GameFramework/GameplayMessageSubsystem.h"
 #include "Net/UnrealNetwork.h"
+#include "Stage/Obstacle/Data/CMObstacleBalanceTableRow.h"
 
 namespace
 {
@@ -43,10 +44,52 @@ void ACMStageDirector::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
     DOREPLIFETIME(ThisClass, StageInstanceId);
 }
 
+float ACMStageDirector::GetObstacleDamageMultiplier() const
+{
+    if (!ObstacleStageBalanceTable || ObstacleStageBalanceRow.IsNone()
+        || ObstacleStageBalanceTable->GetRowStruct()
+            != FCMStageObstacleBalanceTableRow::StaticStruct())
+    {
+        return 1.0f;
+    }
+    const FCMStageObstacleBalanceTableRow* Row =
+        ObstacleStageBalanceTable->FindRow<FCMStageObstacleBalanceTableRow>(
+            ObstacleStageBalanceRow, TEXT("CMStageDirector.StageBalance"), false);
+    return Row ? FMath::Max(Row->DamageMultiplier, 0.0f) : 1.0f;
+}
+
 // 플레이 맵 시작 시 서버 GameMode에 현재 StageDirector 등록
 void ACMStageDirector::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (ObstacleStageBalanceTable || !ObstacleStageBalanceRow.IsNone())
+    {
+        if (!ObstacleStageBalanceTable || ObstacleStageBalanceRow.IsNone())
+        {
+            UE_LOG(LogChimeraStageLoad, Error,
+                TEXT("Stage obstacle balance requires both table and row. Director=%s Table=%s Row=%s"),
+                *GetPathName(), *GetNameSafe(ObstacleStageBalanceTable),
+                *ObstacleStageBalanceRow.ToString());
+        }
+        else if (ObstacleStageBalanceTable->GetRowStruct()
+            != FCMStageObstacleBalanceTableRow::StaticStruct())
+        {
+            UE_LOG(LogChimeraStageLoad, Error,
+                TEXT("Stage obstacle balance table has wrong row struct. Director=%s Table=%s"),
+                *GetPathName(), *ObstacleStageBalanceTable->GetPathName());
+        }
+        else if (!ObstacleStageBalanceTable
+            ->FindRow<FCMStageObstacleBalanceTableRow>(
+                ObstacleStageBalanceRow,
+                TEXT("CMStageDirector.ValidateStageBalance"), false))
+        {
+            UE_LOG(LogChimeraStageLoad, Error,
+                TEXT("Stage obstacle balance row was not found. Director=%s Table=%s Row=%s"),
+                *GetPathName(), *ObstacleStageBalanceTable->GetPathName(),
+                *ObstacleStageBalanceRow.ToString());
+        }
+    }
 
     if (HasAuthority())
     {
@@ -87,22 +130,30 @@ void ACMStageDirector::BroadcastStageEvent(FGameplayTag EventTag, UObject* Event
 
 bool ACMStageDirector::RegisterStageElement(UCMStageElementComponent* Element)
 {
-    if (!IsValid(Element) || Element->PlacementId.IsNone())
+    if (!IsValid(Element))
     {
-        UE_LOG(LogChimeraStageLoad, Error, TEXT("Stage element has no PlacementId. Actor=%s"),
-            *GetNameSafe(Element ? Element->GetOwner() : nullptr));
         return false;
     }
-    if (const TWeakObjectPtr<UCMStageElementComponent>* Existing = ElementsByPlacementId.Find(Element->PlacementId))
+
+    // PuzzleController direct references do not need an address. Elements with
+    // no PlacementId still register for GroupTag routing and stage events.
+    if (!Element->PlacementId.IsNone())
     {
-        if (Existing->IsValid() && Existing->Get() != Element)
+        if (const TWeakObjectPtr<UCMStageElementComponent>* Existing =
+            ElementsByPlacementId.Find(Element->PlacementId))
         {
-            UE_LOG(LogChimeraStageLoad, Error, TEXT("Duplicate PlacementId. Id=%s Existing=%s New=%s"),
-                *Element->PlacementId.ToString(), *GetNameSafe((*Existing)->GetOwner()), *GetNameSafe(Element->GetOwner()));
-            return false;
+            if (Existing->IsValid() && Existing->Get() != Element)
+            {
+                UE_LOG(LogChimeraStageLoad, Error,
+                    TEXT("Duplicate PlacementId. Id=%s Existing=%s New=%s"),
+                    *Element->PlacementId.ToString(),
+                    *GetNameSafe((*Existing)->GetOwner()),
+                    *GetNameSafe(Element->GetOwner()));
+                return false;
+            }
         }
+        ElementsByPlacementId.Add(Element->PlacementId, Element);
     }
-    ElementsByPlacementId.Add(Element->PlacementId, Element);
     RegisteredElements.AddUnique(Element);
     return true;
 }
@@ -113,7 +164,8 @@ void ACMStageDirector::UnregisterStageElement(UCMStageElementComponent* Element)
     {
         return;
     }
-    if (ElementsByPlacementId.FindRef(Element->PlacementId).Get() == Element)
+    if (!Element->PlacementId.IsNone()
+        && ElementsByPlacementId.FindRef(Element->PlacementId).Get() == Element)
     {
         ElementsByPlacementId.Remove(Element->PlacementId);
     }

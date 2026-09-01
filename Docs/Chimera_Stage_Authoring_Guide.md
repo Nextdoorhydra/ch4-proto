@@ -42,7 +42,7 @@
 4. 시작 연출과 결과 연출을 StageDirector에 구현하거나 연결한다.
 5. 장애물, 퍼즐, Trigger, 조명, 이펙트를 배치한다.
 6. 제어할 대상에 `CMStageElementComponent` 또는 파생 컴포넌트를 추가한다.
-7. 모든 StageElement에 고유 `PlacementId`와 필요한 `GroupTags`를 지정한다.
+7. 룸 퍼즐은 PuzzleController에 Trigger와 대상을 직접 등록한다. Sequence 또는 Director 주소 검색이 필요한 요소에만 `PlacementId`나 `GroupTags`를 지정한다.
 8. `FCMStageSequenceRow` 기반 DataTable을 만들고 StageDirector의 Sequence Component에 연결한다.
 9. 스테이지 전용 `CMStageLoadSchedule` PDA를 만든다.
 10. Schedule에서 `RefreshAndRebuildCatalog`를 실행해 Scope를 자동 생성한다.
@@ -58,7 +58,7 @@ Schedule에 로드할 PDA가 없어도 초기 프로토타입 실행은 가능�
 |---|---|
 | Level | 액터 배치, Transform, Trigger Volume, Light, Fog, Post Process |
 | 장애물·퍼즐 Actor | 이동, 충돌, 데미지, 애니메이션, 내부 상태 |
-| `CMStageElementComponent` | PlacementId·GroupTags 등록, Command 수신, Event 발행 |
+| `CMStageElementComponent` | 선택적인 PlacementId·GroupTags 등록, Command 수신, Event 발행 |
 | `CMStageSequenceComponent` | Stage Event에 맞는 DataTable 행 정렬·실행 |
 | `CMStageDirector` | 요소 등록소, 명령 라우팅, 연출·완료·실패 보고 |
 | `CMStageLoadSchedule` | 로드 그룹과 순서·정책·해제 정책 |
@@ -71,15 +71,23 @@ StageDirector에 특정 피스톤의 속도, 특정 문의 잠금 로직, 조명
 | 종류 | 자료형 | 역할 | 예시 |
 |---|---|---|---|
 | `StageId` | `FName` | Route, Schedule, Sequence의 스테이지 식별 | `S01` |
-| `PlacementId` | `FName` | 현재 스테이지의 개별 배치 대상 | `Hallway.Door.Exit` |
+| `PlacementId` | `FName` | Director가 검색할 개별 배치 대상의 선택 ID | `Hallway.Door.Exit` |
 | `GroupTag` | Gameplay Tag | 여러 StageElement 동시 선택 | `Chimera.Stage.Group.Hallway.Lighting` |
 | `EventTag` | Gameplay Tag | 발생한 사실 | `Chimera.Stage.Event.PowerRestored` |
 | `CommandTag` | Gameplay Tag | 대상에 요구하는 동작 | `Chimera.Stage.Command.Unlock` |
 | `LoadGroupId` | `FName` | 함께 로드·해제할 콘텐츠 묶음 | `S01.Hallway` |
 
-개별 인스턴스는 PlacementId, 집합과 의미는 Gameplay Tag를 사용한다.
+PuzzleController 직접 참조는 별도 식별자가 필요 없다. Director가 개별 인스턴스를 검색할 때 PlacementId, 집합을 검색할 때 Gameplay Tag를 사용한다.
 
 ### PlacementId
+
+다음 경우에만 지정한다.
+
+- Stage Sequence의 `TargetPlacementId`로 제어
+- Trigger의 직접 `TargetActor` 또는 `TargetPlacementId`로 제어
+- StageElement의 `RequestStageCommand`로 개별 대상 제어
+
+PuzzleController의 `Triggers`와 `Commands.Targets`에 Actor를 직접 등록한 룸 퍼즐은 비워도 된다. GroupTags만 사용하는 요소도 PlacementId가 필요 없다.
 
 형식은 `구역.종류.의미있는이름`이다.
 
@@ -165,7 +173,7 @@ Chimera.Stage.Command.Lighting.Blackout
 Blueprint와 C++ 모두 같은 계약을 따른다.
 
 1. Actor에 `UCMStageElementComponent` 또는 파생 컴포넌트를 둔다.
-2. PlacementId와 선택적인 GroupTags를 지정한다.
+2. PuzzleController 직접 참조라면 PlacementId와 GroupTags를 비워도 된다. Director 주소 검색이 필요할 때만 해당 값을 지정한다.
 3. 게임 판정 대상은 `AuthorityOnly`를 사용한다.
 4. `ExecuteStageCommand`에서 지원 CommandTag를 처리한다.
 5. 완료가 다음 진행 조건이면 서버에서 `BroadcastStageEvent`를 호출한다.
@@ -222,7 +230,7 @@ Row Struct는 `FCMStageSequenceRow`다.
 
 ## 10. Load Schedule PDA
 
-파츠·장애물·시야 등 개별 런타임 콘텐츠를 Definition PDA와 Asset Bundle로 연결하는 구현 규칙은 [비동기 로드 개발 가이드](Chimera_Async_Load_Developer_Guide.md)를 따른다.
+파츠·시야 등 시작 전 준비가 필요한 개별 런타임 콘텐츠를 Definition PDA와 Asset Bundle로 연결하는 구현 규칙은 [비동기 로드 개발 가이드](Chimera_Async_Load_Developer_Guide.md)를 따른다. 배치 장애물은 Definition PDA 대상이 아니며 룸 서브레벨과 함께 스트리밍한다.
 
 스테이지마다 `CMStageLoadSchedule` 하나를 만든다. LoadGroupId는 `<StageId>.<AreaOrPurpose>`를 권장한다.
 
@@ -251,40 +259,13 @@ Schedule 시작 시 BeforeStageStart와 Sequential은 자동 큐에 들어간다
 - 분기 탈락 후 해제할 그룹만 `ReleaseWhenBranchRejected`를 쓴다.
 - 프로파일 근거 없이 작은 오브젝트마다 그룹을 만들지 않는다.
 
-### 장애물 Definition PDA
+### 배치 장애물 로드와 밸런스
 
-단순 장애물은 BP에 에셋을 직접 지정할 수 있다. 일반 장애물을 비동기 준비하려면 `CMStageObstacleBase` Shell BP를 레벨에 직접 배치하고 `/Game/Chimera/Environment/Obstacle/Data`의 `CMObstacleDefinition` PDA를 Soft Reference로 지정한다.
+장애물은 해당 룸 서브레벨에 BP를 직접 배치하고 메시·머티리얼·Niagara·사운드를 BP 또는 인스턴스에서 참조한다. 룸 스트리밍이 액터와 하드 참조 에셋의 로드/언로드 경계다. 장애물마다 Definition, LoadGroupId, Schedule Catalog 항목을 만들지 않는다.
 
-```text
-Shell BP 인스턴스
-├─ Transform
-├─ PlacementId·GroupTags
-├─ MotionAxis·Speed·MoveDistance
-└─ ObstacleDefinition
-   ├─ Definition = PDA_CMObstacle_MovingBlade
-   └─ LoadGroupId = S01.Area02.Hazards
+피해와 상태 수치는 Damage/Status Balance DataTable 행을 선택하고, 스테이지 피해 배율은 `CMStageDirector`에서 한 번 선택한다. Custom Damage는 피해 행 없이 인스턴스 값만으로 사용할 수 있다. 상세 설정은 [장애물 밸런스 가이드](Chimera_Obstacle_Balance_Sheet.md), 컴포넌트 연결은 [장애물·버튼 가이드](Chimera_Obstacle_Mechanism_Architecture.md)를 따른다.
 
-PDA_CMObstacle_MovingBlade
-├─ PrimaryMesh
-├─ Materials
-├─ NiagaraSystem
-├─ LoopSound
-├─ PartEffect
-│  └─ 파츠 내구도 피해·감전·경직·감속
-└─ ChimeraEffect
-   └─ 키메라 공용 ASC에 적용할 Soft GE
-```
-
-PDA 방식 Shell BP는 부모의 `PrimaryMesh`, `PrimaryEffect`, `LoopAudio`를 사용하고 같은 런타임 에셋을 BP 기본값에 중복 지정하지 않는다. Schedule Catalog에서 PDA의 GroupId와 Shell 인스턴스의 LoadGroupId를 동일하게 설정한다. 로드 전과 실패 시 장애물은 보이지 않는 판정을 만들지 않도록 비활성 상태를 유지한다.
-
-```text
-S01.Entry           BeforeStageStart
-S01.Area02.Hazards  Sequential 10
-S01.Area03.Hazards  Sequential 20
-S01.BranchA.Hazards OnDemand
-```
-
-위치와 이동 설정은 레벨 인스턴스가 관리하고 재사용할 외형·이펙트·사운드·파츠 효과·키메라 GE는 Definition이 관리한다. 파츠 수치와 태그는 PDA 본체와 함께 준비되고, Soft GE와 표현 에셋은 Gameplay Bundle에서 비동기로 준비한다. 전체 제작 절차와 컴포넌트 책임은 `Chimera_Obstacle_Mechanism_Architecture.md`를 따른다.
+`CMObstacleDefinition`과 `CMObstacleDefinitionComponent`는 기존 BP 호환을 위해 코드가 남아 있지만 신규 제작 경로가 아니다. 에셋 참조를 먼저 마이그레이션하지 않고 타입을 삭제하면 기존 BP가 깨질 수 있으므로 즉시 삭제하지 않는다.
 
 ## 11. DataForge와 Sheet
 
@@ -338,7 +319,8 @@ Transform, Actor 경로와 복잡한 퍼즐 스크립트는 Sheet에 넣지 않�
 - StageDirector가 정확히 하나 있다.
 - `PlayerStart`가 하나 있고 방향이 올바르다.
 - `CMStageDestination`이 있고 모든 활성 몸통 마디가 동시에 Overlap할 수 있다.
-- PlacementId가 비어 있지 않고 중복되지 않는다.
+- Director 개별 주소를 사용하는 요소만 PlacementId가 있으며, 지정한 ID는 중복되지 않는다.
+- PuzzleController 직접 참조 대상은 빈 PlacementId여도 정상이다.
 - 판정은 AuthorityOnly, 로컬 표현은 AllMachines다.
 - 대상이 DataTable의 CommandTag를 처리한다.
 
@@ -361,7 +343,8 @@ Transform, Actor 경로와 복잡한 퍼즐 스크립트는 Sheet에 넣지 않�
 
 ## 15. 아직 자동화되지 않은 검증
 
-- 레벨 전체 PlacementId 중복·누락 검사
+- 레벨 전체 비어 있지 않은 PlacementId 중복 검사
+- Sequence/직접 Trigger 대상에 필요한 PlacementId 누락 검사
 - DataTable 대상과 실제 배치 비교
 - 대상이 지원하지 않는 CommandTag 검사
 - PreloadGroupId와 Schedule 교차 검사
