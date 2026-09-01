@@ -149,10 +149,10 @@ void UCMControlHUDSubsystem::HandlePolicyInitialized(
     const TSubclassOf<UNKMUIActivatableWidget> LoadedHUDClass =
         ControlHUDClass.LoadSynchronous();
     ControlHUDWidget = UIManager && LoadedHUDClass
-        ? Cast<UCMControlHUDWidget>(UIManager->PushWidget(
+        ? UIManager->PushWidget(
             UITags::UI_Layer_HUD,
             LoadedHUDClass
-        ))
+        )
         : nullptr;
     if (!ControlHUDWidget)
     {
@@ -162,8 +162,13 @@ void UCMControlHUDSubsystem::HandlePolicyInitialized(
     }
 
     ControlHUDWorld = World;
-    ControlHUDWidget->SetControlBody(ControlBody);
+    if (UCMControlHUDWidget* HUDWidget =
+        Cast<UCMControlHUDWidget>(ControlHUDWidget))
+    {
+        HUDWidget->SetControlBody(ControlBody);
+    }
     UE_LOG(LogChimeraControlHUD, Log,
-        TEXT("Control HUD pushed to NKM.UI.Layer.HUD. Controller=%s"),
+        TEXT("Control HUD pushed to NKM.UI.Layer.HUD. Widget=%s Controller=%s"),
+        *GetNameSafe(ControlHUDWidget),
         *GetNameSafe(PlayerController));
 }

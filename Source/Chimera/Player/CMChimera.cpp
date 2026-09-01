@@ -458,6 +458,7 @@ void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
     bAllSegmentsDeathNotified = false;
     ConfigureSegments();
     ConfigureNetworkPhysics();
+    OnSegmentStatesChanged.Broadcast();
     ForceNetUpdate();
 
     UE_LOG(LogChimeraLineBody, Log,

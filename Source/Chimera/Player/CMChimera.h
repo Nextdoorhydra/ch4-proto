@@ -42,6 +42,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
     SegmentIndex
 );
 
+/** Fired whenever body health data or the active body count changes. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMSegmentStatesChangedSignature);
+
 USTRUCT()
 struct FCMReplicatedSegmentState
 {
@@ -278,6 +281,9 @@ public:
     // the destroyed segment as defeated.
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Health")
     FCMSegmentDestroyedSignature OnSegmentDestroyed;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Health")
+    FCMSegmentStatesChangedSignature OnSegmentStatesChanged;
 
 protected:
     virtual void BeginPlay() override;
