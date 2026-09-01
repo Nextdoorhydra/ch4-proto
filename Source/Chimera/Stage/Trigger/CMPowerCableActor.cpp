@@ -1129,6 +1129,12 @@ void ACMPowerCableActor::OnRep_ConnectedSourceSocket()
     OnConnectionChanged.Broadcast(IsFullyConnected());
 }
 
+void ACMPowerCableActor::OnRep_EndpointOrientation()
+{
+    WakeRopeSimulation();
+    UpdateCableVisual();
+}
+
 void ACMPowerCableActor::OnRep_CableStartLocation()
 {
     bCableStartLocationInitialized = true;
@@ -1382,5 +1388,7 @@ void ACMPowerCableActor::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPowerCableActor, ConnectedSocket);
     DOREPLIFETIME(ACMPowerCableActor, ConnectedSource);
     DOREPLIFETIME(ACMPowerCableActor, ConnectedSourceSocket);
+    DOREPLIFETIME(ACMPowerCableActor, bSocketAtStart);
+    DOREPLIFETIME(ACMPowerCableActor, bSourceAtStart);
     DOREPLIFETIME(ACMPowerCableActor, CableStartLocation);
 }

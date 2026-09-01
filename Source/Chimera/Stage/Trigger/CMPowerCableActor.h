@@ -236,7 +236,8 @@ protected:
         BlueprintReadOnly, Category = "Chimera|Power")
     TObjectPtr<UCMPowerSocketComponent> ConnectedSocket;
 
-    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+    UPROPERTY(ReplicatedUsing = OnRep_EndpointOrientation, VisibleInstanceOnly,
+        BlueprintReadOnly,
         Category = "Chimera|Power")
     bool bSocketAtStart = false;
 
@@ -244,7 +245,8 @@ protected:
         BlueprintReadOnly, Category = "Chimera|Power")
     TObjectPtr<UCMPowerSourceComponent> ConnectedSource;
 
-    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+    UPROPERTY(ReplicatedUsing = OnRep_EndpointOrientation, VisibleInstanceOnly,
+        BlueprintReadOnly,
         Category = "Chimera|Power")
     bool bSourceAtStart = true;
 
@@ -268,6 +270,9 @@ protected:
 
     UFUNCTION()
     void OnRep_ConnectedSourceSocket();
+
+    UFUNCTION()
+    void OnRep_EndpointOrientation();
 
     bool HasAnyEndpointConnected() const
     {
