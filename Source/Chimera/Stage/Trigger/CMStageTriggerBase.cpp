@@ -1,4 +1,5 @@
 #include "Stage/Trigger/CMStageTriggerBase.h"
+#include "Net/UnrealNetwork.h"
 
 #include "Stage/CMStageCommandTags.h"
 #include "Stage/CMStageElementComponent.h"
@@ -14,9 +15,48 @@ ACMStageTriggerBase::ACMStageTriggerBase()
 // 런타임에 공통 트리거 상태를 StageDirector 대상 명령에 연결
 void ACMStageTriggerBase::BeginPlay()
 {
+    ActivationTrigger->OnStateUpdated.AddUObject(this, &ThisClass::RefreshPresentationState);
     Super::BeginPlay();
     ActivationTrigger->OnActivated.AddDynamic(this, &ThisClass::HandleTriggerActivated);
     ActivationTrigger->OnDeactivated.AddDynamic(this, &ThisClass::HandleTriggerDeactivated);
+    RefreshPresentationState();
+}
+
+void ACMStageTriggerBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    ActivationTrigger->OnStateUpdated.RemoveAll(this);
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACMStageTriggerBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ThisClass, PresentationState);
+}
+
+void ACMStageTriggerBase::FillPresentationState(FCMTriggerPresentationState& State) const
+{
+    State.bReady = true;
+    State.bEnabled = ActivationTrigger->IsTriggerEnabled();
+    State.bTriggered = ActivationTrigger->IsTriggered();
+    State.bCanActivate = ActivationTrigger->CanActivate();
+}
+
+void ACMStageTriggerBase::RefreshPresentationState()
+{
+    if (!HasAuthority()) return;
+    FCMTriggerPresentationState NewState;
+    FillPresentationState(NewState);
+    if (NewState == PresentationState) return;
+    PresentationState = NewState;
+    ForceNetUpdate();
+    OnRep_PresentationState();
+}
+
+void ACMStageTriggerBase::OnRep_PresentationState()
+{
+    // Never replay gameplay signals from replicated UI data.
+    OnPresentationStateChanged.Broadcast(PresentationState);
 }
 
 // 하위 구현에서 검증한 작동 조건을 공통 트리거에 전달

@@ -14,6 +14,7 @@
 namespace CMTetraBody
 {
     constexpr float CubeHalfExtent = 50.0f;
+    constexpr float BodyTurnSpeedDegrees = 600.0f;
 }
 
 // 단일 큐브 충돌 몸체와 절차적 애니메이션용 시각 다리 네 개를 생성한다.
@@ -21,8 +22,9 @@ ACMTetraPawn::ACMTetraPawn()
 {
     using namespace CMTetraBody;
 
-    PrimaryActorTick.bCanEverTick = false;
-    PrimaryActorTick.bStartWithTickEnabled = false;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
+    PrimaryActorTick.bAllowTickOnDedicatedServer = false;
     bReplicates = true;
     SetReplicateMovement(true);
     ConfiguredKnockbackDistanceCm = 200.0f;
@@ -70,6 +72,22 @@ void ACMTetraPawn::BeginPlay()
 {
     Super::BeginPlay();
     ApplyPlanarPhysicsSettings();
+    if (BodyMesh)
+        InitialBodyMeshRotation = BodyMesh->GetRelativeRotation().Quaternion();
+    SetActorTickEnabled(GetNetMode() != NM_DedicatedServer);
+}
+
+// 복제된 시야 방향을 향해 바디 메시만 빠르게 회전하고 물리 몸체와 다리는 유지한다.
+void ACMTetraPawn::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    if (!BodyMesh || !Sight)
+        return;
+
+    BodySightYaw = FMath::FixedTurn(BodySightYaw, Sight->GetRelativeRotation().Yaw, CMTetraBody::BodyTurnSpeedDegrees * DeltaSeconds);
+    const FQuat SightRotation(FVector::UpVector, FMath::DegreesToRadians(BodySightYaw));
+    BodyMesh->SetRelativeRotation(SightRotation * InitialBodyMeshRotation);
 }
 
 // 수동 시험 방향을 Tetra AI의 가속도 입력으로 변환한다.

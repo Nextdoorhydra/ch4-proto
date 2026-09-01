@@ -6,6 +6,7 @@
 #include "CMActivationTriggerComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCMActivationTriggerSignature, AActor*, TriggeringActor);
+DECLARE_MULTICAST_DELEGATE(FCMTriggerStateUpdated);
 
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
 // 버튼 상호작용 요청의 사용 가능 여부와 일회성 작동 상태 관리
@@ -39,7 +40,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Mechanism|Trigger")
     bool IsTriggered() const { return bIsTriggered; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Trigger")
+    bool IsTriggerEnabled() const { return bTriggerEnabled; }
+
+    // Internal state notification, including reset; not a puzzle input signal.
+    FCMTriggerStateUpdated OnStateUpdated;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Trigger")
     bool bOneShot = true;
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Mechanism|Trigger")
@@ -54,6 +60,8 @@ protected:
     void OnTriggerStateChanged(bool bIsEnabled, bool bWasTriggered);
 
 private:
+    void NotifyStateUpdated();
+
     UFUNCTION()
     void OnRep_TriggerState();
 

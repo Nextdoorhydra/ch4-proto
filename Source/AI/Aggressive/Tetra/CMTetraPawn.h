@@ -28,6 +28,7 @@ public:
     ACMTetraPawn();
 
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaSeconds) override;
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Tetra|Movement")
     bool SetManualMoveDirection(ECMAggressiveMoveDirection Direction);
@@ -89,4 +90,7 @@ protected:
 private:
     void AddVisualLeg(const TCHAR* Name, const FVector& RelativeContactLocation, UStaticMesh* CubeMesh);
     void ApplyPlanarPhysicsSettings();
+
+    FQuat InitialBodyMeshRotation = FQuat::Identity;
+    float BodySightYaw = 0.0f;
 };

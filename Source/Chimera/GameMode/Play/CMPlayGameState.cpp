@@ -13,6 +13,7 @@ void ACMPlayGameState::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPlayGameState, TotalStageCount);
     DOREPLIFETIME(ACMPlayGameState, PhaseStartServerTime);
     DOREPLIFETIME(ACMPlayGameState, PhaseDuration);
+    DOREPLIFETIME(ACMPlayGameState, CompletedStageTime);
     DOREPLIFETIME(ACMPlayGameState, StageLoadSnapshot);
     DOREPLIFETIME(ACMPlayGameState, StagePresentationState);
 }
@@ -103,9 +104,22 @@ void ACMPlayGameState::SetPlayPhase(ECMPlayPhase NewPhase, float NewDuration)
         return;
     }
 
+    const double CurrentServerTime = GetServerWorldTimeSeconds();
+    if (PlayPhase == ECMPlayPhase::Playing
+        && NewPhase == ECMPlayPhase::Completed)
+    {
+        CompletedStageTime = FMath::Max(
+            0.0,
+            CurrentServerTime - PhaseStartServerTime);
+    }
+    else if (NewPhase == ECMPlayPhase::Playing)
+    {
+        CompletedStageTime = 0.0f;
+    }
+
     PlayPhase = NewPhase;
     PhaseDuration = NewDuration;
-    PhaseStartServerTime = GetServerWorldTimeSeconds();
+    PhaseStartServerTime = CurrentServerTime;
     OnRep_PlayState();
     ForceNetUpdate();
 }

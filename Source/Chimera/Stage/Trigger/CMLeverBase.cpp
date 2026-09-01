@@ -1,35 +1,272 @@
 #include "Stage/Trigger/CMLeverBase.h"
+#include "Components/SphereComponent.h"
+#include "Parts/Arm/CMArmPart.h"
+#include "Net/UnrealNetwork.h"
+#include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 
 ACMLeverBase::ACMLeverBase()
 {
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
+    ActivationTrigger->bOneShot = false;
+    LeverPivot = CreateDefaultSubobject<USceneComponent>(TEXT("LeverPivot"));
+    LeverPivot->SetupAttachment(SceneRoot);
+    ArmHoldVolume = CreateDefaultSubobject<USphereComponent>(TEXT("ArmHoldVolume"));
+    ArmHoldVolume->SetupAttachment(LeverPivot);
+    ArmHoldVolume->SetRelativeLocation(FVector(0.0f, 0.0f, 80.0f));
+    ArmHoldVolume->SetSphereRadius(25.0f);
+    ArmHoldVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    ArmHoldVolume->SetCollisionObjectType(ECC_WorldDynamic);
+    ArmHoldVolume->SetCollisionResponseToAllChannels(ECR_Overlap);
 }
 
-// 당김 힘과 레버의 허용 방향이 모두 맞을 때만 서버에서 작동
+void ACMLeverBase::BeginPlay()
+{
+    InitialPivotRotation = LeverPivot->GetRelativeRotation().Quaternion();
+    bLeverPoseInitialized = true;
+    Super::BeginPlay();
+    ActivationTrigger->OnActivated.AddDynamic(this, &ThisClass::HandleLeverTriggerChanged);
+    ActivationTrigger->OnDeactivated.AddDynamic(this, &ThisClass::HandleLeverTriggerChanged);
+    VisualLeverAlpha = LeverAlpha;
+    NotifyLeverTargetChanged();
+    UpdateVisualRotation(0.0f);
+}
+
+void ACMLeverBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ThisClass, LeverAlpha);
+}
+
+bool ACMLeverBase::QueryArmHold_Implementation(ACMArmPart* ArmPart, FCMArmHoldSpec& OutSpec) const
+{
+    if (!HasAuthority() || !IsValid(ArmPart) || !ArmPart->IsOperational()
+        || !IsElementActive() || HoldingArm.IsValid() || LocalPullAxis.IsNearlyZero()
+        || (!ActivationTrigger->IsTriggered() && !ActivationTrigger->CanActivate()))
+    {
+        return false;
+    }
+    OutSpec.Priority = 100;
+    OutSpec.HoldLocation = ArmHoldVolume->GetComponentLocation();
+    OutSpec.HoldNormal = -GetActorTransform().TransformVectorNoScale(LocalPullAxis).GetSafeNormal();
+    OutSpec.TargetComponent = ArmHoldVolume;
+    OutSpec.bUsePhysicsHandle = false;
+    return true;
+}
+
+bool ACMLeverBase::BeginArmHold_Implementation(ACMArmPart* ArmPart)
+{
+    FCMArmHoldSpec Spec;
+    if (!QueryArmHold_Implementation(ArmPart, Spec))
+    {
+        return false;
+    }
+    HoldingArm = ArmPart;
+    GrabStartArmLocation = ArmPart->GetActorLocation();
+    GrabStartAlpha = LeverAlpha;
+    bTrackingArmHold = true;
+    SetActorTickEnabled(true);
+    return true;
+}
+
+void ACMLeverBase::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+    if (HasAuthority() && bTrackingArmHold)
+    {
+        UpdateArmHold();
+    }
+    UpdateVisualRotation(DeltaSeconds);
+}
+
+void ACMLeverBase::UpdateArmHold()
+{
+    ACMArmPart* Arm = HoldingArm.Get();
+    if (!IsValid(Arm) || !Arm->IsOperational() || !Arm->IsHolding() || !IsElementActive())
+    {
+        StopArmHold();
+        return;
+    }
+    const FVector Axis = GetActorTransform().TransformVectorNoScale(LocalPullAxis).GetSafeNormal();
+    const float Distance = FVector::DotProduct(Arm->GetActorLocation() - GrabStartArmLocation, Axis);
+    LeverAlpha = FMath::Clamp(GrabStartAlpha + 2.0f * Distance / FMath::Max(FullTravelDistance, 1.0f), -1.0f, 1.0f);
+    const float Threshold = FMath::Clamp(SwitchThreshold, 0.01f, 1.0f);
+    if (LeverAlpha >= Threshold)
+    {
+        TGuardValue<bool> HoldUpdateGuard(bUpdatingFromHold, true);
+        SetLeverPressed(true, Arm);
+    }
+    else if (LeverAlpha <= -Threshold)
+    {
+        TGuardValue<bool> HoldUpdateGuard(bUpdatingFromHold, true);
+        SetLeverPressed(false, Arm);
+    }
+    NotifyLeverTargetChanged();
+}
+
+bool ACMLeverBase::SetLeverPressed(bool bPressed, AActor* InstigatorActor)
+{
+    if (!HasAuthority() || !IsElementActive() || ActivationTrigger->IsTriggered() == bPressed)
+    {
+        return false;
+    }
+    const bool bChanged = bPressed ? PressButton(InstigatorActor) : ReleaseButton(InstigatorActor);
+    if (bChanged && bPressed)
+    {
+        OnLeverPulled(InstigatorActor);
+    }
+    return bChanged;
+}
+
+void ACMLeverBase::EndArmHold_Implementation(ACMArmPart* ArmPart)
+{
+    if (HasAuthority() && HoldingArm.Get() == ArmPart)
+    {
+        StopArmHold();
+    }
+}
+
+void ACMLeverBase::StopArmHold()
+{
+    ACMArmPart* Arm = HoldingArm.Get();
+    HoldingArm.Reset();
+    bTrackingArmHold = false;
+    if (IsValid(Arm))
+    {
+        Arm->EndGroundAnchor();
+    }
+    LeverAlpha = ActivationTrigger->IsTriggered() ? 1.0f : -1.0f;
+    NotifyLeverTargetChanged();
+    ForceNetUpdate();
+}
+
+void ACMLeverBase::HandleLeverTriggerChanged(AActor* TriggeringActor)
+{
+    // External button calls synchronize the pose; hold updates retain their intermediate angle.
+    if (HasAuthority() && !bUpdatingFromHold)
+    {
+        StopArmHold();
+    }
+}
+
+void ACMLeverBase::NotifyLeverTargetChanged()
+{
+    if (!bLeverPoseInitialized)
+    {
+        return;
+    }
+    SetActorTickEnabled(true);
+    OnLeverAlphaChanged(LeverAlpha);
+}
+
+void ACMLeverBase::UpdateVisualRotation(float DeltaSeconds)
+{
+    if (!bLeverPoseInitialized)
+    {
+        return;
+    }
+    const float PreviousVisualAlpha = VisualLeverAlpha;
+    VisualLeverAlpha = RotationTransitionDuration > SMALL_NUMBER
+        ? FMath::FInterpConstantTo(VisualLeverAlpha, LeverAlpha, DeltaSeconds, 2.0f / RotationTransitionDuration)
+        : LeverAlpha;
+    const bool bAtTarget = FMath::IsNearlyEqual(VisualLeverAlpha, LeverAlpha);
+    if (bAtTarget)
+    {
+        VisualLeverAlpha = LeverAlpha;
+    }
+    const FVector Axis = LocalRotationAxis.GetSafeNormal(SMALL_NUMBER, FVector::RightVector);
+    LeverPivot->SetRelativeRotation(InitialPivotRotation * FQuat(Axis, FMath::DegreesToRadians(VisualLeverAlpha * RotationHalfAngle)));
+    if (PreviousVisualAlpha != VisualLeverAlpha)
+    {
+        OnLeverVisualAlphaChanged(VisualLeverAlpha);
+    }
+    SetActorTickEnabled((HasAuthority() && bTrackingArmHold) || !bAtTarget);
+}
+
+void ACMLeverBase::OnRep_LeverAlpha()
+{
+    NotifyLeverTargetChanged();
+}
+
+void ACMLeverBase::HandleElementActiveChanged_Implementation(bool bIsActive)
+{
+    Super::HandleElementActiveChanged_Implementation(bIsActive);
+    if (HasAuthority() && !bIsActive)
+    {
+        StopArmHold();
+    }
+}
+
+void ACMLeverBase::HandleElementReset_Implementation()
+{
+    Super::HandleElementReset_Implementation();
+    StopArmHold();
+    VisualLeverAlpha = LeverAlpha;
+    UpdateVisualRotation(0.0f);
+}
+
+void ACMLeverBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (HasAuthority())
+    {
+        StopArmHold();
+    }
+    SetActorTickEnabled(false);
+    Super::EndPlay(EndPlayReason);
+}
+
+// 레버 명중은 항상 소비한다. 전환 불가도 몸통 당김으로 fallback하지 않는다.
+ECMGrabPullResult ACMLeverBase::HandlePullWithResult_Implementation(
+    AActor* PullingActor, FVector PullOrigin, float PullStrength)
+{
+    // Execute the legacy event so existing Blueprint overrides still run.
+    LastPullResult = ECMGrabPullResult::Applied;
+    return ICMGrabPullTarget::Execute_TryHandlePull(this, PullingActor, PullOrigin, PullStrength)
+        ? LastPullResult : ECMGrabPullResult::Unhandled;
+}
+
 bool ACMLeverBase::TryHandlePull_Implementation(
     AActor* PullingActor,
     FVector PullOrigin,
     float PullStrength)
 {
-    if (!HasAuthority() || PullStrength < RequiredPullStrength)
+    LastPullResult = ECMGrabPullResult::Unhandled;
+    if (!HasAuthority() || !IsValid(PullingActor))
     {
         return false;
+    }
+
+    LastPullResult = ECMGrabPullResult::HandledNoChange;
+    if (!IsElementActive() || HoldingArm.IsValid()
+        || !FMath::IsFinite(PullStrength) || PullStrength < RequiredPullStrength
+        || PullOrigin.ContainsNaN())
+    {
+        return true;
     }
 
     const FVector PullDirection =
-        (PullOrigin - GetActorLocation()).GetSafeNormal();
+        (PullOrigin - LeverPivot->GetComponentLocation()).GetSafeNormal();
     const FVector PullAxis =
         GetActorTransform().TransformVectorNoScale(LocalPullAxis).GetSafeNormal();
+    const float Alignment = FVector::DotProduct(PullDirection, PullAxis);
     if (PullDirection.IsNearlyZero() || PullAxis.IsNearlyZero()
-        || FVector::DotProduct(PullDirection, PullAxis) < MinimumPullAlignment)
+        || FMath::IsNearlyZero(Alignment)
+        || FMath::Abs(Alignment) < FMath::Clamp(MinimumPullAlignment, 0.0f, 1.0f))
     {
-        return false;
+        return true;
     }
 
-    if (!PressButton(PullingActor))
+    // 팔이 있는 쪽으로 전환한다. 이미 해당 상태거나 OneShot으로 거절되어도 소비한다.
+    const bool bPressed = Alignment > 0.0f;
+    if (!SetLeverPressed(bPressed, PullingActor))
     {
-        return false;
+        return true;
     }
 
-    OnLeverPulled(PullingActor);
+    // 명령 콜백에서 Reset될 수도 있으므로 최종 트리거 상태를 사용한다.
+    LeverAlpha = ActivationTrigger->IsTriggered() ? 1.0f : -1.0f;
+    NotifyLeverTargetChanged();
+    ForceNetUpdate();
+    LastPullResult = ECMGrabPullResult::Applied;
     return true;
 }

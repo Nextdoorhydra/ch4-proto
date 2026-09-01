@@ -28,6 +28,10 @@ struct CHIMERA_API FCMPartLegArmTableRow : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Strength = 0.0f;
 
+    // Pressure plate weight only; does not change physics mass or scale with tier.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0"))
+    float Weight = 0.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float StaminaCost = 0.0f;
 

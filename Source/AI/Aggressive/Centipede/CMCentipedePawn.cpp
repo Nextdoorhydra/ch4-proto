@@ -628,6 +628,7 @@ void ACMCentipedePawn::CreateSegmentConstraints()
         Constraint->SetAngularDriveAccelerationMode(true);
         Constraint->SetDisableCollision(true);
         AddInstanceComponent(Constraint);
+        Constraint->SetProjectionEnabled(false);
         Constraint->RegisterComponent();
         Constraint->SetConstrainedComponents(Front, NAME_None, Rear, NAME_None);
         SegmentConstraints.Add(Constraint);
