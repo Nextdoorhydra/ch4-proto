@@ -10,6 +10,7 @@
 #include "Parts/Arm/CMArmPart.h"
 #include "Stage/Trigger/Data/CMPowerCableDefinition.h"
 #include "Stage/Trigger/Component/CMPowerSocketComponent.h"
+#include "Stage/Trigger/Component/CMPowerSourceComponent.h"
 
 ACMPowerCableActor::ACMPowerCableActor()
 {
@@ -78,7 +79,7 @@ void ACMPowerCableActor::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
-    if (bRopeSleeping && !IsGrabbed() && !IsConnected())
+    if (bRopeSleeping && !IsGrabbed() && !HasAnyEndpointConnected())
     {
         return;
     }
@@ -103,8 +104,10 @@ FVector ACMPowerCableActor::GetCableEndLocation() const
         return RopePositions.Last();
     }
 
-    return ConnectedSocket
+    return (ConnectedSocket && !bSocketAtStart)
         ? ConnectedSocket->GetComponentLocation()
+        : (ConnectedSource && !bSourceAtStart)
+            ? ConnectedSource->GetComponentLocation()
         : Grabber
             ? Grabber->GetActorLocation()
         : bCableStartLocationInitialized && !bCableHasBeenMoved
@@ -113,9 +116,99 @@ FVector ACMPowerCableActor::GetCableEndLocation() const
         : GetActorLocation();
 }
 
+FVector ACMPowerCableActor::GetCableStartLocation() const
+{
+    return GetRopeStartTarget();
+}
+
+FVector ACMPowerCableActor::GetClosestFreeEndpointLocation(
+    const FVector& Location
+) const
+{
+    const FVector Start = GetRopeStartTarget();
+    const FVector End = bRopeInitialized && !RopePositions.IsEmpty()
+        ? RopePositions.Last() : GetRopeEndTarget();
+    const bool bStartOccupied = ConnectedSource || ConnectedSourceSocket
+        || ConnectedSocket && bSocketAtStart;
+    const bool bEndOccupied = ConnectedSource && !bSourceAtStart
+        || ConnectedSourceSocket && !bSourceAtStart
+        || ConnectedSocket && !bSocketAtStart;
+
+    if (bStartOccupied && !bEndOccupied)
+    {
+        return End;
+    }
+    if (bEndOccupied && !bStartOccupied)
+    {
+        return Start;
+    }
+    return FVector::DistSquared(Location, Start)
+        <= FVector::DistSquared(Location, End) ? Start : End;
+}
+
+FVector ACMPowerCableActor::GetRopeStartTarget() const
+{
+    if (Grabber && bGrabAtStart)
+    {
+        return Grabber->GetActorLocation();
+    }
+    if (bSourceAtStart)
+    {
+        if (ConnectedSource)
+        {
+            return ConnectedSource->GetComponentLocation();
+        }
+        if (ConnectedSourceSocket)
+        {
+            return ConnectedSourceSocket->GetComponentLocation();
+        }
+    }
+    if (bSocketAtStart && ConnectedSocket)
+    {
+        return ConnectedSocket->GetComponentLocation();
+    }
+    return CableStartLocation;
+}
+
+FVector ACMPowerCableActor::GetRopeEndTarget() const
+{
+    if (Grabber && !bGrabAtStart)
+    {
+        return Grabber->GetActorLocation();
+    }
+    if (!bSourceAtStart)
+    {
+        if (ConnectedSource)
+        {
+            return ConnectedSource->GetComponentLocation();
+        }
+        if (ConnectedSourceSocket)
+        {
+            return ConnectedSourceSocket->GetComponentLocation();
+        }
+    }
+    if (!bSocketAtStart && ConnectedSocket)
+    {
+        return ConnectedSocket->GetComponentLocation();
+    }
+    return Grabber ? Grabber->GetActorLocation() :
+        CableStartLocation + GetActorForwardVector() * GetInitialCableLength();
+}
+
+bool ACMPowerCableActor::IsRopeEndFixed() const
+{
+    const bool bEndHasConnection =
+        (ConnectedSocket && !bSocketAtStart)
+        || (ConnectedSource && !bSourceAtStart)
+        || (ConnectedSourceSocket && !bSourceAtStart);
+    return (Grabber && !bGrabAtStart) || bEndHasConnection;
+}
+
 int32 ACMPowerCableActor::GetVisualSegmentCount() const
 {
-    return CableDefinition.Get()
+    return bOverrideDefinitionSettings
+        ? FMath::Max(OverrideVisualSegmentCount, 1)
+        : CableDefinition.Get()
         ? FMath::Max(CableDefinition->VisualSegmentCount, 1)
         : 1;
 }
@@ -127,49 +220,63 @@ float ACMPowerCableActor::GetCableSag() const
 
 float ACMPowerCableActor::GetCableThicknessScale() const
 {
-    return CableDefinition.Get()
+    return bOverrideDefinitionSettings
+        ? FMath::Max(OverrideCableThicknessScale, 0.01f)
+        : CableDefinition.Get()
         ? FMath::Max(CableDefinition->CableThicknessScale, 0.01f)
         : 1.0f;
 }
 
 float ACMPowerCableActor::GetInitialCableLength() const
 {
-    return CableDefinition.Get()
+    return bOverrideDefinitionSettings
+        ? FMath::Max(OverrideInitialCableLength, 0.0f)
+        : CableDefinition.Get()
         ? FMath::Max(CableDefinition->InitialCableLength, 0.0f)
         : 100.0f;
 }
 
 float ACMPowerCableActor::GetRopeNodeSpacing() const
 {
-    return CableDefinition.Get()
+    return bOverrideDefinitionSettings
+        ? FMath::Max(OverrideRopeNodeSpacing, 5.0f)
+        : CableDefinition.Get()
         ? FMath::Max(CableDefinition->RopeNodeSpacing, 5.0f)
         : 35.0f;
 }
 
 float ACMPowerCableActor::GetRopeGravityScale() const
 {
-    return CableDefinition.Get()
+    return bOverrideDefinitionSettings
+        ? FMath::Max(OverrideRopeGravityScale, 0.0f)
+        : CableDefinition.Get()
         ? FMath::Max(CableDefinition->RopeGravityScale, 0.0f)
         : 1.0f;
 }
 
 float ACMPowerCableActor::GetRopeDamping() const
 {
-    return CableDefinition.Get()
+    return bOverrideDefinitionSettings
+        ? FMath::Clamp(OverrideRopeDamping, 0.0f, 1.0f)
+        : CableDefinition.Get()
         ? FMath::Clamp(CableDefinition->RopeDamping, 0.0f, 1.0f)
         : 0.85f;
 }
 
 int32 ACMPowerCableActor::GetRopeConstraintIterations() const
 {
-    return CableDefinition.Get()
+    return bOverrideDefinitionSettings
+        ? FMath::Max(OverrideRopeConstraintIterations, 1)
+        : CableDefinition.Get()
         ? FMath::Max(CableDefinition->RopeConstraintIterations, 1)
         : 8;
 }
 
 float ACMPowerCableActor::GetRopeCollisionRadius() const
 {
-    return CableDefinition.Get()
+    return bOverrideDefinitionSettings
+        ? FMath::Max(OverrideRopeCollisionRadius, 0.0f)
+        : CableDefinition.Get()
         ? FMath::Max(CableDefinition->RopeCollisionRadius, 0.0f)
         : 4.0f;
 }
@@ -188,6 +295,24 @@ int32 ACMPowerCableActor::GetRopeSleepFrameCount() const
         : 20;
 }
 
+float ACMPowerCableActor::GetInitialCoilRadius() const
+{
+    return bOverrideDefinitionSettings
+        ? FMath::Max(OverrideInitialCoilRadius, 0.0f)
+        : CableDefinition.Get()
+        ? FMath::Max(CableDefinition->InitialCoilRadius, 0.0f)
+        : 25.0f;
+}
+
+bool ACMPowerCableActor::ShouldStartCoiled() const
+{
+    return bOverrideDefinitionSettings
+        ? bOverrideStartCoiled
+        : CableDefinition.Get()
+        ? CableDefinition->bStartCoiled
+        : true;
+}
+
 void ACMPowerCableActor::InitializeRope()
 {
     if (bRopeInitialized || !bCableStartLocationInitialized)
@@ -196,75 +321,42 @@ void ACMPowerCableActor::InitializeRope()
     }
 
     const FVector StartLocation = CableStartLocation;
-    const FVector EndLocation = StartLocation
-        + GetActorForwardVector() * FMath::Max(
-            GetInitialCableLength(), 1.0f);
+    const float CableLength = FMath::Max(GetInitialCableLength(), 1.0f);
+    const FVector Forward = GetActorForwardVector().GetSafeNormal();
+    const FVector Right = FVector::CrossProduct(
+        FVector::UpVector, Forward).GetSafeNormal();
+    const float CoilRadius = GetInitialCoilRadius();
     SimulatedRopeLength = FMath::Max(
-        FVector::Distance(StartLocation, EndLocation),
+        CableLength,
         GetRopeNodeSpacing());
+    const int32 MinimumNodeCount = ShouldStartCoiled() ? 8 : 2;
     const int32 NodeCount = FMath::Max(
-        2,
+        MinimumNodeCount,
         FMath::CeilToInt(SimulatedRopeLength / GetRopeNodeSpacing()) + 1);
     RopePositions.SetNum(NodeCount);
     RopePreviousPositions.SetNum(NodeCount);
     for (int32 Index = 0; Index < NodeCount; ++Index)
     {
         const float Alpha = static_cast<float>(Index) / (NodeCount - 1);
-        RopePositions[Index] = FMath::Lerp(StartLocation, EndLocation, Alpha);
+        if (ShouldStartCoiled() && CoilRadius > UE_SMALL_NUMBER)
+        {
+            const FVector CoilCenter = StartLocation + Right * CoilRadius;
+            const float Angle = -HALF_PI + CableLength * Alpha
+                / CoilRadius;
+            RopePositions[Index] = CoilCenter
+                + Forward * FMath::Cos(Angle) * CoilRadius
+                + Right * FMath::Sin(Angle) * CoilRadius;
+        }
+        else
+        {
+            RopePositions[Index] = StartLocation
+                + Forward * CableLength * Alpha;
+        }
         RopePositions[Index].Z -= GetCableSag()
             * FMath::Sin(Alpha * PI);
         RopePreviousPositions[Index] = RopePositions[Index];
     }
     bRopeInitialized = true;
-}
-
-void ACMPowerCableActor::ExtendRopeTo(float RequestedLength)
-{
-    if (RequestedLength <= SimulatedRopeLength)
-    {
-        return;
-    }
-
-    SimulatedRopeLength = RequestedLength;
-    UpdateRopeNodeCount();
-}
-
-void ACMPowerCableActor::UpdateRopeNodeCount()
-{
-    const int32 DesiredCount = FMath::Max(
-        2,
-        FMath::CeilToInt(SimulatedRopeLength / GetRopeNodeSpacing()) + 1);
-    if (DesiredCount <= RopePositions.Num())
-    {
-        return;
-    }
-
-    const TArray<FVector> OldPositions = RopePositions;
-    const TArray<FVector> OldPreviousPositions = RopePreviousPositions;
-    RopePositions.SetNum(DesiredCount);
-    RopePreviousPositions.SetNum(DesiredCount);
-
-    auto SamplePolyline = [](const TArray<FVector>& Points, float Alpha)
-    {
-        if (Points.Num() < 2)
-        {
-            return Points.IsEmpty() ? FVector::ZeroVector : Points[0];
-        }
-        const float ScaledIndex = FMath::Clamp(Alpha, 0.0f, 1.0f)
-            * (Points.Num() - 1);
-        const int32 Index = FMath::Min(
-            FMath::FloorToInt(ScaledIndex), Points.Num() - 2);
-        return FMath::Lerp(Points[Index], Points[Index + 1],
-            ScaledIndex - Index);
-    };
-
-    for (int32 Index = 0; Index < DesiredCount; ++Index)
-    {
-        const float Alpha = static_cast<float>(Index) / (DesiredCount - 1);
-        RopePositions[Index] = SamplePolyline(OldPositions, Alpha);
-        RopePreviousPositions[Index] = SamplePolyline(
-            OldPreviousPositions, Alpha);
-    }
 }
 
 void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
@@ -280,20 +372,24 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
         bRopeSleeping = false;
         RopeStableFrameCount = 0;
     }
-    else if (bRopeSleeping)
+    else if (bRopeSleeping && !HasAnyEndpointConnected())
     {
         return;
     }
 
-    const bool bEndIsFixed = IsConnected() || IsGrabbed();
-    const FVector EndTarget = IsConnected()
-        ? ConnectedSocket->GetComponentLocation()
-        : Grabber
-            ? Grabber->GetActorLocation()
-            : FVector::ZeroVector;
+    const bool bEndIsFixed = IsRopeEndFixed();
+    const FVector RequestedEndTarget = GetRopeEndTarget();
+    FVector EndTarget = RequestedEndTarget;
     if (IsGrabbed())
     {
-        ExtendRopeTo(FVector::Distance(CableStartLocation, EndTarget));
+        const FVector FromStart = EndTarget - GetRopeStartTarget();
+        const float DistanceFromStart = FromStart.Size();
+        if (DistanceFromStart > SimulatedRopeLength
+            && DistanceFromStart > UE_SMALL_NUMBER)
+        {
+            EndTarget = GetRopeStartTarget()
+                + FromStart / DistanceFromStart * SimulatedRopeLength;
+        }
     }
 
     constexpr int32 SimulationSubsteps = 4;
@@ -323,12 +419,16 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                 FHitResult Hit;
                 FCollisionQueryParams QueryParams(
                     SCENE_QUERY_STAT(CMPowerCableRope), false, this);
-                const bool bHit = GetWorld()->SweepSingleByChannel(
+                FCollisionObjectQueryParams ObjectQueryParams;
+                ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+                ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+                ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+                const bool bHit = GetWorld()->SweepSingleByObjectType(
                     Hit,
                     CurrentPosition,
                     RopePositions[Index],
                     FQuat::Identity,
-                    ECC_WorldStatic,
+                    ObjectQueryParams,
                     FCollisionShape::MakeSphere(GetRopeCollisionRadius()),
                     QueryParams);
                 if (bHit)
@@ -346,7 +446,7 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
             Iteration < GetRopeConstraintIterations();
             ++Iteration)
         {
-            RopePositions[0] = CableStartLocation;
+            RopePositions[0] = GetCableStartLocation();
             if (bEndIsFixed)
             {
                 RopePositions.Last() = EndTarget;
@@ -383,7 +483,7 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
             }
         }
 
-        RopePositions[0] = CableStartLocation;
+        RopePositions[0] = GetCableStartLocation();
         if (bEndIsFixed)
         {
             RopePositions.Last() = EndTarget;
@@ -406,7 +506,7 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
         }
     }
 
-    RopePositions[0] = CableStartLocation;
+    RopePositions[0] = GetCableStartLocation();
     if (bEndIsFixed)
     {
         RopePositions.Last() = EndTarget;
@@ -422,7 +522,7 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                 RopePreviousPositions[Index]));
     }
 
-    if (!IsGrabbed()
+    if (!IsGrabbed() && !HasAnyEndpointConnected()
         && MaxMovement <= GetRopeSleepMovementThreshold())
     {
         ++RopeStableFrameCount;
@@ -447,14 +547,15 @@ bool ACMPowerCableActor::QueryArmHold_Implementation(
     FCMArmHoldSpec& OutSpec
 ) const
 {
-    if (!HasAuthority() || !IsValid(ArmPart) || IsConnected()
+    if (!HasAuthority() || !IsValid(ArmPart)
         || IsGrabbed() || !GrabVolume)
     {
         return false;
     }
 
     OutSpec.Priority = 0;
-    OutSpec.HoldLocation = GrabVolume->Bounds.Origin;
+    OutSpec.HoldLocation = GetClosestFreeEndpointLocation(
+        ArmPart->GetActorLocation());
     OutSpec.HoldNormal = (
         ArmPart->GetActorLocation() - OutSpec.HoldLocation
     ).GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
@@ -475,11 +576,12 @@ void ACMPowerCableActor::EndArmHold_Implementation(ACMArmPart* ArmPart)
         return;
     }
 
-    // Try the closest socket while Grabber is still set, so the socket's
-    // distance check measures the cable end at the hand position.
-    const FVector CableEndLocation = GetCableEndLocation();
+    // Try both endpoint types while Grabber is still set, so their distance
+    // checks use the cable endpoint currently held by the arm.
     UCMPowerSocketComponent* ClosestSocket = nullptr;
-    float ClosestDistanceSquared = TNumericLimits<float>::Max();
+    UCMPowerSourceComponent* ClosestSource = nullptr;
+    float ClosestSocketDistanceSquared = TNumericLimits<float>::Max();
+    float ClosestSourceDistanceSquared = TNumericLimits<float>::Max();
 
     for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
     {
@@ -494,15 +596,48 @@ void ACMPowerCableActor::EndArmHold_Implementation(ACMArmPart* ArmPart)
                 continue;
             }
 
+            const FVector SocketEndpoint =
+                GetClosestFreeEndpointLocation(Socket->GetComponentLocation());
             const float DistanceSquared = FVector::DistSquared(
-                Socket->GetComponentLocation(),
-                CableEndLocation);
-            if (DistanceSquared < ClosestDistanceSquared)
+                Socket->GetComponentLocation(), SocketEndpoint);
+            if (DistanceSquared < ClosestSocketDistanceSquared)
             {
-                ClosestDistanceSquared = DistanceSquared;
+                ClosestSocketDistanceSquared = DistanceSquared;
                 ClosestSocket = Socket;
             }
         }
+
+        TArray<UCMPowerSourceComponent*> Sources;
+        ActorIt->GetComponents(Sources);
+        for (UCMPowerSourceComponent* Source : Sources)
+        {
+            if (!IsValid(Source) || Source->IsConnected()
+                || Source->GetPowerChannel() != PowerChannel
+                || PowerChannel.IsNone())
+            {
+                continue;
+            }
+
+            const FVector SourceEndpoint =
+                GetClosestFreeEndpointLocation(Source->GetComponentLocation());
+            const float DistanceSquared = FVector::DistSquared(
+                Source->GetComponentLocation(), SourceEndpoint);
+            if (DistanceSquared < ClosestSourceDistanceSquared)
+            {
+                ClosestSourceDistanceSquared = DistanceSquared;
+                ClosestSource = Source;
+            }
+        }
+    }
+
+    if (ClosestSource
+        && ClosestSourceDistanceSquared <= ClosestSocketDistanceSquared
+        && TryConnectToSource(ClosestSource))
+    {
+        UE_LOG(LogChimeraStageLoad, Display,
+            TEXT("Power cable connected on arm release. Cable=%s Source=%s"),
+            *GetName(), *GetNameSafe(ClosestSource));
+        return;
     }
 
     if (ClosestSocket && TryConnectToSocket(ClosestSocket))
@@ -518,10 +653,31 @@ void ACMPowerCableActor::EndArmHold_Implementation(ACMArmPart* ArmPart)
 
 bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
 {
-    if (!HasAuthority() || !InGrabber || IsConnected() || IsGrabbed())
+    if (!HasAuthority() || !InGrabber || IsGrabbed())
     {
         return false;
     }
+
+    // Grabbing a connected cable unplugs the product-side endpoint while
+    // keeping the generator-side endpoint attached.
+    if (IsConnected())
+    {
+        DisconnectFromSocket();
+    }
+
+    const FVector GrabLocation = InGrabber->GetActorLocation();
+    const FVector StartLocation = GetRopeStartTarget();
+    const FVector EndLocation = bRopeInitialized && !RopePositions.IsEmpty()
+        ? RopePositions.Last() : GetRopeEndTarget();
+    const bool bStartOccupied = ConnectedSource || ConnectedSourceSocket
+        || ConnectedSocket && bSocketAtStart;
+    const bool bEndOccupied = ConnectedSource && !bSourceAtStart
+        || ConnectedSourceSocket && !bSourceAtStart
+        || ConnectedSocket && !bSocketAtStart;
+    bGrabAtStart = bStartOccupied && !bEndOccupied
+        ? false : bEndOccupied && !bStartOccupied
+            ? true : FVector::DistSquared(GrabLocation, StartLocation)
+                <= FVector::DistSquared(GrabLocation, EndLocation);
 
     Grabber = InGrabber;
     bRopeSleeping = false;
@@ -538,6 +694,7 @@ void ACMPowerCableActor::ReleaseGrab()
     }
 
     Grabber = nullptr;
+    bGrabAtStart = false;
     bRopeSleeping = false;
     RopeStableFrameCount = 0;
     ForceNetUpdate();
@@ -550,14 +707,54 @@ bool ACMPowerCableActor::TryConnectToSocket(
     return Socket && Socket->TryConnectCable(this);
 }
 
+bool ACMPowerCableActor::TryConnectToSource(
+    UCMPowerSourceComponent* Source
+)
+{
+    return Source && Source->TryConnectCable(this);
+}
+
+bool ACMPowerCableActor::TryConnectToPoweredSocket(
+    UCMPowerSocketComponent* Socket
+)
+{
+    if (!Socket || !Socket->IsPowered() || HasConnectedSource()
+        || HasConnectedSourceSocket())
+    {
+        return false;
+    }
+
+    if (FVector::DistSquared(
+        Socket->GetComponentLocation(),
+        GetClosestFreeEndpointLocation(Socket->GetComponentLocation()))
+        > FMath::Square(Socket->GetConnectionRadius()))
+    {
+        return false;
+    }
+
+    SetConnectedSourceSocket(Socket);
+    return true;
+}
+
 void ACMPowerCableActor::Disconnect()
 {
-    if (!HasAuthority() || !ConnectedSocket)
+    if (!HasAuthority())
     {
         return;
     }
 
-    ConnectedSocket->DisconnectCable(this);
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->DisconnectCable(this);
+    }
+    if (ConnectedSource)
+    {
+        ConnectedSource->DisconnectCable(this);
+    }
+    if (ConnectedSourceSocket)
+    {
+        SetConnectedSourceSocket(nullptr);
+    }
 }
 
 void ACMPowerCableActor::SetConnectedSocket(
@@ -569,19 +766,176 @@ void ACMPowerCableActor::SetConnectedSocket(
         return;
     }
 
+    UCMPowerSocketComponent* PreviousSocket = ConnectedSocket;
+    const FVector SocketLocation = Socket
+        ? Socket->GetComponentLocation() : FVector::ZeroVector;
+    const FVector ClosestEndpoint =
+        GetClosestFreeEndpointLocation(SocketLocation);
+    bSocketAtStart = bRopeInitialized && !RopePositions.IsEmpty()
+        ? FVector::DistSquared(ClosestEndpoint, RopePositions[0])
+            <= FVector::DistSquared(ClosestEndpoint, RopePositions.Last())
+        : FVector::DistSquared(ClosestEndpoint, CableStartLocation)
+            <= FVector::DistSquared(
+                ClosestEndpoint, GetRopeEndTarget());
     ConnectedSocket = Socket;
     Grabber = nullptr;
     if (Socket)
     {
-        SetActorLocation(Socket->GetComponentLocation());
+        // Keep the rope's current simulated shape. The socket connection is
+        // logical; moving the actor here would straighten the cable. Keep
+        // simulating with both endpoints pinned so later body contacts can
+        // deform the cable naturally.
+        bRopeSleeping = false;
+        RopeStableFrameCount = 0;
     }
-    OnConnectionChanged.Broadcast(ConnectedSocket != nullptr);
+    else
+    {
+        bRopeSleeping = false;
+        RopeStableFrameCount = 0;
+    }
+    if (PreviousSocket && PreviousSocket != ConnectedSocket)
+    {
+        PreviousSocket->NotifyPowerStateChanged();
+    }
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->NotifyPowerStateChanged();
+    }
+    OnConnectionChanged.Broadcast(IsConnected());
     ForceNetUpdate();
+}
+
+void ACMPowerCableActor::DisconnectFromSocket()
+{
+    if (!HasAuthority() || !ConnectedSocket)
+    {
+        return;
+    }
+
+    ConnectedSocket->DisconnectCable(this);
+}
+
+void ACMPowerCableActor::DisconnectFromSource()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (ConnectedSource)
+    {
+        ConnectedSource->DisconnectCable(this);
+    }
+    if (ConnectedSourceSocket)
+    {
+        SetConnectedSourceSocket(nullptr);
+    }
+}
+
+void ACMPowerCableActor::SetConnectedSource(
+    UCMPowerSourceComponent* Source
+)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    const FVector SourceLocation = Source
+        ? Source->GetComponentLocation() : FVector::ZeroVector;
+    const FVector ClosestEndpoint =
+        GetClosestFreeEndpointLocation(SourceLocation);
+    bSourceAtStart = bRopeInitialized && !RopePositions.IsEmpty()
+        ? FVector::DistSquared(ClosestEndpoint, RopePositions[0])
+            <= FVector::DistSquared(ClosestEndpoint, RopePositions.Last())
+        : FVector::DistSquared(ClosestEndpoint, CableStartLocation)
+            <= FVector::DistSquared(
+                ClosestEndpoint, GetRopeEndTarget());
+    ConnectedSource = Source;
+    Grabber = nullptr;
+    bRopeSleeping = false;
+    RopeStableFrameCount = 0;
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->NotifyPowerStateChanged();
+    }
+    OnConnectionChanged.Broadcast(IsConnected());
+    ForceNetUpdate();
+}
+
+void ACMPowerCableActor::SetConnectedSourceSocket(
+    UCMPowerSocketComponent* Socket
+)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (ConnectedSourceSocket && ConnectedSourceSocket != Socket)
+    {
+        ConnectedSourceSocket->RemovePowerOutputCable(this);
+    }
+    ConnectedSourceSocket = Socket;
+    Grabber = nullptr;
+    if (Socket)
+    {
+        const FVector ClosestEndpoint =
+            GetClosestFreeEndpointLocation(Socket->GetComponentLocation());
+        bSourceAtStart = bRopeInitialized && !RopePositions.IsEmpty()
+            ? FVector::DistSquared(ClosestEndpoint, RopePositions[0])
+                <= FVector::DistSquared(ClosestEndpoint, RopePositions.Last())
+            : FVector::DistSquared(ClosestEndpoint, CableStartLocation)
+                <= FVector::DistSquared(
+                    ClosestEndpoint, GetRopeEndTarget());
+    }
+    if (ConnectedSourceSocket)
+    {
+        ConnectedSourceSocket->AddPowerOutputCable(this);
+    }
+    bRopeSleeping = false;
+    RopeStableFrameCount = 0;
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->NotifyPowerStateChanged();
+    }
+    OnConnectionChanged.Broadcast(IsConnected());
+    ForceNetUpdate();
+}
+
+void ACMPowerCableActor::NotifyPowerStateChanged()
+{
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->NotifyPowerStateChanged();
+    }
 }
 
 void ACMPowerCableActor::OnRep_ConnectedSocket()
 {
-    OnConnectionChanged.Broadcast(ConnectedSocket != nullptr);
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->NotifyPowerStateChanged();
+    }
+    OnConnectionChanged.Broadcast(IsConnected());
+}
+
+void ACMPowerCableActor::OnRep_ConnectedSource()
+{
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->NotifyPowerStateChanged();
+    }
+    OnConnectionChanged.Broadcast(IsConnected());
+}
+
+void ACMPowerCableActor::OnRep_ConnectedSourceSocket()
+{
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->NotifyPowerStateChanged();
+    }
+    OnConnectionChanged.Broadcast(IsConnected());
 }
 
 void ACMPowerCableActor::OnRep_CableStartLocation()
@@ -674,7 +1028,7 @@ bool ACMPowerCableActor::TryBuildCableVisual()
     }
 
     bCableVisualReady = true;
-    if (!IsGrabbed() && !IsConnected())
+    if (!IsGrabbed() && !HasAnyEndpointConnected())
     {
         bRopeInitialized = false;
         RopePositions.Reset();
@@ -833,6 +1187,9 @@ void ACMPowerCableActor::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACMPowerCableActor, Grabber);
+    DOREPLIFETIME(ACMPowerCableActor, bGrabAtStart);
     DOREPLIFETIME(ACMPowerCableActor, ConnectedSocket);
+    DOREPLIFETIME(ACMPowerCableActor, ConnectedSource);
+    DOREPLIFETIME(ACMPowerCableActor, ConnectedSourceSocket);
     DOREPLIFETIME(ACMPowerCableActor, CableStartLocation);
 }

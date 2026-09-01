@@ -3,24 +3,24 @@
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
 
-#include "CMPowerSocketComponent.generated.h"
+#include "CMPowerSourceComponent.generated.h"
 
 class ACMPowerCableActor;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
-    FCMPowerSocketConnectionChanged,
+    FCMPowerSourceConnectionChanged,
     bool,
     bConnected
 );
 
-/** A server-authoritative socket that accepts one matching power cable. */
+/** Output connection for an actor that supplies power to a cable. */
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
-class CHIMERA_API UCMPowerSocketComponent : public USceneComponent
+class CHIMERA_API UCMPowerSourceComponent : public USceneComponent
 {
     GENERATED_BODY()
 
 public:
-    UCMPowerSocketComponent();
+    UCMPowerSourceComponent();
 
     bool TryConnectCable(ACMPowerCableActor* Cable);
     void DisconnectCable(ACMPowerCableActor* Cable);
@@ -29,16 +29,7 @@ public:
     bool IsConnected() const { return ConnectedCable != nullptr; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsPowered() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
-    bool CanProvidePower() const { return IsPowered(); }
-
-    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    ACMPowerCableActor* GetConnectedCable() const
-    {
-        return ConnectedCable;
-    }
+    ACMPowerCableActor* GetConnectedCable() const { return ConnectedCable; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FName GetPowerChannel() const { return PowerChannel; }
@@ -47,10 +38,7 @@ public:
     float GetConnectionRadius() const { return ConnectionRadius; }
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Power")
-    FCMPowerSocketConnectionChanged OnConnectionChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Chimera|Power")
-    FCMPowerSocketConnectionChanged OnPowerStateChanged;
+    FCMPowerSourceConnectionChanged OnConnectionChanged;
 
 protected:
     virtual void GetLifetimeReplicatedProps(
@@ -71,14 +59,5 @@ protected:
     UFUNCTION()
     void OnRep_ConnectedCable();
 
-    void NotifyPowerStateChanged();
-
-    void AddPowerOutputCable(ACMPowerCableActor* Cable);
-    void RemovePowerOutputCable(ACMPowerCableActor* Cable);
-
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<ACMPowerCableActor>> PowerOutputCables;
-
     friend class ACMPowerCableActor;
-    friend class ACMPowerTriggerBase;
 };

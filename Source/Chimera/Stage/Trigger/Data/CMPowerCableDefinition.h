@@ -62,4 +62,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "1"))
     int32 RopeSleepFrameCount = 20;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "0.0"))
+    float InitialCoilRadius = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Cable|Simulation")
+    bool bStartCoiled = true;
 };

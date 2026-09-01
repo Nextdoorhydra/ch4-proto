@@ -8,6 +8,7 @@
 #include "CMPowerCableActor.generated.h"
 
 class UCMPowerSocketComponent;
+class UCMPowerSourceComponent;
 class UCMPowerCableDefinition;
 class UBoxComponent;
 class USplineComponent;
@@ -20,7 +21,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
     bConnected
 );
 
-/** Movable cable that can be connected to one matching power socket. */
+/** Movable cable with one source endpoint and one powered socket endpoint. */
 UCLASS()
 class CHIMERA_API ACMPowerCableActor : public AActor, public ICMArmHoldTarget
 {
@@ -39,19 +40,56 @@ public:
     bool TryConnectToSocket(UCMPowerSocketComponent* Socket);
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
+    bool TryConnectToSource(UCMPowerSourceComponent* Source);
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
+    bool TryConnectToPoweredSocket(UCMPowerSocketComponent* Socket);
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
     void Disconnect();
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
+    void DisconnectFromSocket();
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
+    void DisconnectFromSource();
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     bool IsGrabbed() const { return Grabber != nullptr; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsConnected() const { return ConnectedSocket != nullptr; }
+    bool IsConnected() const
+    {
+        return (ConnectedSource != nullptr || ConnectedSourceSocket != nullptr)
+            && ConnectedSocket != nullptr;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    bool HasConnectedSource() const { return ConnectedSource != nullptr; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    bool HasConnectedSocket() const { return ConnectedSocket != nullptr; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    bool HasConnectedSourceSocket() const
+    {
+        return ConnectedSourceSocket != nullptr;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    bool IsPowerActive() const { return IsConnected(); }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FName GetPowerChannel() const { return PowerChannel; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FVector GetCableEndLocation() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    FVector GetCableStartLocation() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    FVector GetClosestFreeEndpointLocation(const FVector& Location) const;
 
     virtual bool QueryArmHold_Implementation(
         ACMArmPart* ArmPart,
@@ -70,6 +108,13 @@ public:
     FCMPowerCableConnectionChanged OnConnectionChanged;
 
     void SetConnectedSocket(UCMPowerSocketComponent* Socket);
+    void SetConnectedSource(UCMPowerSourceComponent* Source);
+    void SetConnectedSourceSocket(UCMPowerSocketComponent* Socket);
+
+    void NotifyPowerStateChanged();
+
+    bool IsSourceAtStart() const { return bSourceAtStart; }
+    bool IsSocketAtStart() const { return bSocketAtStart; }
 
 protected:
     virtual void BeginPlay() override;
@@ -95,15 +140,89 @@ protected:
     FName LoadGroupId = TEXT("Stage.Entry.Power");
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
-    FName PowerChannel = NAME_None;
+    FName PowerChannel = TEXT("DefaultPower");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override")
+    bool bOverrideDefinitionSettings = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    int32 OverrideVisualSegmentCount = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    float OverrideCableThicknessScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    float OverrideInitialCableLength = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    float OverrideRopeNodeSpacing = 35.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    float OverrideRopeGravityScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    float OverrideRopeDamping = 0.85f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    int32 OverrideRopeConstraintIterations = 8;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    float OverrideRopeCollisionRadius = 4.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    float OverrideInitialCoilRadius = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Power|Override",
+        meta = (EditCondition = "bOverrideDefinitionSettings"))
+    bool bOverrideStartCoiled = true;
 
     UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Power")
     TObjectPtr<AActor> Grabber;
 
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Power")
+    bool bGrabAtStart = false;
+
     UPROPERTY(ReplicatedUsing = OnRep_ConnectedSocket, VisibleInstanceOnly,
         BlueprintReadOnly, Category = "Chimera|Power")
     TObjectPtr<UCMPowerSocketComponent> ConnectedSocket;
+
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Power")
+    bool bSocketAtStart = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_ConnectedSource, VisibleInstanceOnly,
+        BlueprintReadOnly, Category = "Chimera|Power")
+    TObjectPtr<UCMPowerSourceComponent> ConnectedSource;
+
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Power")
+    bool bSourceAtStart = true;
+
+    UPROPERTY(ReplicatedUsing = OnRep_ConnectedSourceSocket,
+        VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Power")
+    TObjectPtr<UCMPowerSocketComponent> ConnectedSourceSocket;
 
     UPROPERTY(ReplicatedUsing = OnRep_CableStartLocation,
         VisibleInstanceOnly, BlueprintReadOnly,
@@ -115,6 +234,23 @@ protected:
 
     UFUNCTION()
     void OnRep_ConnectedSocket();
+
+    UFUNCTION()
+    void OnRep_ConnectedSource();
+
+    UFUNCTION()
+    void OnRep_ConnectedSourceSocket();
+
+    bool HasAnyEndpointConnected() const
+    {
+        return ConnectedSource != nullptr
+            || ConnectedSourceSocket != nullptr
+            || ConnectedSocket != nullptr;
+    }
+
+    FVector GetRopeStartTarget() const;
+    FVector GetRopeEndTarget() const;
+    bool IsRopeEndFixed() const;
 
     UFUNCTION()
     void OnRep_CableStartLocation();
@@ -133,8 +269,6 @@ protected:
     void EnsureCableMeshCount(int32 DesiredCount, UStaticMesh* Mesh);
     void InitializeRope();
     void SimulateRope(float DeltaSeconds);
-    void ExtendRopeTo(float RequestedLength);
-    void UpdateRopeNodeCount();
     int32 GetVisualSegmentCount() const;
     float GetCableSag() const;
     float GetCableThicknessScale() const;
@@ -146,6 +280,8 @@ protected:
     float GetRopeCollisionRadius() const;
     float GetRopeSleepMovementThreshold() const;
     int32 GetRopeSleepFrameCount() const;
+    float GetInitialCoilRadius() const;
+    bool ShouldStartCoiled() const;
 
     bool bCableVisualReady = false;
     bool bCableVisualFailed = false;
