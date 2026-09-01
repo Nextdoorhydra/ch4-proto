@@ -1,33 +1,55 @@
 #include "HUD/CMControlHUDWidget.h"
 
+#include "Ability/CMChimeraAttributeSet.h"
+#include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
+#include "Player/CMPartInterface.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
-#include "Parts/Core/CMPartActorBase.h"
+#include "AbilitySystemComponent.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
-#include "Components/CanvasPanel.h"
-#include "Components/CanvasPanelSlot.h"
-#include "Components/HorizontalBox.h"
-#include "Components/HorizontalBoxSlot.h"
-#include "Components/Overlay.h"
-#include "Components/OverlaySlot.h"
+#include "Components/Image.h"
 #include "Components/ProgressBar.h"
-#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
-#include "Components/VerticalBox.h"
-#include "Components/VerticalBoxSlot.h"
+#include "Components/Widget.h"
+#include "Engine/Texture2D.h"
 
 #define LOCTEXT_NAMESPACE "CMControlHUDWidget"
 
 namespace
 {
-float GetResourcePercent(const float Current, const float Maximum)
+const FLinearColor IdleControlKeyColor(0.55f, 0.55f, 0.55f, 0.65f);
+const FLinearColor DisabledControlKeyColor(0.22f, 0.22f, 0.22f, 0.45f);
+const FLinearColor DeadSegmentColor(0.10f, 0.10f, 0.10f, 0.95f);
+
+float GetPercent(float Current, float Maximum)
 {
     return Maximum > 0.0f
         ? FMath::Clamp(Current / Maximum, 0.0f, 1.0f)
         : 0.0f;
+}
+
+FSlateBrush MakeSolidBrush(const FLinearColor& Color)
+{
+    FSlateBrush Brush;
+    Brush.DrawAs = ESlateBrushDrawType::Box;
+    Brush.TintColor = FSlateColor(Color);
+    return Brush;
+}
+
+FSlateBrush MakeTextureBrush(UTexture2D* Texture)
+{
+    FSlateBrush Brush;
+    Brush.DrawAs = ESlateBrushDrawType::Image;
+    Brush.SetResourceObject(Texture);
+    if (Texture)
+    {
+        Brush.ImageSize = FVector2D(
+            Texture->GetSizeX(), Texture->GetSizeY());
+    }
+    return Brush;
 }
 }
 
@@ -36,7 +58,6 @@ UCMControlHUDWidget::UCMControlHUDWidget(
 )
     : Super(ObjectInitializer)
 {
-    // Chimera HUD는 Q/W/E/R 게임 입력과 마우스 포인터를 동시에 사용한다.
     InputConfig = ENKMUIWidgetInputMode::GameAndMenu;
     GameMouseCaptureMode = EMouseCaptureMode::NoCapture;
 }
@@ -45,368 +66,621 @@ void UCMControlHUDWidget::NativeOnInitialized()
 {
     Super::NativeOnInitialized();
 
-    if (!WidgetTree->RootWidget)
+    if (!HeadPartTexture)
     {
-        BuildFallbackWidgetTree();
+        HeadPartTexture = LoadObject<UTexture2D>(nullptr,
+            TEXT("/Game/Chimera/UI/HUD/T_UI_Part_Head.T_UI_Part_Head"));
     }
-
+    if (!ArmPartTexture)
+    {
+        ArmPartTexture = LoadObject<UTexture2D>(nullptr,
+            TEXT("/Game/Chimera/UI/HUD/T_UI_Part_Arm.T_UI_Part_Arm"));
+    }
+    if (!LegPartTexture)
+    {
+        LegPartTexture = LoadObject<UTexture2D>(nullptr,
+            TEXT("/Game/Chimera/UI/HUD/T_UI_Part_Leg.T_UI_Part_Leg"));
+    }
     if (!CacheWidgetTreeReferences())
     {
         UE_LOG(LogTemp, Error,
-            TEXT("WBP_CMControlHUD is missing its stamina, body health, or control-slot widgets."));
+            TEXT("WBP_CMControlHUD is missing required named widgets."));
+        SetVisibility(ESlateVisibility::Collapsed);
         return;
     }
 
     SetVisibility(ESlateVisibility::HitTestInvisible);
-    HUDContainer->SetVisibility(ESlateVisibility::Collapsed);
+    CachedHUDContainer->SetVisibility(ESlateVisibility::Collapsed);
+    RefreshAll();
 }
 
-void UCMControlHUDWidget::BuildFallbackWidgetTree()
+void UCMControlHUDWidget::NativeDestruct()
 {
-    UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(
-        UCanvasPanel::StaticClass(),
-        TEXT("RootCanvas")
-    );
-    WidgetTree->RootWidget = RootCanvas;
-
-    HUDContainer = WidgetTree->ConstructWidget<UVerticalBox>(
-        UVerticalBox::StaticClass(),
-        TEXT("HUDContainer")
-    );
-    UCanvasPanelSlot* ControlSlotCanvas =
-        RootCanvas->AddChildToCanvas(HUDContainer);
-    ControlSlotCanvas->SetAnchors(FAnchors(0.5f, 1.0f));
-    ControlSlotCanvas->SetAlignment(FVector2D(0.5f, 1.0f));
-    ControlSlotCanvas->SetPosition(HUDPosition);
-    ControlSlotCanvas->SetAutoSize(true);
-
-    USizeBox* StaminaSize = WidgetTree->ConstructWidget<USizeBox>(
-        USizeBox::StaticClass(), TEXT("StaminaSize"));
-    StaminaSize->SetWidthOverride(420.0f);
-    StaminaSize->SetHeightOverride(18.0f);
-    HUDContainer->AddChildToVerticalBox(StaminaSize);
-    UOverlay* StaminaOverlay = WidgetTree->ConstructWidget<UOverlay>(
-        UOverlay::StaticClass(), TEXT("StaminaOverlay"));
-    StaminaSize->SetContent(StaminaOverlay);
-    StaminaProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
-        UProgressBar::StaticClass(), TEXT("StaminaProgressBar"));
-    StaminaProgressBar->SetPercent(1.0f);
-    StaminaProgressBar->SetFillColorAndOpacity(
-        FLinearColor(0.05f, 0.7f, 0.85f, 1.0f));
-    StaminaOverlay->AddChildToOverlay(StaminaProgressBar);
-    UTextBlock* StaminaLabel = WidgetTree->ConstructWidget<UTextBlock>(
-        UTextBlock::StaticClass(), TEXT("StaminaLabel"));
-    StaminaLabel->SetText(LOCTEXT("SharedStamina", "공용 스태미너"));
-    StaminaLabel->SetJustification(ETextJustify::Center);
-    UOverlaySlot* StaminaLabelSlot =
-        StaminaOverlay->AddChildToOverlay(StaminaLabel);
-    StaminaLabelSlot->SetHorizontalAlignment(HAlign_Fill);
-    StaminaLabelSlot->SetVerticalAlignment(VAlign_Center);
-
-    UHorizontalBox* BodyHealthRow =
-        WidgetTree->ConstructWidget<UHorizontalBox>(
-            UHorizontalBox::StaticClass(), TEXT("BodyHealthRow"));
-    HUDContainer->AddChildToVerticalBox(BodyHealthRow);
-    for (int32 BodyIndex = 0; BodyIndex < 2; ++BodyIndex)
-    {
-        USizeBox* BodyHealthSize = WidgetTree->ConstructWidget<USizeBox>(
-            USizeBox::StaticClass(),
-            FName(*FString::Printf(TEXT("BodyHealthSize%d"), BodyIndex)));
-        BodyHealthSize->SetWidthOverride((CardWidth + CardSpacing * 2.0f) * 2.0f);
-        BodyHealthSize->SetHeightOverride(18.0f);
-        UHorizontalBoxSlot* BodySlot =
-            BodyHealthRow->AddChildToHorizontalBox(BodyHealthSize);
-        BodySlot->SetPadding(FMargin(CardSpacing, 4.0f));
-
-        UOverlay* BodyHealthOverlay =
-            WidgetTree->ConstructWidget<UOverlay>(
-                UOverlay::StaticClass(),
-                FName(*FString::Printf(
-                    TEXT("BodyHealthOverlay%d"), BodyIndex)));
-        BodyHealthSize->SetContent(BodyHealthOverlay);
-        UProgressBar* BodyHealthBar =
-            WidgetTree->ConstructWidget<UProgressBar>(
-                UProgressBar::StaticClass(),
-                FName(*FString::Printf(TEXT("BodyHealthBar%d"), BodyIndex)));
-        BodyHealthBar->SetPercent(1.0f);
-        BodyHealthBar->SetFillColorAndOpacity(
-            FLinearColor(0.75f, 0.04f, 0.04f, 1.0f));
-        BodyHealthOverlay->AddChildToOverlay(BodyHealthBar);
-        UTextBlock* BodyHealthLabel = WidgetTree->ConstructWidget<UTextBlock>(
-            UTextBlock::StaticClass(),
-            FName(*FString::Printf(TEXT("BodyHealthLabel%d"), BodyIndex)));
-        BodyHealthLabel->SetText(BodyIndex == 0
-            ? LOCTEXT("QWBody", "Q/W 몸통")
-            : LOCTEXT("ERBody", "E/R 몸통"));
-        BodyHealthLabel->SetJustification(ETextJustify::Center);
-        UOverlaySlot* BodyLabelSlot =
-            BodyHealthOverlay->AddChildToOverlay(BodyHealthLabel);
-        BodyLabelSlot->SetHorizontalAlignment(HAlign_Fill);
-        BodyLabelSlot->SetVerticalAlignment(VAlign_Center);
-    }
-
-    ControlSlotBox = WidgetTree->ConstructWidget<UHorizontalBox>(
-        UHorizontalBox::StaticClass(), TEXT("ControlSlotBox"));
-    HUDContainer->AddChildToVerticalBox(ControlSlotBox);
-
-    static const TCHAR* KeyLabels[] =
-    {
-        TEXT("Q"),
-        TEXT("W"),
-        TEXT("E"),
-        TEXT("R")
-    };
-
-    for (int32 SlotIndex = 0;
-        SlotIndex < CMControl::MaxKeysPerPlayer;
-        ++SlotIndex)
-    {
-        USizeBox* CardSize = WidgetTree->ConstructWidget<USizeBox>(
-            USizeBox::StaticClass(),
-            FName(*FString::Printf(TEXT("ControlSlotSize%d"), SlotIndex))
-        );
-        CardSize->SetWidthOverride(CardWidth);
-        CardSize->SetHeightOverride(CardHeight);
-
-        UHorizontalBoxSlot* CardSlot =
-            ControlSlotBox->AddChildToHorizontalBox(CardSize);
-        CardSlot->SetPadding(FMargin(CardSpacing, 0.0f));
-
-        UBorder* CardBorder = WidgetTree->ConstructWidget<UBorder>(
-            UBorder::StaticClass(),
-            FName(*FString::Printf(TEXT("ControlSlotBorder%d"), SlotIndex))
-        );
-        CardBorder->SetPadding(FMargin(0.0f));
-        CardSize->SetContent(CardBorder);
-
-        UOverlay* CardOverlay = WidgetTree->ConstructWidget<UOverlay>(
-            UOverlay::StaticClass(),
-            FName(*FString::Printf(TEXT("ControlSlotOverlay%d"), SlotIndex))
-        );
-        CardBorder->SetContent(CardOverlay);
-
-        UProgressBar* PartHealthBar =
-            WidgetTree->ConstructWidget<UProgressBar>(
-                UProgressBar::StaticClass(),
-                FName(*FString::Printf(TEXT("PartHealthBar%d"), SlotIndex)));
-        PartHealthBar->SetPercent(0.0f);
-        PartHealthBar->SetFillColorAndOpacity(
-            FLinearColor(0.85f, 0.03f, 0.03f, 0.72f));
-        FProgressBarStyle PartHealthStyle =
-            PartHealthBar->GetWidgetStyle();
-        PartHealthStyle.BackgroundImage.TintColor =
-            FSlateColor(FLinearColor::Transparent);
-        PartHealthBar->SetWidgetStyle(PartHealthStyle);
-        CardOverlay->AddChildToOverlay(PartHealthBar);
-
-        UVerticalBox* TextBox = WidgetTree->ConstructWidget<UVerticalBox>(
-            UVerticalBox::StaticClass(),
-            FName(*FString::Printf(TEXT("ControlSlotTextBox%d"), SlotIndex))
-        );
-        UOverlaySlot* TextSlot = CardOverlay->AddChildToOverlay(TextBox);
-        TextSlot->SetHorizontalAlignment(HAlign_Fill);
-        TextSlot->SetVerticalAlignment(VAlign_Center);
-
-        UTextBlock* KeyText = WidgetTree->ConstructWidget<UTextBlock>(
-            UTextBlock::StaticClass(),
-            FName(*FString::Printf(TEXT("KeyText%d"), SlotIndex))
-        );
-        KeyText->SetText(FText::FromString(KeyLabels[SlotIndex]));
-        KeyText->SetJustification(ETextJustify::Center);
-        KeyText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-        FSlateFontInfo KeyFont = KeyText->GetFont();
-        KeyFont.Size = KeyFontSize;
-        KeyText->SetFont(KeyFont);
-        UVerticalBoxSlot* KeySlot = TextBox->AddChildToVerticalBox(KeyText);
-        KeySlot->SetHorizontalAlignment(HAlign_Fill);
-
-        UTextBlock* AssignmentText =
-            WidgetTree->ConstructWidget<UTextBlock>(
-                UTextBlock::StaticClass(),
-                FName(*FString::Printf(TEXT("AssignmentText%d"), SlotIndex))
-            );
-        AssignmentText->SetText(LOCTEXT("Unassigned", "미배정"));
-        AssignmentText->SetJustification(ETextJustify::Center);
-        AssignmentText->SetColorAndOpacity(
-            FSlateColor(FLinearColor::White));
-        FSlateFontInfo AssignmentFont = AssignmentText->GetFont();
-        AssignmentFont.Size = AssignmentFontSize;
-        AssignmentText->SetFont(AssignmentFont);
-        UVerticalBoxSlot* AssignmentSlot =
-            TextBox->AddChildToVerticalBox(AssignmentText);
-        AssignmentSlot->SetHorizontalAlignment(HAlign_Fill);
-    }
-}
-
-bool UCMControlHUDWidget::CacheWidgetTreeReferences()
-{
-    HUDContainer = Cast<UVerticalBox>(
-        WidgetTree->FindWidget(TEXT("HUDContainer"))
-    );
-    ControlSlotBox = Cast<UHorizontalBox>(
-        WidgetTree->FindWidget(TEXT("ControlSlotBox"))
-    );
-    StaminaProgressBar = Cast<UProgressBar>(
-        WidgetTree->FindWidget(TEXT("StaminaProgressBar"))
-    );
-    BodyHealthBars.Reset();
-    PartHealthBars.Reset();
-    ControlSlotBorders.Reset();
-    AssignmentTexts.Reset();
-
-    for (int32 SlotIndex = 0;
-        SlotIndex < CMControl::MaxKeysPerPlayer;
-        ++SlotIndex)
-    {
-        UProgressBar* PartHealthBar = Cast<UProgressBar>(
-            WidgetTree->FindWidget(FName(*FString::Printf(
-                TEXT("PartHealthBar%d"), SlotIndex)))
-        );
-        UBorder* CardBorder = Cast<UBorder>(WidgetTree->FindWidget(
-            FName(*FString::Printf(TEXT("ControlSlotBorder%d"), SlotIndex))
-        ));
-        UTextBlock* AssignmentText = Cast<UTextBlock>(WidgetTree->FindWidget(
-            FName(*FString::Printf(TEXT("AssignmentText%d"), SlotIndex))
-        ));
-        if (!PartHealthBar || !CardBorder || !AssignmentText)
-        {
-            return false;
-        }
-        PartHealthBars.Add(PartHealthBar);
-        ControlSlotBorders.Add(CardBorder);
-        AssignmentTexts.Add(AssignmentText);
-    }
-
-    for (int32 BodyIndex = 0; BodyIndex < 2; ++BodyIndex)
-    {
-        UProgressBar* BodyHealthBar = Cast<UProgressBar>(
-            WidgetTree->FindWidget(FName(*FString::Printf(
-                TEXT("BodyHealthBar%d"), BodyIndex)))
-        );
-        if (!BodyHealthBar)
-        {
-            return false;
-        }
-        BodyHealthBars.Add(BodyHealthBar);
-    }
-
-    return HUDContainer && ControlSlotBox && StaminaProgressBar;
-}
-
-void UCMControlHUDWidget::NativeTick(
-    const FGeometry& MyGeometry,
-    float InDeltaTime
-)
-{
-    Super::NativeTick(MyGeometry, InDeltaTime);
-    RefreshControlSlots();
+    UnbindStateDelegates();
+    Super::NativeDestruct();
 }
 
 void UCMControlHUDWidget::SetControlBody(
     ACMControlBody* NewControlBody
 )
 {
+    if (ControlBody.Get() == NewControlBody && SharedChimera.IsValid())
+    {
+        RebindObservedPlayerState();
+        RefreshAll();
+        return;
+    }
+
+    UnbindStateDelegates();
     ControlBody = NewControlBody;
-    RefreshControlSlots();
+    SharedChimera = NewControlBody
+        ? NewControlBody->GetSharedChimera()
+        : nullptr;
+    BindStateDelegates();
+    RefreshAll();
 }
 
-void UCMControlHUDWidget::RefreshControlSlots()
+bool UCMControlHUDWidget::CacheWidgetTreeReferences()
 {
-    if (!HUDContainer || !ControlSlotBox || !StaminaProgressBar
-        || BodyHealthBars.Num() != 2
-        || PartHealthBars.Num() != CMControl::MaxKeysPerPlayer
-        || ControlSlotBorders.Num() != CMControl::MaxKeysPerPlayer
-        || AssignmentTexts.Num() != CMControl::MaxKeysPerPlayer)
+    CachedHUDContainer = WidgetTree->FindWidget(TEXT("HUDContainer"));
+    CachedStaminaProgressBar = Cast<UProgressBar>(
+        WidgetTree->FindWidget(TEXT("StaminaProgressBar")));
+
+    SegmentRows.Reset();
+    PhysicalPartSlots.Reset();
+    SegmentRows.Reserve(CMControl::MaxSegments);
+    PhysicalPartSlots.Reserve(CMControl::MaxPartSlots);
+
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < CMControl::MaxSegments;
+        ++SegmentIndex)
+    {
+        FSegmentRowVisual& Row = SegmentRows.AddDefaulted_GetRef();
+        Row.Root = WidgetTree->FindWidget(FName(*FString::Printf(
+            TEXT("SegmentRow%d"), SegmentIndex)));
+        Row.BodyBorder = Cast<UBorder>(WidgetTree->FindWidget(
+            FName(*FString::Printf(TEXT("BodyBorder%d"), SegmentIndex))));
+        Row.BodyHealthFill = Cast<UProgressBar>(WidgetTree->FindWidget(
+            FName(*FString::Printf(TEXT("BodyHealthBar%d"), SegmentIndex))));
+        Row.BodyControlText = Cast<UTextBlock>(WidgetTree->FindWidget(
+            FName(*FString::Printf(TEXT("BodyControlText%d"), SegmentIndex))));
+        Row.BodyStrikeLine = Cast<UBorder>(WidgetTree->FindWidget(
+            FName(*FString::Printf(TEXT("BodyStrikeLine%d"), SegmentIndex))));
+        if (!Row.Root || !Row.BodyBorder
+            || !Row.BodyHealthFill || !Row.BodyControlText
+            || !Row.BodyStrikeLine)
+        {
+            return false;
+        }
+        Row.BodyStrikeLine->SetVisibility(ESlateVisibility::Collapsed);
+    }
+
+    for (int32 FlatSlotIndex = 0;
+        FlatSlotIndex < CMControl::MaxPartSlots;
+        ++FlatSlotIndex)
+    {
+        FPartSlotVisual& Visual = PhysicalPartSlots.AddDefaulted_GetRef();
+        Visual.Root = WidgetTree->FindWidget(FName(*FString::Printf(
+            TEXT("PartSlotRoot%d"), FlatSlotIndex)));
+        Visual.BaseImage = Cast<UImage>(WidgetTree->FindWidget(
+            FName(*FString::Printf(TEXT("PartBaseImage%d"), FlatSlotIndex))));
+        Visual.HealthFill = Cast<UProgressBar>(WidgetTree->FindWidget(
+            FName(*FString::Printf(TEXT("PartHealthBar%d"), FlatSlotIndex))));
+        Visual.KeyText = Cast<UTextBlock>(WidgetTree->FindWidget(
+            FName(*FString::Printf(TEXT("PartKeyText%d"), FlatSlotIndex))));
+        Visual.PartText = Cast<UTextBlock>(WidgetTree->FindWidget(
+            FName(*FString::Printf(TEXT("PartLabelText%d"), FlatSlotIndex))));
+        if (!Visual.Root || !Visual.BaseImage || !Visual.HealthFill
+            || !Visual.KeyText || !Visual.PartText)
+        {
+            return false;
+        }
+    }
+
+    return CachedHUDContainer && CachedStaminaProgressBar;
+}
+
+void UCMControlHUDWidget::BindStateDelegates()
+{
+    ACMControlBody* CurrentControlBody = ControlBody.Get();
+    ACMChimera* CurrentChimera = SharedChimera.Get();
+    if (!CurrentControlBody || !CurrentChimera)
     {
         return;
     }
 
-    const ACMControlBody* CurrentControlBody = ControlBody.Get();
-    const ACMChimera* SharedChimera = CurrentControlBody
-        ? CurrentControlBody->GetSharedChimera()
+    CurrentControlBody->OnControlSlotsChanged.AddUniqueDynamic(
+        this, &ThisClass::HandleControlSlotsChanged);
+    CurrentControlBody->OnControlInputChanged.AddUniqueDynamic(
+        this, &ThisClass::HandleControlInputChanged);
+    CurrentControlBody->OnPlayerStateChanged.AddUniqueDynamic(
+        this, &ThisClass::HandleControlPlayerStateChanged);
+    CurrentChimera->OnSegmentStatesChanged.AddUniqueDynamic(
+        this, &ThisClass::HandleSegmentStatesChanged);
+
+    RebindObservedPlayerState();
+
+    if (UAbilitySystemComponent* AbilitySystem =
+        CurrentChimera->GetAbilitySystemComponent())
+    {
+        StaminaChangedHandle = AbilitySystem
+            ->GetGameplayAttributeValueChangeDelegate(
+                UCMChimeraAttributeSet::GetStaminaAttribute())
+            .AddUObject(this, &ThisClass::HandleStaminaChanged);
+        MaxStaminaChangedHandle = AbilitySystem
+            ->GetGameplayAttributeValueChangeDelegate(
+                UCMChimeraAttributeSet::GetMaxStaminaAttribute())
+            .AddUObject(this, &ThisClass::HandleStaminaChanged);
+    }
+
+    RebindObservedSlotsAndParts();
+}
+
+void UCMControlHUDWidget::UnbindStateDelegates()
+{
+    if (ACMControlBody* CurrentControlBody = ControlBody.Get())
+    {
+        CurrentControlBody->OnControlSlotsChanged.RemoveDynamic(
+            this, &ThisClass::HandleControlSlotsChanged);
+        CurrentControlBody->OnControlInputChanged.RemoveDynamic(
+            this, &ThisClass::HandleControlInputChanged);
+        CurrentControlBody->OnPlayerStateChanged.RemoveDynamic(
+            this, &ThisClass::HandleControlPlayerStateChanged);
+    }
+    if (ACMChimera* CurrentChimera = SharedChimera.Get())
+    {
+        CurrentChimera->OnSegmentStatesChanged.RemoveDynamic(
+            this, &ThisClass::HandleSegmentStatesChanged);
+        if (UAbilitySystemComponent* AbilitySystem =
+            CurrentChimera->GetAbilitySystemComponent())
+        {
+            AbilitySystem->GetGameplayAttributeValueChangeDelegate(
+                UCMChimeraAttributeSet::GetStaminaAttribute())
+                .Remove(StaminaChangedHandle);
+            AbilitySystem->GetGameplayAttributeValueChangeDelegate(
+                UCMChimeraAttributeSet::GetMaxStaminaAttribute())
+                .Remove(MaxStaminaChangedHandle);
+        }
+    }
+    if (ACMPlayerState* PlayerState = ObservedPlayerState.Get())
+    {
+        PlayerState->OnPlayerColorChanged.RemoveDynamic(
+            this, &ThisClass::HandlePlayerColorChanged);
+    }
+
+    UnbindObservedSlotsAndParts();
+    StaminaChangedHandle.Reset();
+    MaxStaminaChangedHandle.Reset();
+    ObservedPlayerState.Reset();
+}
+
+void UCMControlHUDWidget::RebindObservedPlayerState()
+{
+    ACMControlBody* CurrentControlBody = ControlBody.Get();
+    ACMPlayerState* NewPlayerState = CurrentControlBody
+        ? CurrentControlBody->GetPlayerState<ACMPlayerState>()
         : nullptr;
-    if (!CurrentControlBody || !SharedChimera)
+    if (ObservedPlayerState.Get() == NewPlayerState)
     {
-        HUDContainer->SetVisibility(ESlateVisibility::Collapsed);
         return;
     }
 
-    HUDContainer->SetVisibility(ESlateVisibility::HitTestInvisible);
-    StaminaProgressBar->SetPercent(GetResourcePercent(
-        SharedChimera->GetStamina(),
-        SharedChimera->GetMaxStamina()
-    ));
+    if (ACMPlayerState* PreviousPlayerState = ObservedPlayerState.Get())
+    {
+        PreviousPlayerState->OnPlayerColorChanged.RemoveDynamic(
+            this, &ThisClass::HandlePlayerColorChanged);
+    }
+    ObservedPlayerState = NewPlayerState;
+    if (NewPlayerState)
+    {
+        NewPlayerState->OnPlayerColorChanged.AddUniqueDynamic(
+            this, &ThisClass::HandlePlayerColorChanged);
+    }
+}
 
+void UCMControlHUDWidget::RebindObservedSlotsAndParts()
+{
+    UnbindObservedSlotsAndParts();
+
+    ACMControlBody* CurrentControlBody = ControlBody.Get();
+    ACMChimera* CurrentChimera = SharedChimera.Get();
+    if (!CurrentControlBody || !CurrentChimera)
+    {
+        return;
+    }
+
+    for (int32 ControlIndex = 0;
+        ControlIndex < CMControl::MaxKeysPerPlayer;
+        ++ControlIndex)
+    {
+        const FCMPartSlotAddress Address =
+            CurrentControlBody->GetPartSlotAddressForControlSlot(ControlIndex);
+        UCMPartSlotComponent* PartSlot =
+            CurrentChimera->GetPartSlotComponent(Address);
+        if (!PartSlot)
+        {
+            continue;
+        }
+
+        PartSlot->OnAttachedPartChanged.AddUniqueDynamic(
+            this, &ThisClass::HandlePartAttachmentChanged);
+        ObservedPartSlots.AddUnique(PartSlot);
+
+        ACMPartActorBase* PartActor = Cast<ACMPartActorBase>(
+            PartSlot->GetAttachedPart());
+        if (PartActor && !ObservedParts.Contains(PartActor))
+        {
+            PartActor->OnHealthChanged.AddUniqueDynamic(
+                this, &ThisClass::HandlePartHealthChanged);
+            ObservedParts.Add(PartActor);
+        }
+    }
+}
+
+void UCMControlHUDWidget::UnbindObservedSlotsAndParts()
+{
+    for (const TWeakObjectPtr<UCMPartSlotComponent>& PartSlot
+        : ObservedPartSlots)
+    {
+        if (PartSlot.IsValid())
+        {
+            PartSlot->OnAttachedPartChanged.RemoveDynamic(
+                this, &ThisClass::HandlePartAttachmentChanged);
+        }
+    }
+    for (const TWeakObjectPtr<ACMPartActorBase>& Part : ObservedParts)
+    {
+        if (Part.IsValid())
+        {
+            Part->OnHealthChanged.RemoveDynamic(
+                this, &ThisClass::HandlePartHealthChanged);
+        }
+    }
+    ObservedPartSlots.Reset();
+    ObservedParts.Reset();
+}
+
+void UCMControlHUDWidget::RefreshAll()
+{
+    if (!CachedHUDContainer || !CachedStaminaProgressBar)
+    {
+        return;
+    }
+
+    const bool bHasState = ControlBody.IsValid() && SharedChimera.IsValid();
+    CachedHUDContainer->SetVisibility(bHasState
+        ? ESlateVisibility::HitTestInvisible
+        : ESlateVisibility::Collapsed);
+    if (!bHasState)
+    {
+        return;
+    }
+
+    RefreshStamina();
+    RefreshBodySegments();
+    RefreshAssignedParts();
+}
+
+void UCMControlHUDWidget::RefreshStamina()
+{
+    const ACMChimera* CurrentChimera = SharedChimera.Get();
+    if (CachedStaminaProgressBar && CurrentChimera)
+    {
+        CachedStaminaProgressBar->SetPercent(GetPercent(
+            CurrentChimera->GetStamina(), CurrentChimera->GetMaxStamina()));
+    }
+}
+
+void UCMControlHUDWidget::RefreshBodySegments()
+{
+    ACMControlBody* CurrentControlBody = ControlBody.Get();
+    ACMChimera* CurrentChimera = SharedChimera.Get();
+    if (!CurrentControlBody || !CurrentChimera)
+    {
+        return;
+    }
+
+    const int32 ActiveSegmentCount = FMath::Min(
+        CurrentChimera->GetActiveSegmentCount(), SegmentRows.Num());
     const TArray<FCMBodySegmentHealthState> SegmentStates =
-        SharedChimera->GetSegmentHealthStates();
+        CurrentChimera->GetSegmentHealthStates();
     const int32 OwnedSegmentIndex =
         CurrentControlBody->GetOwnedSegmentIndex();
-    for (int32 BodyIndex = 0; BodyIndex < 2; ++BodyIndex)
+    const ACMPlayerState* PlayerState = ObservedPlayerState.Get();
+    const FLinearColor PlayerColor = PlayerState
+        ? PlayerState->GetPlayerColor()
+        : FLinearColor(0.95f, 0.8f, 0.15f, 1.0f);
+
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < SegmentRows.Num();
+        ++SegmentIndex)
     {
-        const int32 SegmentIndex = OwnedSegmentIndex + BodyIndex;
+        FSegmentRowVisual& Row = SegmentRows[SegmentIndex];
+        const bool bActive = SegmentIndex < ActiveSegmentCount;
+        Row.Root->SetVisibility(bActive
+            ? ESlateVisibility::HitTestInvisible
+            : ESlateVisibility::Collapsed);
+        if (!bActive)
+        {
+            continue;
+        }
+
+        const bool bFirstOwned = SegmentIndex == OwnedSegmentIndex;
+        const bool bSecondOwned = SegmentIndex == OwnedSegmentIndex + 1;
+        const bool bOwned = bFirstOwned || bSecondOwned;
         const FCMBodySegmentHealthState* SegmentState =
             SegmentStates.IsValidIndex(SegmentIndex)
                 ? &SegmentStates[SegmentIndex]
                 : nullptr;
-        BodyHealthBars[BodyIndex]->SetPercent(SegmentState
-            ? GetResourcePercent(
-                SegmentState->Health, SegmentState->MaxHealth)
+        const bool bDead = SegmentState && SegmentState->bDead;
+        Row.BodyBorder->SetBrushColor(bDead
+            ? DeadSegmentColor
+            : bOwned
+                ? PlayerColor
+                : FLinearColor(0.22f, 0.22f, 0.22f, 0.9f));
+        Row.BodyHealthFill->SetPercent(bOwned && SegmentState
+            ? GetPercent(SegmentState->Health, SegmentState->MaxHealth)
             : 0.0f);
+        Row.BodyControlText->SetStrikeBrush(FSlateBrush());
+        Row.BodyControlText->SetText(bFirstOwned
+            ? LOCTEXT("QWBody", "Q/W")
+            : bSecondOwned
+                ? LOCTEXT("ERBody", "E/R")
+                : FText::GetEmpty());
+        Row.BodyControlText->SetRenderOpacity(bDead ? 0.35f : 1.0f);
+        Row.BodyStrikeLine->SetVisibility(bOwned && bDead
+            ? ESlateVisibility::HitTestInvisible
+            : ESlateVisibility::Collapsed);
     }
-    const ACMPlayerState* PlayerState = GetOwningPlayer()
-        ? GetOwningPlayer()->GetPlayerState<ACMPlayerState>()
-        : nullptr;
-    const FLinearColor PlayerColor = PlayerState
-        ? PlayerState->GetPlayerColor()
-        : FLinearColor::White;
+}
 
-    for (int32 SlotIndex = 0;
-        SlotIndex < CMControl::MaxKeysPerPlayer;
-        ++SlotIndex)
+void UCMControlHUDWidget::RefreshAssignedParts()
+{
+    ACMControlBody* CurrentControlBody = ControlBody.Get();
+    ACMChimera* CurrentChimera = SharedChimera.Get();
+    if (!CurrentControlBody || !CurrentChimera)
     {
-        const FCMPartSlotAddress SlotAddress =
-            CurrentControlBody->GetPartSlotAddressForControlSlot(SlotIndex);
-        const bool bAssigned = CMControl::IsValidPartSlot(SlotAddress);
-        const bool bEnabled = bAssigned
-            && CurrentControlBody->IsControlSlotEnabled(SlotIndex);
-        const bool bPressed = bEnabled
-            && SharedChimera->IsPartSlotPressed(SlotAddress);
+        return;
+    }
 
-        const UCMPartSlotComponent* PartSlot = bAssigned
-            ? SharedChimera->GetPartSlotComponent(SlotAddress)
-            : nullptr;
-        const ACMPartActorBase* PartActor = PartSlot
-            ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
-            : nullptr;
-        PartHealthBars[SlotIndex]->SetPercent(PartActor
-            ? GetResourcePercent(
-                PartActor->GetHealth(), PartActor->GetMaxHealth())
-            : 0.0f);
+    for (FPartSlotVisual& Visual : PhysicalPartSlots)
+    {
+        ResetPartSlotVisual(Visual);
+    }
 
-        FLinearColor CardColor = DisabledCardColor;
-        if (bEnabled)
+    static const TCHAR* KeyNames[] = {
+        TEXT("Q"), TEXT("W"), TEXT("E"), TEXT("R")
+    };
+    const int32 ActiveSegmentCount =
+        CurrentChimera->GetActiveSegmentCount();
+    for (int32 ControlIndex = 0;
+        ControlIndex < CMControl::MaxKeysPerPlayer;
+        ++ControlIndex)
+    {
+        const FCMPartSlotAddress Address =
+            CurrentControlBody->GetPartSlotAddressForControlSlot(ControlIndex);
+        if (!CMControl::IsValidPartSlot(Address, ActiveSegmentCount))
         {
-            CardColor = PlayerColor;
-            CardColor.A = bPressed ? PressedOpacity : EnabledOpacity;
-        }
-        ControlSlotBorders[SlotIndex]->SetBrushColor(CardColor);
-
-        if (!bAssigned)
-        {
-            AssignmentTexts[SlotIndex]->SetText(
-                LOCTEXT("Unassigned", "미배정"));
             continue;
         }
 
-        const FText SideText = CMControl::IsLeftPartSlot(SlotAddress)
-            ? LOCTEXT("LeftSide", "왼쪽")
-            : LOCTEXT("RightSide", "오른쪽");
-        AssignmentTexts[SlotIndex]->SetText(FText::Format(
-            LOCTEXT("AssignmentFormat", "몸통 {0} · {1}"),
-            FText::AsNumber(SlotAddress.SegmentIndex + 1),
-            SideText
-        ));
+        const int32 FlatSlotIndex = CMControl::ToFlatPartSlotIndex(Address);
+        if (!PhysicalPartSlots.IsValidIndex(FlatSlotIndex))
+        {
+            continue;
+        }
+
+        FPartSlotVisual& Visual = PhysicalPartSlots[FlatSlotIndex];
+        Visual.Root->SetVisibility(ESlateVisibility::HitTestInvisible);
+        Visual.KeyText->SetText(FText::FromString(KeyNames[ControlIndex]));
+        Visual.KeyText->SetColorAndOpacity(
+            FSlateColor(CurrentControlBody->IsControlSlotEnabled(ControlIndex)
+                ? IdleControlKeyColor
+                : DisabledControlKeyColor));
+
+        const UCMPartSlotComponent* PartSlot =
+            CurrentChimera->GetPartSlotComponent(Address);
+        const ACMPartActorBase* PartActor = PartSlot
+            ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
+            : nullptr;
+        UTexture2D* PartTexture = GetPartTexture(PartActor);
+        const FVector2D PartImageScale = CMControl::IsRightPartSlot(Address)
+            ? FVector2D(-1.0f, 1.0f)
+            : FVector2D(1.0f, 1.0f);
+        Visual.BaseImage->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+        Visual.BaseImage->SetRenderScale(PartImageScale);
+        Visual.HealthFill->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+        Visual.HealthFill->SetRenderScale(PartImageScale);
+        Visual.BaseImage->SetBrushFromTexture(PartTexture, true);
+        Visual.BaseImage->SetVisibility(PartTexture
+            ? ESlateVisibility::HitTestInvisible
+            : ESlateVisibility::Collapsed);
+        FProgressBarStyle HealthStyle = Visual.HealthFill->GetWidgetStyle();
+        HealthStyle.SetBackgroundImage(MakeSolidBrush(FLinearColor::Transparent));
+        HealthStyle.SetFillImage(MakeTextureBrush(PartTexture));
+        Visual.HealthFill->SetWidgetStyle(HealthStyle);
+        Visual.HealthFill->SetPercent(PartActor
+            ? GetPercent(PartActor->GetHealth(), PartActor->GetMaxHealth())
+            : 0.0f);
+        Visual.HealthFill->SetVisibility(PartTexture
+            ? ESlateVisibility::HitTestInvisible
+            : ESlateVisibility::Collapsed);
+        Visual.PartText->SetText(GetPartLabel(PartActor));
+        Visual.Root->SetRenderOpacity(1.0f);
     }
+}
+
+void UCMControlHUDWidget::ResetPartSlotVisual(
+    FPartSlotVisual& Visual
+)
+{
+    Visual.Root->SetVisibility(ESlateVisibility::Hidden);
+    Visual.Root->SetRenderTranslation(FVector2D::ZeroVector);
+    Visual.Root->SetRenderOpacity(1.0f);
+}
+
+void UCMControlHUDWidget::RefreshPartHealth()
+{
+    ACMControlBody* CurrentControlBody = ControlBody.Get();
+    ACMChimera* CurrentChimera = SharedChimera.Get();
+    if (!CurrentControlBody || !CurrentChimera)
+    {
+        return;
+    }
+
+    for (int32 ControlIndex = 0;
+        ControlIndex < CMControl::MaxKeysPerPlayer;
+        ++ControlIndex)
+    {
+        const FCMPartSlotAddress Address =
+            CurrentControlBody->GetPartSlotAddressForControlSlot(ControlIndex);
+        if (!CMControl::IsValidPartSlot(
+                Address, CurrentChimera->GetActiveSegmentCount()))
+        {
+            continue;
+        }
+
+        const int32 FlatSlotIndex = CMControl::ToFlatPartSlotIndex(Address);
+        if (!PhysicalPartSlots.IsValidIndex(FlatSlotIndex))
+        {
+            continue;
+        }
+
+        const UCMPartSlotComponent* PartSlot =
+            CurrentChimera->GetPartSlotComponent(Address);
+        const ACMPartActorBase* PartActor = PartSlot
+            ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
+            : nullptr;
+        PhysicalPartSlots[FlatSlotIndex].HealthFill->SetPercent(PartActor
+            ? GetPercent(PartActor->GetHealth(), PartActor->GetMaxHealth())
+            : 0.0f);
+    }
+}
+
+void UCMControlHUDWidget::SetControlSlotHighlighted(
+    int32 ControlIndex,
+    bool bPressed
+)
+{
+    ACMControlBody* CurrentControlBody = ControlBody.Get();
+    ACMChimera* CurrentChimera = SharedChimera.Get();
+    if (!CurrentControlBody || !CurrentChimera)
+    {
+        return;
+    }
+
+    const FCMPartSlotAddress Address =
+        CurrentControlBody->GetPartSlotAddressForControlSlot(ControlIndex);
+    if (!CMControl::IsValidPartSlot(
+            Address, CurrentChimera->GetActiveSegmentCount()))
+    {
+        return;
+    }
+    const int32 FlatSlotIndex = CMControl::ToFlatPartSlotIndex(Address);
+    if (!PhysicalPartSlots.IsValidIndex(FlatSlotIndex))
+    {
+        return;
+    }
+
+    PhysicalPartSlots[FlatSlotIndex].Root->SetRenderTranslation(bPressed
+        ? FVector2D(0.0f, -7.0f)
+        : FVector2D::ZeroVector);
+    PhysicalPartSlots[FlatSlotIndex].Root->SetRenderOpacity(1.0f);
+    PhysicalPartSlots[FlatSlotIndex].KeyText->SetColorAndOpacity(
+        FSlateColor(bPressed
+            ? FLinearColor::White
+            : IdleControlKeyColor));
+}
+
+void UCMControlHUDWidget::HandleControlSlotsChanged()
+{
+    RebindObservedPlayerState();
+    RebindObservedSlotsAndParts();
+    RefreshBodySegments();
+    RefreshAssignedParts();
+}
+
+void UCMControlHUDWidget::HandleControlInputChanged(
+    int32 SlotIndex,
+    bool bPressed
+)
+{
+    SetControlSlotHighlighted(SlotIndex, bPressed);
+}
+
+void UCMControlHUDWidget::HandleControlPlayerStateChanged()
+{
+    RebindObservedPlayerState();
+    RefreshBodySegments();
+}
+
+void UCMControlHUDWidget::HandleSegmentStatesChanged()
+{
+    RefreshBodySegments();
+}
+
+void UCMControlHUDWidget::HandlePartAttachmentChanged(
+    UCMPartSlotComponent* PartSlot,
+    AActor* AttachedPart
+)
+{
+    RebindObservedSlotsAndParts();
+    RefreshAssignedParts();
+}
+
+void UCMControlHUDWidget::HandlePartHealthChanged(
+    float PreviousHealth,
+    float CurrentHealth,
+    float MaxHealth
+)
+{
+    RefreshPartHealth();
+}
+
+void UCMControlHUDWidget::HandlePlayerColorChanged()
+{
+    RefreshBodySegments();
+}
+
+void UCMControlHUDWidget::HandleStaminaChanged(
+    const FOnAttributeChangeData& ChangeData
+)
+{
+    RefreshStamina();
+}
+
+UTexture2D* UCMControlHUDWidget::GetPartTexture(
+    const ACMPartActorBase* PartActor
+) const
+{
+    if (!PartActor)
+    {
+        return nullptr;
+    }
+
+    switch (ICMPartInterface::Execute_GetPartType(
+        const_cast<ACMPartActorBase*>(PartActor)))
+    {
+    case ECMPartSlotType::Head:
+        return HeadPartTexture;
+    case ECMPartSlotType::Arm:
+        return ArmPartTexture;
+    case ECMPartSlotType::Leg:
+        return LegPartTexture;
+    default:
+        return nullptr;
+    }
+}
+
+FText UCMControlHUDWidget::GetPartLabel(
+    const ACMPartActorBase* PartActor
+) const
+{
+    return PartActor
+        ? FText::Format(
+            LOCTEXT("PartTier", "T{0}"),
+            FText::AsNumber(PartActor->GetTierLevel()))
+        : FText::GetEmpty();
 }
 
 #undef LOCTEXT_NAMESPACE
