@@ -2,10 +2,29 @@
 
 #include "Net/UnrealNetwork.h"
 #include "Stage/Trigger/CMPowerCableActor.h"
+#include "Stage/Trigger/Subsystem/CMPowerSubsystem.h"
 
 UCMPowerSourceComponent::UCMPowerSourceComponent()
 {
     SetIsReplicatedByDefault(true);
+}
+
+void UCMPowerSourceComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetSubsystem<UCMPowerSubsystem>()->RegisterSource(this);
+    }
+}
+
+void UCMPowerSourceComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetSubsystem<UCMPowerSubsystem>()->UnregisterSource(this);
+    }
+    Super::EndPlay(EndPlayReason);
 }
 
 bool UCMPowerSourceComponent::TryConnectCable(
@@ -51,9 +70,47 @@ void UCMPowerSourceComponent::DisconnectCable(ACMPowerCableActor* Cable)
     GetOwner()->ForceNetUpdate();
 }
 
+void UCMPowerSourceComponent::SetPowerEnabled(bool bEnabled)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority()
+        || bPowerEnabled == bEnabled)
+    {
+        return;
+    }
+
+    bPowerEnabled = bEnabled;
+    NotifyPowerStateChanged();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetSubsystem<UCMPowerSubsystem>()->RefreshPowerState();
+    }
+    GetOwner()->ForceNetUpdate();
+}
+
+void UCMPowerSourceComponent::NotifyPowerStateChanged()
+{
+    OnPowerStateChanged.Broadcast(bPowerEnabled);
+    for (ACMPowerCableActor* Cable : ConnectedCables)
+    {
+        if (IsValid(Cable))
+        {
+            Cable->NotifyPowerStateChanged();
+        }
+    }
+}
+
 void UCMPowerSourceComponent::OnRep_ConnectedCables()
 {
     OnConnectionChanged.Broadcast(!ConnectedCables.IsEmpty());
+}
+
+void UCMPowerSourceComponent::OnRep_PowerEnabled()
+{
+    NotifyPowerStateChanged();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetSubsystem<UCMPowerSubsystem>()->RefreshPowerState();
+    }
 }
 
 void UCMPowerSourceComponent::GetLifetimeReplicatedProps(
@@ -62,4 +119,5 @@ void UCMPowerSourceComponent::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(UCMPowerSourceComponent, ConnectedCables);
+    DOREPLIFETIME(UCMPowerSourceComponent, bPowerEnabled);
 }

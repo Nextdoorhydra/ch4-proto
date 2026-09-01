@@ -2,10 +2,29 @@
 
 #include "Net/UnrealNetwork.h"
 #include "Stage/Trigger/CMPowerCableActor.h"
+#include "Stage/Trigger/Subsystem/CMPowerSubsystem.h"
 
 UCMPowerSocketComponent::UCMPowerSocketComponent()
 {
     SetIsReplicatedByDefault(true);
+}
+
+void UCMPowerSocketComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetSubsystem<UCMPowerSubsystem>()->RegisterSocket(this);
+    }
+}
+
+void UCMPowerSocketComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetSubsystem<UCMPowerSubsystem>()->UnregisterSocket(this);
+    }
+    Super::EndPlay(EndPlayReason);
 }
 
 bool UCMPowerSocketComponent::TryConnectCable(
@@ -61,9 +80,23 @@ void UCMPowerSocketComponent::OnRep_ConnectedCables()
 
 bool UCMPowerSocketComponent::IsPowered() const
 {
+    TSet<const UCMPowerSocketComponent*> VisitedSockets;
+    return IsPowered(VisitedSockets);
+}
+
+bool UCMPowerSocketComponent::IsPowered(
+    TSet<const UCMPowerSocketComponent*>& VisitedSockets
+) const
+{
+    if (VisitedSockets.Contains(this))
+    {
+        return false;
+    }
+
+    VisitedSockets.Add(this);
     for (const ACMPowerCableActor* Cable : ConnectedCables)
     {
-        if (Cable && Cable->IsPowerActive())
+        if (Cable && Cable->IsTransmittingPower(VisitedSockets))
         {
             return true;
         }
@@ -73,12 +106,27 @@ bool UCMPowerSocketComponent::IsPowered() const
 
 void UCMPowerSocketComponent::NotifyPowerStateChanged()
 {
-    OnPowerStateChanged.Broadcast(IsPowered());
+    TSet<const UCMPowerSocketComponent*> VisitedSockets;
+    NotifyPowerStateChanged(VisitedSockets);
+}
+
+void UCMPowerSocketComponent::NotifyPowerStateChanged(
+    TSet<const UCMPowerSocketComponent*>& VisitedSockets
+)
+{
+    if (VisitedSockets.Contains(this))
+    {
+        return;
+    }
+
+    VisitedSockets.Add(this);
+    TSet<const UCMPowerSocketComponent*> PowerVisitedSockets;
+    OnPowerStateChanged.Broadcast(IsPowered(PowerVisitedSockets));
     for (ACMPowerCableActor* Cable : PowerOutputCables)
     {
         if (IsValid(Cable))
         {
-            Cable->NotifyPowerStateChanged();
+            Cable->NotifyPowerStateChanged(VisitedSockets);
         }
     }
 }

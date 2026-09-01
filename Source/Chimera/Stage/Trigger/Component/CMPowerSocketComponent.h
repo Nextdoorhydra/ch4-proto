@@ -29,10 +29,11 @@ public:
     void DisconnectCable(ACMPowerCableActor* Cable);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsConnected() const { return !ConnectedCables.IsEmpty(); }
+    bool IsPhysicallyConnected() const { return !ConnectedCables.IsEmpty(); }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     bool IsPowered() const;
+    bool IsPowered(TSet<const UCMPowerSocketComponent*>& VisitedSockets) const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     int32 GetConnectedCableCount() const { return ConnectedCables.Num(); }
@@ -62,6 +63,9 @@ public:
     FCMPowerSocketConnectionChanged OnPowerStateChanged;
 
 protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
@@ -88,6 +92,7 @@ protected:
     void OnRep_ConnectedCables();
 
     void NotifyPowerStateChanged();
+    void NotifyPowerStateChanged(TSet<const UCMPowerSocketComponent*>& VisitedSockets);
 
     void AddPowerOutputCable(ACMPowerCableActor* Cable);
     void RemovePowerOutputCable(ACMPowerCableActor* Cable);
@@ -97,4 +102,5 @@ protected:
 
     friend class ACMPowerCableActor;
     friend class ACMPowerTriggerBase;
+    friend class UCMPowerSubsystem;
 };

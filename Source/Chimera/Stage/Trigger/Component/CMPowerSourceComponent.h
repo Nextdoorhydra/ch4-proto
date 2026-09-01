@@ -29,7 +29,13 @@ public:
     void DisconnectCable(ACMPowerCableActor* Cable);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsConnected() const { return !ConnectedCables.IsEmpty(); }
+    bool IsPhysicallyConnected() const { return !ConnectedCables.IsEmpty(); }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    bool IsProvidingPower() const { return bPowerEnabled; }
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
+    void SetPowerEnabled(bool bEnabled);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     ACMPowerCableActor* GetConnectedCable() const
@@ -52,7 +58,13 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Power")
     FCMPowerSourceConnectionChanged OnConnectionChanged;
 
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Power")
+    FCMPowerSourceConnectionChanged OnPowerStateChanged;
+
 protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
@@ -77,6 +89,15 @@ protected:
 
     UFUNCTION()
     void OnRep_ConnectedCables();
+
+    UFUNCTION()
+    void OnRep_PowerEnabled();
+
+    void NotifyPowerStateChanged();
+
+    UPROPERTY(ReplicatedUsing = OnRep_PowerEnabled, EditAnywhere,
+        BlueprintReadOnly, Category = "Chimera|Power")
+    bool bPowerEnabled = true;
 
     friend class ACMPowerCableActor;
 };

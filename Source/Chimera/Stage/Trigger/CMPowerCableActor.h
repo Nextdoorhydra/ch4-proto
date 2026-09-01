@@ -73,7 +73,7 @@ public:
     bool IsGrabbed() const { return Grabber != nullptr; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsConnected() const
+    bool IsFullyConnected() const
     {
         return (ConnectedSource != nullptr || ConnectedSourceSocket != nullptr)
             && ConnectedSocket != nullptr;
@@ -92,7 +92,8 @@ public:
     }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsPowerActive() const;
+    bool IsTransmittingPower() const;
+    bool IsTransmittingPower(TSet<const UCMPowerSocketComponent*>& VisitedSockets) const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FName GetPowerChannel() const { return PowerChannel; }
@@ -127,6 +128,7 @@ public:
     void SetConnectedSourceSocket(UCMPowerSocketComponent* Socket);
 
     void NotifyPowerStateChanged();
+    void NotifyPowerStateChanged(TSet<const UCMPowerSocketComponent*>& VisitedSockets);
 
     bool IsSourceAtStart() const { return bSourceAtStart; }
     bool IsSocketAtStart() const { return bSocketAtStart; }
@@ -161,12 +163,12 @@ protected:
     bool bAutoConnectOnSpawn = false;
 
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Power|Spawn",
-        meta = (EditCondition = "bAutoConnectOnSpawn"))
-    TObjectPtr<AActor> SpawnConnectionActorA;
+        meta = (EditCondition = "bAutoConnectOnSpawn", FormerlySerializedAs = "SpawnConnectionActorA"))
+    TObjectPtr<AActor> InputActor;
 
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Power|Spawn",
-        meta = (EditCondition = "bAutoConnectOnSpawn"))
-    TObjectPtr<AActor> SpawnConnectionActorB;
+        meta = (EditCondition = "bAutoConnectOnSpawn", FormerlySerializedAs = "SpawnConnectionActorB"))
+    TObjectPtr<AActor> OutputActor;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Override")
@@ -295,6 +297,7 @@ protected:
     void EnsureCableMeshCount(int32 DesiredCount, UStaticMesh* Mesh);
     void InitializeRope();
     void SimulateRope(float DeltaSeconds);
+    void WakeRopeSimulation();
     int32 GetVisualSegmentCount() const;
     float GetCableSag() const;
     float GetCableThicknessScale() const;
