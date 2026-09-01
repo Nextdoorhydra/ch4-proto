@@ -25,6 +25,7 @@ public class UI : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"GameplayAbilities",
 			"InputCore",
 			"SlateCore"
 		});

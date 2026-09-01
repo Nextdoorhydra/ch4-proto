@@ -58,3 +58,11 @@ private:
     TMap<TWeakObjectPtr<ACMChimera>, FTrackedChimera> TrackedChimeras;
     FTimerHandle PeriodicTimerHandle;
 };
+
+namespace CMObstacleEffectDataNames
+{
+    CHIMERA_API extern const FName Damage;
+    CHIMERA_API extern const FName Duration;
+    CHIMERA_API extern const FName PrimaryStatusValue;
+    CHIMERA_API extern const FName SecondaryStatusValue;
+}

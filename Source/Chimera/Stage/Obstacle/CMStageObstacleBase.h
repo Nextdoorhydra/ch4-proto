@@ -31,6 +31,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Obstacle")
     bool IsObstacleActive() const { return IsElementActive(); }
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Obstacle|Balance")
+    FCMResolvedObstacleBalance GetResolvedObstacleBalance() const
+    {
+        return ResolvedObstacleBalance;
+    }
+
 protected:
     virtual void BeginPlay() override;
     virtual void HandleElementActiveChanged_Implementation(bool bIsActive) override;
@@ -55,16 +61,26 @@ protected:
 
     // 접촉한 팔과 다리에 코드로 적용할 내구도 및 상태 설정
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Obstacle")
+        Category = "Chimera|Obstacle", meta = (DisplayName = "Part Application"))
     FCMPartObstacleEffectConfig PartEffect;
 
     // 키메라 전체 ASC에 적용할 GameplayEffect 설정
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Obstacle")
+        Category = "Chimera|Obstacle", meta = (DisplayName = "Chimera Application"))
     FCMChimeraObstacleEffectConfig ChimeraEffect;
 
+    // 피해·상태 표 선택과 인스턴스별 Custom 오버라이드
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Obstacle|Balance")
+    FCMObstacleBalanceSelection BalanceSelection;
+
 private:
+    void ResolveBalance();
+    void ApplyResolvedBalance();
     void ApplyComponentActiveState(bool bIsActive);
     void ConfigureDirectEffects();
     void ResetMotionComponents();
+
+    UPROPERTY(Transient)
+    FCMResolvedObstacleBalance ResolvedObstacleBalance;
 };

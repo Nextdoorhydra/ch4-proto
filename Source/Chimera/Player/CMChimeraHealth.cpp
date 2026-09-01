@@ -37,6 +37,7 @@ void ACMChimera::ApplyDamageToSegment(
         0.0f
     );
     SegmentState.bDead = SegmentState.Health <= 0.0f;
+    OnSegmentStatesChanged.Broadcast();
 
     UE_LOG(LogChimeraLineBody, Log,
         TEXT("[Segment Damage] Segment=%d Damage=%.1f Health=%.1f -> %.1f"),
@@ -160,6 +161,7 @@ void ACMChimera::RestoreForCheckpointRespawn()
         SegmentState.bDead = false;
     }
     bAllSegmentsDeathNotified = false;
+    OnSegmentStatesChanged.Broadcast();
 
     for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
     {
@@ -201,11 +203,14 @@ void ACMChimera::InitializeSegmentHealth(float SegmentMaxHealth)
         TEXT("[CSV -> Segments] Initialized %d segments with %.1f HP each."),
         SegmentCount, SegmentMaxHealth);
 
+    OnSegmentStatesChanged.Broadcast();
     ForceNetUpdate();
 }
 
 void ACMChimera::OnRep_SegmentHealthStates()
 {
+    OnSegmentStatesChanged.Broadcast();
+
     UE_LOG(LogChimeraLineBody, Log,
         TEXT("[Client Replication] Received %d segment health states."),
         SegmentHealthStates.Num());

@@ -29,10 +29,13 @@ class CHIMERA_API UCMStageElementComponent : public UActorComponent
 public:
     UCMStageElementComponent();
 
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Stage")
+    // PuzzleController 직접 참조만 사용하면 비워도 된다.
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Stage",
+        meta = (ToolTip = "Optional. Required only when addressed by StageDirector, Trigger TargetActor, or Sequence TargetPlacementId."))
     FName PlacementId;
 
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Stage")
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Stage",
+        meta = (ToolTip = "Optional. Add tags only when this element must receive StageDirector group commands."))
     FGameplayTagContainer GroupTags;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Stage")
@@ -57,6 +60,11 @@ public:
         FGameplayTag CommandTag);
 
     bool CanExecuteOnCurrentMachine() const;
+
+    ACMStageDirector* GetRegisteredDirector() const
+    {
+        return RegisteredDirector.Get();
+    }
 
 protected:
     virtual void BeginPlay() override;

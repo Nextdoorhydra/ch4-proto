@@ -1,6 +1,6 @@
 # Chimera 장애물·버튼·퍼즐 구성 가이드
 
-기준: 2026-08-31 작업 트리의 C++ 구현. BP에 저장된 오버라이드는 코드 기본값과 다를 수 있다.
+기준: 2026-09-01 작업 트리의 C++ 구현. BP에 저장된 오버라이드는 코드 기본값과 다를 수 있다.
 이 문서는 기존 Soft ObstacleDefinition 제작 절차를 대체한다.
 
 UI 담당자용 함수·이벤트·무게 조회 계약은 [버튼 UI 연동 가이드](Chimera_Button_UI_Integration.md)를 참고한다.
@@ -20,9 +20,9 @@ UI 담당자용 함수·이벤트·무게 조회 계약은 [버튼 UI 연동 가
 
 ### 장애물 제작 원칙
 
-장애물 BP 또는 배치 인스턴스에 메시·머티리얼·Niagara·사운드·효과 수치를 직접 설정한다. 장애물별 Definition, LoadGroupId, Schedule Catalog 등록은 현재 제작 절차에 없다. 룸 서브레벨과 참조 에셋을 함께 로드한다.
+장애물 BP 또는 배치 인스턴스에 메시·머티리얼·Niagara·사운드를 직접 설정하고, 피해·상태 수치는 Balance DataTable 행으로 선택한다. Custom Damage만 필요한 인스턴스는 피해 행 없이도 사용할 수 있다. 장애물별 Definition, LoadGroupId, Schedule Catalog 등록은 현재 제작 절차에 없다. 룸 서브레벨과 참조 에셋을 함께 로드한다.
 
-남아 있는 구형 Definition 에셋/호환 코드를 신규 제작 경로로 해석하지 않는다. 이 문서 작업은 기존 에셋을 삭제하지 않는다. Head/Vision 등 다른 기능의 PDA 비동기 로드까지 폐지한 것은 아니다. 구글시트 장애물 밸런스/스테이지 배율 설계도 구현 완료로 취급하지 않는다.
+남아 있는 `CMObstacleDefinition`, `CMObstacleDefinitionComponent`, `CMStatusZoneComponent`는 기존 BP 호환용 레거시다. 신규 장애물에는 추가하지 않는다. 기존 에셋 참조가 남아 있어 C++ 타입을 즉시 삭제하지 않았으며, 에셋 마이그레이션 후 별도 제거한다. Head/Vision 등 다른 기능의 PDA 비동기 로드까지 폐지한 것은 아니다. 장애물 Google Sheet 파서, Damage/Status DataTable, StageDirector 배율 적용은 구현되어 있다.
 
 ## 2. 상태와 제어 경로
 
@@ -35,7 +35,7 @@ UI 담당자용 함수·이벤트·무게 조회 계약은 [버튼 UI 연동 가
 
 Start Active는 초기 **장치 작동 요청**이다. 버튼의 초기 눌림이 아니다. 버튼 ON과 대상 레이저 OFF는 동시에 성립할 수 있다.
 
-장애물 비활성화는 부착된 Motion/Hazard/StatusZone/ChimeraEffectZone/ForceZone과 기본 Niagara·반복 사운드를 정지한다. 공통 베이스는 외형 메시를 무조건 숨기거나 물리 Block을 제거하지 않는다. 레이저 등 전용 구현이 추가 표시/판정을 제어한다.
+장애물 비활성화는 부착된 Motion/Hazard/레거시 StatusZone/ChimeraEffectZone/ForceZone과 기본 Niagara·반복 사운드를 정지한다. 공통 베이스는 외형 메시를 무조건 숨기거나 물리 Block을 제거하지 않는다. 레이저 등 전용 구현이 추가 표시/판정을 제어한다.
 
 ### 직접 대상과 ID
 
@@ -46,11 +46,13 @@ Start Active는 초기 **장치 작동 요청**이다. 버튼의 초기 눌림�
 | TargetGroup | StageDirector에서 GroupTags 검색 |
 | PuzzleController Commands.Targets | 대상 Element 함수 직접 호출 |
 
-**트리거 TargetActor는 직접 함수 호출이 아니다.** 이 경로는 트리거와 대상의 StageElement 등록이 필요하다. 월드에 StageDirector가 정확히 하나 있어야 하며, 빈 PlacementId는 등록 오류, 중복 ID는 뒤의 등록이 실패한다. 버튼·장애물 등 타입이 달라도 같은 등록 공간이다.
+**트리거 TargetActor는 직접 함수 호출이 아니다.** TargetActor에서 PlacementId를 읽은 뒤 StageDirector로 검색하므로 이 경로의 대상에는 고유 PlacementId가 필요하다. 월드에는 StageDirector가 정확히 하나 있어야 한다. 버튼·장애물 등 타입이 달라도 같은 ID 공간이며, 중복 ID를 가진 뒤의 요소는 등록에 실패한다.
 
-PuzzleController 직접 호출은 ID 검색에 의존하지 않지만, ID 누락에 따른 StageElement 등록 오류가 없어지는 것은 아니다. 레벨 인스턴스를 여러 번 배치해도 PlacementId가 자동으로 고유해진다고 가정하지 않는다.
+PuzzleController의 `Commands.Targets`는 Actor를 직접 호출하므로 Trigger와 대상 모두 PlacementId 없이 사용할 수 있다. 빈 PlacementId는 더 이상 등록 오류가 아니며 Stage Event 발행과 PuzzleController 직접 제어도 정상 작동한다. GroupTags만 설정한 요소는 PlacementId 없이 그룹 명령을 받을 수 있다.
 
-TargetActor/TargetPlacementId/TargetGroup은 대상 목록 세 개가 아니라 선택 경로다. 의도한 경로만 채운다. 작은 룸 내부 퍼즐은 PuzzleController 직접 참조가 단순하다. 일반 PointLight는 그대로 대상이 될 수 없고 StageElement 기반 장치가 필요하다.
+PlacementId는 StageDirector의 개별 대상 검색, Trigger의 직접 TargetActor 연결, Sequence DataTable의 TargetPlacementId를 사용할 때만 지정한다. 직접 참조 전용 요소에 의미 없는 ID를 만들지 않는다. 단, ID를 지정했다면 현재 StageDirector 안에서 반드시 고유해야 한다.
+
+TargetActor/TargetPlacementId/TargetGroup은 대상 목록 세 개가 아니라 Director 주소 기반 연결 방식이다. 룸 내부 퍼즐은 PuzzleController 직접 참조를 기본으로 사용하고 이 필드들은 비운다. 룸 경계를 넘는 Sequence나 간접 명령이 필요할 때만 ID 또는 Group을 사용한다. 일반 PointLight는 그대로 대상이 될 수 없고 StageElement 기반 장치가 필요하다.
 
 ## 3. 장애물 배치
 
@@ -58,10 +60,10 @@ TargetActor/TargetPlacementId/TargetGroup은 대상 목록 세 개가 아니라 
 2. PrimaryMesh/PrimaryEffect/LoopAudio에 에셋을 지정한다. 메시 기본 머티리얼이 맞으면 별도 덮어쓰기는 불필요하다.
 3. 일반 장애물에는 판정 볼륨과 필요한 Hazard/Motion/ForceZone 등을 추가한다. 전용 부모에 있는 컴포넌트는 중복 추가하지 않는다.
 4. 일반 볼륨 Begin/EndOverlap에서 기능 컴포넌트의 NotifyTargetEntered/Exited를 호출한다. Hazard에는 OtherActor와 **OtherComp 모두** 전달한다. 레이저는 부모 연결을 사용한다.
-5. 액터의 Part Effect/Chimera Effect, Start Active를 설정한다.
+5. Balance Selection에서 Damage/Status 행과 모드를 선택하고, Part Application/Chimera Application의 적용 정책과 주기, Start Active를 설정한다.
 6. 해당 룸 서브레벨을 Current로 선택하고 배치한 뒤 퍼즐에 연결한다.
 
-CMStageObstacleBase::ConfigureDirectEffects()는 BeginPlay에서 액터의 효과 설정을 부착 컴포넌트에 복사한다. **장애물 액터 설정이 원본**이다. Details에 비슷한 항목이 보여도 컴포넌트 런타임 복사본까지 따로 수정하지 않는다. 런타임 Details 수정의 자동 재적용·동기화는 보장하지 않는다.
+`CMStageObstacleBase`는 BeginPlay에서 표 행과 StageDirector 배율을 해석한 뒤 부착된 Hazard/ChimeraEffectZone에 런타임 설정을 전달한다. **Balance Selection과 적용 정책이 원본**이다. 컴포넌트 런타임 복사본은 별도로 수정하지 않는다. 런타임 Details 수정의 자동 재적용·동기화는 보장하지 않는다.
 
 ### 현재 Hazard 피해 계약
 
@@ -73,19 +75,15 @@ CMStageObstacleBase::ConfigureDirectEffects()는 BeginPlay에서 액터의 효�
 
 이름은 PartEffect지만 **현재 몸통 마디 피해도 같은 Damage/Policy 설정을 사용한다.** 이 마디 피해는 GE가 아니다. MovementMultiplier/BlocksAbility 같은 파츠 상태를 몸통에 적용하는 경로는 아니다. 바닥/공기 장판을 분리하는 별도 대상 정책 옵션이 있다고 가정하지 않는다.
 
-| Part Effect 설정 | 의미 |
+| Part Application 설정 | 의미 |
 |---|---|
-| Enabled | 효과 허용 |
 | Once On Enter | 최초 진입 한 번 |
-| Periodic While Overlapping | Period Seconds마다 적용. 첫 피해도 타이머 주기를 기다림 |
+| Periodic While Overlapping | 진입 즉시 한 번 적용하고, 이후 Period Seconds마다 반복 |
 | While Overlapping | 진입 시 피해/상태 적용, 마지막 이탈 시 발생원 상태 제거. 매 프레임 피해가 아님 |
 | Kill On Enter | 접촉 파츠 또는 마디에 처치량 피해 |
-| Damage Per Application | 한 번 적용할 피해량 |
-| Status Tag / Duration | 파츠 상태/지속시간. WhileOverlapping은 이탈 제거 방식 |
-| Movement Multiplier | 상태가 적용된 파츠의 이동 배율. 태그 없이 배율만 바꾸면 상태가 생성되지 않음 |
-| Blocks Ability | 해당 파츠 행동 차단 |
+| Period Seconds | Periodic 정책의 반복 간격. 상태 지속시간과 별개 |
 
-파츠는 Actor별, 몸통은 Hurtbox Component별 오버랩 횟수를 추적한다. ChimeraEffect는 별도로 공용 ASC에 GameplayEffect를 적용한다. 단순 접촉 피해를 위해 GE를 만들 필요는 없다.
+피해량과 파츠 상태/지속시간은 Balance Selection에서 결정된다. 파츠는 Actor별, 몸통은 Hurtbox Component별 오버랩 횟수를 추적한다. Chimera Application은 몸통 상태 행에만 공용 ASC GameplayEffect를 적용하며 Duration/Primary/Secondary 값만 전달한다. 피해는 Hazard의 직접 피해가 단일 소유자이므로 GE에서 중복 적용하지 않는다. 혼란·착란·실명·시야 감소의 실제 플레이 동작은 아직 후속 구현 범위다.
 
 ### Collision
 
@@ -96,7 +94,7 @@ CMStageObstacleBase::ConfigureDirectEffects()는 BeginPlay에서 액터의 효�
 
 ### 레이저·Motion·Force
 
-레이저는 CMLaserObstacleBase의 LaserStart/BeamCollision/Hazard/BeamPresentation을 사용한다. 로컬 X축 Beam 길이에 맞춰 MeshOriginalLength, 두께, MaxDistance, TraceChannel을 설정한다. 정적 벽이면 RefreshInterval=0, 움직이는 차폐물이 있으면 갱신 주기를 준다. CMLaserBeamComponent는 표현, Hazard는 피해 담당이다. 액터 PartEffect의 Enabled와 피해량/주기를 설정한다. BP 자체 Trace/Overlap 그래프와 부모 처리를 중복 실행하지 않는다.
+레이저는 CMLaserObstacleBase의 LaserStart/BeamCollision/Hazard/BeamPresentation을 사용한다. 로컬 X축 Beam 길이에 맞춰 MeshOriginalLength, 두께, MaxDistance, TraceChannel을 설정한다. 정적 벽이면 RefreshInterval=0, 움직이는 차폐물이 있으면 갱신 주기를 준다. CMLaserBeamComponent는 표현, Hazard는 피해 담당이다. Balance Selection의 피해 행/모드와 Part Application 주기를 설정한다. BP 자체 Trace/Overlap 그래프와 부모 처리를 중복 실행하지 않는다.
 
 UCMObstacleMotionComponent는 Rotation(도/초), Linear(거리까지 이동 후 정지), PingPong(왕복)을 지원한다. MotionAxis는 초기 배치 회전 기준이다. 서버 Transform 갱신과 장애물 이동 복제를 사용한다. StartMotion/StopMotion/ReverseMotion/ResetMotion은 이동만 제어하며, Element 명령은 위험 효과·연출까지 함께 제어한다.
 
@@ -148,15 +146,18 @@ UI는 공통 GetPresentationState()/OnPresentationStateChanged(State)를 사용�
 
 ## 5. PuzzleController
 
-서버가 Trigger 신호를 구독하고 Step을 실행한다. 등록한 Trigger의 직접 Target 명령은 비활성화해 이중 실행을 막는다. 같은 Trigger를 여러 컨트롤러가 소유하기보다 한 컨트롤러의 여러 채널에 등록한다.
+서버가 Trigger 신호를 구독하고 Step을 실행한다. 룸 퍼즐의 기본 연결 방식이며 Trigger와 Commands.Targets 모두 PlacementId가 필요 없다. 등록한 Trigger의 직접 Target 명령은 비활성화해 이중 실행을 막는다. 같은 Trigger를 여러 컨트롤러가 소유하기보다 한 컨트롤러의 여러 채널에 등록한다.
 
 | 옵션 | 의미 |
 |---|---|
 | Any | 수락 신호 하나마다 실행 |
 | All + Latched | 각 입력이 한 번씩 수락되면 실행 후 누적 기록 비움. 순서 검사 아님 |
 | All + Simultaneous | Activated/Deactivated로 추적한 상태 평가. Pulse 무시 |
+| Sequence | Expected Trigger Sequence에 등록한 순서가 정확히 완성되면 실행 |
 | All Active / All Inactive / All Equal | 모두 ON / 모두 OFF / 모두 같은 상태 |
 | Accepted Signal | PulseOrActivated / ActivatedOnly / DeactivatedOnly / Any |
+| Wrong Input Behavior | Ignore / Reset Sequence / Reset And Execute Failure Commands |
+| Failure Commands | 오입력 시 실행할 Activate / Deactivate / Toggle / Reset 명령 |
 | Steps → Commands | Activate / Deactivate / Toggle / Reset 및 대상 목록 |
 | Stop | 마지막 Step 후 종료 |
 | Loop | 마지막 Step 후 Step 0 |
@@ -172,10 +173,16 @@ Simultaneous는 수락 여부와 별개로 ON/OFF를 추적하지만 실행을 �
 | 모두 ON이면 레이저 OFF, 모두 OFF이면 ON | 채널 A: AllActive + ActivatedOnly → Deactivate / 채널 B: AllInactive + DeactivatedOnly → Activate. 둘 다 All + Simultaneous + Repeat Current |
 | 버튼과 압력판을 한 번씩 충족 | All + Latched + PulseOrActivated |
 | 매 입력마다 다른 대상 제어 | Any + Accepted Any; Step 0/1/2에 명령; Loop 또는 Stop |
+| A → C → B 순서로 눌러 문 열기 | Sequence; Expected Trigger Sequence=[A,C,B]; ActivatedOnly; Step 0에서 Door Deactivate; Stop |
+| 오답이면 버튼과 장치 초기화 | Sequence; Wrong Input Behavior=Reset And Execute Failure Commands; Failure Commands에 버튼/장치 Reset 등록 |
 
 두 채널 예시는 혼합 상태에서 이전 대상 상태를 유지한다. 하나라도 풀리면 즉시 켜는 조건과 다르다. 토글 버튼에서 PulseOrActivated만 받으면 해제 타격은 실행하지 않아 매 두 번째 입력이 빠진 것처럼 보인다.
 
-ResetPuzzle()은 채널 진행 기록과 선택한 대상들을 초기화하지만 Triggers 자체를 자동 Reset하지 않는다. 버튼/압력판 상태도 함께 초기화해야 한다. 정확한 입력 순서 검사·오답 처리는 별도 구현 대상이다.
+Sequence에서는 일반 Triggers 대신 Expected Trigger Sequence에 입력 Actor를 순서대로 직접 등록한다. 같은 Trigger를 여러 번 등록할 수 있다. Accepted Signal을 통과하지 못한 신호는 오답으로도 취급하지 않는다. Reset Sequence는 현재 오입력 신호를 새 순서의 첫 입력으로 재사용하지 않고 진행도를 0으로 돌린다.
+
+GetCurrentSequenceIndex(ChannelId)는 다음에 맞혀야 할 배열 인덱스, GetSequenceLength(ChannelId)는 전체 길이를 반환하므로 `현재 진행/전체 입력` UI에 사용할 수 있다. 진행도는 서버에서 판정하고 복제된다.
+
+ResetPuzzle()은 Step/Sequence 진행 기록과 선택한 성공·실패 명령 대상을 초기화하지만 Triggers 자체를 자동 Reset하지 않는다. 버튼/압력판 상태도 함께 초기화하려면 Commands 또는 Failure Commands에 해당 Trigger의 Reset을 명시한다.
 
 ## 6. 룸 스트리밍
 
@@ -194,7 +201,7 @@ ResetPuzzle()은 채널 진행 기록과 선택한 대상들을 초기화하지�
 ## 7. 확인 순서
 
 1. 서버 입력 → IsTriggered → 명령 전달 → IsObstacleActive 순으로 확인한다. Print만으로 대상 명령 성공을 판단하지 않는다.
-2. 직접 연결 오류: StageDirector 수, 빈/중복 PlacementId, 대상 ID, 명령 태그.
+2. Director 주소 연결 오류: StageDirector 수, 대상의 빈/중복 PlacementId, 대상 ID, 명령 태그. PuzzleController 직접 참조에서는 빈 ID를 오류로 보지 않는다.
 3. 압력판: 서버 OnPressureChanged의 무게/Pressed. 문턱을 넘었다면 대상 연결을 확인.
 4. 퍼즐: LogChimeraPuzzle의 [Puzzle Step Executed], Accepted Signal, End Behavior.
 5. 피해: 액터 Enabled, OtherComp, ChimeraHurtbox 채널, 서버 권한.

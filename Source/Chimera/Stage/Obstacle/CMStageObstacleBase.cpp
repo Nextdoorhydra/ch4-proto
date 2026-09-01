@@ -8,6 +8,11 @@
 #include "Stage/Obstacle/Component/CMHazardComponent.h"
 #include "Stage/Obstacle/Component/CMObstacleMotionComponent.h"
 #include "Stage/Obstacle/Component/CMStatusZoneComponent.h"
+#include "Parts/Core/CMPartStatusTags.h"
+#include "Stage/CMStageDirector.h"
+#include "Stage/CMStageElementComponent.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogChimeraObstacleBalance, Log, All);
 
 ACMStageObstacleBase::ACMStageObstacleBase()
 {
@@ -28,11 +33,144 @@ ACMStageObstacleBase::ACMStageObstacleBase()
     LoopAudio->bAutoActivate = false;
 }
 
-// BP 또는 배치 인스턴스에 직접 설정된 장애물 효과 준비
+// 배치 인스턴스의 밸런스를 해석하고 런타임 효과 컴포넌트 준비
 void ACMStageObstacleBase::BeginPlay()
 {
     Super::BeginPlay();
+    ResolveBalance();
+    ApplyResolvedBalance();
     ConfigureDirectEffects();
+}
+
+void ACMStageObstacleBase::ResolveBalance()
+{
+    ResolvedObstacleBalance = {};
+    const bool bHasDamageSelection = BalanceSelection.DamageBalanceTable
+        && !BalanceSelection.DamageBalanceRow.IsNone();
+    const bool bHasStatusSelection = BalanceSelection.StatusBalanceTable
+        && !BalanceSelection.StatusBalanceRow.IsNone();
+    const bool bHasCustomDamage = BalanceSelection.DamageMode
+        == ECMObstacleDamageMode::Custom;
+
+    if (!BalanceSelection.DamageBalanceRow.IsNone()
+        && !BalanceSelection.DamageBalanceTable)
+    {
+        UE_LOG(LogChimeraObstacleBalance, Error,
+            TEXT("Damage balance row is set without a table. Obstacle=%s Row=%s"),
+            *GetPathName(), *BalanceSelection.DamageBalanceRow.ToString());
+        return;
+    }
+    if (!BalanceSelection.StatusBalanceRow.IsNone()
+        && !BalanceSelection.StatusBalanceTable)
+    {
+        UE_LOG(LogChimeraObstacleBalance, Error,
+            TEXT("Status balance row is set without a table. Obstacle=%s Row=%s"),
+            *GetPathName(), *BalanceSelection.StatusBalanceRow.ToString());
+        return;
+    }
+    if (!bHasDamageSelection && !bHasStatusSelection && !bHasCustomDamage)
+    {
+        return;
+    }
+
+    const FCMObstacleDamageBalanceTableRow* DamageRow = nullptr;
+    if (bHasDamageSelection)
+    {
+        if (BalanceSelection.DamageBalanceTable->GetRowStruct()
+            != FCMObstacleDamageBalanceTableRow::StaticStruct())
+        {
+            UE_LOG(LogChimeraObstacleBalance, Error,
+                TEXT("Damage balance table has wrong row struct. Obstacle=%s Table=%s"),
+                *GetPathName(), *BalanceSelection.DamageBalanceTable->GetPathName());
+            return;
+        }
+        DamageRow = BalanceSelection.DamageBalanceTable
+            ->FindRow<FCMObstacleDamageBalanceTableRow>(
+                BalanceSelection.DamageBalanceRow,
+                TEXT("CMStageObstacleBase.DamageBalance"));
+        if (!DamageRow)
+        {
+            UE_LOG(LogChimeraObstacleBalance, Error,
+                TEXT("Damage balance row was not found. Obstacle=%s Row=%s"),
+                *GetPathName(), *BalanceSelection.DamageBalanceRow.ToString());
+            return;
+        }
+    }
+
+    const FCMObstacleStatusBalanceTableRow* StatusRow = nullptr;
+    if (bHasStatusSelection)
+    {
+        if (BalanceSelection.StatusBalanceTable->GetRowStruct()
+            != FCMObstacleStatusBalanceTableRow::StaticStruct())
+        {
+            UE_LOG(LogChimeraObstacleBalance, Error,
+                TEXT("Status balance table has wrong row struct. Obstacle=%s Table=%s"),
+                *GetPathName(), *BalanceSelection.StatusBalanceTable->GetPathName());
+            return;
+        }
+        StatusRow = BalanceSelection.StatusBalanceTable
+            ->FindRow<FCMObstacleStatusBalanceTableRow>(
+                BalanceSelection.StatusBalanceRow,
+                TEXT("CMStageObstacleBase.StatusBalance"));
+        if (!StatusRow)
+        {
+            UE_LOG(LogChimeraObstacleBalance, Error,
+                TEXT("Status balance row was not found. Obstacle=%s Row=%s"),
+                *GetPathName(), *BalanceSelection.StatusBalanceRow.ToString());
+            return;
+        }
+    }
+    const ACMStageDirector* Director = StageElement
+        ? StageElement->GetRegisteredDirector() : nullptr;
+    const float StageDamageMultiplier = Director
+        ? Director->GetObstacleDamageMultiplier() : 1.0f;
+    ResolvedObstacleBalance = CMObstacleBalance::Resolve(
+        DamageRow, StatusRow, BalanceSelection, StageDamageMultiplier);
+}
+
+void ACMStageObstacleBase::ApplyResolvedBalance()
+{
+    if (!ResolvedObstacleBalance.bValid)
+    {
+        return;
+    }
+
+    const bool bPartStatus =
+        ResolvedObstacleBalance.StatusEffect == ECMObstacleStatusEffect::PartSlowed
+        || ResolvedObstacleBalance.StatusEffect
+            == ECMObstacleStatusEffect::PartElectrified;
+    const bool bBodyStatus =
+        ResolvedObstacleBalance.StatusEffect == ECMObstacleStatusEffect::BodyConfused
+        || ResolvedObstacleBalance.StatusEffect
+            == ECMObstacleStatusEffect::BodyDelirious
+        || ResolvedObstacleBalance.StatusEffect
+            == ECMObstacleStatusEffect::BodyBlinded
+        || ResolvedObstacleBalance.StatusEffect
+            == ECMObstacleStatusEffect::BodyVisionReduced;
+    PartEffect.bEnabled = ResolvedObstacleBalance.Damage > 0.0f || bPartStatus;
+    PartEffect.DamagePerApplication = ResolvedObstacleBalance.Damage;
+    PartEffect.StatusDuration = ResolvedObstacleBalance.Duration;
+    PartEffect.StatusTag = FGameplayTag();
+    PartEffect.MovementMultiplier = 1.0f;
+    PartEffect.bBlocksAbility = false;
+
+    if (ResolvedObstacleBalance.StatusEffect == ECMObstacleStatusEffect::PartSlowed)
+    {
+        PartEffect.StatusTag = CMPartStatusTags::Slowed;
+        PartEffect.MovementMultiplier = ResolvedObstacleBalance.PrimaryStatusValue;
+    }
+    else if (ResolvedObstacleBalance.StatusEffect
+        == ECMObstacleStatusEffect::PartElectrified)
+    {
+        PartEffect.StatusTag = CMPartStatusTags::Electrified;
+        PartEffect.bBlocksAbility = true;
+    }
+
+    ChimeraEffect.bEnabled = bBodyStatus && ChimeraEffect.GameplayEffectClass;
+    ChimeraEffect.StatusDuration = ResolvedObstacleBalance.Duration;
+    ChimeraEffect.StatusEffect = ResolvedObstacleBalance.StatusEffect;
+    ChimeraEffect.PrimaryStatusValue = ResolvedObstacleBalance.PrimaryStatusValue;
+    ChimeraEffect.SecondaryStatusValue = ResolvedObstacleBalance.SecondaryStatusValue;
 }
 
 void ACMStageObstacleBase::ActivateObstacle()
@@ -134,7 +272,7 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
     HandleObstacleActiveStateChanged(bIsActive);
 }
 
-// 직접 지정된 효과 설정을 부착된 Hazard와 ChimeraEffectZone에 전달
+// 해석된 효과 설정을 부착된 Hazard와 ChimeraEffectZone에 전달
 void ACMStageObstacleBase::ConfigureDirectEffects()
 {
     TInlineComponentArray<UCMHazardComponent*> HazardComponents(this);

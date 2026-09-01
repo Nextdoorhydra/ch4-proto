@@ -14,6 +14,7 @@ void ACMStagePuzzleController::GetLifetimeReplicatedProps(
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ThisClass, CurrentStepIndices);
     DOREPLIFETIME(ThisClass, CompletedChannels);
+    DOREPLIFETIME(ThisClass, CurrentSequenceIndices);
 }
 
 // 서버에서 직접 참조한 Trigger를 구독하고 채널 런타임 상태 준비
@@ -29,7 +30,11 @@ void ACMStagePuzzleController::BeginPlay()
     SetTriggerDirectCommandsEnabled(false);
     for (const FCMPuzzleChannel& Channel : PuzzleChannels)
     {
-        for (ACMStageTriggerBase* Trigger : Channel.Triggers)
+        const TArray<TObjectPtr<ACMStageTriggerBase>>& ChannelTriggers =
+            Channel.TriggerCondition == ECMPuzzleTriggerCondition::Sequence
+                ? Channel.ExpectedTriggerSequence
+                : Channel.Triggers;
+        for (ACMStageTriggerBase* Trigger : ChannelTriggers)
         {
             if (IsValid(Trigger))
             {
@@ -48,7 +53,11 @@ void ACMStagePuzzleController::EndPlay(
     {
         for (const FCMPuzzleChannel& Channel : PuzzleChannels)
         {
-            for (ACMStageTriggerBase* Trigger : Channel.Triggers)
+            const TArray<TObjectPtr<ACMStageTriggerBase>>& ChannelTriggers =
+                Channel.TriggerCondition == ECMPuzzleTriggerCondition::Sequence
+                    ? Channel.ExpectedTriggerSequence
+                    : Channel.Triggers;
+            for (ACMStageTriggerBase* Trigger : ChannelTriggers)
             {
                 if (IsValid(Trigger))
                 {
@@ -86,6 +95,36 @@ int32 ACMStagePuzzleController::GetCurrentStepIndex(FName ChannelId) const
     return INDEX_NONE;
 }
 
+int32 ACMStagePuzzleController::GetCurrentSequenceIndex(FName ChannelId) const
+{
+    for (int32 ChannelIndex = 0;
+        ChannelIndex < PuzzleChannels.Num();
+        ++ChannelIndex)
+    {
+        if (PuzzleChannels[ChannelIndex].ChannelId == ChannelId)
+        {
+            return CurrentSequenceIndices.IsValidIndex(ChannelIndex)
+                ? CurrentSequenceIndices[ChannelIndex]
+                : INDEX_NONE;
+        }
+    }
+    return INDEX_NONE;
+}
+
+int32 ACMStagePuzzleController::GetSequenceLength(FName ChannelId) const
+{
+    for (const FCMPuzzleChannel& Channel : PuzzleChannels)
+    {
+        if (Channel.ChannelId == ChannelId)
+        {
+            return Channel.TriggerCondition == ECMPuzzleTriggerCondition::Sequence
+                ? Channel.ExpectedTriggerSequence.Num()
+                : 0;
+        }
+    }
+    return INDEX_NONE;
+}
+
 void ACMStagePuzzleController::HandleElementReset_Implementation()
 {
     Super::HandleElementReset_Implementation();
@@ -109,7 +148,7 @@ void ACMStagePuzzleController::HandleTriggerSignal(
         ChannelIndex < PuzzleChannels.Num();
         ++ChannelIndex)
     {
-        if (PuzzleChannels[ChannelIndex].Triggers.Contains(Trigger))
+        if (IsTriggerRegistered(PuzzleChannels[ChannelIndex], Trigger))
         {
             HandleChannelSignal(ChannelIndex, Trigger, Signal);
         }
@@ -150,6 +189,12 @@ void ACMStagePuzzleController::HandleChannelSignal(
     }
 
     const FCMPuzzleChannel& Channel = PuzzleChannels[ChannelIndex];
+    if (Channel.TriggerCondition == ECMPuzzleTriggerCondition::Sequence)
+    {
+        HandleSequenceSignal(ChannelIndex, Trigger, Signal);
+        return;
+    }
+
     if (Channel.TriggerCondition == ECMPuzzleTriggerCondition::Any)
     {
         if (IsSignalAccepted(Channel, Signal))
@@ -254,6 +299,84 @@ void ACMStagePuzzleController::HandleChannelSignal(
     }
 }
 
+// 유효 신호가 정확한 Trigger 순서를 따르는지 검사하고 완성 시 현재 Step 실행
+void ACMStagePuzzleController::HandleSequenceSignal(
+    int32 ChannelIndex,
+    ACMStageTriggerBase* Trigger,
+    ECMStageTriggerSignal Signal)
+{
+    if (!PuzzleChannels.IsValidIndex(ChannelIndex)
+        || !CurrentSequenceIndices.IsValidIndex(ChannelIndex))
+    {
+        return;
+    }
+
+    const FCMPuzzleChannel& Channel = PuzzleChannels[ChannelIndex];
+    if (!IsSignalAccepted(Channel, Signal)
+        || Channel.ExpectedTriggerSequence.IsEmpty())
+    {
+        return;
+    }
+
+    int32& SequenceIndex = CurrentSequenceIndices[ChannelIndex];
+    if (!Channel.ExpectedTriggerSequence.IsValidIndex(SequenceIndex))
+    {
+        SequenceIndex = 0;
+    }
+
+    ACMStageTriggerBase* ExpectedTrigger =
+        Channel.ExpectedTriggerSequence[SequenceIndex];
+    if (!IsValid(ExpectedTrigger))
+    {
+        UE_LOG(LogChimeraPuzzle, Error,
+            TEXT("[Puzzle Sequence Invalid] Controller=%s Channel=%s Index=%d has no Trigger"),
+            *GetName(), *Channel.ChannelId.ToString(), SequenceIndex);
+        return;
+    }
+
+    if (Trigger == ExpectedTrigger)
+    {
+        ++SequenceIndex;
+        if (SequenceIndex == Channel.ExpectedTriggerSequence.Num())
+        {
+            SequenceIndex = 0;
+            ExecuteCurrentStep(ChannelIndex);
+        }
+        else
+        {
+            ForceNetUpdate();
+        }
+        return;
+    }
+
+    switch (Channel.WrongInputBehavior)
+    {
+    case ECMPuzzleSequenceWrongInputBehavior::Ignore:
+        return;
+    case ECMPuzzleSequenceWrongInputBehavior::ResetSequence:
+        SequenceIndex = 0;
+        break;
+    case ECMPuzzleSequenceWrongInputBehavior::ResetAndExecuteFailureCommands:
+        SequenceIndex = 0;
+        for (const FCMPuzzleTargetCommand& Command : Channel.FailureCommands)
+        {
+            ExecuteTargetCommand(Command);
+        }
+        break;
+    }
+
+    ForceNetUpdate();
+}
+
+bool ACMStagePuzzleController::IsTriggerRegistered(
+    const FCMPuzzleChannel& Channel,
+    const ACMStageTriggerBase* Trigger) const
+{
+    return Channel.TriggerCondition == ECMPuzzleTriggerCondition::Sequence
+        ? Channel.ExpectedTriggerSequence.Contains(Trigger)
+        : Channel.Triggers.Contains(Trigger);
+}
+
 // 현재 Step의 모든 명령을 실행하고 채널 종료 정책에 따라 다음 위치 결정
 void ACMStagePuzzleController::ExecuteCurrentStep(int32 ChannelIndex)
 {
@@ -341,6 +464,7 @@ void ACMStagePuzzleController::ResetRuntimeState(bool bResetTargets)
 {
     CurrentStepIndices.Init(0, PuzzleChannels.Num());
     CompletedChannels.Init(false, PuzzleChannels.Num());
+    CurrentSequenceIndices.Init(0, PuzzleChannels.Num());
     SatisfiedTriggersByChannel.SetNum(PuzzleChannels.Num());
     AllConditionSatisfied.Init(false, PuzzleChannels.Num());
     for (TArray<TWeakObjectPtr<ACMStageTriggerBase>>& SatisfiedTriggers
@@ -354,6 +478,16 @@ void ACMStagePuzzleController::ResetRuntimeState(bool bResetTargets)
         TSet<ACMStageElementBase*> ResetTargets;
         for (const FCMPuzzleChannel& Channel : PuzzleChannels)
         {
+            for (const FCMPuzzleTargetCommand& Command : Channel.FailureCommands)
+            {
+                for (ACMStageElementBase* Target : Command.Targets)
+                {
+                    if (IsValid(Target) && Target != this)
+                    {
+                        ResetTargets.Add(Target);
+                    }
+                }
+            }
             for (const FCMPuzzleStep& Step : Channel.Steps)
             {
                 for (const FCMPuzzleTargetCommand& Command : Step.Commands)
@@ -382,7 +516,11 @@ void ACMStagePuzzleController::SetTriggerDirectCommandsEnabled(bool bEnabled)
     TSet<ACMStageTriggerBase*> UpdatedTriggers;
     for (const FCMPuzzleChannel& Channel : PuzzleChannels)
     {
-        for (ACMStageTriggerBase* Trigger : Channel.Triggers)
+        const TArray<TObjectPtr<ACMStageTriggerBase>>& ChannelTriggers =
+            Channel.TriggerCondition == ECMPuzzleTriggerCondition::Sequence
+                ? Channel.ExpectedTriggerSequence
+                : Channel.Triggers;
+        for (ACMStageTriggerBase* Trigger : ChannelTriggers)
         {
             if (IsValid(Trigger) && !UpdatedTriggers.Contains(Trigger))
             {

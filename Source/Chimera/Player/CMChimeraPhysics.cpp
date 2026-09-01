@@ -412,6 +412,7 @@ void ACMChimera::OnRep_ActiveSegmentCount()
 {
     ConfigureSegments();
     ConfigureNetworkPhysics();
+    OnSegmentStatesChanged.Broadcast();
 
     UE_LOG(LogChimeraLineBody, Log,
         TEXT("[Client Segment Count] ActiveSegments=%d PartSlots=%d"),
