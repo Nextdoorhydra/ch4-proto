@@ -37,13 +37,28 @@ public:
     void ReleaseGrab();
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
-    bool TryConnectToSocket(UCMPowerSocketComponent* Socket);
+    bool TryConnectToSocket(
+        UCMPowerSocketComponent* Socket,
+        bool bIgnoreConnectionRadius = false
+    );
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
-    bool TryConnectToSource(UCMPowerSourceComponent* Source);
+    bool TryConnectToSource(
+        UCMPowerSourceComponent* Source,
+        bool bIgnoreConnectionRadius = false
+    );
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
-    bool TryConnectToPoweredSocket(UCMPowerSocketComponent* Socket);
+    bool TryConnectToPoweredSocket(
+        UCMPowerSocketComponent* Socket,
+        bool bIgnoreConnectionRadius = false
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
+    bool TryConnectToSocketSource(
+        UCMPowerSocketComponent* Socket,
+        bool bIgnoreConnectionRadius = false
+    );
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
     void Disconnect();
@@ -77,7 +92,7 @@ public:
     }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsPowerActive() const { return IsConnected(); }
+    bool IsPowerActive() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FName GetPowerChannel() const { return PowerChannel; }
@@ -141,6 +156,17 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
     FName PowerChannel = TEXT("DefaultPower");
+
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Power|Spawn")
+    bool bAutoConnectOnSpawn = false;
+
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Power|Spawn",
+        meta = (EditCondition = "bAutoConnectOnSpawn"))
+    TObjectPtr<AActor> SpawnConnectionActorA;
+
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Power|Spawn",
+        meta = (EditCondition = "bAutoConnectOnSpawn"))
+    TObjectPtr<AActor> SpawnConnectionActorB;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Override")

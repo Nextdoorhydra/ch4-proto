@@ -39,6 +39,88 @@ void ACMPowerCableActor::BeginPlay()
     {
         CableStartLocation = GetActorLocation();
         bCableStartLocationInitialized = true;
+
+        if (bAutoConnectOnSpawn)
+        {
+            TArray<UCMPowerSourceComponent*> SourcesA;
+            TArray<UCMPowerSourceComponent*> SourcesB;
+            TArray<UCMPowerSocketComponent*> SocketsA;
+            TArray<UCMPowerSocketComponent*> SocketsB;
+            if (SpawnConnectionActorA)
+            {
+                SpawnConnectionActorA->GetComponents(SourcesA);
+                SpawnConnectionActorA->GetComponents(SocketsA);
+            }
+            if (SpawnConnectionActorB)
+            {
+                SpawnConnectionActorB->GetComponents(SourcesB);
+                SpawnConnectionActorB->GetComponents(SocketsB);
+            }
+
+            UCMPowerSourceComponent* Source = nullptr;
+            UCMPowerSocketComponent* Socket = nullptr;
+            UCMPowerSocketComponent* PoweredSocket = nullptr;
+            if (!SpawnConnectionActorB && !SourcesA.IsEmpty())
+            {
+                Source = SourcesA[0];
+            }
+            else if (!SpawnConnectionActorB && !SocketsA.IsEmpty())
+            {
+                Socket = SocketsA[0];
+            }
+            else if (!SourcesA.IsEmpty() && !SocketsB.IsEmpty())
+            {
+                Source = SourcesA[0];
+                Socket = SocketsB[0];
+            }
+            else if (!SourcesB.IsEmpty() && !SocketsA.IsEmpty())
+            {
+                Source = SourcesB[0];
+                Socket = SocketsA[0];
+            }
+            else if (!SocketsA.IsEmpty() && !SocketsB.IsEmpty())
+            {
+                // This may be an unpowered prewired connection. The source
+                // socket becomes powered later when another cable connects
+                // a generator to it.
+                PoweredSocket = SocketsA[0];
+                Socket = SocketsB[0];
+            }
+
+            bool bConnected = false;
+            if (!SpawnConnectionActorB)
+            {
+                // A single actor reference intentionally creates a one-sided
+                // spawn connection. Prefer a source when the actor provides
+                // both component types.
+                if (Source)
+                {
+                    bConnected = TryConnectToSource(Source, true);
+                }
+                else if (!SocketsA.IsEmpty())
+                {
+                    bConnected = TryConnectToSocket(SocketsA[0], true);
+                }
+            }
+            else if (Source && Socket)
+            {
+                bConnected = TryConnectToSource(Source, true)
+                    && TryConnectToSocket(Socket, true);
+            }
+            else if (PoweredSocket && Socket)
+            {
+                bConnected = TryConnectToSocketSource(PoweredSocket, true)
+                    && TryConnectToSocket(Socket, true);
+            }
+
+            if (!bConnected)
+            {
+                UE_LOG(LogChimeraStageLoad, Warning,
+                    TEXT("Power cable spawn connection failed or is ambiguous. Cable=%s ActorA=%s ActorB=%s"),
+                    *GetName(), *GetNameSafe(SpawnConnectionActorA),
+                    *GetNameSafe(SpawnConnectionActorB));
+            }
+        }
     }
     InitializeRope();
 
@@ -202,6 +284,21 @@ bool ACMPowerCableActor::IsRopeEndFixed() const
         || (ConnectedSource && !bSourceAtStart)
         || (ConnectedSourceSocket && !bSourceAtStart);
     return (Grabber && !bGrabAtStart) || bEndHasConnection;
+}
+
+bool ACMPowerCableActor::IsPowerActive() const
+{
+    if (!ConnectedSocket)
+    {
+        return false;
+    }
+
+    if (ConnectedSource)
+    {
+        return true;
+    }
+
+    return ConnectedSourceSocket && ConnectedSourceSocket->IsPowered();
 }
 
 int32 ACMPowerCableActor::GetVisualSegmentCount() const
@@ -662,6 +759,10 @@ bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
     // keeping the generator-side endpoint attached.
     if (IsConnected())
     {
+        if (ConnectedSocket && !ConnectedSocket->CanDisconnectCable())
+        {
+            return false;
+        }
         DisconnectFromSocket();
     }
 
@@ -701,30 +802,55 @@ void ACMPowerCableActor::ReleaseGrab()
 }
 
 bool ACMPowerCableActor::TryConnectToSocket(
-    UCMPowerSocketComponent* Socket
+    UCMPowerSocketComponent* Socket,
+    bool bIgnoreConnectionRadius
 )
 {
-    return Socket && Socket->TryConnectCable(this);
+    return Socket && Socket->TryConnectCable(this, bIgnoreConnectionRadius);
 }
 
 bool ACMPowerCableActor::TryConnectToSource(
-    UCMPowerSourceComponent* Source
+    UCMPowerSourceComponent* Source,
+    bool bIgnoreConnectionRadius
 )
 {
-    return Source && Source->TryConnectCable(this);
+    return Source && Source->TryConnectCable(this, bIgnoreConnectionRadius);
 }
 
 bool ACMPowerCableActor::TryConnectToPoweredSocket(
-    UCMPowerSocketComponent* Socket
+    UCMPowerSocketComponent* Socket,
+    bool bIgnoreConnectionRadius
 )
 {
-    if (!Socket || !Socket->IsPowered() || HasConnectedSource()
+    if (!Socket || HasConnectedSource()
         || HasConnectedSourceSocket())
     {
         return false;
     }
 
-    if (FVector::DistSquared(
+    if (!bIgnoreConnectionRadius && FVector::DistSquared(
+        Socket->GetComponentLocation(),
+        GetClosestFreeEndpointLocation(Socket->GetComponentLocation()))
+        > FMath::Square(Socket->GetConnectionRadius()))
+    {
+        return false;
+    }
+
+    SetConnectedSourceSocket(Socket);
+    return true;
+}
+
+bool ACMPowerCableActor::TryConnectToSocketSource(
+    UCMPowerSocketComponent* Socket,
+    bool bIgnoreConnectionRadius
+)
+{
+    if (!Socket || HasConnectedSource() || HasConnectedSourceSocket())
+    {
+        return false;
+    }
+
+    if (!bIgnoreConnectionRadius && FVector::DistSquared(
         Socket->GetComponentLocation(),
         GetClosestFreeEndpointLocation(Socket->GetComponentLocation()))
         > FMath::Square(Socket->GetConnectionRadius()))
@@ -751,7 +877,8 @@ void ACMPowerCableActor::Disconnect()
     {
         ConnectedSource->DisconnectCable(this);
     }
-    if (ConnectedSourceSocket)
+    if (ConnectedSourceSocket
+        && ConnectedSourceSocket->CanDisconnectCable())
     {
         SetConnectedSourceSocket(nullptr);
     }
@@ -807,7 +934,8 @@ void ACMPowerCableActor::SetConnectedSocket(
 
 void ACMPowerCableActor::DisconnectFromSocket()
 {
-    if (!HasAuthority() || !ConnectedSocket)
+    if (!HasAuthority() || !ConnectedSocket
+        || !ConnectedSocket->CanDisconnectCable())
     {
         return;
     }
@@ -822,11 +950,12 @@ void ACMPowerCableActor::DisconnectFromSource()
         return;
     }
 
-    if (ConnectedSource)
+    if (ConnectedSource && ConnectedSource->CanDisconnectCable())
     {
         ConnectedSource->DisconnectCable(this);
     }
-    if (ConnectedSourceSocket)
+    if (ConnectedSourceSocket
+        && ConnectedSourceSocket->CanDisconnectCable())
     {
         SetConnectedSourceSocket(nullptr);
     }

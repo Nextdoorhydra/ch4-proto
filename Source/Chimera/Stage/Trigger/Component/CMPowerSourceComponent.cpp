@@ -8,25 +8,29 @@ UCMPowerSourceComponent::UCMPowerSourceComponent()
     SetIsReplicatedByDefault(true);
 }
 
-bool UCMPowerSourceComponent::TryConnectCable(ACMPowerCableActor* Cable)
+bool UCMPowerSourceComponent::TryConnectCable(
+    ACMPowerCableActor* Cable,
+    bool bIgnoreConnectionRadius
+)
 {
     if (!GetOwner() || !GetOwner()->HasAuthority() || !Cable
-        || ConnectedCable || Cable->HasConnectedSource())
+        || ConnectedCables.Num() >= FMath::Max(MaxConnectedCables, 1)
+        || Cable->HasConnectedSource())
     {
         return false;
     }
 
     if (PowerChannel.IsNone()
         || Cable->GetPowerChannel() != PowerChannel
-        || FVector::DistSquared(
+        || (!bIgnoreConnectionRadius && FVector::DistSquared(
             GetComponentLocation(),
             Cable->GetClosestFreeEndpointLocation(GetComponentLocation()))
-            > FMath::Square(ConnectionRadius))
+            > FMath::Square(ConnectionRadius)))
     {
         return false;
     }
 
-    ConnectedCable = Cable;
+    ConnectedCables.AddUnique(Cable);
     Cable->SetConnectedSource(this);
     OnConnectionChanged.Broadcast(true);
     GetOwner()->ForceNetUpdate();
@@ -36,20 +40,20 @@ bool UCMPowerSourceComponent::TryConnectCable(ACMPowerCableActor* Cable)
 void UCMPowerSourceComponent::DisconnectCable(ACMPowerCableActor* Cable)
 {
     if (!GetOwner() || !GetOwner()->HasAuthority()
-        || ConnectedCable != Cable)
+        || !bAllowCableDisconnect || !ConnectedCables.Contains(Cable))
     {
         return;
     }
 
-    ConnectedCable = nullptr;
+    ConnectedCables.Remove(Cable);
     Cable->SetConnectedSource(nullptr);
     OnConnectionChanged.Broadcast(false);
     GetOwner()->ForceNetUpdate();
 }
 
-void UCMPowerSourceComponent::OnRep_ConnectedCable()
+void UCMPowerSourceComponent::OnRep_ConnectedCables()
 {
-    OnConnectionChanged.Broadcast(ConnectedCable != nullptr);
+    OnConnectionChanged.Broadcast(!ConnectedCables.IsEmpty());
 }
 
 void UCMPowerSourceComponent::GetLifetimeReplicatedProps(
@@ -57,5 +61,5 @@ void UCMPowerSourceComponent::GetLifetimeReplicatedProps(
 ) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-    DOREPLIFETIME(UCMPowerSourceComponent, ConnectedCable);
+    DOREPLIFETIME(UCMPowerSourceComponent, ConnectedCables);
 }

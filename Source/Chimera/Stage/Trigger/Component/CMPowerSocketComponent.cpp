@@ -8,25 +8,29 @@ UCMPowerSocketComponent::UCMPowerSocketComponent()
     SetIsReplicatedByDefault(true);
 }
 
-bool UCMPowerSocketComponent::TryConnectCable(ACMPowerCableActor* Cable)
+bool UCMPowerSocketComponent::TryConnectCable(
+    ACMPowerCableActor* Cable,
+    bool bIgnoreConnectionRadius
+)
 {
     if (!GetOwner() || !GetOwner()->HasAuthority() || !Cable
-        || ConnectedCable || Cable->HasConnectedSocket())
+        || ConnectedCables.Num() >= FMath::Max(MaxConnectedCables, 1)
+        || Cable->HasConnectedSocket())
     {
         return false;
     }
 
     if (PowerChannel.IsNone()
         || Cable->GetPowerChannel() != PowerChannel
-        || FVector::DistSquared(
+        || (!bIgnoreConnectionRadius && FVector::DistSquared(
             GetComponentLocation(),
             Cable->GetClosestFreeEndpointLocation(GetComponentLocation()))
-            > FMath::Square(ConnectionRadius))
+            > FMath::Square(ConnectionRadius)))
     {
         return false;
     }
 
-    ConnectedCable = Cable;
+    ConnectedCables.AddUnique(Cable);
     Cable->SetConnectedSocket(this);
     OnConnectionChanged.Broadcast(true);
     NotifyPowerStateChanged();
@@ -37,27 +41,34 @@ bool UCMPowerSocketComponent::TryConnectCable(ACMPowerCableActor* Cable)
 void UCMPowerSocketComponent::DisconnectCable(ACMPowerCableActor* Cable)
 {
     if (!GetOwner() || !GetOwner()->HasAuthority()
-        || ConnectedCable != Cable)
+        || !bAllowCableDisconnect || !ConnectedCables.Contains(Cable))
     {
         return;
     }
 
-    ConnectedCable = nullptr;
+    ConnectedCables.Remove(Cable);
     Cable->SetConnectedSocket(nullptr);
     OnConnectionChanged.Broadcast(false);
     NotifyPowerStateChanged();
     GetOwner()->ForceNetUpdate();
 }
 
-void UCMPowerSocketComponent::OnRep_ConnectedCable()
+void UCMPowerSocketComponent::OnRep_ConnectedCables()
 {
-    OnConnectionChanged.Broadcast(ConnectedCable != nullptr);
+    OnConnectionChanged.Broadcast(!ConnectedCables.IsEmpty());
     NotifyPowerStateChanged();
 }
 
 bool UCMPowerSocketComponent::IsPowered() const
 {
-    return ConnectedCable && ConnectedCable->IsPowerActive();
+    for (const ACMPowerCableActor* Cable : ConnectedCables)
+    {
+        if (Cable && Cable->IsPowerActive())
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 void UCMPowerSocketComponent::NotifyPowerStateChanged()
@@ -94,5 +105,5 @@ void UCMPowerSocketComponent::GetLifetimeReplicatedProps(
 ) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-    DOREPLIFETIME(UCMPowerSocketComponent, ConnectedCable);
+    DOREPLIFETIME(UCMPowerSocketComponent, ConnectedCables);
 }

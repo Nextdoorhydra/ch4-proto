@@ -22,14 +22,23 @@ class CHIMERA_API UCMPowerSocketComponent : public USceneComponent
 public:
     UCMPowerSocketComponent();
 
-    bool TryConnectCable(ACMPowerCableActor* Cable);
+    bool TryConnectCable(
+        ACMPowerCableActor* Cable,
+        bool bIgnoreConnectionRadius = false
+    );
     void DisconnectCable(ACMPowerCableActor* Cable);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsConnected() const { return ConnectedCable != nullptr; }
+    bool IsConnected() const { return !ConnectedCables.IsEmpty(); }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     bool IsPowered() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    int32 GetConnectedCableCount() const { return ConnectedCables.Num(); }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    bool CanDisconnectCable() const { return bAllowCableDisconnect; }
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
     bool CanProvidePower() const { return IsPowered(); }
@@ -37,7 +46,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     ACMPowerCableActor* GetConnectedCable() const
     {
-        return ConnectedCable;
+        return ConnectedCables.IsEmpty() ? nullptr : ConnectedCables[0];
     }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
@@ -64,12 +73,19 @@ protected:
         meta = (ClampMin = "0.0"))
     float ConnectionRadius = 150.0f;
 
-    UPROPERTY(ReplicatedUsing = OnRep_ConnectedCable, VisibleInstanceOnly,
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power",
+        meta = (ClampMin = "1"))
+    int32 MaxConnectedCables = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
+    bool bAllowCableDisconnect = true;
+
+    UPROPERTY(ReplicatedUsing = OnRep_ConnectedCables, VisibleInstanceOnly,
         BlueprintReadOnly, Category = "Chimera|Power")
-    TObjectPtr<ACMPowerCableActor> ConnectedCable;
+    TArray<TObjectPtr<ACMPowerCableActor>> ConnectedCables;
 
     UFUNCTION()
-    void OnRep_ConnectedCable();
+    void OnRep_ConnectedCables();
 
     void NotifyPowerStateChanged();
 
