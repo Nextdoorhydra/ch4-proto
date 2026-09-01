@@ -35,6 +35,8 @@ bool FCMConveyorSplineDistanceTest::RunTest(const FString& Parameters)
     const ACMConveyorSplineActor* DefaultConveyor = GetDefault<ACMConveyorSplineActor>();
     TestFalse(TEXT("Conveyor actor tick remains disabled"), DefaultConveyor->PrimaryActorTick.bCanEverTick);
     TestTrue(TEXT("Conveyor preserves authored part placement by default"), DefaultConveyor->bPreserveInitialPartPlacement);
+    TestTrue(TEXT("Route controller discovers its connected network by default"), DefaultConveyor->bAutoDiscoverConnectedNetwork);
+    TestEqual(TEXT("Route controller accepts grid placement gaps during handoff"), DefaultConveyor->HandoffAcceptanceDistance, 25.0f);
     const USplineComponent* DefaultSpline = DefaultConveyor->FindComponentByClass<USplineComponent>();
     TestNotNull(TEXT("Conveyor owns a spline component"), DefaultSpline);
     if (DefaultSpline)
