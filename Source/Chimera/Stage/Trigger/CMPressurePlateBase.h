@@ -18,9 +18,16 @@ public:
     ACMPressurePlateBase();
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Mechanism|Pressure Plate")
-    float GetCurrentWeight() const { return CurrentWeight; }
+    float GetCurrentWeight() const { return HasAuthority() ? CurrentWeight : GetPresentationState().CurrentWeight; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Mechanism|Pressure Plate")
+    float GetRequiredWeight() const { return HasAuthority() ? RequiredWeight : GetPresentationState().RequiredWeight; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Mechanism|Pressure Plate")
+    float GetReleaseWeight() const { return HasAuthority() ? ReleaseWeight : GetPresentationState().ReleaseWeight; }
 
 protected:
+    virtual void FillPresentationState(FCMTriggerPresentationState& State) const override;
     virtual void BeginPlay() override;
     virtual void HandleElementReset_Implementation() override;
 
@@ -39,6 +46,9 @@ protected:
     void OnPressureChanged(float NewWeight, bool bIsPressed);
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCMTriggerPresentationTest;
+#endif
     UFUNCTION()
     void HandlePressureBeginOverlap(
         UPrimitiveComponent* OverlappedComponent,

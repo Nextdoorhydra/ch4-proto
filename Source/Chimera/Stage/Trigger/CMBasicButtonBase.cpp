@@ -2,7 +2,6 @@
 
 #include "Components/BoxComponent.h"
 #include "Parts/Arm/CMArmPart.h"
-#include "Player/CMChimera.h"
 #include "Stage/CMStageCommandTags.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 
@@ -19,7 +18,7 @@ ACMBasicButtonBase::ACMBasicButtonBase()
     ReleaseCommandTag = CMStageCommandTags::Mechanism_Toggle;
 }
 
-// 서버에서 팔 타격 영역 진입 이벤트 구독
+// 일반 버튼의 토글 및 일회성 정책 초기화
 void ACMBasicButtonBase::BeginPlay()
 {
     // 기존 BP나 레벨 인스턴스에 저장된 명시적 태그와 관계없이 일반 버튼은 토글로 통일
@@ -30,37 +29,37 @@ void ACMBasicButtonBase::BeginPlay()
         ActivationTrigger->bOneShot = false;
     }
     Super::BeginPlay();
-    if (HasAuthority())
-    {
-        HitVolume->OnComponentBeginOverlap.AddUniqueDynamic(
-            this,
-            &ThisClass::HandleHitVolumeBeginOverlap);
-    }
 }
 
-// 일반 접촉은 무시하고 현재 휘두르는 팔만 버튼 입력으로 인정
-void ACMBasicButtonBase::HandleHitVolumeBeginOverlap(
-    UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComponent,
-    int32 OtherBodyIndex,
-    bool bFromSweep,
-    const FHitResult& SweepResult)
+void ACMBasicButtonBase::NotifySwingHit(
+    ACMArmPart* ArmPart, UPrimitiveComponent* HitComponent)
 {
-#if WITH_EDITOR
-    if (bAllowChimeraBodyOverlapForTesting
-        && Cast<ACMChimera>(OtherActor))
+    if (!HasAuthority() || !IsValid(ArmPart) || !ArmPart->HasAuthority()
+        || !ArmPart->IsSwinging() || !ArmPart->IsOperational()
+        || HitComponent != HitVolume || !IsElementActive())
     {
-        HandleValidButtonInput(OtherActor);
         return;
     }
-#endif
 
-    if (ACMArmPart* ArmPart = Cast<ACMArmPart>(OtherActor);
-        ArmPart && ArmPart->IsSwinging())
+    const FGuid AttackId = ArmPart->GetCurrentSwingAttackId();
+    if (!AttackId.IsValid())
     {
-        HandleValidButtonInput(ArmPart);
+        return;
     }
+    for (auto It = LastSwingAttackIds.CreateIterator(); It; ++It)
+    {
+        if (!It.Key().IsValid())
+        {
+            It.RemoveCurrent();
+        }
+    }
+    FGuid& LastAttackId = LastSwingAttackIds.FindOrAdd(ArmPart);
+    if (LastAttackId == AttackId)
+    {
+        return;
+    }
+    LastAttackId = AttackId;
+    HandleValidButtonInput(ArmPart);
 }
 
 ECMStageTriggerSignal ACMBasicButtonBase::ResolveTriggerSignal(

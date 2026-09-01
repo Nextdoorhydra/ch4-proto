@@ -50,7 +50,7 @@ bool UCMActivationTriggerComponent::SetTriggeredState(
         OnDeactivated.Broadcast(TriggeringActor);
     }
 
-    OnTriggerStateChanged(bTriggerEnabled, bIsTriggered);
+    NotifyStateUpdated();
     GetOwner()->ForceNetUpdate();
     return true;
 }
@@ -62,7 +62,7 @@ void UCMActivationTriggerComponent::ResetTrigger()
     {
         bHasTriggered = false;
         bIsTriggered = false;
-        OnTriggerStateChanged(bTriggerEnabled, bIsTriggered);
+        NotifyStateUpdated();
         GetOwner()->ForceNetUpdate();
     }
 }
@@ -73,7 +73,7 @@ void UCMActivationTriggerComponent::SetTriggerEnabled(bool bEnabled)
     if (GetOwner() && GetOwner()->HasAuthority())
     {
         bTriggerEnabled = bEnabled;
-        OnTriggerStateChanged(bTriggerEnabled, bIsTriggered);
+        NotifyStateUpdated();
         GetOwner()->ForceNetUpdate();
     }
 }
@@ -81,5 +81,11 @@ void UCMActivationTriggerComponent::SetTriggerEnabled(bool bEnabled)
 // 복제된 트리거 상태를 클라이언트 표현에 반영
 void UCMActivationTriggerComponent::OnRep_TriggerState()
 {
+    NotifyStateUpdated();
+}
+
+void UCMActivationTriggerComponent::NotifyStateUpdated()
+{
     OnTriggerStateChanged(bTriggerEnabled, bIsTriggered);
+    OnStateUpdated.Broadcast();
 }

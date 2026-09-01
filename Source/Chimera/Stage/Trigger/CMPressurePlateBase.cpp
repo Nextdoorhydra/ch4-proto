@@ -84,6 +84,7 @@ void ACMPressurePlateBase::RecalculatePressure(AActor* ChangedActor)
     {
         ReleaseButton(ChangedActor);
     }
+    RefreshPresentationState();
     OnPressureChanged(CurrentWeight, ActivationTrigger->IsTriggered());
 }
 
@@ -101,8 +102,18 @@ float ACMPressurePlateBase::ResolveMechanismWeight(const AActor* Actor) const
 // 리셋 시 기존 Overlap을 비우고 다음 진입부터 무게를 다시 계산
 void ACMPressurePlateBase::HandleElementReset_Implementation()
 {
-    Super::HandleElementReset_Implementation();
     OverlapCounts.Reset();
     CurrentWeight = 0.0f;
+    Super::HandleElementReset_Implementation();
+    RefreshPresentationState();
     OnPressureChanged(CurrentWeight, false);
+}
+
+void ACMPressurePlateBase::FillPresentationState(FCMTriggerPresentationState& State) const
+{
+    Super::FillPresentationState(State);
+    State.bSupportsWeight = true;
+    State.CurrentWeight = CurrentWeight;
+    State.RequiredWeight = RequiredWeight;
+    State.ReleaseWeight = ReleaseWeight;
 }

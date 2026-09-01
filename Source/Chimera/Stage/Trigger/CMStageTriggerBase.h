@@ -2,11 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "Stage/CMStageElementBase.h"
+#include "Stage/Trigger/CMTriggerPresentationState.h"
 
 #include "CMStageTriggerBase.generated.h"
 
 class UCMActivationTriggerComponent;
 class ACMStageTriggerBase;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+    FCMTriggerPresentationSignature, const FCMTriggerPresentationState&, State);
 
 UENUM(BlueprintType)
 enum class ECMStageTriggerSignal : uint8
@@ -29,6 +33,14 @@ class CHIMERA_API ACMStageTriggerBase : public ACMStageElementBase
 
 public:
     ACMStageTriggerBase();
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Trigger|Presentation")
+    FCMTriggerPresentationState GetPresentationState() const { return PresentationState; }
+
+    // Server updates and client replication both notify this read-only UI event.
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Trigger|Presentation")
+    FCMTriggerPresentationSignature OnPresentationStateChanged;
 
     // 하위 트리거가 조건을 충족했을 때 서버에서 호출
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Mechanism|Trigger")
@@ -46,27 +58,30 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void FillPresentationState(FCMTriggerPresentationState& State) const;
+    void RefreshPresentationState();
     virtual void HandleElementActiveChanged_Implementation(bool bIsActive) override;
     virtual void HandleElementReset_Implementation() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Trigger")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMActivationTriggerComponent> ActivationTrigger;
 
     // 에디터에서 제어할 액터를 직접 선택하면 해당 StageElement ID를 자동 사용
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Mechanism|Trigger|Target")
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera Trigger")
     TObjectPtr<AActor> TargetActor;
 
     // TargetActor를 사용하지 않을 때 직접 지정하는 호환용 대상 ID
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Mechanism|Trigger|Target")
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera Trigger")
     FName TargetPlacementId;
 
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Mechanism|Trigger|Target")
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera Trigger")
     FGameplayTag TargetGroup;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Trigger|Target")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Trigger")
     FGameplayTag TargetCommandTag;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Trigger|Target")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Trigger")
     FGameplayTag ReleaseCommandTag;
 
     // 트리거 표현을 하위 C++ 또는 블루프린트에서 구현
@@ -80,6 +95,12 @@ protected:
     virtual ECMStageTriggerSignal ResolveTriggerSignal(bool bActivated) const;
 
 private:
+    UFUNCTION()
+    void OnRep_PresentationState();
+
+    UPROPERTY(ReplicatedUsing = OnRep_PresentationState)
+    FCMTriggerPresentationState PresentationState;
+
     UFUNCTION()
     void HandleTriggerActivated(AActor* TriggeringActor);
 

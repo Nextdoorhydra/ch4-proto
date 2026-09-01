@@ -1,5 +1,7 @@
 # 디폴트 암 홀드 대상 연동 가이드
 
+> 2026-08-31 레버 구현 갱신: 아래 레버 연동 예시는 구현 전 설계 기록이다. 현재 `ACMLeverBase`에는 `ICMArmHoldTarget` 연동, 그랩 Pull 결과 구분, 회전 보간이 구현되어 있다. 레버의 실제 설정은 [장애물·버튼 가이드](Chimera_Obstacle_Mechanism_Architecture.md), 최신 이벤트와 UI 계약은 [버튼 UI 가이드](Chimera_Button_UI_Integration.md)를 우선한다. 아래 예시를 현재 클래스에 중복 추가하지 않는다.
+
 ## 목적과 담당 범위
 
 디폴트 암은 홀드 입력 시 전방에서 `ICMArmHoldTarget` 대상을 먼저 찾는다.
@@ -18,10 +20,10 @@
 - 구현 완료: 팔 탐색/우선순위, 지면 fallback, 손 IK, Physics Handle,
   해제 및 공격 억제
 - 구현 완료: `ACMArmHoldableBox`, `BP_ArmHoldableBox` 물리 이동 예제
-- 연동 가이드만 제공: `ACMPowerCableActor`, `ACMLeverBase`
+- `ACMLeverBase`: 현재 연동 완료. 상단의 최신 레버 문서를 참고한다.
+- `ACMPowerCableActor`: 아래 전선 섹션은 연동 설계 예시이며, 이 문서의 레버 갱신에서는 전선 구현 상태를 재검증하지 않았다.
 
-즉 전선과 레버 담당자는 아래 섹션을 따라 각 대상 클래스에
-`ICMArmHoldTarget`을 연결해야 한다.
+신규 대상은 아래 인터페이스 연동 구조를 참고하되 기존 대상은 현재 코드와 대조한다.
 
 ## 현재 팔 구현 구조
 
