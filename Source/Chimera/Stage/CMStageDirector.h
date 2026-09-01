@@ -10,6 +10,7 @@ class ACMPlayGameMode;
 class ACMPlayGameState;
 class UCMStageElementComponent;
 class UCMStageSequenceComponent;
+class UDataTable;
 
 struct FCMLocalPendingStageCommand
 {
@@ -59,7 +60,7 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Stage")
     void BroadcastStageEvent(FGameplayTag EventTag, UObject* EventInstigator);
 
-    // 배치된 요소를 PlacementId와 GroupTag 등록소에 추가
+    // 모든 요소를 등록하고, 값이 있는 PlacementId와 GroupTag만 주소 검색에 사용
     bool RegisterStageElement(UCMStageElementComponent* Element);
     void UnregisterStageElement(UCMStageElementComponent* Element);
 
@@ -86,6 +87,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Stage")
     FGuid GetStageInstanceId() const { return StageInstanceId; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stage|Balance")
+    float GetObstacleDamageMultiplier() const;
 
 protected:
     virtual void BeginPlay() override;
@@ -139,6 +143,14 @@ private:
 
     UPROPERTY(VisibleAnywhere, Category = "Chimera|Stage")
     TObjectPtr<UCMStageSequenceComponent> SequenceComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Stage|Balance",
+        meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UDataTable> ObstacleStageBalanceTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Stage|Balance",
+        meta = (AllowPrivateAccess = "true"))
+    FName ObstacleStageBalanceRow;
 
     TMap<FName, TWeakObjectPtr<UCMStageElementComponent>> ElementsByPlacementId;
     TArray<TWeakObjectPtr<UCMStageElementComponent>> RegisteredElements;

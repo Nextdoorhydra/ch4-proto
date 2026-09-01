@@ -34,7 +34,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Hazard")
     void SetHazardEnabled(bool bEnabled);
 
-    // Definition PDA와 함께 준비된 값 기반 파츠 효과 설정
+    // 장애물 액터에서 해석된 밸런스 기반 파츠·몸통 마디 효과 설정
     void ConfigurePartEffect(const FCMPartObstacleEffectConfig& NewConfig);
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Hazard")

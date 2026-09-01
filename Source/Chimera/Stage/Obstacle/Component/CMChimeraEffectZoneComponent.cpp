@@ -6,6 +6,13 @@
 #include "Player/CMChimera.h"
 #include "TimerManager.h"
 
+namespace CMObstacleEffectDataNames
+{
+    const FName Duration(TEXT("Data.Obstacle.Duration"));
+    const FName PrimaryStatusValue(TEXT("Data.Obstacle.Status.Primary"));
+    const FName SecondaryStatusValue(TEXT("Data.Obstacle.Status.Secondary"));
+}
+
 UCMChimeraEffectZoneComponent::UCMChimeraEffectZoneComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
@@ -45,8 +52,7 @@ void UCMChimeraEffectZoneComponent::NotifyTargetEntered(AActor* TargetActor)
     {
         ApplyEffect(*Chimera, &Tracked.PersistentEffectHandle);
     }
-    else if (ChimeraEffect.ApplicationPolicy
-        != ECMObstacleEffectApplicationPolicy::PeriodicWhileOverlapping)
+    else
     {
         ApplyEffect(*Chimera);
     }
@@ -128,6 +134,16 @@ bool UCMChimeraEffectZoneComponent::ApplyEffect(
     {
         return false;
     }
+
+    Spec.Data->SetSetByCallerMagnitude(
+        CMObstacleEffectDataNames::Duration,
+        ChimeraEffect.StatusDuration);
+    Spec.Data->SetSetByCallerMagnitude(
+        CMObstacleEffectDataNames::PrimaryStatusValue,
+        ChimeraEffect.PrimaryStatusValue);
+    Spec.Data->SetSetByCallerMagnitude(
+        CMObstacleEffectDataNames::SecondaryStatusValue,
+        ChimeraEffect.SecondaryStatusValue);
 
     const FActiveGameplayEffectHandle AppliedHandle =
         ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());

@@ -13,7 +13,7 @@ UCMHazardComponent::UCMHazardComponent()
     PrimaryComponentTick.bCanEverTick = false;
 }
 
-// Definition PDA의 값 타입 데이터는 별도 에셋 로드 없이 즉시 복사
+// 장애물 액터에서 해석된 런타임 설정을 복사
 void UCMHazardComponent::ConfigurePartEffect(
     const FCMPartObstacleEffectConfig& NewConfig)
 {
@@ -90,9 +90,7 @@ void UCMHazardComponent::NotifyTargetEntered(
             return;
         }
 
-        if (bHazardEnabled && PartEffect.bEnabled
-            && PartEffect.ApplicationPolicy
-                != ECMObstacleEffectApplicationPolicy::PeriodicWhileOverlapping)
+        if (bHazardEnabled && PartEffect.bEnabled)
         {
             ApplyConfiguredEffect(*PartActor);
         }
@@ -117,9 +115,7 @@ void UCMHazardComponent::NotifyTargetEntered(
         return;
     }
 
-    if (bHazardEnabled && PartEffect.bEnabled
-        && PartEffect.ApplicationPolicy
-            != ECMObstacleEffectApplicationPolicy::PeriodicWhileOverlapping)
+    if (bHazardEnabled && PartEffect.bEnabled)
     {
         ApplyConfiguredDamage(*Chimera, SegmentIndex);
     }
