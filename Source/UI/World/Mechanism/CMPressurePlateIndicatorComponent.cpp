@@ -11,7 +11,9 @@ UCMPressurePlateIndicatorComponent::UCMPressurePlateIndicatorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.TickInterval = 0.0f;
     SetWidgetSpace(EWidgetSpace::World);
+    SetTwoSided(true);
     SetDrawAtDesiredSize(true);
     SetCollisionEnabled(ECollisionEnabled::NoCollision);
     SetGenerateOverlapEvents(false);
@@ -22,8 +24,9 @@ void UCMPressurePlateIndicatorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    SetComponentTickInterval(FMath::Max(DistanceUpdateInterval, 0.02f));
-    SetComponentTickEnabled(FadeEndDistance > 0.0f);
+    // Keep pre-existing BP component templates from restoring the old default.
+    SetTwoSided(true);
+    SetComponentTickEnabled(true);
 
     PressurePlate = Cast<ACMPressurePlateBase>(GetOwner());
     if (!PressurePlate.IsValid())
@@ -49,7 +52,20 @@ void UCMPressurePlateIndicatorComponent::TickComponent(
 )
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    UpdateDistanceFade();
+
+    if (!bHasDisplayableState || FadeEndDistance <= 0.0f)
+    {
+        return;
+    }
+
+    DistanceUpdateElapsed += DeltaTime;
+    if (bInsideFadeRange
+        || DistanceUpdateElapsed >= FMath::Max(
+            DistanceUpdateInterval, 0.02f))
+    {
+        DistanceUpdateElapsed = 0.0f;
+        UpdateDistanceFade();
+    }
 }
 
 void UCMPressurePlateIndicatorComponent::EndPlay(
@@ -82,12 +98,14 @@ void UCMPressurePlateIndicatorComponent::ApplyPresentationState(
     bHasDisplayableState = bCanDisplay;
     if (!bCanDisplay)
     {
+        DistanceUpdateElapsed = 0.0f;
+        bInsideFadeRange = false;
         SetComponentTickEnabled(false);
         SetVisibility(false);
         return;
     }
 
-    SetComponentTickEnabled(FadeEndDistance > 0.0f);
+    SetComponentTickEnabled(true);
 
     InitWidget();
     if (UCMPressurePlateIndicatorWidget* IndicatorWidget =
@@ -114,6 +132,7 @@ void UCMPressurePlateIndicatorComponent::UpdateDistanceFade()
 
     if (FadeEndDistance <= 0.0f)
     {
+        bInsideFadeRange = false;
         SetVisibility(true);
         if (UUserWidget* IndicatorWidget = GetUserWidgetObject())
         {
@@ -129,24 +148,18 @@ void UCMPressurePlateIndicatorComponent::UpdateDistanceFade()
         : nullptr;
     if (!CameraManager)
     {
+        bInsideFadeRange = false;
         SetVisibility(false);
         return;
     }
 
-    const float Distance = FVector::Distance(
+    // Top-view zoom height must not affect world indicator visibility.
+    const float Distance = FVector::Dist2D(
         CameraManager->GetCameraLocation(), GetComponentLocation());
 
-    const bool bInsideFadeRange = FadeEndDistance > FadeStartDistance
+    bInsideFadeRange = FadeEndDistance > FadeStartDistance
         && Distance > FadeStartDistance
         && Distance < FadeEndDistance;
-    const float DesiredTickInterval = bInsideFadeRange
-        ? 0.0f
-        : FMath::Max(DistanceUpdateInterval, 0.02f);
-    if (!FMath::IsNearlyEqual(
-            PrimaryComponentTick.TickInterval, DesiredTickInterval))
-    {
-        SetComponentTickInterval(DesiredTickInterval);
-    }
 
     float Opacity = 1.0f;
     if (FadeEndDistance > 0.0f)

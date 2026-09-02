@@ -59,6 +59,8 @@ private:
     void UpdateDistanceFade();
 
     TWeakObjectPtr<ACMPressurePlateBase> PressurePlate;
+    float DistanceUpdateElapsed = 0.0f;
     bool bHasAppliedReadyState = false;
     bool bHasDisplayableState = false;
+    bool bInsideFadeRange = false;
 };
