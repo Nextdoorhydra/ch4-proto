@@ -12,7 +12,7 @@
 #include "Player/CMPlayerState.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/BoxComponent.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -77,7 +77,7 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
             return Step.LegPart.Get() == &LegPart;
         }
     );
-    UStaticMeshComponent* SegmentBody = Chimera.BodySegments[SegmentIndex];
+    UBoxComponent* SegmentBody = Chimera.BodySegments[SegmentIndex];
     if (bAlreadyActive || !SegmentBody
         || !SegmentBody->IsSimulatingPhysics())
     {
@@ -313,10 +313,10 @@ bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
     }
 
     float TotalMass = 0.0f;
-    TArray<UStaticMeshComponent*> SimulatedSegments;
+    TArray<UBoxComponent*> SimulatedSegments;
     for (int32 Index = 0; Index < Chimera.ActiveSegmentCount; ++Index)
     {
-        UStaticMeshComponent* BodySegment =
+        UBoxComponent* BodySegment =
             Chimera.BodySegments.IsValidIndex(Index)
             ? Chimera.BodySegments[Index]
             : nullptr;
@@ -336,7 +336,7 @@ bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
 
     // The hook only needs to bring its attached segment to the anchor. Using
     // the whole chain's center makes long bodies pull forever at a wall.
-    UStaticMeshComponent* SourceSegment = Chimera.BodySegments[SegmentIndex];
+    UBoxComponent* SourceSegment = Chimera.BodySegments[SegmentIndex];
     const FVector AnchorOffset =
         AnchorLocation - SourceSegment->GetCenterOfMass();
     if (AnchorOffset.Size() <= FMath::Max(StopDistance, 0.0f))
@@ -353,7 +353,7 @@ bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
     // Distribute one total impulse by mass. Every segment receives the same
     // velocity change, so the constraint chain translates without an
     // artificial yaw torque from pulling only one segment.
-    for (UStaticMeshComponent* BodySegment : SimulatedSegments)
+    for (UBoxComponent* BodySegment : SimulatedSegments)
     {
         const float MassFraction = BodySegment->GetMass() / TotalMass;
         BodySegment->AddImpulse(
@@ -372,7 +372,7 @@ bool UCMLineBodyMovementCoordinator::ApplyAnchorPull(
 
 bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
     ACMChimera& Chimera,
-    UStaticMeshComponent* SegmentBody,
+    UBoxComponent* SegmentBody,
     USceneComponent* ImpulsePoint,
     ACMPlayerState* ContributingPlayerState,
     float MovementImpulse,
@@ -609,7 +609,7 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
             return Anchor.PartSlotAddress == PartSlotAddress;
         }
     );
-    UStaticMeshComponent* SegmentBody = Chimera.BodySegments[SegmentIndex];
+    UBoxComponent* SegmentBody = Chimera.BodySegments[SegmentIndex];
     if (bAlreadyAnchored || !SegmentBody
         || !SegmentBody->IsSimulatingPhysics())
     {
@@ -928,10 +928,10 @@ void UCMLineBodyMovementCoordinator::ApplyCooperativeForwardImpulse(
     float ForwardImpulseMagnitude = FMath::Abs(SignedForwardImpulse);
 
     float TotalMass = 0.0f;
-    TArray<UStaticMeshComponent*> SimulatedSegments;
+    TArray<UBoxComponent*> SimulatedSegments;
     for (int32 Index = 0; Index < Chimera.ActiveSegmentCount; ++Index)
     {
-        UStaticMeshComponent* BodySegment =
+        UBoxComponent* BodySegment =
             Chimera.BodySegments.IsValidIndex(Index)
             ? Chimera.BodySegments[Index]
             : nullptr;
@@ -961,7 +961,7 @@ void UCMLineBodyMovementCoordinator::ApplyCooperativeForwardImpulse(
         return;
     }
 
-    for (UStaticMeshComponent* BodySegment : SimulatedSegments)
+    for (UBoxComponent* BodySegment : SimulatedSegments)
     {
         const float MassFraction =
             FMath::Max(BodySegment->GetMass(), 0.01f) / TotalMass;
@@ -1026,7 +1026,7 @@ void UCMLineBodyMovementCoordinator::ApplyWholeBodyYawAssist(
         SegmentIndex < Chimera.ActiveSegmentCount;
         ++SegmentIndex)
     {
-        UStaticMeshComponent* BodySegment =
+        UBoxComponent* BodySegment =
             Chimera.BodySegments.IsValidIndex(SegmentIndex)
                 ? Chimera.BodySegments[SegmentIndex]
                 : nullptr;
@@ -1139,14 +1139,14 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
     // server physics frame before the existing whole-body speed cap runs.
     ApplyActiveLegSteps(Chimera);
 
-    TArray<UStaticMeshComponent*> SimulatedSegments;
+    TArray<UBoxComponent*> SimulatedSegments;
     float TotalMass = 0.0f;
     FVector MassWeightedHorizontalVelocity = FVector::ZeroVector;
     for (int32 SegmentIndex = 0;
         SegmentIndex < Chimera.ActiveSegmentCount;
         ++SegmentIndex)
     {
-        UStaticMeshComponent* BodySegment =
+        UBoxComponent* BodySegment =
             Chimera.BodySegments.IsValidIndex(SegmentIndex)
                 ? Chimera.BodySegments[SegmentIndex]
                 : nullptr;
@@ -1191,7 +1191,7 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
     const FVector HorizontalVelocityCorrection =
         LimitedCenterOfMassVelocity - CenterOfMassHorizontalVelocity;
 
-    for (UStaticMeshComponent* BodySegment : SimulatedSegments)
+    for (UBoxComponent* BodySegment : SimulatedSegments)
     {
         FVector SegmentVelocity = BodySegment->GetPhysicsLinearVelocity();
         SegmentVelocity.X += HorizontalVelocityCorrection.X;
@@ -1399,7 +1399,7 @@ void UCMLineBodyMovementCoordinator::UpdatePhysicsHandles(
     for (FActiveArmAnchor& Anchor : ActiveArmAnchors)
     {
         UPhysicsHandleComponent* PhysicsHandle = Anchor.PhysicsHandle.Get();
-        UStaticMeshComponent* SegmentBody =
+        UBoxComponent* SegmentBody =
             Chimera.BodySegments.IsValidIndex(Anchor.SegmentIndex)
                 ? Chimera.BodySegments[Anchor.SegmentIndex]
                 : nullptr;
@@ -1607,7 +1607,7 @@ void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
     {
         FActiveLegStep& Step = ActiveLegSteps[StepIndex];
         ACMLegPart* LegPart = Step.LegPart.Get();
-        UStaticMeshComponent* SegmentBody = Step.SegmentBody.Get();
+        UBoxComponent* SegmentBody = Step.SegmentBody.Get();
         const bool bCanContinue = CurrentTime < Step.EndTime
             && IsValid(LegPart)
             && LegPart->IsOperational()
