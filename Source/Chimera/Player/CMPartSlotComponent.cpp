@@ -4,9 +4,91 @@
 #include "AbilitySystemInterface.h"
 #include "GameplayAbilitySpec.h"
 #include "Net/UnrealNetwork.h"
+#include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMPartInterface.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPartSlot, Log, All);
+
+namespace
+{
+const FName LegThighBoneName(TEXT("thigh_l"));
+
+bool TryGetReferenceComponentTransform(
+    const USkeletalMeshComponent& Mesh,
+    const FName BoneName,
+    FTransform& OutTransform
+)
+{
+    const USkeletalMesh* SkeletalMesh = Mesh.GetSkeletalMeshAsset();
+    if (!SkeletalMesh)
+    {
+        return false;
+    }
+
+    const FReferenceSkeleton& ReferenceSkeleton =
+        SkeletalMesh->GetRefSkeleton();
+    int32 BoneIndex = ReferenceSkeleton.FindBoneIndex(BoneName);
+    if (BoneIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    const TArray<FTransform>& ReferencePose =
+        ReferenceSkeleton.GetRefBonePose();
+    OutTransform = ReferencePose[BoneIndex];
+    BoneIndex = ReferenceSkeleton.GetParentIndex(BoneIndex);
+    while (ReferencePose.IsValidIndex(BoneIndex))
+    {
+        OutTransform *= ReferencePose[BoneIndex];
+        BoneIndex = ReferenceSkeleton.GetParentIndex(BoneIndex);
+    }
+    return true;
+}
+
+void AlignLegThighToRigAnchor(
+    AActor& PartActor,
+    const UCMPartSlotComponent& PartSlot
+)
+{
+    ACMPartActorBase* Part = Cast<ACMPartActorBase>(&PartActor);
+    USceneComponent* Anchor = PartSlot.GetLegRigControlAnchor();
+    USceneComponent* PartRoot = Part ? Part->GetRootComponent() : nullptr;
+    USkeletalMeshComponent* PartMesh = Part ? Part->GetPartMesh() : nullptr;
+    if (!Anchor || !PartRoot || !PartMesh)
+    {
+        return;
+    }
+
+    FTransform ThighReferenceTransform = FTransform::Identity;
+    if (!TryGetReferenceComponentTransform(
+            *PartMesh,
+            LegThighBoneName,
+            ThighReferenceTransform))
+    {
+        return;
+    }
+
+    const FTransform ThighToPartRoot =
+        ThighReferenceTransform * PartMesh->GetRelativeTransform();
+    const FTransform AnchorRelativeTransform =
+        Anchor->GetComponentTransform().GetRelativeTransform(
+            PartSlot.GetComponentTransform());
+    FTransform PartRootTransform(
+        AnchorRelativeTransform.GetRotation()
+            * ThighToPartRoot.GetRotation().Inverse(),
+        FVector::ZeroVector,
+        PartRoot->GetRelativeScale3D()
+    );
+    const FVector ThighLocationWithZeroRoot =
+        (ThighToPartRoot * PartRootTransform).GetLocation();
+    PartRootTransform.SetLocation(
+        AnchorRelativeTransform.GetLocation() - ThighLocationWithZeroRoot
+    );
+    PartRoot->SetRelativeTransform(PartRootTransform);
+}
+}
 
 UCMPartSlotComponent::UCMPartSlotComponent()
 {
@@ -81,6 +163,10 @@ bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
         this,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale
     );
+    if (PartType == ECMPartSlotType::Leg)
+    {
+        AlignLegThighToRigAnchor(*AttachedPart, *this);
+    }
 
     if (UAbilitySystemComponent* ASC = GetOwnerAbilitySystemComponent())
     {
@@ -161,6 +247,18 @@ bool UCMPartSlotComponent::HasAttachedPart() const
     return IsValid(AttachedPart);
 }
 
+void UCMPartSlotComponent::SetLegRigControlAnchor(
+    USceneComponent* InControlAnchor
+)
+{
+    LegRigControlAnchor = InControlAnchor;
+}
+
+USceneComponent* UCMPartSlotComponent::GetLegRigControlAnchor() const
+{
+    return LegRigControlAnchor;
+}
+
 void UCMPartSlotComponent::OnRep_AttachedPart(AActor* PreviousPart)
 {
     if (IsValid(PreviousPart)
@@ -177,6 +275,11 @@ void UCMPartSlotComponent::OnRep_AttachedPart(AActor* PreviousPart)
             this,
             FAttachmentTransformRules::SnapToTargetNotIncludingScale
         );
+        if (ICMPartInterface::Execute_GetPartType(AttachedPart)
+            == ECMPartSlotType::Leg)
+        {
+            AlignLegThighToRigAnchor(*AttachedPart, *this);
+        }
     }
 
     OnAttachedPartChanged.Broadcast(this, AttachedPart);
