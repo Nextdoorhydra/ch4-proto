@@ -578,7 +578,6 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                     SCENE_QUERY_STAT(CMPowerCableRope), false, this);
                 FCollisionObjectQueryParams ObjectQueryParams;
                 ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
-                ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
                 ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
                 ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
                 const bool bHit = GetWorld()->SweepSingleByObjectType(
@@ -658,7 +657,6 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                 SCENE_QUERY_STAT(CMPowerCableRopePostConstraint), false, this);
             FCollisionObjectQueryParams ObjectQueryParams;
             ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
-            ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
             ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
             ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
             const bool bHit = GetWorld()->SweepSingleByObjectType(
@@ -773,8 +771,7 @@ void ACMPowerCableActor::ResolveRopeGroundContact(bool bEndIsFixed)
     const float ProbeHeight = FMath::Max(50.0f, CollisionRadius * 4.0f);
     FCollisionObjectQueryParams ObjectQueryParams;
     ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
-    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
-    ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
 
     for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
     {
