@@ -18,6 +18,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaSeconds) override;
 
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Mechanism|Power")
@@ -32,4 +33,6 @@ private:
     void HandleSocketConnectionChanged(bool bConnected);
 
     void EvaluatePowerState();
+
+    bool bPendingInitialEvaluation = false;
 };

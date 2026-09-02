@@ -3,24 +3,24 @@
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
 
-#include "CMPowerSocketComponent.generated.h"
+#include "CMPowerSourceComponent.generated.h"
 
 class ACMPowerCableActor;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
-    FCMPowerSocketConnectionChanged,
+    FCMPowerSourceConnectionChanged,
     bool,
     bConnected
 );
 
-/** A server-authoritative socket that accepts one matching power cable. */
+/** Output connection for an actor that supplies power to a cable. */
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
-class CHIMERA_API UCMPowerSocketComponent : public USceneComponent
+class CHIMERA_API UCMPowerSourceComponent : public USceneComponent
 {
     GENERATED_BODY()
 
 public:
-    UCMPowerSocketComponent();
+    UCMPowerSourceComponent();
 
     bool TryConnectCable(
         ACMPowerCableActor* Cable,
@@ -32,17 +32,10 @@ public:
     bool IsPhysicallyConnected() const { return !ConnectedCables.IsEmpty(); }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool IsPowered() const;
-    bool IsPowered(TSet<const UCMPowerSocketComponent*>& VisitedSockets) const;
-
-    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    int32 GetConnectedCableCount() const { return ConnectedCables.Num(); }
-
-    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
-    bool CanDisconnectCable() const { return bAllowCableDisconnect; }
+    bool IsProvidingPower() const { return bPowerEnabled; }
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Power")
-    bool CanProvidePower() const { return IsPowered(); }
+    void SetPowerEnabled(bool bEnabled);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     ACMPowerCableActor* GetConnectedCable() const
@@ -51,16 +44,22 @@ public:
     }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    int32 GetConnectedCableCount() const { return ConnectedCables.Num(); }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
+    bool CanDisconnectCable() const { return bAllowCableDisconnect; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FName GetPowerChannel() const { return PowerChannel; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     float GetConnectionRadius() const { return ConnectionRadius; }
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Power")
-    FCMPowerSocketConnectionChanged OnConnectionChanged;
+    FCMPowerSourceConnectionChanged OnConnectionChanged;
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Power")
-    FCMPowerSocketConnectionChanged OnPowerStateChanged;
+    FCMPowerSourceConnectionChanged OnPowerStateChanged;
 
 protected:
     virtual void BeginPlay() override;
@@ -74,15 +73,15 @@ protected:
     FName PowerChannel = TEXT("DefaultPower");
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power",
-        meta = (ClampMin = "0.0"))
-    float ConnectionRadius = 150.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power",
         meta = (ClampMin = "1"))
     int32 MaxConnectedCables = 1;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
     bool bAllowCableDisconnect = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power",
+        meta = (ClampMin = "0.0"))
+    float ConnectionRadius = 150.0f;
 
     UPROPERTY(ReplicatedUsing = OnRep_ConnectedCables, VisibleInstanceOnly,
         BlueprintReadOnly, Category = "Chimera|Power")
@@ -91,16 +90,14 @@ protected:
     UFUNCTION()
     void OnRep_ConnectedCables();
 
+    UFUNCTION()
+    void OnRep_PowerEnabled();
+
     void NotifyPowerStateChanged();
-    void NotifyPowerStateChanged(TSet<const UCMPowerSocketComponent*>& VisitedSockets);
 
-    void AddPowerOutputCable(ACMPowerCableActor* Cable);
-    void RemovePowerOutputCable(ACMPowerCableActor* Cable);
-
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<ACMPowerCableActor>> PowerOutputCables;
+    UPROPERTY(ReplicatedUsing = OnRep_PowerEnabled, EditAnywhere,
+        BlueprintReadOnly, Category = "Chimera|Power")
+    bool bPowerEnabled = true;
 
     friend class ACMPowerCableActor;
-    friend class ACMPowerTriggerBase;
-    friend class UCMPowerSubsystem;
 };
