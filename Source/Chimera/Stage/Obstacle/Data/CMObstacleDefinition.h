@@ -39,8 +39,4 @@ public:
         Category = "Chimera|Obstacle|Part Effect")
     FCMPartObstacleEffectConfig PartEffect;
 
-    // 키메라 전체의 공용 ASC에 적용할 GameplayEffect 설정
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Chimera Effect")
-    FCMChimeraObstacleEffectConfig ChimeraEffect;
 };

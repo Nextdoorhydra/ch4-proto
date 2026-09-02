@@ -1,6 +1,8 @@
 #include "Stage/Trigger/CMPressurePlateBase.h"
 
 #include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 #include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 
@@ -11,6 +13,11 @@ ACMPressurePlateBase::ACMPressurePlateBase()
     PressureVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     PressureVolume->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
     PressureVolume->SetGenerateOverlapEvents(true);
+
+    PlateVisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(
+        TEXT("PlateVisualMesh"));
+    PlateVisualMesh->SetupAttachment(SceneRoot);
+    PlateVisualMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     ActivationTrigger->bOneShot = false;
 }
 
@@ -18,6 +25,13 @@ ACMPressurePlateBase::ACMPressurePlateBase()
 void ACMPressurePlateBase::BeginPlay()
 {
     Super::BeginPlay();
+
+    PlateMaterial = PlateVisualMesh->CreateDynamicMaterialInstance(
+        FMath::Max(MaterialSlotIndex, 0));
+    OnPresentationStateChanged.AddUniqueDynamic(
+        this, &ThisClass::HandlePresentationStateChanged);
+    ApplyPresentationState(GetPresentationState());
+
     if (HasAuthority())
     {
         PressureVolume->OnComponentBeginOverlap.AddUniqueDynamic(
@@ -27,6 +41,14 @@ void ACMPressurePlateBase::BeginPlay()
             this,
             &ThisClass::HandlePressureEndOverlap);
     }
+}
+
+void ACMPressurePlateBase::EndPlay(
+    const EEndPlayReason::Type EndPlayReason)
+{
+    OnPresentationStateChanged.RemoveDynamic(
+        this, &ThisClass::HandlePresentationStateChanged);
+    Super::EndPlay(EndPlayReason);
 }
 
 // 같은 액터의 여러 콜리전이 들어와도 무게는 한 번만 더하도록 횟수 기록
@@ -116,4 +138,37 @@ void ACMPressurePlateBase::FillPresentationState(FCMTriggerPresentationState& St
     State.CurrentWeight = CurrentWeight;
     State.RequiredWeight = RequiredWeight;
     State.ReleaseWeight = ReleaseWeight;
+}
+
+void ACMPressurePlateBase::HandlePresentationStateChanged(
+    const FCMTriggerPresentationState& State)
+{
+    ApplyPresentationState(State);
+}
+
+void ACMPressurePlateBase::ApplyPresentationState(
+    const FCMTriggerPresentationState& State)
+{
+    if (!State.bReady || !PlateMaterial)
+    {
+        return;
+    }
+
+    const FLinearColor Color = State.bEnabled
+        ? (State.bTriggered ? OnColor : OffColor)
+        : DisabledColor;
+    const float EmissiveIntensity = !State.bEnabled
+        ? 0.0f
+        : State.bTriggered
+            ? FMath::Max(OnEmissiveIntensity, 0.0f)
+            : FMath::Max(OffEmissiveIntensity, 0.0f);
+    if (!ColorParameterName.IsNone())
+    {
+        PlateMaterial->SetVectorParameterValue(ColorParameterName, Color);
+    }
+    if (!EmissiveParameterName.IsNone())
+    {
+        PlateMaterial->SetScalarParameterValue(
+            EmissiveParameterName, EmissiveIntensity);
+    }
 }

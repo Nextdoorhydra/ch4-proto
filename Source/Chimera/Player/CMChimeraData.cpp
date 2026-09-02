@@ -5,7 +5,10 @@
 #include "AbilitySystemComponent.h"
 #include "Data/Body/CMBodyTableRow.h"
 #include "Engine/DataTable.h"
+#include "Parts/Head/CMHeadPartActor.h"
+#include "Parts/Head/CMVisionComponent.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Player/CMPartSlotComponent.h"
 
 float ACMChimera::GetStamina() const
 {
@@ -15,6 +18,24 @@ float ACMChimera::GetStamina() const
 float ACMChimera::GetMaxStamina() const
 {
     return AttributeSet ? AttributeSet->GetMaxStamina() : 0.0f;
+}
+
+void ACMChimera::GetActiveHeadVisionSources(
+    TArray<UCMVisionComponent*>& OutVisionSources) const
+{
+    OutVisionSources.Reset();
+    for (const UCMPartSlotComponent* PartSlot : PartSlotPoints)
+    {
+        ACMHeadPartActor* Head = PartSlot
+            ? Cast<ACMHeadPartActor>(PartSlot->GetAttachedPart())
+            : nullptr;
+        UCMVisionComponent* HeadVision = Head
+            ? Head->GetVisionComponent() : nullptr;
+        if (HeadVision && HeadVision->IsVisionActiveWithoutStatus())
+        {
+            OutVisionSources.Add(HeadVision);
+        }
+    }
 }
 
 bool ACMChimera::InitializeFromBodyData()

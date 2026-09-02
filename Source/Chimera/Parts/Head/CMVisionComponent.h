@@ -60,6 +60,31 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     bool IsVisionActive() const;
 
+    bool IsVisionActiveWithoutStatus() const { return bVisionActive; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    bool IsBlinded() const { return bBlinded; }
+
+    bool IsBlindnessPending() const { return bBlindnessPending; }
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Vision")
+    void ApplyBlindness(
+        float Duration,
+        float Delay = 0.0f,
+        float RecoveryDuration = 0.75f);
+
+    void ApplyVisionReduction(
+        float Duration,
+        float AngleMultiplier,
+        float DistanceMultiplier,
+        UObject* Source);
+
+    void RemoveVisionReduction(UObject* Source);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
+    bool IsLocationInsideVisionCone(const FVector& WorldLocation) const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     ECMVisionContribution GetVisionContribution() const;
 
@@ -127,6 +152,14 @@ private:
         meta = (AllowPrivateAccess = "true"))
     bool bVisionActive = false;
 
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision",
+        meta = (AllowPrivateAccess = "true"))
+    bool bBlinded = false;
+
+    UPROPERTY(Replicated)
+    float BlindnessRecoveryDuration = 0.75f;
+
     UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly,
         Category = "Chimera|Vision",
         meta = (AllowPrivateAccess = "true"))
@@ -181,6 +214,41 @@ private:
         Category = "Chimera|Vision|Smoothing",
         meta = (ClampMin = "0.1", AllowPrivateAccess = "true"))
     float LocalPredictionTimeout = 0.5f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Vision|Smoothing",
+        meta = (ClampMin = "0.0", AllowPrivateAccess = "true"))
+    float StatusInterpolationSpeed = 2.0f;
+
+    UPROPERTY(Replicated)
+    float VisionAngleStatusMultiplier = 1.0f;
+
+    UPROPERTY(Replicated)
+    float VisionDistanceStatusMultiplier = 1.0f;
+
+    struct FActiveVisionReduction
+    {
+        int32 Handle = INDEX_NONE;
+        TWeakObjectPtr<UObject> Source;
+        float AngleMultiplier = 1.0f;
+        float DistanceMultiplier = 1.0f;
+        FTimerHandle ExpirationTimer;
+    };
+
+    TArray<FActiveVisionReduction> ActiveVisionReductions;
+    float RenderedVisionAngleMultiplier = 1.0f;
+    float RenderedVisionDistanceMultiplier = 1.0f;
+    float RenderedBlindnessMultiplier = 1.0f;
+    FTimerHandle BlindnessTimerHandle;
+    FTimerHandle BlindnessDelayTimerHandle;
+    float PendingBlindnessDuration = 0.0f;
+    bool bBlindnessPending = false;
+    int32 NextVisionReductionHandle = 1;
+
+    void ClearBlindness();
+    void BeginBlindness();
+    void HandleVisionReductionExpired(int32 Handle);
+    void RecalculateVisionReduction();
 
     FVector RenderedAimDirection = FVector::ForwardVector;
     float RenderedAimRotationDegrees = 0.0f;

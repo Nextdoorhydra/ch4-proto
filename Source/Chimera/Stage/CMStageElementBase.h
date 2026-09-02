@@ -49,6 +49,9 @@ protected:
     // 추가 활성 조건이 바뀐 하위 요소가 실제 상태를 다시 계산할 때 호출
     void RefreshElementActiveState();
 
+    // Activate 요청 자체에 반응해야 하는 단발 장치용 훅
+    virtual void HandleElementActivationRequested() {}
+
     // 활성 상태 변경을 하위 C++와 블루프린트 표현에 전달
     UFUNCTION(BlueprintNativeEvent, Category = "Chimera|Stage|Element")
     void HandleElementActiveChanged(bool bIsActive);

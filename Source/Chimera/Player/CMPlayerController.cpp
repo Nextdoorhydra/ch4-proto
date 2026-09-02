@@ -1054,7 +1054,8 @@ void ACMPlayerController::SetControlSlotPressed(
     {
         if (bPressed && VisionInputComponent)
         {
-            VisionInputComponent->SetActiveControlSlot(SlotIndex);
+            VisionInputComponent->SetActiveControlSlot(
+                ControlBody->ResolveControlInputSlot(SlotIndex));
         }
 
         if (bPressed && bDetachModifierHeld)

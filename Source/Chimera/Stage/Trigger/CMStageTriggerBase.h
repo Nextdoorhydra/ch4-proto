@@ -78,11 +78,17 @@ protected:
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera Trigger")
     FGameplayTag TargetGroup;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Trigger")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Trigger",
+        meta = (EditCondition = "bExposeDirectCommandTags", EditConditionHides))
     FGameplayTag TargetCommandTag;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Trigger")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Trigger",
+        meta = (EditCondition = "bExposeDirectCommandTags", EditConditionHides))
     FGameplayTag ReleaseCommandTag;
+
+    // 하위 타입이 명령을 자체 정책으로 고정할 때 의미 없는 직접 명령 UI를 숨긴다.
+    UPROPERTY(Transient)
+    bool bExposeDirectCommandTags = true;
 
     // 트리거 표현을 하위 C++ 또는 블루프린트에서 구현
     UFUNCTION(BlueprintImplementableEvent, Category = "Chimera|Mechanism|Trigger")
