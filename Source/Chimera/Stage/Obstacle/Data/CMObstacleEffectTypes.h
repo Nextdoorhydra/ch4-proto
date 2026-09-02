@@ -6,7 +6,58 @@
 
 #include "CMObstacleEffectTypes.generated.h"
 
-class UGameplayEffect;
+UENUM(BlueprintType)
+enum class ECMPartObstacleStatusEffect : uint8
+{
+    None,
+    Slowed,
+    Electrified
+};
+
+UENUM(BlueprintType)
+enum class ECMControlObstacleStatusEffect : uint8
+{
+    None,
+    Confused UMETA(DisplayName = "Confusion"),
+    Delirious UMETA(DisplayName = "Delirium")
+};
+
+UENUM(BlueprintType)
+enum class ECMControlStatusApplicationPolicy : uint8
+{
+    OnceOnEnter,
+    WhileOverlapping
+};
+
+USTRUCT(BlueprintType)
+struct CHIMERA_API FCMControlObstacleEffectConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    ECMControlObstacleStatusEffect StatusEffect =
+        ECMControlObstacleStatusEffect::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (EditCondition = "StatusEffect != ECMControlObstacleStatusEffect::None",
+            EditConditionHides))
+    ECMControlStatusApplicationPolicy ApplicationPolicy =
+        ECMControlStatusApplicationPolicy::OnceOnEnter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (ClampMin = "0.01",
+            EditCondition = "StatusEffect != ECMControlObstacleStatusEffect::None && ApplicationPolicy == ECMControlStatusApplicationPolicy::OnceOnEnter",
+            EditConditionHides, Units = "s"))
+    float Duration = 5.0f;
+};
+
+UENUM(BlueprintType)
+enum class ECMHeadVisionEffectApplicationPolicy : uint8
+{
+    OnceOnEnter,
+    PeriodicWhileOverlapping,
+    WhileOverlapping
+};
 
 UENUM(BlueprintType)
 enum class ECMObstacleEffectApplicationPolicy : uint8
@@ -30,19 +81,31 @@ struct CHIMERA_API FCMPartObstacleEffectConfig
         ECMObstacleEffectApplicationPolicy::OnceOnEnter;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        meta = (ClampMin = "0.01"))
+        meta = (ClampMin = "0.01",
+            EditCondition = "ApplicationPolicy == ECMObstacleEffectApplicationPolicy::PeriodicWhileOverlapping",
+            EditConditionHides))
     float PeriodSeconds = 1.0f;
 
     UPROPERTY(Transient, BlueprintReadOnly)
     float DamagePerApplication = 0.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    ECMPartObstacleStatusEffect StatusEffect =
+        ECMPartObstacleStatusEffect::None;
+
     UPROPERTY(Transient, BlueprintReadOnly)
     FGameplayTag StatusTag;
 
-    UPROPERTY(Transient, BlueprintReadOnly)
-    float StatusDuration = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (ClampMin = "0.01",
+            EditCondition = "StatusEffect != ECMPartObstacleStatusEffect::None && ApplicationPolicy != ECMObstacleEffectApplicationPolicy::WhileOverlapping",
+            EditConditionHides, Units = "s"))
+    float StatusDuration = 1.0f;
 
-    UPROPERTY(Transient, BlueprintReadOnly)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (ClampMin = "0.0", ClampMax = "1.0",
+            EditCondition = "StatusEffect == ECMPartObstacleStatusEffect::Slowed",
+            EditConditionHides))
     float MovementMultiplier = 1.0f;
 
     UPROPERTY(Transient, BlueprintReadOnly)
@@ -50,38 +113,34 @@ struct CHIMERA_API FCMPartObstacleEffectConfig
 };
 
 USTRUCT(BlueprintType)
-struct CHIMERA_API FCMChimeraObstacleEffectConfig
+struct CHIMERA_API FCMHeadVisionObstacleEffectConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(Transient, BlueprintReadOnly)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
     bool bEnabled = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
-    ECMObstacleEffectApplicationPolicy ApplicationPolicy =
-        ECMObstacleEffectApplicationPolicy::OnceOnEnter;
+    ECMHeadVisionEffectApplicationPolicy ApplicationPolicy =
+        ECMHeadVisionEffectApplicationPolicy::WhileOverlapping;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        meta = (ClampMin = "0.01"))
+        meta = (ClampMin = "0.01",
+            EditCondition = "ApplicationPolicy == ECMHeadVisionEffectApplicationPolicy::PeriodicWhileOverlapping",
+            EditConditionHides, Units = "s"))
     float PeriodSeconds = 1.0f;
 
-    UPROPERTY(Transient, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Gameplay")
-    float StatusDuration = 0.0f;
-
-    UPROPERTY(Transient, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Gameplay")
-    ECMObstacleStatusEffect StatusEffect = ECMObstacleStatusEffect::None;
-
-    UPROPERTY(Transient, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Gameplay")
-    float PrimaryStatusValue = 0.0f;
-
-    UPROPERTY(Transient, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Gameplay")
-    float SecondaryStatusValue = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (ClampMin = "0.01",
+            EditCondition = "ApplicationPolicy != ECMHeadVisionEffectApplicationPolicy::WhileOverlapping",
+            EditConditionHides, Units = "s"))
+    float StatusDuration = 3.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Gameplay")
-    TSubclassOf<UGameplayEffect> GameplayEffectClass;
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VisionAngleMultiplier = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VisionDistanceMultiplier = 0.5f;
 };

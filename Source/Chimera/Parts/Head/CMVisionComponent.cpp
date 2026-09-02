@@ -4,6 +4,7 @@
 #include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Vision/CMVisionManagerSubsystem.h"
+#include "TimerManager.h"
 
 UCMVisionComponent::UCMVisionComponent()
 {
@@ -18,6 +19,10 @@ void UCMVisionComponent::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(UCMVisionComponent, bVisionActive);
+    DOREPLIFETIME(UCMVisionComponent, bBlinded);
+    DOREPLIFETIME(UCMVisionComponent, BlindnessRecoveryDuration);
+    DOREPLIFETIME(UCMVisionComponent, VisionAngleStatusMultiplier);
+    DOREPLIFETIME(UCMVisionComponent, VisionDistanceStatusMultiplier);
     DOREPLIFETIME(UCMVisionComponent, VisionContribution);
     DOREPLIFETIME(UCMVisionComponent, VisionAngleDegrees);
     DOREPLIFETIME(UCMVisionComponent, VisionDistance);
@@ -35,6 +40,25 @@ void UCMVisionComponent::TickComponent(
 )
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    RenderedVisionAngleMultiplier = FMath::FInterpTo(
+        RenderedVisionAngleMultiplier,
+        VisionAngleStatusMultiplier,
+        DeltaTime,
+        StatusInterpolationSpeed);
+    RenderedVisionDistanceMultiplier = FMath::FInterpTo(
+        RenderedVisionDistanceMultiplier,
+        VisionDistanceStatusMultiplier,
+        DeltaTime,
+        StatusInterpolationSpeed);
+    const float BlindnessTarget = bBlinded ? 0.0f : 1.0f;
+    RenderedBlindnessMultiplier = bBlinded
+        ? 0.0f
+        : FMath::FInterpConstantTo(
+            RenderedBlindnessMultiplier,
+            BlindnessTarget,
+            DeltaTime,
+            1.0f / FMath::Max(BlindnessRecoveryDuration, 0.01f));
 
     const UWorld* World = GetWorld();
     const bool bPredictionIsCurrent = bHasLocalAimPrediction
@@ -212,6 +236,182 @@ bool UCMVisionComponent::IsVisionActive() const
     return bVisionActive;
 }
 
+void UCMVisionComponent::ApplyBlindness(
+    float Duration,
+    float Delay,
+    float RecoveryDuration)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !GetWorld())
+    {
+        return;
+    }
+
+    const float ClampedDuration = FMath::Max(Duration, 0.01f);
+    BlindnessRecoveryDuration = FMath::Max(RecoveryDuration, 0.01f);
+    if (bBlinded)
+    {
+        const float RemainingDuration = GetWorld()->GetTimerManager()
+            .GetTimerRemaining(BlindnessTimerHandle);
+        GetWorld()->GetTimerManager().SetTimer(
+            BlindnessTimerHandle,
+            this,
+            &ThisClass::ClearBlindness,
+            FMath::Max(ClampedDuration, RemainingDuration),
+            false);
+        GetOwner()->ForceNetUpdate();
+        return;
+    }
+
+    PendingBlindnessDuration = FMath::Max(
+        PendingBlindnessDuration, ClampedDuration);
+    if (bBlindnessPending)
+    {
+        return;
+    }
+
+    const float ClampedDelay = FMath::Max(Delay, 0.0f);
+    if (ClampedDelay <= UE_KINDA_SMALL_NUMBER)
+    {
+        BeginBlindness();
+        return;
+    }
+
+    bBlindnessPending = true;
+    GetWorld()->GetTimerManager().SetTimer(
+        BlindnessDelayTimerHandle,
+        this,
+        &ThisClass::BeginBlindness,
+        ClampedDelay,
+        false);
+}
+
+void UCMVisionComponent::BeginBlindness()
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !GetWorld())
+    {
+        return;
+    }
+
+    bBlindnessPending = false;
+    const float Duration = FMath::Max(PendingBlindnessDuration, 0.01f);
+    PendingBlindnessDuration = 0.0f;
+    const float RemainingDuration = GetWorld()->GetTimerManager()
+        .GetTimerRemaining(BlindnessTimerHandle);
+    bBlinded = true;
+    GetWorld()->GetTimerManager().SetTimer(
+        BlindnessTimerHandle,
+        this,
+        &ThisClass::ClearBlindness,
+        FMath::Max(Duration, RemainingDuration),
+        false);
+    GetOwner()->ForceNetUpdate();
+}
+
+void UCMVisionComponent::ClearBlindness()
+{
+    bBlinded = false;
+    if (GetOwner())
+    {
+        GetOwner()->ForceNetUpdate();
+    }
+}
+
+void UCMVisionComponent::ApplyVisionReduction(
+    float Duration,
+    float AngleMultiplier,
+    float DistanceMultiplier,
+    UObject* Source)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !GetWorld() || !Source)
+    {
+        return;
+    }
+
+    FActiveVisionReduction* Status = ActiveVisionReductions.FindByPredicate(
+        [Source](const FActiveVisionReduction& Candidate)
+        {
+            return Candidate.Source.Get() == Source;
+        });
+    if (!Status)
+    {
+        Status = &ActiveVisionReductions.AddDefaulted_GetRef();
+        Status->Handle = NextVisionReductionHandle++;
+        Status->Source = Source;
+    }
+    Status->AngleMultiplier = FMath::Clamp(AngleMultiplier, 0.0f, 1.0f);
+    Status->DistanceMultiplier = FMath::Clamp(
+        DistanceMultiplier, 0.0f, 1.0f);
+
+    GetWorld()->GetTimerManager().ClearTimer(Status->ExpirationTimer);
+    if (Duration > 0.0f)
+    {
+        FTimerDelegate ExpirationDelegate;
+        ExpirationDelegate.BindUObject(
+            this,
+            &ThisClass::HandleVisionReductionExpired,
+            Status->Handle);
+        GetWorld()->GetTimerManager().SetTimer(
+            Status->ExpirationTimer,
+            ExpirationDelegate,
+            Duration,
+            false);
+    }
+    RecalculateVisionReduction();
+}
+
+void UCMVisionComponent::RemoveVisionReduction(UObject* Source)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !GetWorld())
+    {
+        return;
+    }
+
+    FTimerManager& TimerManager = GetWorld()->GetTimerManager();
+    const int32 RemovedCount = ActiveVisionReductions.RemoveAll(
+        [&TimerManager, Source](FActiveVisionReduction& Status)
+        {
+            if (Status.Source.Get() != Source)
+            {
+                return false;
+            }
+            TimerManager.ClearTimer(Status.ExpirationTimer);
+            return true;
+        });
+    if (RemovedCount > 0)
+    {
+        RecalculateVisionReduction();
+    }
+}
+
+void UCMVisionComponent::HandleVisionReductionExpired(int32 Handle)
+{
+    if (ActiveVisionReductions.RemoveAll(
+        [Handle](const FActiveVisionReduction& Status)
+        {
+            return Status.Handle == Handle;
+        }) > 0)
+    {
+        RecalculateVisionReduction();
+    }
+}
+
+void UCMVisionComponent::RecalculateVisionReduction()
+{
+    VisionAngleStatusMultiplier = 1.0f;
+    VisionDistanceStatusMultiplier = 1.0f;
+    for (const FActiveVisionReduction& Status : ActiveVisionReductions)
+    {
+        VisionAngleStatusMultiplier = FMath::Min(
+            VisionAngleStatusMultiplier, Status.AngleMultiplier);
+        VisionDistanceStatusMultiplier = FMath::Min(
+            VisionDistanceStatusMultiplier, Status.DistanceMultiplier);
+    }
+    if (GetOwner())
+    {
+        GetOwner()->ForceNetUpdate();
+    }
+}
+
 ECMVisionContribution UCMVisionComponent::GetVisionContribution() const
 {
     return VisionContribution;
@@ -219,17 +419,19 @@ ECMVisionContribution UCMVisionComponent::GetVisionContribution() const
 
 float UCMVisionComponent::GetVisionAngleDegrees() const
 {
-    return VisionAngleDegrees;
+    return VisionAngleDegrees * RenderedVisionAngleMultiplier
+        * RenderedBlindnessMultiplier;
 }
 
 float UCMVisionComponent::GetVisionDistance() const
 {
-    return VisionDistance;
+    return VisionDistance * RenderedVisionDistanceMultiplier
+        * RenderedBlindnessMultiplier;
 }
 
 float UCMVisionComponent::GetNearVisionRadius() const
 {
-    return NearVisionRadius;
+    return NearVisionRadius * RenderedBlindnessMultiplier;
 }
 
 void UCMVisionComponent::SetVisionEyeHeightOffset(float InHeightOffset)
@@ -341,7 +543,7 @@ bool UCMVisionComponent::IsLocationVisible(
     const FVector& WorldLocation
 ) const
 {
-    if (!bVisionActive)
+    if (!IsVisionActive())
     {
         return false;
     }
@@ -352,7 +554,9 @@ bool UCMVisionComponent::IsLocationVisible(
         return true;
     }
 
-    if (VisionDistance <= 0.0f || VisionAngleDegrees <= 0.0f)
+    const float EffectiveDistance = GetVisionDistance();
+    const float EffectiveAngle = GetVisionAngleDegrees();
+    if (EffectiveDistance <= 0.0f || EffectiveAngle <= 0.0f)
     {
         return false;
     }
@@ -360,10 +564,21 @@ bool UCMVisionComponent::IsLocationVisible(
     return IsPointInsideVisionCone(
         GetVisionOrigin(),
         AimDirection,
-        VisionAngleDegrees,
-        VisionDistance,
+        EffectiveAngle,
+        EffectiveDistance,
         WorldLocation
     );
+}
+
+bool UCMVisionComponent::IsLocationInsideVisionCone(
+    const FVector& WorldLocation) const
+{
+    return IsVisionActive() && IsPointInsideVisionCone(
+        GetVisionOrigin(),
+        AimDirection,
+        GetVisionAngleDegrees(),
+        GetVisionDistance(),
+        WorldLocation);
 }
 
 bool UCMVisionComponent::IsPointInsideVisionCone(
@@ -434,6 +649,14 @@ void UCMVisionComponent::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(BlindnessTimerHandle);
+        for (FActiveVisionReduction& Status : ActiveVisionReductions)
+        {
+            World->GetTimerManager().ClearTimer(Status.ExpirationTimer);
+        }
+    }
     if (UWorld* World = GetWorld())
     {
         if (UCMVisionManagerSubsystem* VisionManager =

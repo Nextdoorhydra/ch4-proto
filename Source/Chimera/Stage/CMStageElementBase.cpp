@@ -53,6 +53,7 @@ void ACMStageElementBase::ActivateElement()
     {
         bActivationRequested = true;
         RefreshElementActiveState();
+        HandleElementActivationRequested();
     }
 }
 

@@ -263,7 +263,7 @@ Schedule 시작 시 BeforeStageStart와 Sequential은 자동 큐에 들어간다
 
 장애물은 해당 룸 서브레벨에 BP를 직접 배치하고 메시·머티리얼·Niagara·사운드를 BP 또는 인스턴스에서 참조한다. 룸 스트리밍이 액터와 하드 참조 에셋의 로드/언로드 경계다. 장애물마다 Definition, LoadGroupId, Schedule Catalog 항목을 만들지 않는다.
 
-피해와 상태 수치는 Damage/Status Balance DataTable 행을 선택하고, 스테이지 피해 배율은 `CMStageDirector`에서 한 번 선택한다. Custom Damage는 피해 행 없이 인스턴스 값만으로 사용할 수 있다. 상세 설정은 [장애물 밸런스 가이드](Chimera_Obstacle_Balance_Sheet.md), 컴포넌트 연결은 [장애물·버튼 가이드](Chimera_Obstacle_Mechanism_Architecture.md)를 따른다.
+피해는 Damage Balance DataTable 행을 선택하고, 상태 종류·지속시간·강도는 장애물 인스턴스에서 설정한다. 스테이지 피해 배율은 `CMStageDirector`에서 한 번 선택한다. Custom Damage는 피해 행 없이 인스턴스 값만으로 사용할 수 있다. 상세 설정은 [장애물 밸런스 가이드](Chimera_Obstacle_Balance_Sheet.md), 컴포넌트 연결은 [장애물·버튼 가이드](Chimera_Obstacle_Mechanism_Architecture.md)를 따른다.
 
 `CMObstacleDefinition`과 `CMObstacleDefinitionComponent`는 기존 BP 호환을 위해 코드가 남아 있지만 신규 제작 경로가 아니다. 에셋 참조를 먼저 마이그레이션하지 않고 타입을 삭제하면 기존 BP가 깨질 수 있으므로 즉시 삭제하지 않는다.
 
