@@ -1,5 +1,7 @@
 #include "Parts/Arm/CMArmPart.h"
 
+#include "Combat/CMCombatHitTarget.h"
+
 #include "Ability/CMArmGameplayAbility.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -10,6 +12,9 @@
 #include "Gore/CMDismemberableTarget.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Stage/Trigger/CMBasicButtonBase.h"
+#include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
+#include "Components/BoxComponent.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraArm, Log, All);
@@ -24,6 +29,8 @@ ACMArmPart::ACMArmPart()
     PartType = ECMPartSlotType::Arm;
     GrantedAbilityClass = UCMArmGameplayAbility::StaticClass();
     PartRowName = TEXT("DefaultArm");
+    MechanismWeightComponent = CreateDefaultSubobject<UCMMechanismWeightComponent>(TEXT("MechanismWeight"));
+    MechanismWeightComponent->MechanismWeight = 0.0f;
 }
 
 void ACMArmPart::BeginPlay()
@@ -321,12 +328,16 @@ void ACMArmPart::DetectSwingTargets()
             SwingDetectionTimerHandle))
     {
         const FVector SafeForward = ForwardDirection.GetSafeNormal();
-        const float HalfAngle = FMath::Atan2(AttackRadius, AttackRange);
+        const float DebugRange = AttackRange
+            + DismemberableTargetHitTolerance;
+        const float DebugRadius = AttackRadius
+            + DismemberableTargetHitTolerance;
+        const float HalfAngle = FMath::Atan2(DebugRadius, DebugRange);
         DrawDebugCone(
             World,
             Origin,
             SafeForward,
-            AttackRange,
+            DebugRange,
             HalfAngle,
             HalfAngle,
             24,
@@ -339,7 +350,7 @@ void ACMArmPart::DetectSwingTargets()
         DrawDebugDirectionalArrow(
             World,
             Origin,
-            Origin + SafeForward * AttackRange,
+            Origin + SafeForward * DebugRange,
             20.0f,
             FColor::Yellow,
             false,
@@ -368,7 +379,8 @@ void ACMArmPart::DetectSwingTargets()
         Origin,
         FQuat::Identity,
         ObjectQueryParams,
-        FCollisionShape::MakeSphere(AttackRange),
+        FCollisionShape::MakeSphere(
+            AttackRange + DismemberableTargetHitTolerance),
         QueryParams
     );
 
@@ -386,6 +398,13 @@ void ACMArmPart::DetectSwingTargets()
             continue;
         }
 
+        // 버튼 장식 메쉬가 아닌 HitVolume이 실제 공격 범위에 들어와야 입력 처리
+        ACMBasicButtonBase* Button = Cast<ACMBasicButtonBase>(TargetActor);
+        if (Button && TargetComponent != Button->GetHitVolume())
+        {
+            continue;
+        }
+
         FVector TargetLocation = TargetComponent->Bounds.Origin;
         const float ClosestPointDistance =
             TargetComponent->GetClosestPointOnCollision(
@@ -393,17 +412,25 @@ void ACMArmPart::DetectSwingTargets()
                 TargetLocation);
         const bool bOriginInsideTarget = ClosestPointDistance == 0.0f
             && TargetComponent->Bounds.GetBox().IsInsideOrOn(Origin);
+        const float TargetTolerance =
+            TargetActor->Implements<UCMDismemberableTarget>()
+                ? DismemberableTargetHitTolerance
+                : 0.0f;
         if (!bOriginInsideTarget && !IsInsideSwingSector(
                 Origin,
                 ForwardDirection,
                 TargetLocation,
-                AttackRange,
-                AttackRadius))
+                AttackRange + TargetTolerance,
+                AttackRadius + TargetTolerance))
         {
             continue;
         }
 
         DetectedActors.Add(TargetActor);
+        if (Button)
+        {
+            Button->NotifySwingHit(this, TargetComponent);
+        }
         int32 SeveredPartCount = 0;
         if (TargetActor->Implements<UCMDismemberableTarget>())
         {
@@ -418,16 +445,31 @@ void ACMArmPart::DetectSwingTargets()
                 TargetActor,
                 Request);
         }
+        bool bCombatHitAccepted = false;
+        if (TargetActor->Implements<UCMCombatHitTarget>())
+        {
+            FCMCombatHitRequest Request;
+            Request.Attacker = GetOwner();
+            Request.SourcePart = this;
+            Request.AttackId = CurrentSwingAttackId;
+            Request.ImpactPoint = TargetLocation;
+            Request.ImpactDirection = ForwardDirection;
+            bCombatHitAccepted =
+                ICMCombatHitTarget::Execute_ReceiveCombatHit(
+                    TargetActor,
+                    Request);
+        }
         OnSwingTargetDetected.Broadcast(TargetActor, TargetLocation);
 
         UE_LOG(LogChimeraArm, Log,
-            TEXT("[Arm Swing Target] Part=%s Target=%s Dismemberable=%s Severed=%d Impact=%s"),
+            TEXT("[Arm Swing Target] Part=%s Target=%s Dismemberable=%s Severed=%d CombatAccepted=%s Impact=%s"),
             *GetName(),
             *GetNameSafe(TargetActor),
             TargetActor->Implements<UCMDismemberableTarget>()
                 ? TEXT("true")
                 : TEXT("false"),
             SeveredPartCount,
+            bCombatHitAccepted ? TEXT("true") : TEXT("false"),
             *TargetLocation.ToCompactString());
     }
 
@@ -490,6 +532,7 @@ void ACMArmPart::HandlePartDied()
 
 void ACMArmPart::ApplyPartData(const FCMPartLegArmTableRow& PartRow)
 {
+    MechanismWeightComponent->MechanismWeight = FMath::Max(PartRow.Weight, 0.0f);
     StaminaCost = FMath::Max(PartRow.StaminaCost, 0.0f);
     AnchorStaminaCostPerSecond = FMath::Max(
         PartRow.StaminaPerSecond,

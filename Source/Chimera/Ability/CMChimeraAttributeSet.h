@@ -17,6 +17,8 @@ class CHIMERA_API UCMChimeraAttributeSet : public UAttributeSet
     GENERATED_BODY()
 
 public:
+    UCMChimeraAttributeSet();
+
     /*
      * 이 AttributeSet은 특정 플레이어의 능력치가 아니라 한 마리의
      * Shared Chimera가 공용으로 사용하는 상태만 보관한다.
@@ -65,6 +67,7 @@ private:
 
     UFUNCTION()
     void OnRep_StaminaRegen(const FGameplayAttributeData& OldValue) const;
+
 };
 
 #undef CM_ATTRIBUTE_ACCESSORS

@@ -6,6 +6,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 
 namespace
 {
@@ -24,6 +25,8 @@ ACMLegPart::ACMLegPart()
     PartType = ECMPartSlotType::Leg;
     GrantedAbilityClass = UCMLegGameplayAbility::StaticClass();
     PartRowName = TEXT("DefaultLeg");
+    MechanismWeightComponent = CreateDefaultSubobject<UCMMechanismWeightComponent>(TEXT("MechanismWeight"));
+    MechanismWeightComponent->MechanismWeight = 0.0f;
 }
 
 void ACMLegPart::GetLifetimeReplicatedProps(
@@ -367,6 +370,7 @@ float ACMLegPart::GetStepPhase() const
 
 void ACMLegPart::ApplyPartData(const FCMPartLegArmTableRow& PartRow)
 {
+    MechanismWeightComponent->MechanismWeight = FMath::Max(PartRow.Weight, 0.0f);
     StaminaCost = FMath::Max(PartRow.StaminaCost, 0.0f);
     ActionDuration = FMath::Max(PartRow.ActionDuration, 0.01f);
 }

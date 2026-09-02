@@ -83,6 +83,11 @@ public:
         meta = (ClampMin = "0.0"))
     float VisionHeightTolerance = 2.0f;
 
+    /** Maximum surface height above the vision source that remains visible. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
+        meta = (ClampMin = "0.0"))
+    float VisionAboveHeightAllowance = 100.0f;
+
     /** Maximum height difference below the vision source that remains visible. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mask|Height",
         meta = (ClampMin = "0.0"))

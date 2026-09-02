@@ -15,6 +15,7 @@ namespace PartColumns
     const FString Species = TEXT("Species");
     const FString MaxHealth = TEXT("MaxHealth");
     const FString Strength = TEXT("Strength");
+    const FString Weight = TEXT("Weight");
     const FString StaminaCost = TEXT("StaminaCost");
     const FString StaminaPerSecond = TEXT("Staminapersec");
     const FString ActionDuration = TEXT("ActionDuration");
@@ -34,6 +35,7 @@ namespace PartColumns
         Species,
         MaxHealth,
         Strength,
+        Weight,
         StaminaCost,
         StaminaPerSecond,
         ActionDuration,
@@ -73,7 +75,7 @@ namespace PartColumns
             return false;
         }
 
-        if (OutValue < 0.0f || (!bAllowZero && OutValue == 0.0f))
+        if (!FMath::IsFinite(OutValue) || OutValue < 0.0f || (!bAllowZero && OutValue == 0.0f))
         {
             Report.AddIssue(
                 SheetValidation::EParseIssueSeverity::Error,
@@ -138,6 +140,9 @@ bool UPartLegArmDataParser::OnParseComplete(FString& OutError)
         NewRow.Species = Row.GetRequiredName(PartColumns::Species);
 
         bool bHasValidNumbers = true;
+        bHasValidNumbers &= PartColumns::ReadRequiredFloat(
+            Row, PartColumns::Weight, NewRow.Weight,
+            Report, Index, ParsedRowName, true);
         bHasValidNumbers &= PartColumns::ReadRequiredFloat(
             Row, PartColumns::MaxHealth, NewRow.MaxHealth,
             Report, Index, ParsedRowName, false);

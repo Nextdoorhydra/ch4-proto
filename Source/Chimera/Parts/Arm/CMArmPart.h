@@ -147,6 +147,9 @@ public:
     FCMArmAnchorStateChangedSignature OnGroundAnchorStateChanged;
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism")
+    TObjectPtr<class UCMMechanismWeightComponent> MechanismWeightComponent;
+
     virtual void BeginPlay() override;
     virtual void ApplyPartData(
         const FCMPartLegArmTableRow& PartRow
@@ -180,6 +183,11 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm|Hold",
         meta = (ClampMin = "0.0"))
     float HoldRadius = 40.0f;
+
+    /** Extra forgiveness for characters that expose dismemberable body parts. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Arm",
+        meta = (ClampMin = "0.0", ForceUnits = "cm"))
+    float DismemberableTargetHitTolerance = 35.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Arm|Debug")

@@ -19,6 +19,7 @@ class UMaterialInstanceDynamic;
 class UTextRenderComponent;
 class UAbilitySystemComponent;
 class UCMChimeraAttributeSet;
+class UCMVisionComponent;
 class UCMLineBodyMovementCoordinator;
 class UCMPartSlotComponent;
 class UPrimitiveComponent;
@@ -41,6 +42,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
     int32,
     SegmentIndex
 );
+
+/** Fired whenever body health data or the active body count changes. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMSegmentStatesChangedSignature);
 
 USTRUCT()
 struct FCMReplicatedSegmentState
@@ -86,6 +90,9 @@ public:
 
     virtual UAbilitySystemComponent* GetAbilitySystemComponent()
         const override;
+
+    void GetActiveHeadVisionSources(
+        TArray<UCMVisionComponent*>& OutVisionSources) const;
 
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
@@ -162,6 +169,14 @@ public:
 
     /** Changes only this process's camera component; the value is not replicated. */
     float AdjustLocalCameraDistance(float WheelInput);
+
+    /** 모든 활성 몸통 마디에 질량 독립적인 평면 넉백 속도를 더한다. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Movement")
+    void ApplyPlanarKnockback(FVector WorldDirection, float Speed);
+
+    /** Moves the active assembly by a measured planar knockback distance. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Movement")
+    void StartPlanarKnockback(FVector WorldDirection, float DistanceCm);
 
     // 지정 Volume과 모든 활성 몸통 물리 컴포넌트가 겹치는지 확인
     bool AreAllActiveBodySegmentsOverlapping(
@@ -270,6 +285,9 @@ public:
     // the destroyed segment as defeated.
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Health")
     FCMSegmentDestroyedSignature OnSegmentDestroyed;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Health")
+    FCMSegmentStatesChangedSignature OnSegmentStatesChanged;
 
 protected:
     virtual void BeginPlay() override;
@@ -657,6 +675,7 @@ private:
     void ApplyBlueprintSettings();
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
+    void UpdatePlanarKnockback(float DeltaTime);
     void UpdateReplicatedSegmentStates();
     void ApplyReplicatedSegmentStates(float DeltaTime);
 
@@ -681,6 +700,12 @@ private:
     UPROPERTY(Replicated)
     uint32 PressedPartSlotMask = 0;
 
+    // Server-only history for the current key press, independent of anchor lifetime.
+    uint32 InteractionConsumedPartSlotMask = 0;
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCMLeverInteractionRegressionTest;
+#endif
+
     UPROPERTY(Transient)
     TArray<TObjectPtr<UMaterialInstanceDynamic>> ControlMarkerMaterials;
 
@@ -690,6 +715,11 @@ private:
     bool bHasReceivedSegmentStates = false;
     bool bAllSegmentsDeathNotified = false;
     float ConfiguredSegmentMaxHealth = 0.0f;
+    bool bPlanarKnockbackActive = false;
+    FVector PlanarKnockbackStartLocation = FVector::ZeroVector;
+    FVector PlanarKnockbackDirection = FVector::ForwardVector;
+    float PlanarKnockbackDistanceCm = 0.0f;
+    float PlanarKnockbackElapsedSeconds = 0.0f;
     
     TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
     FActiveGameplayEffectHandle StaminaRegenEffectHandle;

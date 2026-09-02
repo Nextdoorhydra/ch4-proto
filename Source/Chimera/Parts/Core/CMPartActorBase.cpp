@@ -423,6 +423,11 @@ bool ACMPartActorBase::ApplyPartDamage(float Damage)
         BattleComponent->EndParryWindow();
         OnPartDied.Broadcast();
         OnDisabledChanged.Broadcast(true);
+
+        if (UCMPartSlotComponent* PartSlot = GetAttachedPartSlot())
+        {
+            PartSlot->DetachPart();
+        }
     }
 
     ForceNetUpdate();

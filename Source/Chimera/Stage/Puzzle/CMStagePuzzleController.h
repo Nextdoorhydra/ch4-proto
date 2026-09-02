@@ -19,7 +19,16 @@ UENUM(BlueprintType)
 enum class ECMPuzzleTriggerCondition : uint8
 {
     Any, // 등록된 Trigger 중 하나의 유효 신호로 실행
-    All  // 등록된 Trigger가 모두 조건을 충족하면 실행
+    All, // 등록된 Trigger가 모두 조건을 충족하면 실행
+    Sequence // Expected Trigger Sequence의 순서대로 입력되면 실행
+};
+
+UENUM(BlueprintType)
+enum class ECMPuzzleSequenceWrongInputBehavior : uint8
+{
+    Ignore,
+    ResetSequence,
+    ResetAndExecuteFailureCommands
 };
 
 UENUM(BlueprintType)
@@ -83,7 +92,8 @@ struct FCMPuzzleChannel
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
     FName ChannelId;
 
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly)
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
+        meta = (EditCondition = "TriggerCondition != ECMPuzzleTriggerCondition::Sequence", EditConditionHides))
     TArray<TObjectPtr<ACMStageTriggerBase>> Triggers;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
@@ -97,6 +107,20 @@ struct FCMPuzzleChannel
         meta = (EditCondition = "TriggerCondition == ECMPuzzleTriggerCondition::All && AllConditionMode == ECMPuzzleAllConditionMode::Simultaneous"))
     ECMPuzzleSimultaneousMatchState SimultaneousMatchState =
         ECMPuzzleSimultaneousMatchState::AllActive;
+
+    // Sequence 조건에서 사용할 정확한 입력 순서. 같은 Trigger를 여러 번 등록할 수 있다.
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
+        meta = (EditCondition = "TriggerCondition == ECMPuzzleTriggerCondition::Sequence", EditConditionHides))
+    TArray<TObjectPtr<ACMStageTriggerBase>> ExpectedTriggerSequence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (EditCondition = "TriggerCondition == ECMPuzzleTriggerCondition::Sequence", EditConditionHides))
+    ECMPuzzleSequenceWrongInputBehavior WrongInputBehavior =
+        ECMPuzzleSequenceWrongInputBehavior::ResetSequence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (EditCondition = "TriggerCondition == ECMPuzzleTriggerCondition::Sequence && WrongInputBehavior == ECMPuzzleSequenceWrongInputBehavior::ResetAndExecuteFailureCommands", EditConditionHides))
+    TArray<FCMPuzzleTargetCommand> FailureCommands;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
     ECMPuzzleAcceptedSignal AcceptedSignal = ECMPuzzleAcceptedSignal::PulseOrActivated;
@@ -127,6 +151,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Stage|Puzzle")
     int32 GetCurrentStepIndex(FName ChannelId) const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stage|Puzzle")
+    int32 GetCurrentSequenceIndex(FName ChannelId) const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Stage|Puzzle")
+    int32 GetSequenceLength(FName ChannelId) const;
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -149,6 +179,10 @@ protected:
         Category = "Chimera|Stage|Puzzle")
     TArray<bool> CompletedChannels;
 
+    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Stage|Puzzle")
+    TArray<int32> CurrentSequenceIndices;
+
 private:
     UFUNCTION()
     void HandleTriggerSignal(
@@ -162,8 +196,15 @@ private:
         int32 ChannelIndex,
         ACMStageTriggerBase* Trigger,
         ECMStageTriggerSignal Signal);
+    void HandleSequenceSignal(
+        int32 ChannelIndex,
+        ACMStageTriggerBase* Trigger,
+        ECMStageTriggerSignal Signal);
     void ExecuteCurrentStep(int32 ChannelIndex);
     void ExecuteTargetCommand(const FCMPuzzleTargetCommand& TargetCommand);
+    bool IsTriggerRegistered(
+        const FCMPuzzleChannel& Channel,
+        const ACMStageTriggerBase* Trigger) const;
     void ResetRuntimeState(bool bResetTargets);
     void SetTriggerDirectCommandsEnabled(bool bEnabled);
 

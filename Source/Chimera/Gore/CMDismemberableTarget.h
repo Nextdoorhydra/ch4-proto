@@ -19,6 +19,10 @@ struct CHIMERA_API FCMDismembermentHitRequest
     UPROPERTY(BlueprintReadWrite)
     FGuid AttackId;
 
+    /** The attacker consumes the severed part instead of spawning a drop. */
+    UPROPERTY(BlueprintReadWrite)
+    bool bConsumeSeveredPart = false;
+
     UPROPERTY(BlueprintReadWrite)
     FVector ImpactPoint = FVector::ZeroVector;
 

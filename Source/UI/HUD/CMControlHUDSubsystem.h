@@ -6,7 +6,7 @@
 
 #include "CMControlHUDSubsystem.generated.h"
 
-class UCMControlHUDWidget;
+class UNKMUIActivatableWidget;
 enum class ENKMUIAsyncResult : uint8;
 
 /** Pushes the local player's control HUD onto the NKMUI HUD layer. */
@@ -28,7 +28,9 @@ private:
     void HandlePolicyInitialized(ENKMUIAsyncResult Result);
 
     UPROPERTY(Transient)
-    TObjectPtr<UCMControlHUDWidget> ControlHUDWidget;
+    TObjectPtr<UNKMUIActivatableWidget> ControlHUDWidget;
+
+    TWeakObjectPtr<UWorld> ControlHUDWorld;
 
     bool bPolicyInitializationPending = false;
 };

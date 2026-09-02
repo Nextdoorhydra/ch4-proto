@@ -3,11 +3,16 @@
 #include "Components/AudioComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "NiagaraComponent.h"
-#include "Stage/Obstacle/Component/CMChimeraEffectZoneComponent.h"
 #include "Stage/Obstacle/Component/CMForceZoneComponent.h"
+#include "Stage/Obstacle/Component/CMFlashComponent.h"
 #include "Stage/Obstacle/Component/CMHazardComponent.h"
 #include "Stage/Obstacle/Component/CMObstacleMotionComponent.h"
 #include "Stage/Obstacle/Component/CMStatusZoneComponent.h"
+#include "Parts/Core/CMPartStatusTags.h"
+#include "Stage/CMStageDirector.h"
+#include "Stage/CMStageElementComponent.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogChimeraObstacleBalance, Log, All);
 
 ACMStageObstacleBase::ACMStageObstacleBase()
 {
@@ -28,11 +33,95 @@ ACMStageObstacleBase::ACMStageObstacleBase()
     LoopAudio->bAutoActivate = false;
 }
 
-// BP 또는 배치 인스턴스에 직접 설정된 장애물 효과 준비
+// 배치 인스턴스의 밸런스를 해석하고 런타임 효과 컴포넌트 준비
 void ACMStageObstacleBase::BeginPlay()
 {
     Super::BeginPlay();
+    ResolveBalance();
+    ApplyResolvedBalance();
     ConfigureDirectEffects();
+}
+
+void ACMStageObstacleBase::ResolveBalance()
+{
+    ResolvedObstacleBalance = {};
+    const bool bHasDamageSelection = BalanceSelection.DamageBalanceTable
+        && !BalanceSelection.DamageBalanceRow.IsNone();
+    const bool bHasCustomDamage = BalanceSelection.DamageMode
+        == ECMObstacleDamageMode::Custom;
+
+    if (!BalanceSelection.DamageBalanceRow.IsNone()
+        && !BalanceSelection.DamageBalanceTable)
+    {
+        UE_LOG(LogChimeraObstacleBalance, Error,
+            TEXT("Damage balance row is set without a table. Obstacle=%s Row=%s"),
+            *GetPathName(), *BalanceSelection.DamageBalanceRow.ToString());
+        return;
+    }
+    if (!bHasDamageSelection && !bHasCustomDamage)
+    {
+        return;
+    }
+
+    const FCMObstacleDamageBalanceTableRow* DamageRow = nullptr;
+    if (bHasDamageSelection)
+    {
+        if (BalanceSelection.DamageBalanceTable->GetRowStruct()
+            != FCMObstacleDamageBalanceTableRow::StaticStruct())
+        {
+            UE_LOG(LogChimeraObstacleBalance, Error,
+                TEXT("Damage balance table has wrong row struct. Obstacle=%s Table=%s"),
+                *GetPathName(), *BalanceSelection.DamageBalanceTable->GetPathName());
+            return;
+        }
+        DamageRow = BalanceSelection.DamageBalanceTable
+            ->FindRow<FCMObstacleDamageBalanceTableRow>(
+                BalanceSelection.DamageBalanceRow,
+                TEXT("CMStageObstacleBase.DamageBalance"));
+        if (!DamageRow)
+        {
+            UE_LOG(LogChimeraObstacleBalance, Error,
+                TEXT("Damage balance row was not found. Obstacle=%s Row=%s"),
+                *GetPathName(), *BalanceSelection.DamageBalanceRow.ToString());
+            return;
+        }
+    }
+
+    const ACMStageDirector* Director = StageElement
+        ? StageElement->GetRegisteredDirector() : nullptr;
+    const float StageDamageMultiplier = Director
+        ? Director->GetObstacleDamageMultiplier() : 1.0f;
+    ResolvedObstacleBalance = CMObstacleBalance::Resolve(
+        DamageRow, BalanceSelection, StageDamageMultiplier);
+}
+
+void ACMStageObstacleBase::ApplyResolvedBalance()
+{
+    PartEffect.bEnabled = ResolvedObstacleBalance.Damage > 0.0f
+        || PartEffect.StatusEffect != ECMPartObstacleStatusEffect::None;
+    PartEffect.DamagePerApplication = ResolvedObstacleBalance.bValid
+        ? ResolvedObstacleBalance.Damage : 0.0f;
+    PartEffect.StatusTag = FGameplayTag();
+    PartEffect.bBlocksAbility = false;
+
+    if (PartEffect.StatusEffect == ECMPartObstacleStatusEffect::Slowed)
+    {
+        PartEffect.StatusTag = CMPartStatusTags::Slowed;
+        PartEffect.MovementMultiplier = FMath::Clamp(
+            PartEffect.MovementMultiplier, 0.0f, 1.0f);
+    }
+    else if (PartEffect.StatusEffect
+        == ECMPartObstacleStatusEffect::Electrified)
+    {
+        PartEffect.StatusTag = CMPartStatusTags::Electrified;
+        PartEffect.MovementMultiplier = 1.0f;
+        PartEffect.bBlocksAbility = true;
+    }
+    else
+    {
+        PartEffect.MovementMultiplier = 1.0f;
+    }
+
 }
 
 void ACMStageObstacleBase::ActivateObstacle()
@@ -48,6 +137,22 @@ void ACMStageObstacleBase::DeactivateObstacle()
 void ACMStageObstacleBase::ResetObstacle()
 {
     ResetElement();
+}
+
+// 활성화 요청마다 부착된 단발 섬광을 실행한다.
+// 시작 상태 복원과 BeginPlay 초기화에서는 호출되지 않는다.
+void ACMStageObstacleBase::HandleElementActivationRequested()
+{
+    if (!IsObstacleActive())
+    {
+        return;
+    }
+
+    TInlineComponentArray<UCMFlashComponent*> FlashComponents(this);
+    for (UCMFlashComponent* FlashComponent : FlashComponents)
+    {
+        FlashComponent->TriggerFlash();
+    }
 }
 
 // 공통 활성 상태를 장애물 컴포넌트와 블루프린트 표현에 전달
@@ -94,18 +199,16 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
         StatusZoneComponent->SetZoneEnabled(bIsActive);
     }
 
-    TInlineComponentArray<UCMChimeraEffectZoneComponent*>
-        ChimeraEffectZoneComponents(this);
-    for (UCMChimeraEffectZoneComponent* ChimeraEffectZone
-        : ChimeraEffectZoneComponents)
-    {
-        ChimeraEffectZone->SetZoneEnabled(bIsActive);
-    }
-
     TInlineComponentArray<UCMForceZoneComponent*> ForceZoneComponents(this);
     for (UCMForceZoneComponent* ForceZoneComponent : ForceZoneComponents)
     {
         ForceZoneComponent->SetZoneEnabled(bIsActive);
+    }
+
+    TInlineComponentArray<UCMFlashComponent*> FlashComponents(this);
+    for (UCMFlashComponent* FlashComponent : FlashComponents)
+    {
+        FlashComponent->SetFlashEnabled(bIsActive);
     }
 
     if (PrimaryEffect && PrimaryEffect->GetAsset())
@@ -134,23 +237,15 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
     HandleObstacleActiveStateChanged(bIsActive);
 }
 
-// 직접 지정된 효과 설정을 부착된 Hazard와 ChimeraEffectZone에 전달
+// 해석된 피해와 파츠 상태 설정을 부착된 Hazard에 전달
 void ACMStageObstacleBase::ConfigureDirectEffects()
 {
     TInlineComponentArray<UCMHazardComponent*> HazardComponents(this);
     for (UCMHazardComponent* HazardComponent : HazardComponents)
     {
         HazardComponent->ConfigurePartEffect(PartEffect);
-    }
-
-    TInlineComponentArray<UCMChimeraEffectZoneComponent*>
-        ChimeraEffectZoneComponents(this);
-    for (UCMChimeraEffectZoneComponent* ChimeraEffectZone
-        : ChimeraEffectZoneComponents)
-    {
-        ChimeraEffectZone->ConfigureChimeraEffect(
-            ChimeraEffect,
-            ChimeraEffect.GameplayEffectClass);
+        HazardComponent->ConfigureHeadVisionEffect(HeadVisionEffect);
+        HazardComponent->ConfigureControlEffect(ControlEffect);
     }
 }
 

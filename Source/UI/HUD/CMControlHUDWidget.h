@@ -5,83 +5,128 @@
 
 #include "CMControlHUDWidget.generated.h"
 
+class ACMControlBody;
+class ACMChimera;
+class ACMPartActorBase;
+class ACMPlayerState;
+class AActor;
 class UBorder;
-class UHorizontalBox;
+class UImage;
+class UCMPartSlotComponent;
 class UProgressBar;
 class UTextBlock;
-class UVerticalBox;
-class ACMControlBody;
+class UTexture2D;
+class UWidget;
+struct FOnAttributeChangeData;
 
-/** Local-only, persistent Q/W/E/R control assignment HUD. */
+/** WBP-authored Chimera body map; C++ only binds live gameplay data. */
 UCLASS(Blueprintable)
-class UI_API UCMControlHUDWidget : public UNKMUIActivatableWidget
+class UI_API UCMControlHUDWidget
+    : public UNKMUIActivatableWidget
 {
     GENERATED_BODY()
 
 public:
-    UCMControlHUDWidget(const FObjectInitializer& ObjectInitializer);
+    UCMControlHUDWidget(
+        const FObjectInitializer& ObjectInitializer);
 
     void SetControlBody(ACMControlBody* NewControlBody);
 
 protected:
     virtual void NativeOnInitialized() override;
-    virtual void NativeTick(
-        const FGeometry& MyGeometry,
-        float InDeltaTime
-    ) override;
+    virtual void NativeDestruct() override;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Layout")
-    FVector2D HUDPosition = FVector2D(0.0f, -30.0f);
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera HUD|Part Images")
+    TObjectPtr<UTexture2D> HeadPartTexture;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Layout", meta = (ClampMin = "1.0"))
-    float CardWidth = 95.0f;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera HUD|Part Images")
+    TObjectPtr<UTexture2D> ArmPartTexture;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Layout", meta = (ClampMin = "1.0"))
-    float CardHeight = 58.0f;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Layout", meta = (ClampMin = "0.0"))
-    float CardSpacing = 5.0f;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Text", meta = (ClampMin = "1"))
-    int32 KeyFontSize = 20;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Text", meta = (ClampMin = "1"))
-    int32 AssignmentFontSize = 11;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Color")
-    FLinearColor DisabledCardColor = FLinearColor(0.08f, 0.08f, 0.08f, 0.82f);
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Color", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float EnabledOpacity = 0.62f;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Control HUD|Color", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float PressedOpacity = 0.95f;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera HUD|Part Images")
+    TObjectPtr<UTexture2D> LegPartTexture;
 
 private:
-    void BuildFallbackWidgetTree();
+    struct FPartSlotVisual
+    {
+        TObjectPtr<UWidget> Root;
+        TObjectPtr<UImage> BaseImage;
+        TObjectPtr<UProgressBar> HealthFill;
+        TObjectPtr<UTextBlock> KeyText;
+        TObjectPtr<UTextBlock> PartText;
+    };
+
+    struct FSegmentRowVisual
+    {
+        TObjectPtr<UWidget> Root;
+        TObjectPtr<UBorder> BodyBorder;
+        TObjectPtr<UProgressBar> BodyHealthFill;
+        TObjectPtr<UTextBlock> BodyControlText;
+        TObjectPtr<UBorder> BodyStrikeLine;
+    };
+
     bool CacheWidgetTreeReferences();
-    void RefreshControlSlots();
+    void BindStateDelegates();
+    void UnbindStateDelegates();
+    void RebindObservedPlayerState();
+    void RebindObservedSlotsAndParts();
+    void UnbindObservedSlotsAndParts();
+    void RefreshAll();
+    void RefreshStamina();
+    void RefreshBodySegments();
+    void RefreshAssignedParts();
+    void RefreshPartHealth();
+    void ResetPartSlotVisual(FPartSlotVisual& Visual);
+    void SetControlSlotHighlighted(int32 ControlIndex, bool bPressed);
+    UTexture2D* GetPartTexture(const ACMPartActorBase* PartActor) const;
+    FText GetPartLabel(const ACMPartActorBase* PartActor) const;
+
+    UFUNCTION()
+    void HandleControlSlotsChanged();
+
+    UFUNCTION()
+    void HandleControlInputChanged(int32 SlotIndex, bool bPressed);
+
+    UFUNCTION()
+    void HandleControlPlayerStateChanged();
+
+    UFUNCTION()
+    void HandleSegmentStatesChanged();
+
+    UFUNCTION()
+    void HandlePartAttachmentChanged(
+        UCMPartSlotComponent* PartSlot,
+        AActor* AttachedPart
+    );
+
+    UFUNCTION()
+    void HandlePartHealthChanged(
+        float PreviousHealth,
+        float CurrentHealth,
+        float MaxHealth
+    );
+
+    UFUNCTION()
+    void HandlePlayerColorChanged();
+
+    void HandleStaminaChanged(const FOnAttributeChangeData& ChangeData);
 
     TWeakObjectPtr<ACMControlBody> ControlBody;
+    TWeakObjectPtr<ACMChimera> SharedChimera;
+    TWeakObjectPtr<ACMPlayerState> ObservedPlayerState;
 
     UPROPERTY(Transient)
-    TObjectPtr<UVerticalBox> HUDContainer;
+    TObjectPtr<UWidget> CachedHUDContainer;
 
     UPROPERTY(Transient)
-    TObjectPtr<UHorizontalBox> ControlSlotBox;
+    TObjectPtr<UProgressBar> CachedStaminaProgressBar;
 
-    UPROPERTY(Transient)
-    TObjectPtr<UProgressBar> StaminaProgressBar;
-
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<UProgressBar>> BodyHealthBars;
-
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<UProgressBar>> PartHealthBars;
-
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<UBorder>> ControlSlotBorders;
-
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<UTextBlock>> AssignmentTexts;
+    TArray<FSegmentRowVisual> SegmentRows;
+    TArray<FPartSlotVisual> PhysicalPartSlots;
+    TArray<TWeakObjectPtr<UCMPartSlotComponent>> ObservedPartSlots;
+    TArray<TWeakObjectPtr<ACMPartActorBase>> ObservedParts;
+    FDelegateHandle StaminaChangedHandle;
+    FDelegateHandle MaxStaminaChangedHandle;
 };

@@ -31,8 +31,15 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Obstacle")
     bool IsObstacleActive() const { return IsElementActive(); }
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Obstacle|Balance")
+    FCMResolvedObstacleBalance GetResolvedObstacleBalance() const
+    {
+        return ResolvedObstacleBalance;
+    }
+
 protected:
     virtual void BeginPlay() override;
+    virtual void HandleElementActivationRequested() override;
     virtual void HandleElementActiveChanged_Implementation(bool bIsActive) override;
     virtual void HandleElementReset_Implementation() override;
 
@@ -55,16 +62,31 @@ protected:
 
     // 접촉한 팔과 다리에 코드로 적용할 내구도 및 상태 설정
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Part Effect")
+        Category = "Chimera|Obstacle", meta = (DisplayName = "Part Application"))
     FCMPartObstacleEffectConfig PartEffect;
 
-    // 키메라 전체 ASC에 적용할 GameplayEffect 설정
+    // 머리 DamageHurtbox에 적용할 시야각·시야거리 감소 설정
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Obstacle|Chimera Effect")
-    FCMChimeraObstacleEffectConfig ChimeraEffect;
+        Category = "Chimera|Obstacle", meta = (DisplayName = "Head Vision Application"))
+    FCMHeadVisionObstacleEffectConfig HeadVisionEffect;
+
+    // 몸통 마디에 닿은 플레이어의 Q/W/E/R 매핑에 적용할 혼란·착란
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Obstacle", meta = (DisplayName = "Control Status Application"))
+    FCMControlObstacleEffectConfig ControlEffect;
+
+    // 피해 표 선택과 인스턴스별 Custom 오버라이드
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Obstacle|Balance")
+    FCMObstacleBalanceSelection BalanceSelection;
 
 private:
+    void ResolveBalance();
+    void ApplyResolvedBalance();
     void ApplyComponentActiveState(bool bIsActive);
     void ConfigureDirectEffects();
     void ResetMotionComponents();
+
+    UPROPERTY(Transient)
+    FCMResolvedObstacleBalance ResolvedObstacleBalance;
 };

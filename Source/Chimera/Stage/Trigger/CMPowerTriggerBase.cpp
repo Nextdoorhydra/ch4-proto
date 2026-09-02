@@ -1,9 +1,12 @@
 #include "Stage/Trigger/CMPowerTriggerBase.h"
 
+#include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 #include "Stage/Trigger/Component/CMPowerSocketComponent.h"
 
 ACMPowerTriggerBase::ACMPowerTriggerBase()
 {
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
 }
 
 void ACMPowerTriggerBase::BeginPlay()
@@ -38,13 +41,30 @@ void ACMPowerTriggerBase::BeginPlay()
     {
         if (Socket)
         {
-            Socket->OnConnectionChanged.AddUniqueDynamic(
+            Socket->OnPowerStateChanged.AddUniqueDynamic(
                 this,
                 &ThisClass::HandleSocketConnectionChanged
             );
         }
     }
 
+    EvaluatePowerState();
+    bPendingInitialEvaluation = true;
+    SetActorTickEnabled(true);
+}
+
+void ACMPowerTriggerBase::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    if (!bPendingInitialEvaluation)
+    {
+        SetActorTickEnabled(false);
+        return;
+    }
+
+    bPendingInitialEvaluation = false;
+    SetActorTickEnabled(false);
     EvaluatePowerState();
 }
 
@@ -63,7 +83,7 @@ void ACMPowerTriggerBase::EvaluatePowerState()
     int32 ConnectedCount = 0;
     for (const UCMPowerSocketComponent* Socket : RequiredSockets)
     {
-        if (Socket && Socket->IsConnected())
+        if (Socket && Socket->IsPowered())
         {
             ++ConnectedCount;
         }
@@ -73,7 +93,7 @@ void ACMPowerTriggerBase::EvaluatePowerState()
     const bool bConditionMet = bRequireAllSockets
         ? RequiredCount > 0 && ConnectedCount == RequiredCount
         : ConnectedCount > 0;
-    const bool bIsTriggered = ActivationTrigger
+    const bool bIsTriggered = ActivationTrigger != nullptr
         && ActivationTrigger->IsTriggered();
 
     if (bConditionMet && !bIsTriggered)
