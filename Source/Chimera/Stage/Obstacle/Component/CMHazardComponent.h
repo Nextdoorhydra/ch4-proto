@@ -7,6 +7,7 @@
 #include "CMHazardComponent.generated.h"
 
 class ACMPartActorBase;
+class ACMHeadPartActor;
 class ACMChimera;
 class UPrimitiveComponent;
 
@@ -37,6 +38,10 @@ public:
     // 장애물 액터에서 해석된 밸런스 기반 파츠·몸통 마디 효과 설정
     void ConfigurePartEffect(const FCMPartObstacleEffectConfig& NewConfig);
 
+    // 머리 DamageHurtbox에 적용할 시야 감소 설정
+    void ConfigureHeadVisionEffect(
+        const FCMHeadVisionObstacleEffectConfig& NewConfig);
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Hazard")
     FCMHazardTargetSignature OnTargetEntered;
 
@@ -48,6 +53,10 @@ private:
     UPROPERTY(Transient, BlueprintReadOnly, Category = "Chimera|Hazard",
         meta = (AllowPrivateAccess = "true"))
     FCMPartObstacleEffectConfig PartEffect;
+
+    UPROPERTY(Transient, BlueprintReadOnly, Category = "Chimera|Hazard",
+        meta = (AllowPrivateAccess = "true"))
+    FCMHeadVisionObstacleEffectConfig HeadVisionEffect;
 
     struct FTrackedPart
     {
@@ -68,12 +77,21 @@ private:
         AActor* TargetActor,
         const UPrimitiveComponent* TargetComponent) const;
     void ApplyConfiguredEffect(ACMPartActorBase& PartActor);
+    void ApplyHeadVisionEffect(ACMHeadPartActor& Head);
+    void RemoveHeadVisionEffect(ACMHeadPartActor& Head);
     void ApplyConfiguredDamage(ACMChimera& Chimera, int32 SegmentIndex);
     void UpdatePeriodicTimer();
+    void UpdateHeadVisionPeriodicTimer();
     void HandlePeriodicApplication();
+    void HandleHeadVisionPeriodicApplication();
 
+protected:
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+private:
     bool bHazardEnabled = true;
     TMap<TWeakObjectPtr<ACMPartActorBase>, FTrackedPart> TrackedParts;
     TMap<TWeakObjectPtr<UPrimitiveComponent>, FTrackedSegment> TrackedSegments;
     FTimerHandle PeriodicTimerHandle;
+    FTimerHandle HeadVisionPeriodicTimerHandle;
 };

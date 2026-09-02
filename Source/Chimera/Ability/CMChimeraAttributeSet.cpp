@@ -5,6 +5,8 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraAttributes, Log, All);
 
+UCMChimeraAttributeSet::UCMChimeraAttributeSet() = default;
+
 void UCMChimeraAttributeSet::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const

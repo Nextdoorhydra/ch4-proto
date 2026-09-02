@@ -4,6 +4,8 @@
 #include "Engine/World.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Core/CMPartStatusComponent.h"
+#include "Parts/Head/CMHeadPartActor.h"
+#include "Parts/Head/CMVisionComponent.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "TimerManager.h"
@@ -26,6 +28,21 @@ void UCMHazardComponent::ConfigurePartEffect(
     UpdatePeriodicTimer();
 }
 
+void UCMHazardComponent::ConfigureHeadVisionEffect(
+    const FCMHeadVisionObstacleEffectConfig& NewConfig)
+{
+    HeadVisionEffect = NewConfig;
+    HeadVisionEffect.PeriodSeconds = FMath::Max(
+        HeadVisionEffect.PeriodSeconds, 0.01f);
+    HeadVisionEffect.StatusDuration = FMath::Max(
+        HeadVisionEffect.StatusDuration, 0.01f);
+    HeadVisionEffect.VisionAngleMultiplier = FMath::Clamp(
+        HeadVisionEffect.VisionAngleMultiplier, 0.0f, 1.0f);
+    HeadVisionEffect.VisionDistanceMultiplier = FMath::Clamp(
+        HeadVisionEffect.VisionDistanceMultiplier, 0.0f, 1.0f);
+    UpdateHeadVisionPeriodicTimer();
+}
+
 // 비활성 중에도 오버랩 목록은 유지하고 실제 효과와 타이머만 정지
 void UCMHazardComponent::SetHazardEnabled(bool bEnabled)
 {
@@ -45,7 +62,12 @@ void UCMHazardComponent::SetHazardEnabled(bool bEnabled)
             It.RemoveCurrent();
             continue;
         }
-        if (!bPersistent || !PartEffect.StatusTag.IsValid())
+        const ECMPartSlotType PartType =
+            PartActor->GetPartType_Implementation();
+        const bool bSupportsPartStatus = PartType == ECMPartSlotType::Arm
+            || PartType == ECMPartSlotType::Leg;
+        if (!bPersistent || !bSupportsPartStatus
+            || !PartEffect.StatusTag.IsValid())
         {
             continue;
         }
@@ -66,7 +88,29 @@ void UCMHazardComponent::SetHazardEnabled(bool bEnabled)
             }
         }
     }
+    if (HeadVisionEffect.ApplicationPolicy
+        == ECMHeadVisionEffectApplicationPolicy::WhileOverlapping)
+    {
+        for (const TPair<TWeakObjectPtr<ACMPartActorBase>, FTrackedPart>& Entry
+            : TrackedParts)
+        {
+            ACMHeadPartActor* Head = Cast<ACMHeadPartActor>(Entry.Key.Get());
+            if (!Head || Entry.Value.OverlapCount <= 0)
+            {
+                continue;
+            }
+            if (bHazardEnabled && HeadVisionEffect.bEnabled)
+            {
+                ApplyHeadVisionEffect(*Head);
+            }
+            else
+            {
+                RemoveHeadVisionEffect(*Head);
+            }
+        }
+    }
     UpdatePeriodicTimer();
+    UpdateHeadVisionPeriodicTimer();
 }
 
 // 파츠는 Actor, 몸통은 Component 단위로 첫 진입만 효과 처리
@@ -94,7 +138,15 @@ void UCMHazardComponent::NotifyTargetEntered(
         {
             ApplyConfiguredEffect(*PartActor);
         }
+        if (bHazardEnabled && HeadVisionEffect.bEnabled)
+        {
+            if (ACMHeadPartActor* Head = Cast<ACMHeadPartActor>(PartActor))
+            {
+                ApplyHeadVisionEffect(*Head);
+            }
+        }
         UpdatePeriodicTimer();
+        UpdateHeadVisionPeriodicTimer();
         OnTargetEntered.Broadcast(PartActor);
         return;
     }
@@ -155,8 +207,18 @@ void UCMHazardComponent::NotifyTargetExited(
             }
         }
 
+        if (HeadVisionEffect.ApplicationPolicy
+            == ECMHeadVisionEffectApplicationPolicy::WhileOverlapping)
+        {
+            if (ACMHeadPartActor* Head = Cast<ACMHeadPartActor>(PartActor))
+            {
+                RemoveHeadVisionEffect(*Head);
+            }
+        }
+
         TrackedParts.Remove(PartActor);
         UpdatePeriodicTimer();
+        UpdateHeadVisionPeriodicTimer();
         OnTargetExited.Broadcast(PartActor);
         return;
     }
@@ -181,7 +243,8 @@ void UCMHazardComponent::NotifyTargetExited(
     }
 }
 
-// 현재 정책은 바닥에 직접 닿는 팔과 다리만 허용
+// 모든 파츠는 정확한 DamageHurtbox 접촉만 허용한다.
+// 상태이상 적용 대상 제한은 ApplyConfiguredEffect에서 처리한다.
 ACMPartActorBase* UCMHazardComponent::ResolveSupportedPart(
     AActor* TargetActor,
     const UPrimitiveComponent* TargetComponent) const
@@ -191,10 +254,7 @@ ACMPartActorBase* UCMHazardComponent::ResolveSupportedPart(
     {
         return nullptr;
     }
-    const ECMPartSlotType PartType = PartActor->GetPartType_Implementation();
-    return PartType == ECMPartSlotType::Arm
-        || PartType == ECMPartSlotType::Leg
-        ? PartActor : nullptr;
+    return PartActor;
 }
 
 int32 UCMHazardComponent::ResolveBodySegment(
@@ -221,7 +281,11 @@ void UCMHazardComponent::ApplyConfiguredEffect(
         PartActor.ApplyPartDamage(PartEffect.DamagePerApplication);
     }
 
-    if (!PartActor.IsAlive() || !PartEffect.StatusTag.IsValid())
+    const ECMPartSlotType PartType = PartActor.GetPartType_Implementation();
+    const bool bSupportsPartStatus = PartType == ECMPartSlotType::Arm
+        || PartType == ECMPartSlotType::Leg;
+    if (!PartActor.IsAlive() || !bSupportsPartStatus
+        || !PartEffect.StatusTag.IsValid())
     {
         return;
     }
@@ -234,6 +298,31 @@ void UCMHazardComponent::ApplyConfiguredEffect(
             PartEffect.StatusTag, Duration,
             PartEffect.MovementMultiplier,
             PartEffect.bBlocksAbility, this);
+    }
+}
+
+void UCMHazardComponent::ApplyHeadVisionEffect(ACMHeadPartActor& Head)
+{
+    UCMVisionComponent* Vision = Head.GetVisionComponent();
+    if (!Vision)
+    {
+        return;
+    }
+    const float Duration = HeadVisionEffect.ApplicationPolicy
+            == ECMHeadVisionEffectApplicationPolicy::WhileOverlapping
+        ? 0.0f : HeadVisionEffect.StatusDuration;
+    Vision->ApplyVisionReduction(
+        Duration,
+        HeadVisionEffect.VisionAngleMultiplier,
+        HeadVisionEffect.VisionDistanceMultiplier,
+        this);
+}
+
+void UCMHazardComponent::RemoveHeadVisionEffect(ACMHeadPartActor& Head)
+{
+    if (UCMVisionComponent* Vision = Head.GetVisionComponent())
+    {
+        Vision->RemoveVisionReduction(this);
     }
 }
 
@@ -300,4 +389,67 @@ void UCMHazardComponent::HandlePeriodicApplication()
         ApplyConfiguredDamage(*Chimera, It.Value().SegmentIndex);
     }
     UpdatePeriodicTimer();
+}
+
+void UCMHazardComponent::UpdateHeadVisionPeriodicTimer()
+{
+    FTimerManager& TimerManager = GetWorld()->GetTimerManager();
+    bool bHasTrackedHead = false;
+    for (const TPair<TWeakObjectPtr<ACMPartActorBase>, FTrackedPart>& Entry
+        : TrackedParts)
+    {
+        if (Entry.Value.OverlapCount > 0
+            && Cast<ACMHeadPartActor>(Entry.Key.Get()))
+        {
+            bHasTrackedHead = true;
+            break;
+        }
+    }
+    const bool bNeedsTimer = bHazardEnabled && HeadVisionEffect.bEnabled
+        && HeadVisionEffect.ApplicationPolicy
+            == ECMHeadVisionEffectApplicationPolicy::PeriodicWhileOverlapping
+        && bHasTrackedHead;
+    if (!bNeedsTimer)
+    {
+        TimerManager.ClearTimer(HeadVisionPeriodicTimerHandle);
+    }
+    else if (!TimerManager.IsTimerActive(HeadVisionPeriodicTimerHandle))
+    {
+        TimerManager.SetTimer(
+            HeadVisionPeriodicTimerHandle, this,
+            &ThisClass::HandleHeadVisionPeriodicApplication,
+            HeadVisionEffect.PeriodSeconds, true);
+    }
+}
+
+void UCMHazardComponent::HandleHeadVisionPeriodicApplication()
+{
+    for (const TPair<TWeakObjectPtr<ACMPartActorBase>, FTrackedPart>& Entry
+        : TrackedParts)
+    {
+        ACMHeadPartActor* Head = Cast<ACMHeadPartActor>(Entry.Key.Get());
+        if (Head && Entry.Value.OverlapCount > 0)
+        {
+            ApplyHeadVisionEffect(*Head);
+        }
+    }
+    UpdateHeadVisionPeriodicTimer();
+}
+
+void UCMHazardComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(PeriodicTimerHandle);
+        World->GetTimerManager().ClearTimer(HeadVisionPeriodicTimerHandle);
+    }
+    for (const TPair<TWeakObjectPtr<ACMPartActorBase>, FTrackedPart>& Entry
+        : TrackedParts)
+    {
+        if (ACMHeadPartActor* Head = Cast<ACMHeadPartActor>(Entry.Key.Get()))
+        {
+            RemoveHeadVisionEffect(*Head);
+        }
+    }
+    Super::EndPlay(EndPlayReason);
 }

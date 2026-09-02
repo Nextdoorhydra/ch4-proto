@@ -140,10 +140,17 @@ bool UCMChimeraEffectZoneComponent::ApplyEffect(
         ChimeraEffect.StatusDuration);
     Spec.Data->SetSetByCallerMagnitude(
         CMObstacleEffectDataNames::PrimaryStatusValue,
-        ChimeraEffect.PrimaryStatusValue);
+        FMath::Clamp(
+            ChimeraEffect.VisionAngleMultiplier, 0.0f, 1.0f));
     Spec.Data->SetSetByCallerMagnitude(
         CMObstacleEffectDataNames::SecondaryStatusValue,
-        ChimeraEffect.SecondaryStatusValue);
+        FMath::Clamp(
+            ChimeraEffect.VisionDistanceMultiplier, 0.0f, 1.0f));
+    if (ChimeraEffect.ApplicationPolicy
+        == ECMObstacleEffectApplicationPolicy::WhileOverlapping)
+    {
+        Spec.Data->SetDuration(UGameplayEffect::INFINITE_DURATION, true);
+    }
 
     const FActiveGameplayEffectHandle AppliedHandle =
         ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());

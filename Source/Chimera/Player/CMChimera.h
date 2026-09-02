@@ -19,6 +19,7 @@ class UMaterialInstanceDynamic;
 class UTextRenderComponent;
 class UAbilitySystemComponent;
 class UCMChimeraAttributeSet;
+class UCMVisionComponent;
 class UCMLineBodyMovementCoordinator;
 class UCMPartSlotComponent;
 class UPrimitiveComponent;
@@ -86,6 +87,9 @@ public:
 
     virtual UAbilitySystemComponent* GetAbilitySystemComponent()
         const override;
+
+    void GetActiveHeadVisionSources(
+        TArray<UCMVisionComponent*>& OutVisionSources) const;
 
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
