@@ -263,7 +263,7 @@ bool ACMPowerCableActor::QueryArmHold_Implementation(
     ACMArmPart* ArmPart,
     FCMArmHoldSpec& OutSpec) const
 {
-    if (!IsValid(ArmPart) || IsConnected() || IsGrabbed()
+    if (!IsValid(ArmPart) || IsFullyConnected() || IsGrabbed()
         || !CableEndHoldVolume)
     {
         return false;
@@ -319,7 +319,7 @@ void ACMPowerCableActor::EndArmHold_Implementation(ACMArmPart* ArmPart)
 
 ```cpp
 if (HasAuthority() && HoldingArm.IsValid()
-    && Grabber == HoldingArm.Get() && !IsConnected())
+    && Grabber == HoldingArm.Get() && !IsFullyConnected())
 {
     ACMArmPart* ArmPart = HoldingArm.Get();
     const FVector ArmLocation = ArmPart->GetPartMesh()

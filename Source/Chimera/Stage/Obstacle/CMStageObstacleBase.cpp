@@ -3,8 +3,8 @@
 #include "Components/AudioComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "NiagaraComponent.h"
-#include "Stage/Obstacle/Component/CMChimeraEffectZoneComponent.h"
 #include "Stage/Obstacle/Component/CMForceZoneComponent.h"
+#include "Stage/Obstacle/Component/CMFlashComponent.h"
 #include "Stage/Obstacle/Component/CMHazardComponent.h"
 #include "Stage/Obstacle/Component/CMObstacleMotionComponent.h"
 #include "Stage/Obstacle/Component/CMStatusZoneComponent.h"
@@ -47,8 +47,6 @@ void ACMStageObstacleBase::ResolveBalance()
     ResolvedObstacleBalance = {};
     const bool bHasDamageSelection = BalanceSelection.DamageBalanceTable
         && !BalanceSelection.DamageBalanceRow.IsNone();
-    const bool bHasStatusSelection = BalanceSelection.StatusBalanceTable
-        && !BalanceSelection.StatusBalanceRow.IsNone();
     const bool bHasCustomDamage = BalanceSelection.DamageMode
         == ECMObstacleDamageMode::Custom;
 
@@ -60,15 +58,7 @@ void ACMStageObstacleBase::ResolveBalance()
             *GetPathName(), *BalanceSelection.DamageBalanceRow.ToString());
         return;
     }
-    if (!BalanceSelection.StatusBalanceRow.IsNone()
-        && !BalanceSelection.StatusBalanceTable)
-    {
-        UE_LOG(LogChimeraObstacleBalance, Error,
-            TEXT("Status balance row is set without a table. Obstacle=%s Row=%s"),
-            *GetPathName(), *BalanceSelection.StatusBalanceRow.ToString());
-        return;
-    }
-    if (!bHasDamageSelection && !bHasStatusSelection && !bHasCustomDamage)
+    if (!bHasDamageSelection && !bHasCustomDamage)
     {
         return;
     }
@@ -97,80 +87,41 @@ void ACMStageObstacleBase::ResolveBalance()
         }
     }
 
-    const FCMObstacleStatusBalanceTableRow* StatusRow = nullptr;
-    if (bHasStatusSelection)
-    {
-        if (BalanceSelection.StatusBalanceTable->GetRowStruct()
-            != FCMObstacleStatusBalanceTableRow::StaticStruct())
-        {
-            UE_LOG(LogChimeraObstacleBalance, Error,
-                TEXT("Status balance table has wrong row struct. Obstacle=%s Table=%s"),
-                *GetPathName(), *BalanceSelection.StatusBalanceTable->GetPathName());
-            return;
-        }
-        StatusRow = BalanceSelection.StatusBalanceTable
-            ->FindRow<FCMObstacleStatusBalanceTableRow>(
-                BalanceSelection.StatusBalanceRow,
-                TEXT("CMStageObstacleBase.StatusBalance"));
-        if (!StatusRow)
-        {
-            UE_LOG(LogChimeraObstacleBalance, Error,
-                TEXT("Status balance row was not found. Obstacle=%s Row=%s"),
-                *GetPathName(), *BalanceSelection.StatusBalanceRow.ToString());
-            return;
-        }
-    }
     const ACMStageDirector* Director = StageElement
         ? StageElement->GetRegisteredDirector() : nullptr;
     const float StageDamageMultiplier = Director
         ? Director->GetObstacleDamageMultiplier() : 1.0f;
     ResolvedObstacleBalance = CMObstacleBalance::Resolve(
-        DamageRow, StatusRow, BalanceSelection, StageDamageMultiplier);
+        DamageRow, BalanceSelection, StageDamageMultiplier);
 }
 
 void ACMStageObstacleBase::ApplyResolvedBalance()
 {
-    if (!ResolvedObstacleBalance.bValid)
-    {
-        return;
-    }
-
-    const bool bPartStatus =
-        ResolvedObstacleBalance.StatusEffect == ECMObstacleStatusEffect::PartSlowed
-        || ResolvedObstacleBalance.StatusEffect
-            == ECMObstacleStatusEffect::PartElectrified;
-    const bool bBodyStatus =
-        ResolvedObstacleBalance.StatusEffect == ECMObstacleStatusEffect::BodyConfused
-        || ResolvedObstacleBalance.StatusEffect
-            == ECMObstacleStatusEffect::BodyDelirious
-        || ResolvedObstacleBalance.StatusEffect
-            == ECMObstacleStatusEffect::BodyBlinded
-        || ResolvedObstacleBalance.StatusEffect
-            == ECMObstacleStatusEffect::BodyVisionReduced;
-    PartEffect.bEnabled = ResolvedObstacleBalance.Damage > 0.0f || bPartStatus;
-    PartEffect.DamagePerApplication = ResolvedObstacleBalance.Damage;
-    PartEffect.StatusDuration = ResolvedObstacleBalance.Duration;
+    PartEffect.bEnabled = ResolvedObstacleBalance.Damage > 0.0f
+        || PartEffect.StatusEffect != ECMPartObstacleStatusEffect::None;
+    PartEffect.DamagePerApplication = ResolvedObstacleBalance.bValid
+        ? ResolvedObstacleBalance.Damage : 0.0f;
     PartEffect.StatusTag = FGameplayTag();
-    PartEffect.MovementMultiplier = 1.0f;
     PartEffect.bBlocksAbility = false;
 
-    if (ResolvedObstacleBalance.StatusEffect == ECMObstacleStatusEffect::PartSlowed)
+    if (PartEffect.StatusEffect == ECMPartObstacleStatusEffect::Slowed)
     {
         PartEffect.StatusTag = CMPartStatusTags::Slowed;
-        PartEffect.MovementMultiplier = ResolvedObstacleBalance.PrimaryStatusValue;
+        PartEffect.MovementMultiplier = FMath::Clamp(
+            PartEffect.MovementMultiplier, 0.0f, 1.0f);
     }
-    else if (ResolvedObstacleBalance.StatusEffect
-        == ECMObstacleStatusEffect::PartElectrified)
+    else if (PartEffect.StatusEffect
+        == ECMPartObstacleStatusEffect::Electrified)
     {
         PartEffect.StatusTag = CMPartStatusTags::Electrified;
+        PartEffect.MovementMultiplier = 1.0f;
         PartEffect.bBlocksAbility = true;
     }
+    else
+    {
+        PartEffect.MovementMultiplier = 1.0f;
+    }
 
-    ChimeraEffect.bEnabled = bBodyStatus && ChimeraEffect.GameplayEffectClass;
-    ChimeraEffect.StatusDuration = ResolvedObstacleBalance.Duration;
-    ChimeraEffect.StatusEffect = ResolvedObstacleBalance.StatusEffect;
-    ChimeraEffect.PrimaryStatusValue = ResolvedObstacleBalance.PrimaryStatusValue;
-    ChimeraEffect.SecondaryStatusValue = ResolvedObstacleBalance.SecondaryStatusValue;
 }
 
 void ACMStageObstacleBase::ActivateObstacle()
@@ -186,6 +137,22 @@ void ACMStageObstacleBase::DeactivateObstacle()
 void ACMStageObstacleBase::ResetObstacle()
 {
     ResetElement();
+}
+
+// 활성화 요청마다 부착된 단발 섬광을 실행한다.
+// 시작 상태 복원과 BeginPlay 초기화에서는 호출되지 않는다.
+void ACMStageObstacleBase::HandleElementActivationRequested()
+{
+    if (!IsObstacleActive())
+    {
+        return;
+    }
+
+    TInlineComponentArray<UCMFlashComponent*> FlashComponents(this);
+    for (UCMFlashComponent* FlashComponent : FlashComponents)
+    {
+        FlashComponent->TriggerFlash();
+    }
 }
 
 // 공통 활성 상태를 장애물 컴포넌트와 블루프린트 표현에 전달
@@ -232,18 +199,16 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
         StatusZoneComponent->SetZoneEnabled(bIsActive);
     }
 
-    TInlineComponentArray<UCMChimeraEffectZoneComponent*>
-        ChimeraEffectZoneComponents(this);
-    for (UCMChimeraEffectZoneComponent* ChimeraEffectZone
-        : ChimeraEffectZoneComponents)
-    {
-        ChimeraEffectZone->SetZoneEnabled(bIsActive);
-    }
-
     TInlineComponentArray<UCMForceZoneComponent*> ForceZoneComponents(this);
     for (UCMForceZoneComponent* ForceZoneComponent : ForceZoneComponents)
     {
         ForceZoneComponent->SetZoneEnabled(bIsActive);
+    }
+
+    TInlineComponentArray<UCMFlashComponent*> FlashComponents(this);
+    for (UCMFlashComponent* FlashComponent : FlashComponents)
+    {
+        FlashComponent->SetFlashEnabled(bIsActive);
     }
 
     if (PrimaryEffect && PrimaryEffect->GetAsset())
@@ -272,23 +237,15 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
     HandleObstacleActiveStateChanged(bIsActive);
 }
 
-// 해석된 효과 설정을 부착된 Hazard와 ChimeraEffectZone에 전달
+// 해석된 피해와 파츠 상태 설정을 부착된 Hazard에 전달
 void ACMStageObstacleBase::ConfigureDirectEffects()
 {
     TInlineComponentArray<UCMHazardComponent*> HazardComponents(this);
     for (UCMHazardComponent* HazardComponent : HazardComponents)
     {
         HazardComponent->ConfigurePartEffect(PartEffect);
-    }
-
-    TInlineComponentArray<UCMChimeraEffectZoneComponent*>
-        ChimeraEffectZoneComponents(this);
-    for (UCMChimeraEffectZoneComponent* ChimeraEffectZone
-        : ChimeraEffectZoneComponents)
-    {
-        ChimeraEffectZone->ConfigureChimeraEffect(
-            ChimeraEffect,
-            ChimeraEffect.GameplayEffectClass);
+        HazardComponent->ConfigureHeadVisionEffect(HeadVisionEffect);
+        HazardComponent->ConfigureControlEffect(ControlEffect);
     }
 }
 

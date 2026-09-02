@@ -20,9 +20,9 @@ UI 담당자용 함수·이벤트·무게 조회 계약은 [버튼 UI 연동 가
 
 ### 장애물 제작 원칙
 
-장애물 BP 또는 배치 인스턴스에 메시·머티리얼·Niagara·사운드를 직접 설정하고, 피해·상태 수치는 Balance DataTable 행으로 선택한다. Custom Damage만 필요한 인스턴스는 피해 행 없이도 사용할 수 있다. 장애물별 Definition, LoadGroupId, Schedule Catalog 등록은 현재 제작 절차에 없다. 룸 서브레벨과 참조 에셋을 함께 로드한다.
+장애물 BP 또는 배치 인스턴스에 메시·머티리얼·Niagara·사운드를 직접 설정한다. 피해는 Balance DataTable 행으로 선택하고 상태 종류·지속시간·강도는 인스턴스에서 설정한다. Custom Damage만 필요한 인스턴스는 피해 행 없이도 사용할 수 있다. 장애물별 Definition, LoadGroupId, Schedule Catalog 등록은 현재 제작 절차에 없다. 룸 서브레벨과 참조 에셋을 함께 로드한다.
 
-남아 있는 `CMObstacleDefinition`, `CMObstacleDefinitionComponent`, `CMStatusZoneComponent`는 기존 BP 호환용 레거시다. 신규 장애물에는 추가하지 않는다. 기존 에셋 참조가 남아 있어 C++ 타입을 즉시 삭제하지 않았으며, 에셋 마이그레이션 후 별도 제거한다. Head/Vision 등 다른 기능의 PDA 비동기 로드까지 폐지한 것은 아니다. 장애물 Google Sheet 파서, Damage/Status DataTable, StageDirector 배율 적용은 구현되어 있다.
+남아 있는 `CMObstacleDefinition`, `CMObstacleDefinitionComponent`, `CMStatusZoneComponent`는 기존 BP 호환용 레거시다. 신규 장애물에는 추가하지 않는다. 기존 에셋 참조가 남아 있어 C++ 타입을 즉시 삭제하지 않았으며, 에셋 마이그레이션 후 별도 제거한다. Head/Vision 등 다른 기능의 PDA 비동기 로드까지 폐지한 것은 아니다. 장애물 Google Sheet는 Damage DataTable과 StageDirector 배율에만 사용한다.
 
 ## 2. 상태와 제어 경로
 
@@ -35,7 +35,7 @@ UI 담당자용 함수·이벤트·무게 조회 계약은 [버튼 UI 연동 가
 
 Start Active는 초기 **장치 작동 요청**이다. 버튼의 초기 눌림이 아니다. 버튼 ON과 대상 레이저 OFF는 동시에 성립할 수 있다.
 
-장애물 비활성화는 부착된 Motion/Hazard/레거시 StatusZone/ChimeraEffectZone/ForceZone과 기본 Niagara·반복 사운드를 정지한다. 공통 베이스는 외형 메시를 무조건 숨기거나 물리 Block을 제거하지 않는다. 레이저 등 전용 구현이 추가 표시/판정을 제어한다.
+장애물 비활성화는 부착된 Motion/Hazard/레거시 StatusZone/ForceZone과 기본 Niagara·반복 사운드를 정지한다. 공통 베이스는 외형 메시를 무조건 숨기거나 물리 Block을 제거하지 않는다. 레이저 등 전용 구현이 추가 표시/판정을 제어한다.
 
 ### 직접 대상과 ID
 
@@ -60,10 +60,10 @@ TargetActor/TargetPlacementId/TargetGroup은 대상 목록 세 개가 아니라 
 2. PrimaryMesh/PrimaryEffect/LoopAudio에 에셋을 지정한다. 메시 기본 머티리얼이 맞으면 별도 덮어쓰기는 불필요하다.
 3. 일반 장애물에는 판정 볼륨과 필요한 Hazard/Motion/ForceZone 등을 추가한다. 전용 부모에 있는 컴포넌트는 중복 추가하지 않는다.
 4. 일반 볼륨 Begin/EndOverlap에서 기능 컴포넌트의 NotifyTargetEntered/Exited를 호출한다. Hazard에는 OtherActor와 **OtherComp 모두** 전달한다. 레이저는 부모 연결을 사용한다.
-5. Balance Selection에서 Damage/Status 행과 모드를 선택하고, Part Application/Chimera Application의 적용 정책과 주기, Start Active를 설정한다.
+5. Balance Selection에서 Damage 행과 모드를 선택한다. 파츠 상태는 Part Application, 머리 시야 감소는 Head Vision Application에서 지속시간·강도·적용 정책을 설정하고 Start Active를 정한다.
 6. 해당 룸 서브레벨을 Current로 선택하고 배치한 뒤 퍼즐에 연결한다.
 
-`CMStageObstacleBase`는 BeginPlay에서 표 행과 StageDirector 배율을 해석한 뒤 부착된 Hazard/ChimeraEffectZone에 런타임 설정을 전달한다. **Balance Selection과 적용 정책이 원본**이다. 컴포넌트 런타임 복사본은 별도로 수정하지 않는다. 런타임 Details 수정의 자동 재적용·동기화는 보장하지 않는다.
+`CMStageObstacleBase`는 BeginPlay에서 표 행과 StageDirector 배율을 해석한 뒤 부착된 Hazard에 런타임 설정을 전달한다. **Balance Selection과 적용 정책이 원본**이다. 컴포넌트 런타임 복사본은 별도로 수정하지 않는다. 런타임 Details 수정의 자동 재적용·동기화는 보장하지 않는다.
 
 ### 현재 Hazard 피해 계약
 
@@ -83,7 +83,9 @@ TargetActor/TargetPlacementId/TargetGroup은 대상 목록 세 개가 아니라 
 | Kill On Enter | 접촉 파츠 또는 마디에 처치량 피해 |
 | Period Seconds | Periodic 정책의 반복 간격. 상태 지속시간과 별개 |
 
-피해량과 파츠 상태/지속시간은 Balance Selection에서 결정된다. 파츠는 Actor별, 몸통은 Hurtbox Component별 오버랩 횟수를 추적한다. Chimera Application은 몸통 상태 행에만 공용 ASC GameplayEffect를 적용하며 Duration/Primary/Secondary 값만 전달한다. 피해는 Hazard의 직접 피해가 단일 소유자이므로 GE에서 중복 적용하지 않는다. 혼란·착란·실명·시야 감소의 실제 플레이 동작은 아직 후속 구현 범위다.
+피해량은 Balance Selection에서 결정되고 파츠 상태는 Part Application에서 직접 설정한다. 파츠는 Actor별, 몸통은 Hurtbox Component별 오버랩 횟수를 추적한다. 머리 시야 감소도 별도 Zone 없이 같은 Hazard가 처리하며, Head Vision Application을 켜면 정확히 `CMHeadPartActor::GetDamageHurtbox()`와 겹친 머리에만 적용한다. 머리는 Part Application의 피해도 받을 수 있지만 Slowed/Electrified는 팔·다리에만 적용된다. 여러 발생원이 겹치면 가장 작은 시야 배율을 사용하고 각 머리는 해당 배율까지 부드럽게 보간한다.
+
+실명은 오버랩형 공용 상태 존이 아니라 `CMFlashComponent`가 직접 처리한다. 섬광 장애물에 `CMFlashComponent`를 추가하고 `Start Active=false`로 둔 뒤 PuzzleController에서 `Activate`를 보내면 한 번 발생한다. 활성 상태에서 `Activate`를 다시 받아도 재발동하며, BeginPlay의 시작 상태 초기화만으로는 발생하지 않는다. 블루프린트에서 직접 `TriggerFlash()`를 호출할 수도 있다. 컴포넌트는 Flash Range, Blind Activation Delay, Blind Recovery Duration, Blind Duration, Line Of Sight 사용 여부와 Trace Channel을 제공한다. TriggerFlash는 기본 1초의 경고 시간을 시작할 뿐이며, 거리·머리 시야 방향·가림 여부는 경고 종료 후 실제 폭발 순간에 판정한다. 따라서 경고 중 고개를 돌리거나 벽 뒤로 피하면 실명되지 않는다. 노출된 머리는 즉시 시야를 잃고 종료 시 Recovery Duration 동안 부드럽게 복구하며, 최소 한 머리는 무작위로 남긴다.
 
 ### Collision
 
@@ -110,6 +112,8 @@ UCMForceZoneComponent는 LocalDirection/ForceStrength로 서버에서 영역 안
 - Toggle On Hit=false: Press를 시도하고 Pulse를 보낸다. 자동 Release는 없으므로 보통 최초 눌림 후 재입력이 상태를 바꾸지 않는다. One Shot 기본값은 true지만 이 분기가 저장값을 강제로 true로 덮지는 않는다.
 - 직접 연결의 Target/Release Command는 **런타임에 둘 다 Toggle로 강제**한다. 명시적인 Activate/Deactivate 동작은 PuzzleController에서 설정한다.
 
+표현용 메시를 네이티브 ButtonVisualMesh에 지정한다. ButtonVisualRoot만 이동하므로 HitVolume과 논리 판정은 움직이지 않는다. 머티리얼은 ButtonColor(Vector)와 EmissiveIntensity(Scalar) 파라미터를 가진 것을 사용하며 이름은 인스턴스에서 변경할 수 있다. PressDepth/LocalPressDirection과 Press·Hold·Release 시간을 설정하고 Off/On/Disabled Color 및 Emissive 강도를 버튼별로 조정한다. Toggle On Hit=true는 복제된 bTriggered 상태를 따라 눌림·점등을 유지하고 다음 타격에서 복귀한다. false인 원샷은 서버 성공 입력을 Reliable Multicast 표현으로 재생해 눌림·점등 후 자동 복귀하며 논리 One Shot 이력은 유지한다.
+
 One Shot은 한 번 활성화한 이력을 Reset까지 유지하여 재활성화를 막는다. One Shot을 끄는 것과 현재 눌림 해제는 별개다.
 
 ### 압력판 — CMPressurePlateBase
@@ -127,6 +131,8 @@ OFF에서 CurrentWeight >= RequiredWeight이면 ON, ON에서 CurrentWeight < Rel
 팔/다리는 코드에서 무게 컴포넌트를 생성하고 FCMPartLegArmTableRow::Weight를 적용한다. CSV 열은 정확히 Weight이며 0 이상의 유한값이다. 기존 데이터가 0이면 합산에 기여하지 않는다.
 
 UI는 공통 GetPresentationState()/OnPresentationStateChanged(State)를 사용한다. **현재·목표·해제 무게와 On/Off를 하나의 표시용 구조체로 복제한다.** GetCurrentWeight()/GetRequiredWeight()/GetReleaseWeight()도 클라이언트에서 해당 스냅샷을 조회한다. 기존 OnPressureChanged는 서버 이벤트로 유지한다. 초기 bReady 처리와 연결 예시는 [UI 문서](Chimera_Button_UI_Integration.md)를 참고한다.
+
+표현용 Plane 메시를 네이티브 PlateVisualMesh에 지정한다. 위치 이동 없이 복제된 bTriggered 상태에 따라 ButtonColor(Vector)와 EmissiveIntensity(Scalar)를 즉시 변경한다. Off/On/Disabled Color, Off/On Emissive, 머티리얼 슬롯과 파라미터 이름은 인스턴스에서 설정한다. 비활성 상태는 Disabled Color와 Emissive 0을 사용한다.
 
 재계산은 서버 Begin/EndOverlap에서 한다. 안에서 무게만 변경하거나 Actor가 사라졌을 때 즉시 반영은 보장하지 않는다. Reset은 추적 목록을 비우고 이미 겹친 Actor를 재검색하지 않으므로 재진입 테스트가 필요하다.
 

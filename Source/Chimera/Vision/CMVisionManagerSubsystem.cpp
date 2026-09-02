@@ -52,6 +52,9 @@ namespace
     const FName VisionHeightToleranceParameterName(
         TEXT("VisionHeightTolerance")
     );
+    const FName VisionAboveHeightAllowanceParameterName(
+        TEXT("VisionAboveHeightAllowance")
+    );
 
     TAutoConsoleVariable<int32> CVarVisionDebugDraw(
         TEXT("CM.Vision.DebugDraw"),
@@ -930,16 +933,13 @@ void UCMVisionManagerSubsystem::EnsurePostProcessBinding()
         CeilingSurfaceNormalZThresholdParameterName,
         RenderConfig->CeilingSurfaceNormalZThreshold
     );
-    const float LowObstacleTopRevealHeight = FMath::Max(
-        FMath::Max(
-            RenderConfig->VisionHeightTolerance,
-            RenderConfig->OccluderSurfaceRevealDistance
-        ),
-        RenderConfig->VisionBelowHeightAllowance
-    );
     PostProcessMaterialInstance->SetScalarParameterValue(
         VisionHeightToleranceParameterName,
-        LowObstacleTopRevealHeight
+        RenderConfig->VisionHeightTolerance
+    );
+    PostProcessMaterialInstance->SetScalarParameterValue(
+        VisionAboveHeightAllowanceParameterName,
+        RenderConfig->VisionAboveHeightAllowance
     );
 
     Camera->PostProcessSettings.AddBlendable(
@@ -1286,6 +1286,19 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
     {
         return;
     }
+
+    // Clear explicitly for every render-target update.  Relying only on
+    // UCanvasRenderTarget2D's receive-update clear can leave pixels from a
+    // previous frame when the active vision polygon changes shape or height.
+    // Those stale pixels appear as an unrelated vision cone, especially on
+    // upper floors after moving around a low obstacle.
+    FCanvasTileItem ClearItem(
+        FVector2D::ZeroVector,
+        FVector2D(static_cast<float>(Width), static_cast<float>(Height)),
+        bDrawVisionTint ? FLinearColor::Transparent : FLinearColor::Black
+    );
+    ClearItem.BlendMode = SE_BLEND_Opaque;
+    Canvas->DrawItem(ClearItem);
 
     TArray<const FCMVisionSourceMaskData*> SourcesToDraw;
     SourcesToDraw.Reserve(CachedVisionMaskData.Num());

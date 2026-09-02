@@ -91,6 +91,22 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Control Body")
     bool IsControlInputEnabled() const;
 
+    /** 혼란이 적용된 물리 키가 실제로 가리키는 Q/W/E/R 인덱스. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Control Status")
+    int32 ResolveControlInputSlot(int32 PhysicalSlotIndex) const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Control Status")
+    bool IsConfused() const { return !ConfusionSlotRemap.IsEmpty(); }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Control Status")
+    bool IsDelirious() const { return !DeliriumControlSlots.IsEmpty(); }
+
+    void ApplyConfusion(float Duration, UObject* Source);
+    void RemoveConfusion(UObject* Source = nullptr);
+    bool ApplyDelirium(
+        ACMControlBody& OtherControlBody, float Duration, UObject* Source);
+    void RemoveDelirium(UObject* Source = nullptr);
+
     /** Called by the authoritative Chimera when one Segment is destroyed. */
     void HandleSegmentDestroyed(int32 DestroyedSegmentIndex);
 
@@ -113,6 +129,7 @@ protected:
     virtual void BeginPlay() override;
     virtual void PossessedBy(AController* NewController) override;
     virtual void UnPossessed() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void OnRep_Controller() override;
     virtual void OnRep_PlayerState() override;
 
@@ -168,6 +185,18 @@ protected:
         meta = (AllowPrivateAccess = "true"))
     uint8 DisabledControlSlotMask = 0;
 
+    /** 비어 있으면 identity. 값은 물리 Q/W/E/R이 가리키는 슬롯 인덱스다. */
+    UPROPERTY(ReplicatedUsing = OnRep_ControlSlots, BlueprintReadOnly,
+        Category = "Chimera|Control Status",
+        meta = (AllowPrivateAccess = "true"))
+    TArray<int32> ConfusionSlotRemap;
+
+    /** 비어 있으면 본인 슬롯, 값이 있으면 착란 상대의 슬롯을 제어한다. */
+    UPROPERTY(ReplicatedUsing = OnRep_ControlSlots, BlueprintReadOnly,
+        Category = "Chimera|Control Status",
+        meta = (AllowPrivateAccess = "true"))
+    TArray<FCMPartSlotAddress> DeliriumControlSlots;
+
     /** Temporary slot-based validation until the Head pickup rule exists. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Parts",
@@ -177,6 +206,15 @@ protected:
 private:
     /** 눌렀을 때 배정됐던 파츠를 기억해 Release와 재할당을 안전하게 처리한다. */
     FCMPartSlotAddress PressedPartSlots[CMControl::MaxKeysPerPlayer];
+
+    TMap<TWeakObjectPtr<UObject>, FTimerHandle> ConfusionSources;
+    TMap<TWeakObjectPtr<UObject>, FTimerHandle> DeliriumSources;
+    TWeakObjectPtr<ACMControlBody> DeliriumPartner;
+
+    FCMPartSlotAddress GetEffectivePartSlotAddress(int32 SlotIndex) const;
+    void RemoveConfusionSource(TWeakObjectPtr<UObject> Source);
+    void RemoveDeliriumSource(TWeakObjectPtr<UObject> Source);
+    void RemoveDeliriumSourceLocal(TWeakObjectPtr<UObject> Source);
 
     uint8 LocalPressedControlSlotMask = 0;
 };

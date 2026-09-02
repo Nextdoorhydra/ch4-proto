@@ -7,7 +7,9 @@
 #include "CMHazardComponent.generated.h"
 
 class ACMPartActorBase;
+class ACMHeadPartActor;
 class ACMChimera;
+class ACMControlBody;
 class UPrimitiveComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCMHazardTargetSignature, AActor*, TargetActor);
@@ -37,6 +39,13 @@ public:
     // 장애물 액터에서 해석된 밸런스 기반 파츠·몸통 마디 효과 설정
     void ConfigurePartEffect(const FCMPartObstacleEffectConfig& NewConfig);
 
+    // 머리 DamageHurtbox에 적용할 시야 감소 설정
+    void ConfigureHeadVisionEffect(
+        const FCMHeadVisionObstacleEffectConfig& NewConfig);
+
+    void ConfigureControlEffect(
+        const FCMControlObstacleEffectConfig& NewConfig);
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Hazard")
     FCMHazardTargetSignature OnTargetEntered;
 
@@ -49,6 +58,14 @@ private:
         meta = (AllowPrivateAccess = "true"))
     FCMPartObstacleEffectConfig PartEffect;
 
+    UPROPERTY(Transient, BlueprintReadOnly, Category = "Chimera|Hazard",
+        meta = (AllowPrivateAccess = "true"))
+    FCMHeadVisionObstacleEffectConfig HeadVisionEffect;
+
+    UPROPERTY(Transient, BlueprintReadOnly, Category = "Chimera|Hazard",
+        meta = (AllowPrivateAccess = "true"))
+    FCMControlObstacleEffectConfig ControlEffect;
+
     struct FTrackedPart
     {
         int32 OverlapCount = 0;
@@ -59,6 +76,7 @@ private:
         TWeakObjectPtr<ACMChimera> Chimera;
         int32 SegmentIndex = INDEX_NONE;
         int32 OverlapCount = 0;
+        TWeakObjectPtr<ACMControlBody> ControlBody;
     };
 
     ACMPartActorBase* ResolveSupportedPart(
@@ -68,12 +86,25 @@ private:
         AActor* TargetActor,
         const UPrimitiveComponent* TargetComponent) const;
     void ApplyConfiguredEffect(ACMPartActorBase& PartActor);
+    void ApplyHeadVisionEffect(ACMHeadPartActor& Head);
+    void RemoveHeadVisionEffect(ACMHeadPartActor& Head);
     void ApplyConfiguredDamage(ACMChimera& Chimera, int32 SegmentIndex);
+    ACMControlBody* FindControlBodyForSegment(int32 SegmentIndex) const;
+    void ApplyControlEffect(ACMControlBody& ControlBody);
+    void RemoveControlEffect(ACMControlBody& ControlBody);
     void UpdatePeriodicTimer();
+    void UpdateHeadVisionPeriodicTimer();
     void HandlePeriodicApplication();
+    void HandleHeadVisionPeriodicApplication();
 
+protected:
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+private:
     bool bHazardEnabled = true;
     TMap<TWeakObjectPtr<ACMPartActorBase>, FTrackedPart> TrackedParts;
     TMap<TWeakObjectPtr<UPrimitiveComponent>, FTrackedSegment> TrackedSegments;
+    TMap<TWeakObjectPtr<ACMControlBody>, int32> ControlBodyOverlapCounts;
     FTimerHandle PeriodicTimerHandle;
+    FTimerHandle HeadVisionPeriodicTimerHandle;
 };
