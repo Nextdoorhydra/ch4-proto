@@ -94,6 +94,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     bool IsTransmittingPower() const;
     bool IsTransmittingPower(TSet<const UCMPowerSocketComponent*>& VisitedSockets) const;
+    bool CanConnectEndpointWithinLength(const FVector& EndpointLocation) const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FName GetPowerChannel() const { return PowerChannel; }
@@ -302,6 +303,7 @@ protected:
     void EnsureCableMeshCount(int32 DesiredCount, UStaticMesh* Mesh);
     void InitializeRope();
     void SimulateRope(float DeltaSeconds);
+    void ResolveRopeGroundContact(bool bEndIsFixed);
     void WakeRopeSimulation();
     int32 GetVisualSegmentCount() const;
     float GetCableSag() const;
@@ -329,4 +331,6 @@ protected:
     float SimulatedRopeLength = 0.0f;
     TArray<FVector> RopePositions;
     TArray<FVector> RopePreviousPositions;
+    TArray<FVector> RopeConstraintStartPositions;
+    TArray<uint8> CollisionLockedNodes;
 };

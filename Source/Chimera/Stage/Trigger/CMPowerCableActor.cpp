@@ -321,6 +321,34 @@ bool ACMPowerCableActor::IsTransmittingPower(
         && ConnectedSourceSocket->IsPowered(VisitedSockets);
 }
 
+bool ACMPowerCableActor::CanConnectEndpointWithinLength(
+    const FVector& EndpointLocation) const
+{
+    if (SimulatedRopeLength <= UE_SMALL_NUMBER)
+    {
+        return true;
+    }
+
+    bool bHasExistingEndpoint = false;
+    FVector ExistingEndpoint = FVector::ZeroVector;
+    if (ConnectedSource || ConnectedSourceSocket)
+    {
+        ExistingEndpoint = bSourceAtStart
+            ? GetRopeStartTarget() : GetRopeEndTarget();
+        bHasExistingEndpoint = true;
+    }
+    else if (ConnectedSocket)
+    {
+        ExistingEndpoint = bSocketAtStart
+            ? GetRopeStartTarget() : GetRopeEndTarget();
+        bHasExistingEndpoint = true;
+    }
+
+    return !bHasExistingEndpoint
+        || FVector::DistSquared(ExistingEndpoint, EndpointLocation)
+            <= FMath::Square(SimulatedRopeLength + 1.0f);
+}
+
 int32 ACMPowerCableActor::GetVisualSegmentCount() const
 {
     return bOverrideDefinitionSettings
@@ -521,8 +549,13 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
         DeltaSeconds / SimulationSubsteps,
         0.001f,
         0.02f);
+    RopeConstraintStartPositions.SetNum(RopePositions.Num());
+    CollisionLockedNodes.SetNum(RopePositions.Num());
     for (int32 Substep = 0; Substep < SimulationSubsteps; ++Substep)
     {
+        FMemory::Memzero(CollisionLockedNodes.GetData(),
+            CollisionLockedNodes.Num() * sizeof(uint8));
+
         for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
         {
             if (bEndIsFixed && Index == RopePositions.Num() - 1)
@@ -545,6 +578,7 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                     SCENE_QUERY_STAT(CMPowerCableRope), false, this);
                 FCollisionObjectQueryParams ObjectQueryParams;
                 ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+                ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
                 ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
                 ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
                 const bool bHit = GetWorld()->SweepSingleByObjectType(
@@ -560,12 +594,14 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                     RopePositions[Index] = Hit.Location
                         + Hit.Normal * GetRopeCollisionRadius();
                     RopePreviousPositions[Index] = RopePositions[Index];
+                    CollisionLockedNodes[Index] = 1;
                 }
             }
         }
 
         const float RestDistance = SimulatedRopeLength
             / (RopePositions.Num() - 1);
+        RopeConstraintStartPositions = RopePositions;
         for (int32 Iteration = 0;
             Iteration < GetRopeConstraintIterations();
             ++Iteration)
@@ -607,11 +643,47 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
             }
         }
 
+        // Length constraints can push a node back into the floor after the
+        // first collision sweep. Resolve that penetration after constraints
+        // as well, otherwise the next Verlet step turns it into a bounce.
+        for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
+        {
+            if (bEndIsFixed && Index == RopePositions.Num() - 1)
+            {
+                continue;
+            }
+
+            FHitResult Hit;
+            FCollisionQueryParams QueryParams(
+                SCENE_QUERY_STAT(CMPowerCableRopePostConstraint), false, this);
+            FCollisionObjectQueryParams ObjectQueryParams;
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+            const bool bHit = GetWorld()->SweepSingleByObjectType(
+                Hit,
+                RopeConstraintStartPositions[Index],
+                RopePositions[Index],
+                FQuat::Identity,
+                ObjectQueryParams,
+                FCollisionShape::MakeSphere(GetRopeCollisionRadius()),
+                QueryParams);
+            if (bHit)
+            {
+                RopePositions[Index] = Hit.Location
+                    + Hit.Normal * GetRopeCollisionRadius();
+                RopePreviousPositions[Index] = RopePositions[Index];
+            }
+        }
+
         RopePositions[0] = GetCableStartLocation();
         if (bEndIsFixed)
         {
             RopePositions.Last() = EndTarget;
         }
+
+        ResolveRopeGroundContact(bEndIsFixed);
 
         // Prevent constraint corrections from becoming artificial velocity.
         for (int32 Index = 1; Index < RopePreviousPositions.Num(); ++Index)
@@ -626,6 +698,20 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                     RopePreviousPositions[Index],
                     RopePositions[Index],
                     0.35f);
+            }
+        }
+
+        // Constraint corrections can move a node after it was projected out
+        // of a surface. Keep collided nodes at their resolved position so
+        // that this correction cannot become artificial bounce velocity on
+        // the next substep.
+        for (int32 Index = 1; Index < RopePreviousPositions.Num(); ++Index)
+        {
+            if (CollisionLockedNodes[Index] != 0
+                && !(bEndIsFixed
+                    && Index == RopePreviousPositions.Num() - 1))
+            {
+                RopePreviousPositions[Index] = RopePositions[Index];
             }
         }
     }
@@ -664,6 +750,60 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
     else
     {
         RopeStableFrameCount = 0;
+    }
+}
+
+void ACMPowerCableActor::ResolveRopeGroundContact(bool bEndIsFixed)
+{
+    UWorld* World = GetWorld();
+    if (!World || RopePositions.Num() < 2)
+    {
+        return;
+    }
+
+    const float CollisionRadius = GetRopeCollisionRadius();
+    if (CollisionRadius <= UE_SMALL_NUMBER)
+    {
+        return;
+    }
+
+    // Only resolve contacts below/near a surface. Starting the sweep above
+    // the node prevents a node that is still in the air from being snapped
+    // down to a distant floor.
+    const float ProbeHeight = FMath::Max(50.0f, CollisionRadius * 4.0f);
+    FCollisionObjectQueryParams ObjectQueryParams;
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+
+    for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
+    {
+        if (bEndIsFixed && Index == RopePositions.Num() - 1)
+        {
+            continue;
+        }
+
+        const FVector NodePosition = RopePositions[Index];
+        FHitResult Hit;
+        FCollisionQueryParams QueryParams(
+            SCENE_QUERY_STAT(CMPowerCableRopeGroundContact), false, this);
+        const bool bHit = World->SweepSingleByObjectType(
+            Hit,
+            NodePosition + FVector::UpVector * ProbeHeight,
+            NodePosition - FVector::UpVector * CollisionRadius,
+            FQuat::Identity,
+            ObjectQueryParams,
+            FCollisionShape::MakeSphere(CollisionRadius),
+            QueryParams);
+
+        // A downward-facing normal is a ceiling or underside, not a floor.
+        if (bHit && Hit.Normal.Z > 0.2f)
+        {
+            RopePositions[Index] = Hit.Location
+                + Hit.Normal * CollisionRadius;
+            // Remove both downward and collision-generated rebound velocity.
+            RopePreviousPositions[Index] = RopePositions[Index];
+        }
     }
 }
 
