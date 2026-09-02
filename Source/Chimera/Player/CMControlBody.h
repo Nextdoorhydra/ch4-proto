@@ -11,6 +11,14 @@ class AActor;
 class USceneComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraControlSlotsChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChimeraControlPlayerStateChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+    FChimeraControlInputChanged,
+    int32,
+    SlotIndex,
+    bool,
+    bPressed
+);
 
 /**
  * 플레이어 한 명이 소유하고 Possess하는 논리 Pawn이다.
@@ -110,12 +118,20 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Control Body")
     FChimeraControlSlotsChanged OnControlSlotsChanged;
 
+    /** Local input feedback for HUDs; gameplay remains server-authoritative. */
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Control Body")
+    FChimeraControlInputChanged OnControlInputChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Chimera|Control Body")
+    FChimeraControlPlayerStateChanged OnPlayerStateChanged;
+
 protected:
     virtual void BeginPlay() override;
     virtual void PossessedBy(AController* NewController) override;
     virtual void UnPossessed() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void OnRep_Controller() override;
+    virtual void OnRep_PlayerState() override;
 
     UFUNCTION()
     void OnRep_ControlSlots();
@@ -199,4 +215,6 @@ private:
     void RemoveConfusionSource(TWeakObjectPtr<UObject> Source);
     void RemoveDeliriumSource(TWeakObjectPtr<UObject> Source);
     void RemoveDeliriumSourceLocal(TWeakObjectPtr<UObject> Source);
+
+    uint8 LocalPressedControlSlotMask = 0;
 };

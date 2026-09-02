@@ -95,6 +95,12 @@ void ACMControlBody::OnRep_Controller()
         *GetName());
 }
 
+void ACMControlBody::OnRep_PlayerState()
+{
+    Super::OnRep_PlayerState();
+    OnPlayerStateChanged.Broadcast();
+}
+
 ACMChimera* ACMControlBody::GetSharedChimera() const
 {
     const ACMGameState* GameState = GetWorld()
@@ -115,6 +121,21 @@ void ACMControlBody::SetControlSlotPressed(
         || SlotIndex >= CMControl::MaxKeysPerPlayer)
     {
         return;
+    }
+
+    const uint8 SlotBit = static_cast<uint8>(1u << SlotIndex);
+    const bool bWasPressed = (LocalPressedControlSlotMask & SlotBit) != 0;
+    if (bWasPressed != bPressed)
+    {
+        if (bPressed)
+        {
+            LocalPressedControlSlotMask |= SlotBit;
+        }
+        else
+        {
+            LocalPressedControlSlotMask &= ~SlotBit;
+        }
+        OnControlInputChanged.Broadcast(SlotIndex, bPressed);
     }
 
     ServerSetControlSlotPressed(
