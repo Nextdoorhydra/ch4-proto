@@ -161,6 +161,18 @@ bool UCMPartSlotComponent::HasAttachedPart() const
     return IsValid(AttachedPart);
 }
 
+void UCMPartSlotComponent::SetLegRigControlAnchor(
+    USceneComponent* InControlAnchor
+)
+{
+    LegRigControlAnchor = InControlAnchor;
+}
+
+USceneComponent* UCMPartSlotComponent::GetLegRigControlAnchor() const
+{
+    return LegRigControlAnchor;
+}
+
 void UCMPartSlotComponent::OnRep_AttachedPart(AActor* PreviousPart)
 {
     if (IsValid(PreviousPart)

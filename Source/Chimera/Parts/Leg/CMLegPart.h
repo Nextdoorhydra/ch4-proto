@@ -13,6 +13,66 @@ enum class ECMLegStepDirection : uint8
     Reverse
 };
 
+UENUM(BlueprintType)
+enum class ECMLegPlantState : uint8
+{
+    Free,
+    Swing,
+    Landing,
+    Planted,
+    Recover
+};
+
+UENUM(BlueprintType)
+enum class ECMLegPlantTrigger : uint8
+{
+    None,
+    Initialization,
+    PlayerInput,
+    ReachRecovery,
+    Emergency
+};
+
+USTRUCT(BlueprintType)
+struct FCMLegPlantSnapshot
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    ECMLegPlantState State = ECMLegPlantState::Free;
+
+    UPROPERTY(BlueprintReadOnly)
+    ECMLegPlantTrigger Trigger = ECMLegPlantTrigger::None;
+
+    /** Non-None only while this snapshot owns gameplay movement force. */
+    UPROPERTY(BlueprintReadOnly)
+    ECMLegStepDirection StepDirection = ECMLegStepDirection::None;
+
+    UPROPERTY(BlueprintReadOnly)
+    bool bContactValid = false;
+
+    UPROPERTY(BlueprintReadOnly)
+    FVector_NetQuantize10 StartGroundLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly)
+    FVector_NetQuantizeNormal StartGroundNormal = FVector::UpVector;
+
+    UPROPERTY(BlueprintReadOnly)
+    FVector_NetQuantize10 GroundLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly)
+    FVector_NetQuantizeNormal GroundNormal = FVector::UpVector;
+
+    UPROPERTY(BlueprintReadOnly)
+    float ServerStartTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float Duration = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 Sequence = 0;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
     FCMLegStepStateChangedSignature,
     ECMLegStepDirection,
@@ -59,18 +119,78 @@ public:
         bool bReverseMovement,
         FVector GroundLocation,
         FVector GroundNormal,
+        float Duration,
+        ECMLegPlantTrigger Trigger = ECMLegPlantTrigger::PlayerInput
+    );
+
+    /** Starts a visual-only reach recovery; it must never apply body force. */
+    void BeginVisualReplant(
+        FVector GroundLocation,
+        FVector GroundNormal,
         float Duration
     );
+
+    /** Stores the first authoritative contact without playing a swing. */
+    void InitializePlantedContact(
+        FVector GroundLocation,
+        FVector GroundNormal
+    );
+
+    /** Completes a valid gameplay or visual transition into Planted. */
     void EndProceduralStep();
 
-    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
-    ECMLegStepDirection GetStepDirection() const { return StepDirection; }
+    /** Cancels a transition without applying force or retaining its target. */
+    void CancelProceduralStep(
+        ECMLegPlantTrigger Trigger = ECMLegPlantTrigger::Emergency
+    );
+
+    /** Advances short Recover transitions on the authority. */
+    void AdvancePlantState();
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
-    FVector GetStepGroundLocation() const { return StepGroundLocation; }
+    ECMLegStepDirection GetStepDirection() const
+    {
+        return PlantSnapshot.StepDirection;
+    }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
-    FVector GetStepGroundNormal() const { return StepGroundNormal; }
+    ECMLegPlantState GetPlantState() const { return PlantSnapshot.State; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    ECMLegPlantTrigger GetPlantTrigger() const { return PlantSnapshot.Trigger; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    bool HasValidGroundContact() const { return PlantSnapshot.bContactValid; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    FVector GetStepStartGroundLocation() const
+    {
+        return PlantSnapshot.StartGroundLocation;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    FVector GetStepStartGroundNormal() const
+    {
+        return PlantSnapshot.StartGroundNormal;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    int32 GetPlantSequence() const { return PlantSnapshot.Sequence; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    float GetSideSign() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    FVector GetStepGroundLocation() const
+    {
+        return PlantSnapshot.GroundLocation;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
+    FVector GetStepGroundNormal() const
+    {
+        return PlantSnapshot.GroundNormal;
+    }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Leg|Animation")
     float GetStepPhase() const;
@@ -94,23 +214,43 @@ protected:
     float ActionDuration = 0.25f;
 
 private:
+    /** Kept as a compatibility hook for older Blueprint subclasses. */
     UFUNCTION()
     void OnRep_StepState();
 
+    UFUNCTION()
+    void OnRep_PlantSnapshot();
+
+    void BeginPlantTransition(
+        ECMLegStepDirection NewStepDirection,
+        ECMLegPlantTrigger Trigger,
+        FVector GroundLocation,
+        FVector GroundNormal,
+        float Duration
+    );
+
+    void BroadcastPlantState();
+
+    FVector GetCurrentPlantStartLocation() const;
+
     bool bPendingReverseMovement = false;
 
-    UPROPERTY(ReplicatedUsing = OnRep_StepState)
+    // Legacy fields remain as transient compatibility mirrors for existing
+    // native/Blueprint callers. Authority state is replicated atomically via
+    // PlantSnapshot below.
+    UPROPERTY(Transient)
     ECMLegStepDirection StepDirection = ECMLegStepDirection::None;
 
-    UPROPERTY(ReplicatedUsing = OnRep_StepState)
+    UPROPERTY(Transient)
     FVector_NetQuantize10 StepGroundLocation = FVector::ZeroVector;
 
-    UPROPERTY(ReplicatedUsing = OnRep_StepState)
+    UPROPERTY(Transient)
     FVector_NetQuantizeNormal StepGroundNormal = FVector::UpVector;
 
-    UPROPERTY(Replicated)
-    float StepStartTime = 0.0f;
+    /** Client-side guard against a delayed transition snapshot. */
+    UPROPERTY(Transient)
+    int32 LastAppliedPlantSequence = INDEX_NONE;
 
-    UPROPERTY(Replicated)
-    float StepDuration = 0.0f;
+    UPROPERTY(ReplicatedUsing = OnRep_PlantSnapshot)
+    FCMLegPlantSnapshot PlantSnapshot;
 };

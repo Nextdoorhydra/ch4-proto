@@ -385,6 +385,31 @@ protected:
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MinimumGroundNormalZ = 0.5f;
 
+    /** Planar error before a planted leg requests a visual-only replant. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.0"))
+    float LegReplantReleaseDistance = 140.0f;
+
+    /** Error below which a newly acquired planted target is considered settled. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.0"))
+    float LegReplantSettleDistance = 90.0f;
+
+    /** Server-side cadence for reach recovery traces, not an animation Tick. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.01"))
+    float LegReplantCheckInterval = 0.08f;
+
+    /** Visual-only replant duration; it never contributes a body force. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.01"))
+    float LegReplantDuration = 0.25f;
+
+    /** Time allowed for a landing contact to recover before entering Recover. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.0"))
+    float LegLandingContactGrace = 0.08f;
+
     UPROPERTY(EditAnywhere, Category = "Leg")
     float MaxSpeed = 600.0f;
     

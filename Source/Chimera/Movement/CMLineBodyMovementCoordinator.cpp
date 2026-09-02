@@ -37,8 +37,17 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     UCMPartSlotComponent* PartSlot = LegPart.GetAttachedPartSlot();
     const FCMPartSlotAddress SlotAddress = LegPart.GetAttachedSlotAddress();
     const int32 SegmentIndex = SlotAddress.SegmentIndex;
+    const bool bVisualReplantInProgress =
+        LegPart.GetPlantTrigger() == ECMLegPlantTrigger::ReachRecovery
+        && LegPart.GetStepDirection() == ECMLegStepDirection::None
+        && (LegPart.GetPlantState() == ECMLegPlantState::Swing
+            || LegPart.GetPlantState() == ECMLegPlantState::Landing);
     if (!Chimera.HasAuthority()
         || !LegPart.IsOperational()
+        || ((!bVisualReplantInProgress)
+            && (LegPart.GetPlantState() == ECMLegPlantState::Swing
+                || LegPart.GetPlantState() == ECMLegPlantState::Landing
+                || LegPart.GetPlantState() == ECMLegPlantState::Recover))
         || !PartSlot
         || PartSlot->GetOwner() != &Chimera
         || MovementImpulse <= 0.0f
@@ -156,11 +165,15 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     Step.GroundNormal = GroundHit.ImpactNormal;
     Step.PushForce = PushDirection * PushForceMagnitude;
     Step.EndTime = Chimera.GetWorld()->GetTimeSeconds() + PushDuration;
-    LegPart.BeginProceduralStep(
-        bReverseMovement,
-        GroundHit.ImpactPoint,
-        GroundHit.ImpactNormal,
-        PushDuration);
+    Step.bOwnsVisualStep = !bVisualReplantInProgress;
+    if (Step.bOwnsVisualStep)
+    {
+        LegPart.BeginProceduralStep(
+            bReverseMovement,
+            GroundHit.ImpactPoint,
+            GroundHit.ImpactNormal,
+            PushDuration);
+    }
 
     // 개별 Step Force는 해당 마디의 회전과 접지 이동을 담당한다.
     // 같은 시간창에 좌우 다리가 함께 눌렸을 때만 기존 Rolling Match가
@@ -245,7 +258,7 @@ void UCMLineBodyMovementCoordinator::CancelLegStep(
     );
     if (RemovedCount > 0)
     {
-        LegPart->EndProceduralStep();
+        LegPart->CancelProceduralStep();
     }
     if (RemovedCount > 0)
     {
@@ -810,11 +823,25 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         return true;
     }
 
-    // 승인된 상호작 대상이 없을 때만 기존 지면 짚기를 시도한다.
+    // 승인된 상호작 대상이 없을 때만 지면 짚기를 시도한다. 슬롯
+    // 중심이 아니라 현재 손 본의 XY에서 내리쏴야 홀드 입력 순간 손이
+    // 옆으로 순간 이동하지 않는다. 전용 서버처럼 포즈가 없는 경우에는
+    // 기존 슬롯 위치가 안전한 폴백이다.
+    FVector GroundTracePoint = PartSlot->GetComponentLocation();
+    if (const USkeletalMeshComponent* ArmMesh = ArmPart.GetPartMesh())
+    {
+        static const FName HandBone(TEXT("hand_l"));
+        if (ArmMesh->GetBoneIndex(HandBone) != INDEX_NONE)
+        {
+            GroundTracePoint = ArmMesh->GetBoneLocation(
+                HandBone,
+                EBoneSpaces::WorldSpace);
+        }
+    }
     FHitResult GroundHit;
     if (!TraceGroundAtPoint(
         Chimera,
-        PartSlot->GetComponentLocation(),
+        GroundTracePoint,
         &ArmPart,
         GroundHit))
     {
@@ -1106,6 +1133,8 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
     ApplyArmAnchorStaminaDrain(Chimera);
     UpdatePhysicsHandles(Chimera);
 
+    UpdateLegPlantStates(Chimera);
+
     // A Step is a sustained ground reaction, so its Force is supplied every
     // server physics frame before the existing whole-body speed cap runs.
     ApplyActiveLegSteps(Chimera);
@@ -1168,6 +1197,199 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
         SegmentVelocity.X += HorizontalVelocityCorrection.X;
         SegmentVelocity.Y += HorizontalVelocityCorrection.Y;
         BodySegment->SetPhysicsLinearVelocity(SegmentVelocity);
+    }
+}
+
+void UCMLineBodyMovementCoordinator::UpdateLegPlantStates(
+    ACMChimera& Chimera
+)
+{
+    const UWorld* World = Chimera.GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    const double CurrentTime = World->GetTimeSeconds();
+    const int32 ActiveSlotCount = Chimera.ActiveSegmentCount
+        * CMControl::PartSlotsPerSegment;
+    for (int32 FlatSlotIndex = 0;
+        FlatSlotIndex < ActiveSlotCount;
+        ++FlatSlotIndex)
+    {
+        if (!Chimera.PartSlotPoints.IsValidIndex(FlatSlotIndex))
+        {
+            continue;
+        }
+        UCMPartSlotComponent* PartSlot =
+            Chimera.PartSlotPoints[FlatSlotIndex];
+        ACMLegPart* LegPart = PartSlot
+            ? Cast<ACMLegPart>(PartSlot->GetAttachedPart())
+            : nullptr;
+        if (LegPart)
+        {
+            LegPart->AdvancePlantState();
+        }
+    }
+
+    if (CurrentTime < NextReachRecoveryCheckTime)
+    {
+        return;
+    }
+    NextReachRecoveryCheckTime = CurrentTime
+        + FMath::Max(static_cast<double>(Chimera.LegReplantCheckInterval),
+            0.01);
+
+    // Acquire each leg's first contact from the same production sweep used by
+    // gameplay steps. This runs at the low-frequency contact cadence, never in
+    // AnimGraph/Control Rig evaluation, and does not create a force window.
+    for (int32 FlatSlotIndex = 0;
+        FlatSlotIndex < ActiveSlotCount;
+        ++FlatSlotIndex)
+    {
+        if (!Chimera.PartSlotPoints.IsValidIndex(FlatSlotIndex))
+        {
+            continue;
+        }
+
+        UCMPartSlotComponent* PartSlot =
+            Chimera.PartSlotPoints[FlatSlotIndex];
+        ACMLegPart* LegPart = PartSlot
+            ? Cast<ACMLegPart>(PartSlot->GetAttachedPart())
+            : nullptr;
+        if (!PartSlot || !LegPart
+            || !LegPart->IsOperational()
+            || LegPart->GetPlantState() != ECMLegPlantState::Free
+            || ActiveLegSteps.ContainsByPredicate(
+                [LegPart](const FActiveLegStep& Step)
+                {
+                    return Step.LegPart.Get() == LegPart;
+                }))
+        {
+            continue;
+        }
+
+        FVector ForwardDirection = PartSlot->GetForwardVector();
+        ForwardDirection.Z = 0.0f;
+        if (!ForwardDirection.Normalize())
+        {
+            continue;
+        }
+
+        const FVector DesiredFootPoint = PartSlot->GetComponentLocation()
+            + ForwardDirection * Chimera.LegStepLength;
+        FHitResult GroundHit;
+        if (TraceGroundAtPoint(
+                Chimera,
+                DesiredFootPoint,
+                LegPart,
+                GroundHit))
+        {
+            LegPart->InitializePlantedContact(
+                GroundHit.ImpactPoint,
+                GroundHit.ImpactNormal);
+        }
+    }
+    UpdateReachRecovery(Chimera, CurrentTime);
+}
+
+void UCMLineBodyMovementCoordinator::UpdateReachRecovery(
+    ACMChimera& Chimera,
+    const double CurrentTime
+)
+{
+    const int32 ActiveSlotCount = Chimera.ActiveSegmentCount
+        * CMControl::PartSlotsPerSegment;
+    const float ReleaseDistance = FMath::Max(
+        Chimera.LegReplantReleaseDistance,
+        Chimera.LegStepLength);
+    const float SettleDistance = FMath::Clamp(
+        Chimera.LegReplantSettleDistance,
+        0.0f,
+        ReleaseDistance * 0.9f);
+    for (int32 FlatSlotIndex = 0;
+        FlatSlotIndex < ActiveSlotCount;
+        ++FlatSlotIndex)
+    {
+        if (!Chimera.PartSlotPoints.IsValidIndex(FlatSlotIndex))
+        {
+            continue;
+        }
+
+        UCMPartSlotComponent* PartSlot =
+            Chimera.PartSlotPoints[FlatSlotIndex];
+        ACMLegPart* LegPart = PartSlot
+            ? Cast<ACMLegPart>(PartSlot->GetAttachedPart())
+            : nullptr;
+        if (!PartSlot || !LegPart
+            || LegPart->GetPlantState() != ECMLegPlantState::Planted
+            || !LegPart->IsOperational()
+            || ActiveLegSteps.ContainsByPredicate(
+                [LegPart](const FActiveLegStep& Step)
+                {
+                    return Step.LegPart.Get() == LegPart
+                        && Step.bOwnsVisualStep;
+                }))
+        {
+            continue;
+        }
+
+        FVector ForwardDirection = PartSlot->GetForwardVector();
+        ForwardDirection.Z = 0.0f;
+        if (!ForwardDirection.Normalize())
+        {
+            continue;
+        }
+        const FVector DesiredFootPoint = PartSlot->GetComponentLocation()
+            + ForwardDirection * Chimera.LegStepLength;
+        const FVector GroundPoint = LegPart->GetStepGroundLocation();
+        const FVector GroundNormal = LegPart->GetStepGroundNormal()
+            .GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+        const FVector PlanarError = FVector::VectorPlaneProject(
+            DesiredFootPoint - GroundPoint,
+            GroundNormal);
+        // The smaller settle threshold is kept explicit so tuning cannot
+        // accidentally remove the release/settle hysteresis contract.
+        if (PlanarError.SizeSquared() <= FMath::Square(SettleDistance))
+        {
+            continue;
+        }
+        if (PlanarError.SizeSquared() < FMath::Square(ReleaseDistance))
+        {
+            continue;
+        }
+
+        FHitResult GroundHit;
+        if (!TraceGroundAtPoint(
+                Chimera,
+                DesiredFootPoint,
+                LegPart,
+                GroundHit))
+        {
+            UE_LOG(LogChimeraMovement, Verbose,
+                TEXT("[Leg Reach Recovery Deferred] Part=%s Slot=(%d,%d) Error=%.1f Reason=NoGround"),
+                *GetNameSafe(LegPart),
+                PartSlot->GetSlotAddress().SegmentIndex,
+                PartSlot->GetSlotAddress().PartSlotIndex,
+                PlanarError.Size());
+            continue;
+        }
+
+        // This transition changes only the replicated visual target. It is
+        // deliberately not inserted into ActiveLegSteps and contributes no
+        // force, impulse, or cooperative movement input.
+        LegPart->BeginVisualReplant(
+            GroundHit.ImpactPoint,
+            GroundHit.ImpactNormal,
+            Chimera.LegReplantDuration);
+        UE_LOG(LogChimeraMovement, Log,
+            TEXT("[Leg Reach Recovery Started] Part=%s Slot=(%d,%d) Error=%.1f Ground=%s Time=%.2f"),
+            *GetNameSafe(LegPart),
+            PartSlot->GetSlotAddress().SegmentIndex,
+            PartSlot->GetSlotAddress().PartSlotIndex,
+            PlanarError.Size(),
+            *GroundHit.ImpactPoint.ToCompactString(),
+            CurrentTime);
     }
 }
 
@@ -1402,7 +1624,56 @@ void UCMLineBodyMovementCoordinator::ApplyActiveLegSteps(
                     : TEXT("false"));
             if (LegPart)
             {
-                LegPart->EndProceduralStep();
+                const bool bCanFinalizeContact = Step.bOwnsVisualStep
+                    &&
+                    LegPart->IsOperational()
+                    && IsValid(SegmentBody)
+                    && SegmentBody->IsSimulatingPhysics()
+                    && (LegPart->GetPlantState() == ECMLegPlantState::Swing
+                        || LegPart->GetPlantState()
+                            == ECMLegPlantState::Landing);
+                if (bCanFinalizeContact)
+                {
+                    FHitResult FinalGroundHit;
+                    const bool bFinalContactValid = TraceGroundAtPoint(
+                        Chimera,
+                        Step.VirtualFootPoint,
+                        LegPart,
+                        FinalGroundHit);
+                    if (bFinalContactValid)
+                    {
+                        LegPart->EndProceduralStep();
+                    }
+                    else
+                    {
+                        // A single missed sweep at the exact landing frame
+                        // must not release a valid planted foot. Keep the
+                        // state in Landing for the short configured grace
+                        // window, without applying force after EndTime.
+                        const double LandingGrace = FMath::Max(
+                            static_cast<double>(Chimera.LegLandingContactGrace),
+                            0.0);
+                        if (CurrentTime < Step.EndTime + LandingGrace)
+                        {
+                            continue;
+                        }
+                        // Do not promote a stale target to Planted after a
+                        // failed final contact check. Recover keeps the last
+                        // rendered pose briefly before releasing it.
+                        LegPart->CancelProceduralStep();
+                    }
+                }
+                else if (Step.bOwnsVisualStep
+                    && LegPart->IsOperational()
+                    && IsValid(SegmentBody)
+                    && !SegmentBody->IsSimulatingPhysics())
+                {
+                    LegPart->CancelProceduralStep();
+                }
+                else if (Step.bOwnsVisualStep)
+                {
+                    LegPart->CancelProceduralStep();
+                }
             }
             ActiveLegSteps.RemoveAtSwap(
                 StepIndex,
@@ -1489,6 +1760,8 @@ bool UCMLineBodyMovementCoordinator::TraceGroundAtPoint(
     const auto SelectWalkableGround = [&Chimera, &OutHit](
         const TArray<FHitResult>& CandidateHits)
     {
+        bool bFound = false;
+        float BestMetric = MAX_FLT;
         for (const FHitResult& Hit : CandidateHits)
         {
             const AActor* HitActor = Hit.GetActor();
@@ -1497,13 +1770,43 @@ bool UCMLineBodyMovementCoordinator::TraceGroundAtPoint(
             {
                 continue;
             }
-            if (Hit.ImpactNormal.Z >= Chimera.MinimumGroundNormalZ)
+            if (Hit.bStartPenetrating
+                || Hit.ImpactPoint.ContainsNaN()
+                || Hit.ImpactNormal.ContainsNaN()
+                || Hit.ImpactNormal.SizeSquared() <= SMALL_NUMBER)
             {
-                OutHit = Hit;
-                return true;
+                continue;
+            }
+
+            const FVector SafeNormal = Hit.ImpactNormal.GetSafeNormal();
+            if (SafeNormal.IsNearlyZero()
+                || SafeNormal.Z < Chimera.MinimumGroundNormalZ)
+            {
+                continue;
+            }
+
+            // SweepMulti does not promise array order. Time is the distance
+            // along this sweep; Distance is a safe fallback for providers
+            // that leave Time unset.
+            float Metric = Hit.Time;
+            if (!FMath::IsFinite(Metric) || Metric < 0.0f)
+            {
+                Metric = Hit.Distance;
+            }
+            if (!FMath::IsFinite(Metric))
+            {
+                Metric = 0.0f;
+            }
+            if (!bFound || Metric < BestMetric)
+            {
+                FHitResult ValidHit = Hit;
+                ValidHit.ImpactNormal = SafeNormal;
+                OutHit = ValidHit;
+                BestMetric = Metric;
+                bFound = true;
             }
         }
-        return false;
+        return bFound;
     };
 
     bool bHasGroundContact = SelectWalkableGround(Hits);
@@ -1630,7 +1933,7 @@ void UCMLineBodyMovementCoordinator::EndPlay(
     {
         if (ACMLegPart* LegPart = Step.LegPart.Get())
         {
-            LegPart->EndProceduralStep();
+            LegPart->CancelProceduralStep();
         }
     }
     ActiveLegSteps.Reset();

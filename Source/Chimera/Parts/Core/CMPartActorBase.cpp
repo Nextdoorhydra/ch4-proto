@@ -201,9 +201,19 @@ UCMPartSlotComponent* ACMPartActorBase::GetAttachedPartSlot() const
         return PartSlot;
     }
 
-    return SceneRoot
-        ? Cast<UCMPartSlotComponent>(SceneRoot->GetAttachParent())
-        : nullptr;
+    for (USceneComponent* Parent = SceneRoot
+            ? SceneRoot->GetAttachParent()
+            : nullptr;
+        Parent;
+        Parent = Parent->GetAttachParent())
+    {
+        if (UCMPartSlotComponent* PartSlot =
+            Cast<UCMPartSlotComponent>(Parent))
+        {
+            return PartSlot;
+        }
+    }
+    return nullptr;
 }
 
 FCMPartSlotAddress ACMPartActorBase::GetAttachedSlotAddress() const

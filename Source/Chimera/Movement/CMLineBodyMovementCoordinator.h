@@ -124,6 +124,8 @@ private:
     ) const;
 
     void ApplyActiveLegSteps(ACMChimera& Chimera);
+    void UpdateLegPlantStates(ACMChimera& Chimera);
+    void UpdateReachRecovery(ACMChimera& Chimera, double CurrentTime);
     void UpdatePhysicsHandles(ACMChimera& Chimera);
     void ApplyArmAnchorStaminaDrain(ACMChimera& Chimera);
     void RemoveInvalidArmAnchors(ACMChimera& Chimera);
@@ -154,6 +156,7 @@ private:
         FVector GroundNormal = FVector::UpVector;
         FVector PushForce = FVector::ZeroVector;
         double EndTime = 0.0;
+        bool bOwnsVisualStep = false;
     };
 
     struct FActiveArmAnchor
@@ -178,4 +181,5 @@ private:
     TArray<FActiveLegStep> ActiveLegSteps;
     TArray<FActiveArmAnchor> ActiveArmAnchors;
     FTimerHandle CooperationExpiryTimerHandle;
+    double NextReachRecoveryCheckTime = 0.0;
 };
