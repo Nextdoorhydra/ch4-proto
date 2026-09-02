@@ -245,6 +245,7 @@ void ACMStageObstacleBase::ConfigureDirectEffects()
     {
         HazardComponent->ConfigurePartEffect(PartEffect);
         HazardComponent->ConfigureHeadVisionEffect(HeadVisionEffect);
+        HazardComponent->ConfigureControlEffect(ControlEffect);
     }
 }
 

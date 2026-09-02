@@ -6,6 +6,7 @@
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
 #include "Net/UnrealNetwork.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraControlBody, Log, All);
 
@@ -40,6 +41,8 @@ void ACMControlBody::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMControlBody, OwnedSegmentIndex);
     DOREPLIFETIME(ACMControlBody, bControlInputEnabled);
     DOREPLIFETIME(ACMControlBody, DisabledControlSlotMask);
+    DOREPLIFETIME(ACMControlBody, ConfusionSlotRemap);
+    DOREPLIFETIME(ACMControlBody, DeliriumControlSlots);
 }
 
 void ACMControlBody::BeginPlay()
@@ -67,7 +70,19 @@ void ACMControlBody::UnPossessed()
 {
     // 소유자가 사라진 뒤에도 Shared Chimera에 눌림 비트가 남지 않게 한다.
     ClearPressedControlSlots();
+    RemoveConfusion();
+    RemoveDelirium();
     Super::UnPossessed();
+}
+
+void ACMControlBody::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (HasAuthority())
+    {
+        RemoveConfusion();
+        RemoveDelirium();
+    }
+    Super::EndPlay(EndPlayReason);
 }
 
 void ACMControlBody::OnRep_Controller()
@@ -149,8 +164,9 @@ void ACMControlBody::ServerRequestAttachPartToControlSlot_Implementation(
         return;
     }
 
+    const int32 ResolvedSlotIndex = ResolveControlInputSlot(SlotIndex);
     const FCMPartSlotAddress PartSlotAddress =
-        GetPartSlotAddressForControlSlot(SlotIndex);
+        GetEffectivePartSlotAddress(ResolvedSlotIndex);
     ACMChimera* SharedChimera = GetSharedChimera();
     UCMPartSlotComponent* PartSlot = SharedChimera
         ? SharedChimera->GetPartSlotComponent(PartSlotAddress)
@@ -206,8 +222,9 @@ void ACMControlBody::ServerRequestDetachPartFromControlSlot_Implementation(
         return;
     }
 
+    const int32 ResolvedSlotIndex = ResolveControlInputSlot(SlotIndex);
     const FCMPartSlotAddress PartSlotAddress =
-        GetPartSlotAddressForControlSlot(SlotIndex);
+        GetEffectivePartSlotAddress(ResolvedSlotIndex);
     ACMChimera* SharedChimera = GetSharedChimera();
     if (!SharedChimera
         || !CMControl::IsValidPartSlot(PartSlotAddress))
@@ -283,8 +300,9 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
         return;
     }
 
+    const int32 ResolvedSlotIndex = ResolveControlInputSlot(SlotIndex);
     const FCMPartSlotAddress PartSlotAddress =
-        GetPartSlotAddressForControlSlot(SlotIndex);
+        GetEffectivePartSlotAddress(ResolvedSlotIndex);
     if (!CMControl::IsValidPartSlot(PartSlotAddress))
     {
         return;
@@ -351,6 +369,243 @@ FCMPartSlotAddress ACMControlBody::GetPartSlotAddressForControlSlot(
         : FCMPartSlotAddress();
 }
 
+FCMPartSlotAddress ACMControlBody::GetEffectivePartSlotAddress(
+    int32 SlotIndex) const
+{
+    const TArray<FCMPartSlotAddress>& EffectiveSlots =
+        DeliriumControlSlots.IsEmpty() ? ControlSlots : DeliriumControlSlots;
+    return EffectiveSlots.IsValidIndex(SlotIndex)
+        ? EffectiveSlots[SlotIndex]
+        : FCMPartSlotAddress();
+}
+
+int32 ACMControlBody::ResolveControlInputSlot(int32 PhysicalSlotIndex) const
+{
+    return ConfusionSlotRemap.IsValidIndex(PhysicalSlotIndex)
+        ? ConfusionSlotRemap[PhysicalSlotIndex]
+        : PhysicalSlotIndex;
+}
+
+void ACMControlBody::ApplyConfusion(float Duration, UObject* Source)
+{
+    if (!HasAuthority() || !IsValid(Source))
+    {
+        return;
+    }
+
+    const bool bWasConfused = !ConfusionSources.IsEmpty();
+    FTimerHandle& SourceTimer = ConfusionSources.FindOrAdd(Source);
+    GetWorldTimerManager().ClearTimer(SourceTimer);
+    if (!bWasConfused)
+    {
+        ClearPressedControlSlots();
+        ConfusionSlotRemap = {0, 1, 2, 3};
+        do
+        {
+            for (int32 Index = ConfusionSlotRemap.Num() - 1;
+                Index > 0; --Index)
+            {
+                const int32 SwapIndex = FMath::RandRange(0, Index);
+                ConfusionSlotRemap.Swap(Index, SwapIndex);
+            }
+        }
+        while (ConfusionSlotRemap == TArray<int32>({0, 1, 2, 3}));
+    }
+
+    if (Duration > 0.0f)
+    {
+        const TWeakObjectPtr<UObject> WeakSource(Source);
+        GetWorldTimerManager().SetTimer(
+            SourceTimer,
+            FTimerDelegate::CreateWeakLambda(this, [this, WeakSource]()
+            {
+                RemoveConfusionSource(WeakSource);
+            }),
+            Duration, false);
+    }
+    OnRep_ControlSlots();
+    ForceNetUpdate();
+}
+
+void ACMControlBody::RemoveConfusion(UObject* Source)
+{
+    if (!HasAuthority() || ConfusionSources.IsEmpty())
+    {
+        return;
+    }
+    if (Source)
+    {
+        RemoveConfusionSource(Source);
+        return;
+    }
+    else
+    {
+        for (TPair<TWeakObjectPtr<UObject>, FTimerHandle>& Entry
+            : ConfusionSources)
+        {
+            GetWorldTimerManager().ClearTimer(Entry.Value);
+        }
+        ConfusionSources.Reset();
+    }
+    if (!ConfusionSources.IsEmpty())
+    {
+        return;
+    }
+    ClearPressedControlSlots();
+    ConfusionSlotRemap.Reset();
+    OnRep_ControlSlots();
+    ForceNetUpdate();
+}
+
+void ACMControlBody::RemoveConfusionSource(TWeakObjectPtr<UObject> Source)
+{
+    if (FTimerHandle* Timer = ConfusionSources.Find(Source))
+    {
+        GetWorldTimerManager().ClearTimer(*Timer);
+        ConfusionSources.Remove(Source);
+    }
+    if (!ConfusionSources.IsEmpty())
+    {
+        return;
+    }
+    ClearPressedControlSlots();
+    ConfusionSlotRemap.Reset();
+    OnRep_ControlSlots();
+    ForceNetUpdate();
+}
+
+bool ACMControlBody::ApplyDelirium(
+    ACMControlBody& OtherControlBody, float Duration, UObject* Source)
+{
+    if (!HasAuthority() || &OtherControlBody == this || !IsValid(Source)
+        || (!DeliriumSources.IsEmpty()
+            && DeliriumPartner.Get() != &OtherControlBody)
+        || (!OtherControlBody.DeliriumSources.IsEmpty()
+            && OtherControlBody.DeliriumPartner.Get() != this))
+    {
+        return false;
+    }
+
+    if (DeliriumSources.IsEmpty())
+    {
+        ClearPressedControlSlots();
+        OtherControlBody.ClearPressedControlSlots();
+        DeliriumControlSlots = OtherControlBody.ControlSlots;
+        OtherControlBody.DeliriumControlSlots = ControlSlots;
+        DeliriumPartner = &OtherControlBody;
+        OtherControlBody.DeliriumPartner = this;
+    }
+    FTimerHandle& SourceTimer = DeliriumSources.FindOrAdd(Source);
+    OtherControlBody.DeliriumSources.FindOrAdd(Source);
+    GetWorldTimerManager().ClearTimer(SourceTimer);
+    if (Duration > 0.0f)
+    {
+        const TWeakObjectPtr<UObject> WeakSource(Source);
+        GetWorldTimerManager().SetTimer(
+            SourceTimer,
+            FTimerDelegate::CreateWeakLambda(this, [this, WeakSource]()
+            {
+                RemoveDeliriumSource(WeakSource);
+            }),
+            Duration, false);
+    }
+    OnRep_ControlSlots();
+    OtherControlBody.OnRep_ControlSlots();
+    ForceNetUpdate();
+    OtherControlBody.ForceNetUpdate();
+    return true;
+}
+
+void ACMControlBody::RemoveDeliriumSourceLocal(
+    TWeakObjectPtr<UObject> Source)
+{
+    if (!Source.IsExplicitlyNull())
+    {
+        if (FTimerHandle* Timer = DeliriumSources.Find(Source))
+        {
+            GetWorldTimerManager().ClearTimer(*Timer);
+            DeliriumSources.Remove(Source);
+        }
+        return;
+    }
+    for (TPair<TWeakObjectPtr<UObject>, FTimerHandle>& Entry
+        : DeliriumSources)
+    {
+        GetWorldTimerManager().ClearTimer(Entry.Value);
+    }
+    DeliriumSources.Reset();
+}
+
+void ACMControlBody::RemoveDelirium(UObject* Source)
+{
+    if (!HasAuthority() || DeliriumSources.IsEmpty())
+    {
+        return;
+    }
+    if (Source)
+    {
+        RemoveDeliriumSource(Source);
+        return;
+    }
+
+    ACMControlBody* Partner = DeliriumPartner.Get();
+    RemoveDeliriumSourceLocal(TWeakObjectPtr<UObject>());
+    if (IsValid(Partner) && Partner->DeliriumPartner.Get() == this)
+    {
+        Partner->RemoveDeliriumSourceLocal(TWeakObjectPtr<UObject>());
+    }
+    if (!DeliriumSources.IsEmpty())
+    {
+        return;
+    }
+
+    ClearPressedControlSlots();
+    DeliriumControlSlots.Reset();
+    DeliriumPartner.Reset();
+    OnRep_ControlSlots();
+    ForceNetUpdate();
+    if (IsValid(Partner) && Partner->DeliriumPartner.Get() == this)
+    {
+        Partner->ClearPressedControlSlots();
+        Partner->DeliriumControlSlots.Reset();
+        Partner->DeliriumPartner.Reset();
+        Partner->OnRep_ControlSlots();
+        Partner->ForceNetUpdate();
+    }
+}
+
+void ACMControlBody::RemoveDeliriumSource(TWeakObjectPtr<UObject> Source)
+{
+    if (!HasAuthority() || DeliriumSources.IsEmpty())
+    {
+        return;
+    }
+    ACMControlBody* Partner = DeliriumPartner.Get();
+    RemoveDeliriumSourceLocal(Source);
+    if (IsValid(Partner) && Partner->DeliriumPartner.Get() == this)
+    {
+        Partner->RemoveDeliriumSourceLocal(Source);
+    }
+    if (!DeliriumSources.IsEmpty())
+    {
+        return;
+    }
+
+    ClearPressedControlSlots();
+    DeliriumControlSlots.Reset();
+    DeliriumPartner.Reset();
+    OnRep_ControlSlots();
+    ForceNetUpdate();
+    if (IsValid(Partner) && Partner->DeliriumPartner.Get() == this)
+    {
+        Partner->ClearPressedControlSlots();
+        Partner->DeliriumControlSlots.Reset();
+        Partner->DeliriumPartner.Reset();
+        Partner->OnRep_ControlSlots();
+        Partner->ForceNetUpdate();
+    }
+}
+
 int32 ACMControlBody::GetAssignedControlCount() const
 {
     return ControlSlots.Num();
@@ -374,10 +629,13 @@ int32 ACMControlBody::GetEnabledControlCount() const
 
 bool ACMControlBody::IsControlSlotEnabled(int32 SlotIndex) const
 {
+    const int32 ResolvedSlotIndex = ResolveControlInputSlot(SlotIndex);
+    const TArray<FCMPartSlotAddress>& EffectiveSlots =
+        DeliriumControlSlots.IsEmpty() ? ControlSlots : DeliriumControlSlots;
     return bControlInputEnabled
-        && ControlSlots.IsValidIndex(SlotIndex)
+        && EffectiveSlots.IsValidIndex(ResolvedSlotIndex)
         && SlotIndex < CMControl::MaxKeysPerPlayer
-        && (DisabledControlSlotMask & (1u << SlotIndex)) == 0;
+        && (DisabledControlSlotMask & (1u << ResolvedSlotIndex)) == 0;
 }
 
 const TArray<FCMPartSlotAddress>& ACMControlBody::GetControlSlots() const
@@ -500,6 +758,8 @@ void ACMControlBody::RestoreControlsAfterRespawn()
     }
 
     ClearPressedControlSlots();
+    RemoveConfusion();
+    RemoveDelirium();
     DisabledControlSlotMask = 0;
     bControlInputEnabled = true;
     if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())

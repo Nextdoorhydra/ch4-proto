@@ -35,7 +35,7 @@ UI 담당자용 함수·이벤트·무게 조회 계약은 [버튼 UI 연동 가
 
 Start Active는 초기 **장치 작동 요청**이다. 버튼의 초기 눌림이 아니다. 버튼 ON과 대상 레이저 OFF는 동시에 성립할 수 있다.
 
-장애물 비활성화는 부착된 Motion/Hazard/레거시 StatusZone/ChimeraEffectZone/ForceZone과 기본 Niagara·반복 사운드를 정지한다. 공통 베이스는 외형 메시를 무조건 숨기거나 물리 Block을 제거하지 않는다. 레이저 등 전용 구현이 추가 표시/판정을 제어한다.
+장애물 비활성화는 부착된 Motion/Hazard/레거시 StatusZone/ForceZone과 기본 Niagara·반복 사운드를 정지한다. 공통 베이스는 외형 메시를 무조건 숨기거나 물리 Block을 제거하지 않는다. 레이저 등 전용 구현이 추가 표시/판정을 제어한다.
 
 ### 직접 대상과 ID
 
@@ -63,7 +63,7 @@ TargetActor/TargetPlacementId/TargetGroup은 대상 목록 세 개가 아니라 
 5. Balance Selection에서 Damage 행과 모드를 선택한다. 파츠 상태는 Part Application, 머리 시야 감소는 Head Vision Application에서 지속시간·강도·적용 정책을 설정하고 Start Active를 정한다.
 6. 해당 룸 서브레벨을 Current로 선택하고 배치한 뒤 퍼즐에 연결한다.
 
-`CMStageObstacleBase`는 BeginPlay에서 표 행과 StageDirector 배율을 해석한 뒤 부착된 Hazard/ChimeraEffectZone에 런타임 설정을 전달한다. **Balance Selection과 적용 정책이 원본**이다. 컴포넌트 런타임 복사본은 별도로 수정하지 않는다. 런타임 Details 수정의 자동 재적용·동기화는 보장하지 않는다.
+`CMStageObstacleBase`는 BeginPlay에서 표 행과 StageDirector 배율을 해석한 뒤 부착된 Hazard에 런타임 설정을 전달한다. **Balance Selection과 적용 정책이 원본**이다. 컴포넌트 런타임 복사본은 별도로 수정하지 않는다. 런타임 Details 수정의 자동 재적용·동기화는 보장하지 않는다.
 
 ### 현재 Hazard 피해 계약
 
@@ -85,7 +85,7 @@ TargetActor/TargetPlacementId/TargetGroup은 대상 목록 세 개가 아니라 
 
 피해량은 Balance Selection에서 결정되고 파츠 상태는 Part Application에서 직접 설정한다. 파츠는 Actor별, 몸통은 Hurtbox Component별 오버랩 횟수를 추적한다. 머리 시야 감소도 별도 Zone 없이 같은 Hazard가 처리하며, Head Vision Application을 켜면 정확히 `CMHeadPartActor::GetDamageHurtbox()`와 겹친 머리에만 적용한다. 머리는 Part Application의 피해도 받을 수 있지만 Slowed/Electrified는 팔·다리에만 적용된다. 여러 발생원이 겹치면 가장 작은 시야 배율을 사용하고 각 머리는 해당 배율까지 부드럽게 보간한다.
 
-실명은 ChimeraEffectZone 오버랩으로 적용하지 않는다. 섬광 장애물에 `CMFlashComponent`를 추가하고 `Start Active=false`로 둔 뒤 PuzzleController에서 `Activate`를 보내면 한 번 발생한다. 활성 상태에서 `Activate`를 다시 받아도 재발동하며, BeginPlay의 시작 상태 초기화만으로는 발생하지 않는다. 블루프린트에서 직접 `TriggerFlash()`를 호출할 수도 있다. 컴포넌트는 Flash Range, Blind Activation Delay, Blind Recovery Duration, Blind Duration, Line Of Sight 사용 여부와 Trace Channel을 제공한다. TriggerFlash는 기본 1초의 경고 시간을 시작할 뿐이며, 거리·머리 시야 방향·가림 여부는 경고 종료 후 실제 폭발 순간에 판정한다. 따라서 경고 중 고개를 돌리거나 벽 뒤로 피하면 실명되지 않는다. 노출된 머리는 즉시 시야를 잃고 종료 시 Recovery Duration 동안 부드럽게 복구하며, 최소 한 머리는 무작위로 남긴다.
+실명은 오버랩형 공용 상태 존이 아니라 `CMFlashComponent`가 직접 처리한다. 섬광 장애물에 `CMFlashComponent`를 추가하고 `Start Active=false`로 둔 뒤 PuzzleController에서 `Activate`를 보내면 한 번 발생한다. 활성 상태에서 `Activate`를 다시 받아도 재발동하며, BeginPlay의 시작 상태 초기화만으로는 발생하지 않는다. 블루프린트에서 직접 `TriggerFlash()`를 호출할 수도 있다. 컴포넌트는 Flash Range, Blind Activation Delay, Blind Recovery Duration, Blind Duration, Line Of Sight 사용 여부와 Trace Channel을 제공한다. TriggerFlash는 기본 1초의 경고 시간을 시작할 뿐이며, 거리·머리 시야 방향·가림 여부는 경고 종료 후 실제 폭발 순간에 판정한다. 따라서 경고 중 고개를 돌리거나 벽 뒤로 피하면 실명되지 않는다. 노출된 머리는 즉시 시야를 잃고 종료 시 Recovery Duration 동안 부드럽게 복구하며, 최소 한 머리는 무작위로 남긴다.
 
 ### Collision
 

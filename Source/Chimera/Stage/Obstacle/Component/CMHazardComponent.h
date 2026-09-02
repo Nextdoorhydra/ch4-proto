@@ -9,6 +9,7 @@
 class ACMPartActorBase;
 class ACMHeadPartActor;
 class ACMChimera;
+class ACMControlBody;
 class UPrimitiveComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCMHazardTargetSignature, AActor*, TargetActor);
@@ -42,6 +43,9 @@ public:
     void ConfigureHeadVisionEffect(
         const FCMHeadVisionObstacleEffectConfig& NewConfig);
 
+    void ConfigureControlEffect(
+        const FCMControlObstacleEffectConfig& NewConfig);
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Hazard")
     FCMHazardTargetSignature OnTargetEntered;
 
@@ -58,6 +62,10 @@ private:
         meta = (AllowPrivateAccess = "true"))
     FCMHeadVisionObstacleEffectConfig HeadVisionEffect;
 
+    UPROPERTY(Transient, BlueprintReadOnly, Category = "Chimera|Hazard",
+        meta = (AllowPrivateAccess = "true"))
+    FCMControlObstacleEffectConfig ControlEffect;
+
     struct FTrackedPart
     {
         int32 OverlapCount = 0;
@@ -68,6 +76,7 @@ private:
         TWeakObjectPtr<ACMChimera> Chimera;
         int32 SegmentIndex = INDEX_NONE;
         int32 OverlapCount = 0;
+        TWeakObjectPtr<ACMControlBody> ControlBody;
     };
 
     ACMPartActorBase* ResolveSupportedPart(
@@ -80,6 +89,9 @@ private:
     void ApplyHeadVisionEffect(ACMHeadPartActor& Head);
     void RemoveHeadVisionEffect(ACMHeadPartActor& Head);
     void ApplyConfiguredDamage(ACMChimera& Chimera, int32 SegmentIndex);
+    ACMControlBody* FindControlBodyForSegment(int32 SegmentIndex) const;
+    void ApplyControlEffect(ACMControlBody& ControlBody);
+    void RemoveControlEffect(ACMControlBody& ControlBody);
     void UpdatePeriodicTimer();
     void UpdateHeadVisionPeriodicTimer();
     void HandlePeriodicApplication();
@@ -92,6 +104,7 @@ private:
     bool bHazardEnabled = true;
     TMap<TWeakObjectPtr<ACMPartActorBase>, FTrackedPart> TrackedParts;
     TMap<TWeakObjectPtr<UPrimitiveComponent>, FTrackedSegment> TrackedSegments;
+    TMap<TWeakObjectPtr<ACMControlBody>, int32> ControlBodyOverlapCounts;
     FTimerHandle PeriodicTimerHandle;
     FTimerHandle HeadVisionPeriodicTimerHandle;
 };

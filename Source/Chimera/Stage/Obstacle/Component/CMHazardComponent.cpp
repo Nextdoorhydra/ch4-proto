@@ -7,8 +7,10 @@
 #include "Parts/Head/CMHeadPartActor.h"
 #include "Parts/Head/CMVisionComponent.h"
 #include "Player/CMChimera.h"
+#include "Player/CMControlBody.h"
 #include "Player/CMPartSlotComponent.h"
 #include "TimerManager.h"
+#include "EngineUtils.h"
 
 UCMHazardComponent::UCMHazardComponent()
 {
@@ -41,6 +43,13 @@ void UCMHazardComponent::ConfigureHeadVisionEffect(
     HeadVisionEffect.VisionDistanceMultiplier = FMath::Clamp(
         HeadVisionEffect.VisionDistanceMultiplier, 0.0f, 1.0f);
     UpdateHeadVisionPeriodicTimer();
+}
+
+void UCMHazardComponent::ConfigureControlEffect(
+    const FCMControlObstacleEffectConfig& NewConfig)
+{
+    ControlEffect = NewConfig;
+    ControlEffect.Duration = FMath::Max(ControlEffect.Duration, 0.01f);
 }
 
 // 비활성 중에도 오버랩 목록은 유지하고 실제 효과와 타이머만 정지
@@ -109,6 +118,27 @@ void UCMHazardComponent::SetHazardEnabled(bool bEnabled)
             }
         }
     }
+    if (ControlEffect.ApplicationPolicy
+        == ECMControlStatusApplicationPolicy::WhileOverlapping)
+    {
+        for (const TPair<TWeakObjectPtr<ACMControlBody>, int32>& Entry
+            : ControlBodyOverlapCounts)
+        {
+            ACMControlBody* ControlBody = Entry.Key.Get();
+            if (!ControlBody || Entry.Value <= 0)
+            {
+                continue;
+            }
+            if (bHazardEnabled)
+            {
+                ApplyControlEffect(*ControlBody);
+            }
+            else
+            {
+                RemoveControlEffect(*ControlBody);
+            }
+        }
+    }
     UpdatePeriodicTimer();
     UpdateHeadVisionPeriodicTimer();
 }
@@ -162,6 +192,7 @@ void UCMHazardComponent::NotifyTargetEntered(
     FTrackedSegment& Tracked = TrackedSegments.FindOrAdd(TargetComponent);
     Tracked.Chimera = Chimera;
     Tracked.SegmentIndex = SegmentIndex;
+    Tracked.ControlBody = FindControlBodyForSegment(SegmentIndex);
     if (++Tracked.OverlapCount > 1)
     {
         return;
@@ -170,6 +201,16 @@ void UCMHazardComponent::NotifyTargetEntered(
     if (bHazardEnabled && PartEffect.bEnabled)
     {
         ApplyConfiguredDamage(*Chimera, SegmentIndex);
+    }
+    if (Tracked.ControlBody.IsValid())
+    {
+        int32& BodyOverlapCount = ControlBodyOverlapCounts.FindOrAdd(
+            Tracked.ControlBody);
+        ++BodyOverlapCount;
+        if (BodyOverlapCount == 1 && bHazardEnabled)
+        {
+            ApplyControlEffect(*Tracked.ControlBody.Get());
+        }
     }
     UpdatePeriodicTimer();
     OnTargetEntered.Broadcast(Chimera);
@@ -235,6 +276,25 @@ void UCMHazardComponent::NotifyTargetExited(
     }
 
     ACMChimera* Chimera = Tracked->Chimera.Get();
+    ACMControlBody* ControlBody = Tracked->ControlBody.Get();
+    bool bLastControlBodyOverlap = false;
+    if (ControlBody)
+    {
+        if (int32* BodyOverlapCount = ControlBodyOverlapCounts.Find(ControlBody))
+        {
+            bLastControlBodyOverlap = --*BodyOverlapCount <= 0;
+            if (bLastControlBodyOverlap)
+            {
+                ControlBodyOverlapCounts.Remove(ControlBody);
+            }
+        }
+    }
+    if (ControlBody && bLastControlBodyOverlap
+        && ControlEffect.ApplicationPolicy
+            == ECMControlStatusApplicationPolicy::WhileOverlapping)
+    {
+        RemoveControlEffect(*ControlBody);
+    }
     TrackedSegments.Remove(TargetComponent);
     UpdatePeriodicTimer();
     if (Chimera)
@@ -298,6 +358,67 @@ void UCMHazardComponent::ApplyConfiguredEffect(
             PartEffect.StatusTag, Duration,
             PartEffect.MovementMultiplier,
             PartEffect.bBlocksAbility, this);
+    }
+}
+
+ACMControlBody* UCMHazardComponent::FindControlBodyForSegment(
+    int32 SegmentIndex) const
+{
+    const UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+    for (TActorIterator<ACMControlBody> It(World); It; ++It)
+    {
+        const int32 OwnedSegment = It->GetOwnedSegmentIndex();
+        if (SegmentIndex == OwnedSegment || SegmentIndex == OwnedSegment + 1)
+        {
+            return *It;
+        }
+    }
+    return nullptr;
+}
+
+void UCMHazardComponent::ApplyControlEffect(ACMControlBody& ControlBody)
+{
+    if (ControlEffect.StatusEffect == ECMControlObstacleStatusEffect::None)
+    {
+        return;
+    }
+    const float Duration = ControlEffect.ApplicationPolicy
+            == ECMControlStatusApplicationPolicy::WhileOverlapping
+        ? 0.0f : ControlEffect.Duration;
+    if (ControlEffect.StatusEffect
+        == ECMControlObstacleStatusEffect::Confused)
+    {
+        ControlBody.ApplyConfusion(Duration, this);
+        return;
+    }
+
+    for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
+    {
+        if (*It != &ControlBody
+            && It->GetAssignedControlCount() > 0
+            && It->IsControlInputEnabled()
+            && ControlBody.ApplyDelirium(**It, Duration, this))
+        {
+            return;
+        }
+    }
+}
+
+void UCMHazardComponent::RemoveControlEffect(ACMControlBody& ControlBody)
+{
+    if (ControlEffect.StatusEffect
+        == ECMControlObstacleStatusEffect::Confused)
+    {
+        ControlBody.RemoveConfusion(this);
+    }
+    else if (ControlEffect.StatusEffect
+        == ECMControlObstacleStatusEffect::Delirious)
+    {
+        ControlBody.RemoveDelirium(this);
     }
 }
 
@@ -449,6 +570,18 @@ void UCMHazardComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
         if (ACMHeadPartActor* Head = Cast<ACMHeadPartActor>(Entry.Key.Get()))
         {
             RemoveHeadVisionEffect(*Head);
+        }
+    }
+    if (ControlEffect.ApplicationPolicy
+        == ECMControlStatusApplicationPolicy::WhileOverlapping)
+    {
+        for (const TPair<TWeakObjectPtr<ACMControlBody>, int32>& Entry
+            : ControlBodyOverlapCounts)
+        {
+            if (ACMControlBody* ControlBody = Entry.Key.Get())
+            {
+                RemoveControlEffect(*ControlBody);
+            }
         }
     }
     Super::EndPlay(EndPlayReason);
