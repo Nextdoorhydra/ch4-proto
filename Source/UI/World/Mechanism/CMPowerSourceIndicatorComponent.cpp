@@ -16,6 +16,7 @@ UCMPowerSourceIndicatorComponent::UCMPowerSourceIndicatorComponent()
     PrimaryComponentTick.bStartWithTickEnabled = true;
     PrimaryComponentTick.TickInterval = 0.0f;
     SetWidgetSpace(EWidgetSpace::World);
+    SetBlendMode(EWidgetBlendMode::Transparent);
     SetTwoSided(true);
     SetDrawAtDesiredSize(true);
     SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -29,6 +30,7 @@ void UCMPowerSourceIndicatorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    SetBlendMode(EWidgetBlendMode::Transparent);
     SetTwoSided(true);
     PowerSource = ResolvePowerSource();
     if (!PowerSource.IsValid())

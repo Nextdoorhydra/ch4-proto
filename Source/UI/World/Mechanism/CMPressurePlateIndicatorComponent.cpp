@@ -13,6 +13,7 @@ UCMPressurePlateIndicatorComponent::UCMPressurePlateIndicatorComponent()
     PrimaryComponentTick.bStartWithTickEnabled = true;
     PrimaryComponentTick.TickInterval = 0.0f;
     SetWidgetSpace(EWidgetSpace::World);
+    SetBlendMode(EWidgetBlendMode::Transparent);
     SetTwoSided(true);
     SetDrawAtDesiredSize(true);
     SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -25,6 +26,7 @@ void UCMPressurePlateIndicatorComponent::BeginPlay()
     Super::BeginPlay();
 
     // Keep pre-existing BP component templates from restoring the old default.
+    SetBlendMode(EWidgetBlendMode::Transparent);
     SetTwoSided(true);
     SetComponentTickEnabled(true);
 
