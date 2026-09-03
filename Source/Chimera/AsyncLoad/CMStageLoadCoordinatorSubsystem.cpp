@@ -155,6 +155,17 @@ bool UCMStageLoadCoordinatorSubsystem::StartStageScheduleRequest(
 		return false;
 	}
 
+	// Seamless Travel 중 구/신 로컬 컨트롤러가 같은 복제 요청을 차례로 전달할 수 있다.
+	// 이미 실행 중인 동일 요청은 취소·재시작하지 않고 기존 실행을 공유한다.
+	if (ActiveStageRequestId == RequestId)
+	{
+		UE_LOG(LogChimeraStageLoad, Display,
+			TEXT("Duplicate local stage schedule request ignored. NetMode=%d Request=%s Schedule=%s"),
+			GetWorld() ? static_cast<int32>(GetWorld()->GetNetMode()) : INDEX_NONE,
+			*RequestId.ToString(), *ScheduleId.ToString());
+		return true;
+	}
+
 	// 이전 스테이지의 Sequential 큐가 남아 있어도 새 스테이지 요청이 안전하게 대체한다.
 	if (ActiveStageRequestId.IsValid() || ScheduleLoadHandle.IsValid()
 		|| !ActiveQueuedGroup.IsNone() || !QueuedLoadGroups.IsEmpty())
