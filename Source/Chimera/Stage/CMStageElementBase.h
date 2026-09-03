@@ -8,6 +8,7 @@
 
 class USceneComponent;
 class UCMStageElementComponent;
+class UCMPowerSocketComponent;
 
 UCLASS(Abstract, Blueprintable)
 // 스테이지 요소의 공통 활성화, 비활성화, 초기화, 네트워크 복제 흐름 담당
@@ -43,7 +44,7 @@ protected:
     virtual void BeginPlay() override;
 
     // Definition 준비 등 하위 요소의 추가 활성 조건 검사
-    virtual bool CanActivateElement() const { return true; }
+    virtual bool CanActivateElement() const;
 
     // 추가 활성 조건이 바뀐 하위 요소가 실제 상태를 다시 계산할 때 호출
     void RefreshElementActiveState();
@@ -70,9 +71,16 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Stage|Element")
     bool bStartActive = true;
 
+    // Optional power gate. Unassigned means existing behavior is preserved.
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Power")
+    TObjectPtr<UCMPowerSocketComponent> PowerSocket;
+
 private:
     UFUNCTION()
     void HandleStageCommand(FGameplayTag CommandTag, UObject* CommandInstigator);
+
+    UFUNCTION()
+    void HandlePowerStateChanged(bool bPowered);
 
     UFUNCTION()
     void OnRep_ElementActive();

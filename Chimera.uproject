@@ -127,6 +127,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "CableComponent",
+			"Enabled": true
+		},
+		{
 			"Name": "CascadeToNiagaraConverter",
 			"Enabled": true
 		},
