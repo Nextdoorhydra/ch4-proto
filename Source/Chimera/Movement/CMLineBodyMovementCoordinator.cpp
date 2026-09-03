@@ -11,7 +11,6 @@
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
 #include "Components/SceneComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
@@ -823,21 +822,9 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         return true;
     }
 
-    // 승인된 상호작 대상이 없을 때만 지면 짚기를 시도한다. 슬롯
-    // 중심이 아니라 현재 손 본의 XY에서 내리쏴야 홀드 입력 순간 손이
-    // 옆으로 순간 이동하지 않는다. 전용 서버처럼 포즈가 없는 경우에는
-    // 기존 슬롯 위치가 안전한 폴백이다.
-    FVector GroundTracePoint = PartSlot->GetComponentLocation();
-    if (const USkeletalMeshComponent* ArmMesh = ArmPart.GetPartMesh())
-    {
-        static const FName HandBone(TEXT("hand_l"));
-        if (ArmMesh->GetBoneIndex(HandBone) != INDEX_NONE)
-        {
-            GroundTracePoint = ArmMesh->GetBoneLocation(
-                HandBone,
-                EBoneSpaces::WorldSpace);
-        }
-    }
+    // IK/Control Rig pose must not move gameplay queries. Grounding starts
+    // from the same owning body slot used by arm detection.
+    const FVector GroundTracePoint = PartSlot->GetComponentLocation();
     FHitResult GroundHit;
     if (!TraceGroundAtPoint(
         Chimera,

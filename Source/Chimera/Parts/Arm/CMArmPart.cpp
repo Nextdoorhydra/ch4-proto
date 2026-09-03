@@ -299,27 +299,25 @@ ECMPartHitResult ACMArmPart::ResolveSwingHit(
 void ACMArmPart::DetectSwingTargets()
 {
     UWorld* World = GetWorld();
-    if (!HasAuthority() || !bSwinging || !World || !PartMesh
+    const UCMPartSlotComponent* PartSlot = GetAttachedPartSlot();
+    if (!HasAuthority() || !bSwinging || !World || !PartMesh || !PartSlot
         || AttackRange <= 0.0f || AttackRadius <= 0.0f)
     {
         return;
     }
 
-    const FVector Origin = PartMesh->GetComponentLocation();
+    const FVector DetectionOrigin = PartSlot->GetComponentLocation();
     FVector ForwardDirection = PartMesh->GetForwardVector();
-    if (const UCMPartSlotComponent* PartSlot = GetAttachedPartSlot())
+    if (const USceneComponent* SegmentBody = PartSlot->GetAttachParent())
     {
-        if (const USceneComponent* SegmentBody = PartSlot->GetAttachParent())
+        const FVector OutwardDirection = FVector::VectorPlaneProject(
+            PartSlot->GetComponentLocation()
+                - SegmentBody->GetComponentLocation(),
+            SegmentBody->GetUpVector()
+        ).GetSafeNormal();
+        if (!OutwardDirection.IsNearlyZero())
         {
-            const FVector OutwardDirection = FVector::VectorPlaneProject(
-                PartSlot->GetComponentLocation()
-                    - SegmentBody->GetComponentLocation(),
-                SegmentBody->GetUpVector()
-            ).GetSafeNormal();
-            if (!OutwardDirection.IsNearlyZero())
-            {
-                ForwardDirection = OutwardDirection;
-            }
+            ForwardDirection = OutwardDirection;
         }
     }
 #if ENABLE_DRAW_DEBUG
@@ -335,7 +333,7 @@ void ACMArmPart::DetectSwingTargets()
         const float HalfAngle = FMath::Atan2(DebugRadius, DebugRange);
         DrawDebugCone(
             World,
-            Origin,
+            DetectionOrigin,
             SafeForward,
             DebugRange,
             HalfAngle,
@@ -349,8 +347,8 @@ void ACMArmPart::DetectSwingTargets()
         );
         DrawDebugDirectionalArrow(
             World,
-            Origin,
-            Origin + SafeForward * DebugRange,
+            DetectionOrigin,
+            DetectionOrigin + SafeForward * DebugRange,
             20.0f,
             FColor::Yellow,
             false,
@@ -376,7 +374,7 @@ void ACMArmPart::DetectSwingTargets()
 
     World->OverlapMultiByObjectType(
         Overlaps,
-        Origin,
+        DetectionOrigin,
         FQuat::Identity,
         ObjectQueryParams,
         FCollisionShape::MakeSphere(
@@ -408,16 +406,17 @@ void ACMArmPart::DetectSwingTargets()
         FVector TargetLocation = TargetComponent->Bounds.Origin;
         const float ClosestPointDistance =
             TargetComponent->GetClosestPointOnCollision(
-                Origin,
+                DetectionOrigin,
                 TargetLocation);
         const bool bOriginInsideTarget = ClosestPointDistance == 0.0f
-            && TargetComponent->Bounds.GetBox().IsInsideOrOn(Origin);
+            && TargetComponent->Bounds.GetBox().IsInsideOrOn(
+                DetectionOrigin);
         const float TargetTolerance =
             TargetActor->Implements<UCMDismemberableTarget>()
                 ? DismemberableTargetHitTolerance
                 : 0.0f;
         if (!bOriginInsideTarget && !IsInsideSwingSector(
-                Origin,
+                DetectionOrigin,
                 ForwardDirection,
                 TargetLocation,
                 AttackRange + TargetTolerance,
