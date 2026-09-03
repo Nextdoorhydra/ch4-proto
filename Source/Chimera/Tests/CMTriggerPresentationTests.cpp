@@ -1,9 +1,15 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Stage/CMStageDirector.h"
 #include "Stage/CMStageElementComponent.h"
+#include "Stage/Obstacle/CMPushBox.h"
+#include "Stage/Obstacle/CMLaserObstacleBase.h"
+#include "Stage/Puzzle/CMStagePuzzleController.h"
 #include "Stage/Trigger/CMStageButtonBase.h"
 #include "Stage/Trigger/CMPressurePlateBase.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
@@ -22,6 +28,10 @@ bool FCMTriggerPresentationTest::RunTest(const FString& Parameters)
     UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, NAME_None,
         nullptr, true, ERHIFeatureLevel::Num, &InitValues);
     if (!TestNotNull(TEXT("World"), World)) return false;
+    FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+    WorldContext.SetCurrentWorld(World);
+    World->InitializeActorsForPlay(FURL());
+    World->BeginPlay();
     World->SpawnActor<ACMStageDirector>();
     ACMStageButtonBase* Button = World->SpawnActor<ACMStageButtonBase>();
     Button->FindComponentByClass<UCMStageElementComponent>()->PlacementId = TEXT("Test.UI.Button");
@@ -44,6 +54,72 @@ bool FCMTriggerPresentationTest::RunTest(const FString& Parameters)
     Plate->FindComponentByClass<UCMStageElementComponent>()->PlacementId = TEXT("Test.UI.Plate");
     Plate->SetDirectTargetCommandEnabled(false);
     Plate->DispatchBeginPlay();
+    ACMPushBox* PushBox = World->SpawnActor<ACMPushBox>(FVector(1000.0f, 0.0f, 0.0f), FRotator::ZeroRotator);
+    PushBox->DispatchBeginPlay();
+    UStaticMeshComponent* PushBoxMesh = PushBox->FindComponentByClass<UStaticMeshComponent>();
+    TestTrue(TEXT("Pressure volume generates overlap events"), Plate->PressureVolume->GetGenerateOverlapEvents());
+    TestEqual(TEXT("Pressure volume uses query collision"), Plate->PressureVolume->GetCollisionEnabled(), ECollisionEnabled::QueryOnly);
+    TestTrue(TEXT("Push box generates overlap events"), PushBoxMesh && PushBoxMesh->GetGenerateOverlapEvents());
+    PushBox->SetActorLocation(Plate->GetActorLocation());
+    PushBoxMesh->UpdateOverlaps();
+    Plate->PressureVolume->UpdateOverlaps();
+    Plate->RefreshOverlaps();
+    TestEqual(TEXT("Moving push box into pressure volume contributes weight"), Plate->GetCurrentWeight(), 40.0f);
+    PushBox->SetActorLocation(FVector(1000.0f, 0.0f, 0.0f));
+    PushBoxMesh->UpdateOverlaps();
+    Plate->PressureVolume->UpdateOverlaps();
+    Plate->RefreshOverlaps();
+    TestEqual(TEXT("Moving push box out of pressure volume removes weight"), Plate->GetCurrentWeight(), 0.0f);
+
+    UCMMechanismWeightComponent* FirstPushBoxWeight = PushBox->FindComponentByClass<UCMMechanismWeightComponent>();
+    ACMPushBox* SecondPushBox = World->SpawnActor<ACMPushBox>(FVector(1000.0f, 200.0f, 0.0f), FRotator::ZeroRotator);
+    SecondPushBox->DispatchBeginPlay();
+    UStaticMeshComponent* SecondPushBoxMesh = SecondPushBox->FindComponentByClass<UStaticMeshComponent>();
+    UCMMechanismWeightComponent* SecondPushBoxWeight = SecondPushBox->FindComponentByClass<UCMMechanismWeightComponent>();
+    TestNotNull(TEXT("First push box weight"), FirstPushBoxWeight);
+    TestNotNull(TEXT("Second push box mesh"), SecondPushBoxMesh);
+    TestNotNull(TEXT("Second push box weight"), SecondPushBoxWeight);
+    if (!FirstPushBoxWeight || !SecondPushBoxMesh || !SecondPushBoxWeight)
+    {
+        GEngine->DestroyWorldContext(World);
+        World->DestroyWorld(false);
+        return false;
+    }
+    Plate->RequiredWeight = 1000.0f;
+    Plate->ReleaseWeight = 999.0f;
+    FirstPushBoxWeight->MechanismWeight = 500.0f;
+    SecondPushBoxWeight->MechanismWeight = 500.0f;
+    ACMLaserObstacleBase* Laser = World->SpawnActor<ACMLaserObstacleBase>();
+    Laser->FindComponentByClass<UCMStageElementComponent>()->PlacementId = TEXT("Test.Pressure.Laser");
+    Laser->DispatchBeginPlay();
+    ACMStagePuzzleController* PuzzleController = World->SpawnActor<ACMStagePuzzleController>();
+    PuzzleController->FindComponentByClass<UCMStageElementComponent>()->PlacementId = TEXT("Test.Pressure.Controller");
+    FCMPuzzleTargetCommand LaserCommand;
+    LaserCommand.Command = ECMPuzzleElementCommand::Toggle;
+    LaserCommand.Targets.Add(Laser);
+    FCMPuzzleStep PressureStep;
+    PressureStep.Commands.Add(LaserCommand);
+    FCMPuzzleChannel PressureChannel;
+    PressureChannel.ChannelId = TEXT("Pressure");
+    PressureChannel.Triggers.Add(Plate);
+    PressureChannel.Steps.Add(PressureStep);
+    PuzzleController->PuzzleChannels.Add(PressureChannel);
+    PuzzleController->DispatchBeginPlay();
+    TestTrue(TEXT("Laser starts active"), Laser->IsElementActive());
+    PushBox->SetActorLocation(Plate->GetActorLocation() + FVector(0.0f, -20.0f, 0.0f));
+    Plate->RefreshOverlaps();
+    TestEqual(TEXT("One 500 kg push box contributes 500 kg"), Plate->GetCurrentWeight(), 500.0f);
+    TestFalse(TEXT("One 500 kg push box does not meet 1000 kg requirement"), Plate->GetPresentationState().bTriggered);
+    SecondPushBox->SetActorLocation(Plate->GetActorLocation() + FVector(0.0f, 20.0f, 0.0f));
+    Plate->RefreshOverlaps();
+    TestEqual(TEXT("Two 500 kg push boxes contribute 1000 kg"), Plate->GetCurrentWeight(), 1000.0f);
+    TestTrue(TEXT("Two 500 kg push boxes meet 1000 kg requirement"), Plate->GetPresentationState().bTriggered);
+    TestFalse(TEXT("Pressure plate signal toggles laser off through puzzle controller"), Laser->IsElementActive());
+    PushBox->SetActorLocation(FVector(1000.0f, 0.0f, 0.0f));
+    SecondPushBox->SetActorLocation(FVector(1000.0f, 200.0f, 0.0f));
+    Plate->RefreshOverlaps();
+    Plate->RequiredWeight = 100.0f;
+    Plate->ReleaseWeight = 90.0f;
     AActor* WeightActor = World->SpawnActor<AActor>();
     UCMMechanismWeightComponent* Weight = NewObject<UCMMechanismWeightComponent>(WeightActor);
     WeightActor->AddInstanceComponent(Weight);
@@ -67,6 +143,7 @@ bool FCMTriggerPresentationTest::RunTest(const FString& Parameters)
     Plate->ResetElement();
     TestEqual(TEXT("Reset weight snapshot"), Plate->GetPresentationState().CurrentWeight, 0.0f);
     TestFalse(TEXT("Reset pressed snapshot"), Plate->GetPresentationState().bTriggered);
+    GEngine->DestroyWorldContext(World);
     World->DestroyWorld(false);
     return true;
 }
