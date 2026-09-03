@@ -32,7 +32,7 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "0.0"))
-    float InitialCableLength = 100.0f;
+    float InitialCableLength = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "5.0"))
@@ -45,11 +45,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "0.0",
         ClampMax = "1.0"))
-    float RopeDamping = 0.85f;
+    float RopeDamping = 0.6f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "1"))
-    int32 RopeConstraintIterations = 8;
+    int32 RopeConstraintIterations = 16;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Cable|Simulation", meta = (ClampMin = "0.0"))

@@ -10,6 +10,7 @@
 class AActor;
 class UAbilitySystemComponent;
 class UCMPartSlotComponent;
+class USkeletalMeshComponent;
 
 /** Parts may later use this value to validate which physical slots accept them. */
 UENUM(BlueprintType)
@@ -66,6 +67,51 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot")
     bool HasAttachedPart() const;
 
+    /** Optional editor-authored thigh attachment point for a mounted leg rig. */
+    void SetLegRigControlAnchor(USceneComponent* InControlAnchor);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot|Control Rig")
+    USceneComponent* GetLegRigControlAnchor() const;
+
+    /**
+     * Optional editor-authored shoulder attachment point for a mounted Arm.
+     * If unset, Arm attachment falls back to the slot transform itself.
+     */
+    void SetArmRigControlAnchor(USceneComponent* InControlAnchor);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot|Control Rig")
+    USceneComponent* GetArmRigControlAnchor() const;
+
+    /**
+     * Optional editor-authored neck attachment point for a mounted Head.
+     * If unset, Head attachment falls back to the slot transform itself.
+     */
+    void SetHeadRigControlAnchor(USceneComponent* InControlAnchor);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot|Control Rig")
+    USceneComponent* GetHeadRigControlAnchor() const;
+
+    /**
+     * Resolves the skeleton bone used as the Head mount point.
+     * neck_01 is preferred, with neck_02/neck/head fallbacks for alternate skeletons.
+     */
+    bool ResolveHeadMountBoneName(
+        const USkeletalMeshComponent& Mesh,
+        FName& OutMountBone
+    ) const;
+
+    /**
+     * Resolves the Arm chain that this slot should consume. Right slots use a
+     * mirrored _l chain by default and can opt into a native _r chain.
+     */
+    bool ResolveArmReferenceBoneNames(
+        const USkeletalMeshComponent& Mesh,
+        FName& OutUpperBone,
+        FName& OutLowerBone,
+        FName& OutHandBone,
+        bool& bOutUsesMirroredLeftChain
+    ) const;
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Part Slot")
     FCMPartSlotAttachmentChanged OnAttachedPartChanged;
 
@@ -81,6 +127,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Part Slot")
     ECMPartSlotType AllowedPartType = ECMPartSlotType::Any;
+
+    /**
+     * Right slots default to mirroring a left-authored Arm and using its _l
+     * chain. Enable only when mounted Arm assets are authored for _r bones.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Part Slot|Arm")
+    bool bPreferNativeRightArmChain = false;
 
 protected:
     virtual void GetLifetimeReplicatedProps(
@@ -102,6 +156,15 @@ private:
         Category = "Chimera|Part Slot",
         meta = (AllowPrivateAccess = "true"))
     TObjectPtr<AActor> AttachedPart;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USceneComponent> LegRigControlAnchor;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USceneComponent> ArmRigControlAnchor;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USceneComponent> HeadRigControlAnchor;
 
     FGameplayAbilitySpecHandle GrantedAbilityHandle;
 };

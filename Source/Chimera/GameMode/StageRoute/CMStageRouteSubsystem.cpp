@@ -35,6 +35,7 @@ bool UCMStageRouteSubsystem::StartStageRouteAtIndex(
     StageRouteDefinition = Definition;
     CurrentStageIndex = InitialStageIndex;
     PendingStageIndex = INDEX_NONE;
+    ExpectedPlayerCount = 0;
     return true;
 }
 
@@ -44,6 +45,7 @@ void UCMStageRouteSubsystem::ResetStageRoute()
     StageRouteDefinition = nullptr;
     CurrentStageIndex = INDEX_NONE;
     PendingStageIndex = INDEX_NONE;
+    ExpectedPlayerCount = 0;
     bSoloTestMode = false;
 }
 

@@ -22,7 +22,11 @@ class CHIMERA_API UCMStageLoadBarrierComponent : public UActorComponent
     GENERATED_BODY()
 
 public:
-    void BeginBarrier(FGuid RequestId, bool bBlocking, float TimeoutSeconds);
+    void BeginBarrier(
+        FGuid RequestId,
+        bool bBlocking,
+        float TimeoutSeconds,
+        int32 ExpectedPlayerCount);
     void ReportPlayerResult(ACMPlayerController* Controller, FGuid RequestId, bool bSucceeded);
     void HandlePlayerJoined();
     void HandlePlayerLeft(ACMPlayerController* Controller);
@@ -43,6 +47,7 @@ private:
     FGuid ActiveRequestId;
     bool bBlockingRequest = false;
     float ActiveTimeout = 0.0f;
+    int32 ExpectedTargetPlayerCount = 0;
     TSet<TWeakObjectPtr<ACMPlayerController>> ReadyControllers;
     FTimerHandle TimeoutHandle;
 };

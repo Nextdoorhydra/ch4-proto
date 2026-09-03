@@ -1,10 +1,14 @@
 #include "Stage/Trigger/CMPressurePlateBase.h"
 
+#include "Collision/CMCollisionChannels.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 #include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
+#include "TimerManager.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogChimeraPressurePlate, Log, All);
 
 ACMPressurePlateBase::ACMPressurePlateBase()
 {
@@ -34,18 +38,28 @@ void ACMPressurePlateBase::BeginPlay()
 
     if (HasAuthority())
     {
+        // Blueprint component templates can retain older collision overrides, so restore the gameplay contract at runtime.
+        PressureVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        PressureVolume->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+        PressureVolume->SetCollisionResponseToChannel(
+            CMCollision::ChimeraHurtbox,
+            ECR_Overlap
+        );
+        PressureVolume->SetGenerateOverlapEvents(true);
         PressureVolume->OnComponentBeginOverlap.AddUniqueDynamic(
             this,
             &ThisClass::HandlePressureBeginOverlap);
         PressureVolume->OnComponentEndOverlap.AddUniqueDynamic(
             this,
             &ThisClass::HandlePressureEndOverlap);
+        GetWorldTimerManager().SetTimer(OverlapRefreshTimerHandle, this, &ThisClass::RefreshOverlaps, 0.1f, true, 0.0f);
     }
 }
 
 void ACMPressurePlateBase::EndPlay(
     const EEndPlayReason::Type EndPlayReason)
 {
+    GetWorldTimerManager().ClearTimer(OverlapRefreshTimerHandle);
     OnPresentationStateChanged.RemoveDynamic(
         this, &ThisClass::HandlePresentationStateChanged);
     Super::EndPlay(EndPlayReason);
@@ -60,7 +74,9 @@ void ACMPressurePlateBase::HandlePressureBeginOverlap(
     bool bFromSweep,
     const FHitResult& SweepResult)
 {
-    if (IsValid(OtherActor) && ResolveMechanismWeight(OtherActor) > 0.0f)
+    const float MechanismWeight = ResolveMechanismWeight(OtherActor);
+    UE_LOG(LogChimeraPressurePlate, Log, TEXT("[Pressure Overlap Begin] Plate=%s Actor=%s Component=%s Weight=%.1f OtherOverlap=%s"), *GetName(), *GetNameSafe(OtherActor), *GetNameSafe(OtherComponent), MechanismWeight, IsValid(OtherComponent) && OtherComponent->GetGenerateOverlapEvents() ? TEXT("true") : TEXT("false"));
+    if (IsValid(OtherActor) && MechanismWeight > 0.0f)
     {
         ++OverlapCounts.FindOrAdd(OtherActor);
         RecalculatePressure(OtherActor);
@@ -74,6 +90,7 @@ void ACMPressurePlateBase::HandlePressureEndOverlap(
     UPrimitiveComponent* OtherComponent,
     int32 OtherBodyIndex)
 {
+    UE_LOG(LogChimeraPressurePlate, Log, TEXT("[Pressure Overlap End] Plate=%s Actor=%s Component=%s"), *GetName(), *GetNameSafe(OtherActor), *GetNameSafe(OtherComponent));
     if (int32* Count = OverlapCounts.Find(OtherActor))
     {
         if (--(*Count) <= 0)
@@ -108,6 +125,37 @@ void ACMPressurePlateBase::RecalculatePressure(AActor* ChangedActor)
     }
     RefreshPresentationState();
     OnPressureChanged(CurrentWeight, ActivationTrigger->IsTriggered());
+    UE_LOG(LogChimeraPressurePlate, Log, TEXT("[Pressure Weight] Plate=%s Changed=%s Current=%.1f Required=%.1f Triggered=%s"), *GetName(), *GetNameSafe(ChangedActor), CurrentWeight, RequiredWeight, ActivationTrigger->IsTriggered() ? TEXT("true") : TEXT("false"));
+}
+
+// Overlap 이벤트 누락 여부와 무관하게 현재 발판 영역의 무게 액터를 주기적으로 동기화
+void ACMPressurePlateBase::RefreshOverlaps()
+{
+    if (!HasAuthority() || !PressureVolume)
+    {
+        return;
+    }
+
+    PressureVolume->UpdateOverlaps();
+    TArray<UPrimitiveComponent*> OverlappingComponents;
+    PressureVolume->GetOverlappingComponents(OverlappingComponents);
+    TMap<TWeakObjectPtr<AActor>, int32> RefreshedOverlapCounts;
+    for (UPrimitiveComponent* OverlappingComponent : OverlappingComponents)
+    {
+        AActor* OverlappingActor = IsValid(OverlappingComponent) ? OverlappingComponent->GetOwner() : nullptr;
+        if (IsValid(OverlappingActor) && ResolveMechanismWeight(OverlappingActor) > 0.0f)
+        {
+            ++RefreshedOverlapCounts.FindOrAdd(OverlappingActor);
+        }
+    }
+    const bool bOverlapStateChanged = !bHasRefreshedOverlaps || !OverlapCounts.OrderIndependentCompareEqual(RefreshedOverlapCounts);
+    if (bOverlapStateChanged)
+    {
+        OverlapCounts = MoveTemp(RefreshedOverlapCounts);
+        RecalculatePressure(nullptr);
+        UE_LOG(LogChimeraPressurePlate, Log, TEXT("[Pressure Overlap Scan] Plate=%s Components=%d Actors=%d Current=%.1f Required=%.1f GenerateOverlap=%s Collision=%d Profile=%s VolumeOrigin=%s VolumeExtent=%s VisualOrigin=%s VisualExtent=%s"), *GetName(), OverlappingComponents.Num(), OverlapCounts.Num(), CurrentWeight, RequiredWeight, PressureVolume->GetGenerateOverlapEvents() ? TEXT("true") : TEXT("false"), static_cast<int32>(PressureVolume->GetCollisionEnabled()), *PressureVolume->GetCollisionProfileName().ToString(), *PressureVolume->Bounds.Origin.ToCompactString(), *PressureVolume->Bounds.BoxExtent.ToCompactString(), PlateVisualMesh ? *PlateVisualMesh->Bounds.Origin.ToCompactString() : TEXT("None"), PlateVisualMesh ? *PlateVisualMesh->Bounds.BoxExtent.ToCompactString() : TEXT("None"));
+    }
+    bHasRefreshedOverlaps = true;
 }
 
 // 대상 액터에 설정된 게임플레이 무게 컴포넌트 값 조회
@@ -126,6 +174,7 @@ void ACMPressurePlateBase::HandleElementReset_Implementation()
 {
     OverlapCounts.Reset();
     CurrentWeight = 0.0f;
+    bHasRefreshedOverlaps = false;
     Super::HandleElementReset_Implementation();
     RefreshPresentationState();
     OnPressureChanged(CurrentWeight, false);

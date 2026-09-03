@@ -2,6 +2,7 @@
 
 #include "AsyncLoad/CMStageLoadCoordinatorSubsystem.h"
 #include "AsyncLoad/CMStageLoadLog.h"
+#include "CableComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/SplineComponent.h"
 #include "Components/SplineMeshComponent.h"
@@ -20,6 +21,20 @@ ACMPowerCableActor::ACMPowerCableActor()
     SetRootComponent(CableSpline);
     CableSpline->SetMobility(EComponentMobility::Movable);
     CableSpline->SetClosedLoop(false);
+
+    CablePhysics = CreateDefaultSubobject<UCableComponent>(
+        TEXT("CablePhysics"));
+    CablePhysics->SetupAttachment(CableSpline);
+    CablePhysics->SetMobility(EComponentMobility::Movable);
+    CablePhysics->bAttachStart = true;
+    CablePhysics->bAttachEnd = false;
+    CablePhysics->bEnableCollision = true;
+    CablePhysics->CollisionFriction = 0.05f;
+    CablePhysics->bUseSubstepping = true;
+    CablePhysics->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    CablePhysics->SetCollisionResponseToAllChannels(ECR_Ignore);
+    CablePhysics->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+    CablePhysics->SetVisibility(false);
 
     GrabVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("GrabVolume"));
     GrabVolume->SetupAttachment(CableSpline);
@@ -124,6 +139,7 @@ void ACMPowerCableActor::BeginPlay()
         }
     }
     InitializeRope();
+    UpdateCablePhysics();
 
     if (UGameInstance* GameInstance = GetWorld()
         ? GetWorld()->GetGameInstance() : nullptr)
@@ -176,7 +192,18 @@ void ACMPowerCableActor::Tick(float DeltaSeconds)
         bHasCachedVisualEndpoint = false;
     }
 
-    SimulateRope(DeltaSeconds);
+    UpdateCablePhysics();
+    if (CablePhysics)
+    {
+        TArray<FVector> ParticleLocations;
+        CablePhysics->GetCableParticleLocations(ParticleLocations);
+        if (ParticleLocations.Num() >= 2)
+        {
+            RopePositions = MoveTemp(ParticleLocations);
+            RopePreviousPositions = RopePositions;
+            bRopeInitialized = true;
+        }
+    }
     UpdateCableVisual();
     UpdateGrabVolume();
 }
@@ -319,6 +346,34 @@ bool ACMPowerCableActor::IsTransmittingPower(
 
     return ConnectedSourceSocket
         && ConnectedSourceSocket->IsPowered(VisitedSockets);
+}
+
+bool ACMPowerCableActor::CanConnectEndpointWithinLength(
+    const FVector& EndpointLocation) const
+{
+    if (SimulatedRopeLength <= UE_SMALL_NUMBER)
+    {
+        return true;
+    }
+
+    bool bHasExistingEndpoint = false;
+    FVector ExistingEndpoint = FVector::ZeroVector;
+    if (ConnectedSource || ConnectedSourceSocket)
+    {
+        ExistingEndpoint = bSourceAtStart
+            ? GetRopeStartTarget() : GetRopeEndTarget();
+        bHasExistingEndpoint = true;
+    }
+    else if (ConnectedSocket)
+    {
+        ExistingEndpoint = bSocketAtStart
+            ? GetRopeStartTarget() : GetRopeEndTarget();
+        bHasExistingEndpoint = true;
+    }
+
+    return !bHasExistingEndpoint
+        || FVector::DistSquared(ExistingEndpoint, EndpointLocation)
+            <= FMath::Square(SimulatedRopeLength + 1.0f);
 }
 
 int32 ACMPowerCableActor::GetVisualSegmentCount() const
@@ -483,6 +538,200 @@ void ACMPowerCableActor::WakeRopeSimulation()
     SetActorTickEnabled(true);
 }
 
+void ACMPowerCableActor::UpdateCablePhysics()
+{
+    if (!CablePhysics)
+    {
+        return;
+    }
+
+    const float DesiredCableLength = FMath::Max(
+        GetInitialCableLength(), GetRopeNodeSpacing());
+    const int32 DesiredNumSegments = FMath::Max(
+        1,
+        FMath::CeilToInt(
+            DesiredCableLength / GetRopeNodeSpacing()));
+    const bool bCableShapeChanged = !bCablePhysicsRegistered
+        || !FMath::IsNearlyEqual(
+            CablePhysics->CableLength, DesiredCableLength)
+        || CablePhysics->NumSegments != DesiredNumSegments;
+    CablePhysics->CableLength = DesiredCableLength;
+    CablePhysics->NumSegments = DesiredNumSegments;
+    CablePhysics->SolverIterations = FMath::Clamp(
+        GetRopeConstraintIterations(), 1, 16);
+    CablePhysics->SubstepTime = 0.01f;
+    CablePhysics->CableGravityScale = GetRopeGravityScale();
+    if (bCableShapeChanged)
+    {
+        bCablePhysicsRegistered = true;
+        CablePhysics->ReregisterComponent();
+    }
+    const FVector StartTarget = GetRopeStartTarget();
+    FVector CurrentEndLocation = GetCableEndLocation();
+    TArray<FVector> CurrentParticleLocations;
+    CablePhysics->GetCableParticleLocations(CurrentParticleLocations);
+    if (CurrentParticleLocations.Num() >= 2)
+    {
+        CurrentEndLocation = CurrentParticleLocations.Last();
+    }
+    CablePhysics->SetWorldLocation(StartTarget);
+
+    USceneComponent* EndComponent = nullptr;
+    if (Grabber && !bGrabAtStart)
+    {
+        EndComponent = Grabber->GetRootComponent();
+    }
+    else if (ConnectedSocket && !bSocketAtStart)
+    {
+        EndComponent = ConnectedSocket;
+    }
+    else if (ConnectedSource && !bSourceAtStart)
+    {
+        EndComponent = ConnectedSource;
+    }
+    else if (ConnectedSourceSocket && !bSourceAtStart)
+    {
+        EndComponent = ConnectedSourceSocket;
+    }
+
+    if (EndComponent)
+    {
+        // EndLocation is relative to the attached component. It may contain
+        // the previous free-end offset after a release, so reset it before
+        // attaching to a new player/socket/source endpoint.
+        CablePhysics->EndLocation = FVector::ZeroVector;
+        if (CablePhysics->GetAttachedComponent() != EndComponent)
+        {
+            CablePhysics->SetAttachEndToComponent(EndComponent);
+        }
+        CablePhysics->bAttachEnd = true;
+    }
+    else
+    {
+        if (CablePhysics->bAttachEnd)
+        {
+            CablePhysics->EndLocation = CurrentEndLocation - StartTarget;
+            // Clear the old attached component as well as bAttachEnd. The
+            // Cable Component still uses the referenced component transform
+            // to resolve EndLocation when the reference is left behind.
+            CablePhysics->SetAttachEndToComponent(nullptr);
+            CablePhysics->bAttachEnd = false;
+        }
+    }
+}
+
+void ACMPowerCableActor::UpdateRopeContactPoints()
+{
+    UWorld* World = GetWorld();
+    if (!World || RopePositions.Num() < 3)
+    {
+        RopeContactPoints.Reset();
+        return;
+    }
+
+    FCollisionObjectQueryParams ObjectQueryParams;
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+    for (int32 ContactIndex = RopeContactPoints.Num() - 1;
+        ContactIndex >= 0; --ContactIndex)
+    {
+        FCMRopeContactPoint& Contact = RopeContactPoints[ContactIndex];
+        if (Contact.NodeIndex <= 0
+            || Contact.NodeIndex >= RopePositions.Num() - 1)
+        {
+            RopeContactPoints.RemoveAtSwap(ContactIndex);
+            continue;
+        }
+
+        FHitResult Hit;
+        FCollisionQueryParams QueryParams(
+            SCENE_QUERY_STAT(CMPowerCableContactRelease), false, this);
+        const bool bStillBlocksDirectPath = World->SweepSingleByObjectType(
+            Hit,
+            RopePositions[Contact.NodeIndex - 1],
+            RopePositions[Contact.NodeIndex + 1],
+            FQuat::Identity,
+            ObjectQueryParams,
+            FCollisionShape::MakeSphere(GetRopeCollisionRadius()),
+            QueryParams);
+
+        // A pawn can push the two neighbouring nodes apart for a frame and
+        // make the direct path look clear even though this contact is still
+        // physically on the wall. Validate the contact itself before
+        // releasing it, otherwise the cable can immediately cut through the
+        // corner again.
+        FHitResult ContactHit;
+        const FVector ContactProbeStart = Contact.Location
+            + Contact.Normal * GetRopeCollisionRadius() * 2.0f;
+        const FVector ContactProbeEnd = Contact.Location
+            - Contact.Normal * GetRopeCollisionRadius() * 2.0f;
+        const bool bStillTouchesWall = World->SweepSingleByObjectType(
+            ContactHit,
+            ContactProbeStart,
+            ContactProbeEnd,
+            FQuat::Identity,
+            ObjectQueryParams,
+            FCollisionShape::MakeSphere(GetRopeCollisionRadius()),
+            QueryParams);
+        if (!bStillBlocksDirectPath && !bStillTouchesWall)
+        {
+            RopeContactPoints.RemoveAtSwap(ContactIndex);
+        }
+    }
+}
+
+void ACMPowerCableActor::RebuildRopePathFromContactPoints(
+    const FVector& EndTarget,
+    bool bEndIsFixed
+)
+{
+    if (RopeContactPoints.IsEmpty() || RopePositions.Num() < 2)
+    {
+        return;
+    }
+
+    TArray<FVector> PathPoints;
+    TArray<int32> PathNodeIndices;
+    PathPoints.Add(GetCableStartLocation());
+    PathNodeIndices.Add(0);
+
+    for (const FCMRopeContactPoint& Contact : RopeContactPoints)
+    {
+        if (Contact.NodeIndex > 0
+            && Contact.NodeIndex < RopePositions.Num() - 1)
+        {
+            PathPoints.Add(Contact.Location);
+            PathNodeIndices.Add(Contact.NodeIndex);
+        }
+    }
+
+    PathPoints.Add(bEndIsFixed ? EndTarget : RopePositions.Last());
+    PathNodeIndices.Add(RopePositions.Num() - 1);
+    if (PathPoints.Num() < 3)
+    {
+        return;
+    }
+
+    for (int32 PathIndex = 1; PathIndex < PathPoints.Num(); ++PathIndex)
+    {
+        const int32 FirstNode = PathNodeIndices[PathIndex - 1];
+        const int32 LastNode = PathNodeIndices[PathIndex];
+        const int32 NodeCount = LastNode - FirstNode;
+        if (NodeCount <= 0)
+        {
+            continue;
+        }
+
+        for (int32 NodeIndex = FirstNode; NodeIndex <= LastNode; ++NodeIndex)
+        {
+            const float Alpha = static_cast<float>(NodeIndex - FirstNode)
+                / static_cast<float>(NodeCount);
+            RopePositions[NodeIndex] = FMath::Lerp(
+                PathPoints[PathIndex - 1], PathPoints[PathIndex], Alpha);
+            RopePreviousPositions[NodeIndex] = RopePositions[NodeIndex];
+        }
+    }
+}
+
 void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
 {
     InitializeRope();
@@ -490,6 +739,9 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
     {
         return;
     }
+
+    UpdateRopeContactPoints();
+    bWallHitThisFrame = false;
 
     if (IsGrabbed())
     {
@@ -514,6 +766,32 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
             EndTarget = GetRopeStartTarget()
                 + FromStart / DistanceFromStart * SimulatedRopeLength;
         }
+
+        // The grabbed endpoint can otherwise teleport through a wall between
+        // frames. Sweep its requested movement against WorldStatic before
+        // the rope constraints distribute the motion to the other nodes.
+        if (!bGrabAtStart && GetWorld())
+        {
+            FHitResult Hit;
+            FCollisionQueryParams QueryParams(
+                SCENE_QUERY_STAT(CMPowerCableGrabbedEndpoint), false, this);
+            FCollisionObjectQueryParams ObjectQueryParams;
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+            const FVector CurrentEndpoint = RopePositions.Last();
+            const bool bHit = GetWorld()->SweepSingleByObjectType(
+                Hit,
+                CurrentEndpoint,
+                EndTarget,
+                FQuat::Identity,
+                ObjectQueryParams,
+                FCollisionShape::MakeSphere(GetRopeCollisionRadius()),
+                QueryParams);
+            if (bHit)
+            {
+                EndTarget = Hit.Location
+                    + Hit.Normal * GetRopeCollisionRadius();
+            }
+        }
     }
 
     constexpr int32 SimulationSubsteps = 4;
@@ -521,8 +799,13 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
         DeltaSeconds / SimulationSubsteps,
         0.001f,
         0.02f);
+    RopeConstraintStartPositions.SetNum(RopePositions.Num());
+    CollisionLockedNodes.SetNum(RopePositions.Num());
     for (int32 Substep = 0; Substep < SimulationSubsteps; ++Substep)
     {
+        FMemory::Memzero(CollisionLockedNodes.GetData(),
+            CollisionLockedNodes.Num() * sizeof(uint8));
+
         for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
         {
             if (bEndIsFixed && Index == RopePositions.Num() - 1)
@@ -566,6 +849,7 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
 
         const float RestDistance = SimulatedRopeLength
             / (RopePositions.Num() - 1);
+        RopeConstraintStartPositions = RopePositions;
         for (int32 Iteration = 0;
             Iteration < GetRopeConstraintIterations();
             ++Iteration)
@@ -605,12 +889,168 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                     RopePositions[Index] += Correction;
                 }
             }
+
+            // Constraint correction can move a node through a wall. Resolve
+            // that movement after every iteration, not only after the whole
+            // constraint pass, so the next length correction cannot undo it.
+            FCollisionObjectQueryParams IterationObjectQueryParams;
+            IterationObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+            for (int32 NodeIndex = 1;
+                NodeIndex < RopePositions.Num(); ++NodeIndex)
+            {
+                if (bEndIsFixed && NodeIndex == RopePositions.Num() - 1)
+                {
+                    continue;
+                }
+
+                FHitResult Hit;
+                FCollisionQueryParams QueryParams(
+                    SCENE_QUERY_STAT(CMPowerCableConstraintCollision),
+                    false,
+                    this);
+                const bool bHit = GetWorld()->SweepSingleByObjectType(
+                    Hit,
+                    RopeConstraintStartPositions[NodeIndex],
+                    RopePositions[NodeIndex],
+                    FQuat::Identity,
+                    IterationObjectQueryParams,
+                    FCollisionShape::MakeSphere(GetRopeCollisionRadius()),
+                    QueryParams);
+                if (bHit)
+                {
+                    const FVector Movement = RopePositions[NodeIndex]
+                        - RopeConstraintStartPositions[NodeIndex];
+                    const FVector SlidingMovement = FVector::VectorPlaneProject(
+                        Movement, Hit.Normal);
+                    RopePositions[NodeIndex] = Hit.Location
+                        + Hit.Normal * GetRopeCollisionRadius()
+                        + SlidingMovement;
+                    RopePreviousPositions[NodeIndex] = RopePositions[NodeIndex]
+                        - SlidingMovement;
+                }
+            }
+
+        }
+
+        // Length constraints can push a node back into the floor after the
+        // first collision sweep. Resolve that penetration after constraints
+        // as well, otherwise the next Verlet step turns it into a bounce.
+        for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
+        {
+            if (bEndIsFixed && Index == RopePositions.Num() - 1)
+            {
+                continue;
+            }
+
+            FHitResult Hit;
+            FCollisionQueryParams QueryParams(
+                SCENE_QUERY_STAT(CMPowerCableRopePostConstraint), false, this);
+            FCollisionObjectQueryParams ObjectQueryParams;
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+            const bool bHit = GetWorld()->SweepSingleByObjectType(
+                Hit,
+                RopeConstraintStartPositions[Index],
+                RopePositions[Index],
+                FQuat::Identity,
+                ObjectQueryParams,
+                FCollisionShape::MakeSphere(GetRopeCollisionRadius()),
+                QueryParams);
+            if (bHit)
+            {
+                RopePositions[Index] = Hit.Location
+                    + Hit.Normal * GetRopeCollisionRadius();
+                RopePreviousPositions[Index] = RopePositions[Index];
+            }
         }
 
         RopePositions[0] = GetCableStartLocation();
         if (bEndIsFixed)
         {
             RopePositions.Last() = EndTarget;
+        }
+
+        ResolveRopeGroundContact(bEndIsFixed);
+
+        // A node-by-node sweep is not enough when the cable wraps around a
+        // wall: constraint correction can move the edge between two nodes
+        // through WorldStatic even though neither node crossed it alone.
+        // Sweep every final cable edge and keep the free node on the contact
+        // side of the wall.
+        FCollisionObjectQueryParams EdgeObjectQueryParams;
+        EdgeObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+        for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
+        {
+            if (bEndIsFixed && Index == RopePositions.Num() - 1)
+            {
+                continue;
+            }
+
+            FHitResult Hit;
+            FCollisionQueryParams EdgeQueryParams(
+                SCENE_QUERY_STAT(CMPowerCableRopeEdge), false, this);
+            const bool bHit = GetWorld()->SweepSingleByObjectType(
+                Hit,
+                RopePositions[Index - 1],
+                RopePositions[Index],
+                FQuat::Identity,
+                EdgeObjectQueryParams,
+                FCollisionShape::MakeSphere(GetRopeCollisionRadius()),
+                EdgeQueryParams);
+            if (bHit)
+            {
+                const FVector DesiredMovement = RopePositions[Index]
+                    - RopePreviousPositions[Index];
+                const FVector SlidingMovement = FVector::VectorPlaneProject(
+                    DesiredMovement, Hit.Normal);
+                RopePositions[Index] = Hit.Location
+                    + Hit.Normal * GetRopeCollisionRadius()
+                    + SlidingMovement;
+                // Preserve tangential movement instead of locking the node
+                // at the wall contact point every substep.
+                RopePreviousPositions[Index] = RopePositions[Index]
+                    - SlidingMovement;
+                CollisionLockedNodes[Index] = 0;
+
+                // A first hit on a flat wall is only a temporary collision.
+                // Create a persistent wrap point only when the hit normal
+                // changes substantially, which indicates that the cable has
+                // reached and started turning around a corner.
+                bWallHitThisFrame = true;
+                const bool bHitCorner = Hit.Normal.Z < 0.8f
+                    && bHasLastWallHitNormal
+                    && FVector::DotProduct(
+                        LastWallHitNormal, Hit.Normal) < 0.8f;
+                if (bHitCorner)
+                {
+                    bool bUpdatedContact = false;
+                    for (FCMRopeContactPoint& Contact : RopeContactPoints)
+                    {
+                        if (Contact.NodeIndex == Index
+                            || FVector::DistSquared(
+                                Contact.Location, RopePositions[Index])
+                                <= FMath::Square(GetRopeNodeSpacing() * 0.5f))
+                        {
+                            Contact.Location = RopePositions[Index];
+                            Contact.Normal = Hit.Normal;
+                            Contact.NodeIndex = Index;
+                            bUpdatedContact = true;
+                            break;
+                        }
+                    }
+                    if (!bUpdatedContact)
+                    {
+                        FCMRopeContactPoint Contact;
+                        Contact.Location = RopePositions[Index];
+                        Contact.Normal = Hit.Normal;
+                        Contact.NodeIndex = Index;
+                        RopeContactPoints.Add(Contact);
+                    }
+                }
+                LastWallHitNormal = Hit.Normal;
+                bHasLastWallHitNormal = true;
+            }
         }
 
         // Prevent constraint corrections from becoming artificial velocity.
@@ -628,8 +1068,28 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
                     0.35f);
             }
         }
+
+        // Constraint corrections can move a node after it was projected out
+        // of a surface. Keep collided nodes at their resolved position so
+        // that this correction cannot become artificial bounce velocity on
+        // the next substep.
+        for (int32 Index = 1; Index < RopePreviousPositions.Num(); ++Index)
+        {
+            if (CollisionLockedNodes[Index] != 0
+                && !(bEndIsFixed
+                    && Index == RopePreviousPositions.Num() - 1))
+            {
+                RopePreviousPositions[Index] = RopePositions[Index];
+            }
+        }
     }
 
+    if (!bWallHitThisFrame)
+    {
+        bHasLastWallHitNormal = false;
+    }
+
+    RebuildRopePathFromContactPoints(EndTarget, bEndIsFixed);
     RopePositions[0] = GetCableStartLocation();
     if (bEndIsFixed)
     {
@@ -664,6 +1124,59 @@ void ACMPowerCableActor::SimulateRope(float DeltaSeconds)
     else
     {
         RopeStableFrameCount = 0;
+    }
+}
+
+void ACMPowerCableActor::ResolveRopeGroundContact(bool bEndIsFixed)
+{
+    UWorld* World = GetWorld();
+    if (!World || RopePositions.Num() < 2)
+    {
+        return;
+    }
+
+    const float CollisionRadius = GetRopeCollisionRadius();
+    if (CollisionRadius <= UE_SMALL_NUMBER)
+    {
+        return;
+    }
+
+    // Only resolve contacts below/near a surface. Starting the sweep above
+    // the node prevents a node that is still in the air from being snapped
+    // down to a distant floor.
+    const float ProbeHeight = FMath::Max(50.0f, CollisionRadius * 4.0f);
+    FCollisionObjectQueryParams ObjectQueryParams;
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+            ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+
+    for (int32 Index = 1; Index < RopePositions.Num(); ++Index)
+    {
+        if (bEndIsFixed && Index == RopePositions.Num() - 1)
+        {
+            continue;
+        }
+
+        const FVector NodePosition = RopePositions[Index];
+        FHitResult Hit;
+        FCollisionQueryParams QueryParams(
+            SCENE_QUERY_STAT(CMPowerCableRopeGroundContact), false, this);
+        const bool bHit = World->SweepSingleByObjectType(
+            Hit,
+            NodePosition + FVector::UpVector * ProbeHeight,
+            NodePosition - FVector::UpVector * CollisionRadius,
+            FQuat::Identity,
+            ObjectQueryParams,
+            FCollisionShape::MakeSphere(CollisionRadius),
+            QueryParams);
+
+        // A downward-facing normal is a ceiling or underside, not a floor.
+        if (bHit && Hit.Normal.Z > 0.2f)
+        {
+            RopePositions[Index] = Hit.Location
+                + Hit.Normal * CollisionRadius;
+            // Remove both downward and collision-generated rebound velocity.
+            RopePreviousPositions[Index] = RopePositions[Index];
+        }
     }
 }
 
@@ -845,6 +1358,13 @@ void ACMPowerCableActor::ReleaseGrab()
     }
 
     WakeRopeSimulation();
+    if (bGrabAtStart && Grabber)
+    {
+        // Keep the release point as the new fixed start instead of snapping
+        // back to the original spawn location after Grabber is cleared.
+        CableStartLocation = Grabber->GetActorLocation();
+        bCableStartLocationInitialized = true;
+    }
     Grabber = nullptr;
     bGrabAtStart = false;
     bRopeSleeping = false;
@@ -946,16 +1466,23 @@ void ACMPowerCableActor::SetConnectedSocket(
 
     WakeRopeSimulation();
     UCMPowerSocketComponent* PreviousSocket = ConnectedSocket;
-    const FVector SocketLocation = Socket
-        ? Socket->GetComponentLocation() : FVector::ZeroVector;
-    const FVector ClosestEndpoint =
-        GetClosestFreeEndpointLocation(SocketLocation);
-    bSocketAtStart = bRopeInitialized && !RopePositions.IsEmpty()
-        ? FVector::DistSquared(ClosestEndpoint, RopePositions[0])
-            <= FVector::DistSquared(ClosestEndpoint, RopePositions.Last())
-        : FVector::DistSquared(ClosestEndpoint, CableStartLocation)
-            <= FVector::DistSquared(
-                ClosestEndpoint, GetRopeEndTarget());
+    if (Socket)
+    {
+        const FVector SocketLocation = Socket->GetComponentLocation();
+        const FVector ClosestEndpoint =
+            GetClosestFreeEndpointLocation(SocketLocation);
+        bSocketAtStart = bRopeInitialized && !RopePositions.IsEmpty()
+            ? FVector::DistSquared(ClosestEndpoint, RopePositions[0])
+                <= FVector::DistSquared(ClosestEndpoint, RopePositions.Last())
+            : FVector::DistSquared(ClosestEndpoint, CableStartLocation)
+                <= FVector::DistSquared(
+                    ClosestEndpoint, GetRopeEndTarget());
+    }
+    else if (PreviousSocket && bSocketAtStart)
+    {
+        CableStartLocation = PreviousSocket->GetComponentLocation();
+        bCableStartLocationInitialized = true;
+    }
     ConnectedSocket = Socket;
     Grabber = nullptr;
     if (Socket)
@@ -1023,16 +1550,24 @@ void ACMPowerCableActor::SetConnectedSource(
     }
 
     WakeRopeSimulation();
-    const FVector SourceLocation = Source
-        ? Source->GetComponentLocation() : FVector::ZeroVector;
-    const FVector ClosestEndpoint =
-        GetClosestFreeEndpointLocation(SourceLocation);
-    bSourceAtStart = bRopeInitialized && !RopePositions.IsEmpty()
-        ? FVector::DistSquared(ClosestEndpoint, RopePositions[0])
-            <= FVector::DistSquared(ClosestEndpoint, RopePositions.Last())
-        : FVector::DistSquared(ClosestEndpoint, CableStartLocation)
-            <= FVector::DistSquared(
-                ClosestEndpoint, GetRopeEndTarget());
+    UCMPowerSourceComponent* PreviousSource = ConnectedSource;
+    if (Source)
+    {
+        const FVector SourceLocation = Source->GetComponentLocation();
+        const FVector ClosestEndpoint =
+            GetClosestFreeEndpointLocation(SourceLocation);
+        bSourceAtStart = bRopeInitialized && !RopePositions.IsEmpty()
+            ? FVector::DistSquared(ClosestEndpoint, RopePositions[0])
+                <= FVector::DistSquared(ClosestEndpoint, RopePositions.Last())
+            : FVector::DistSquared(ClosestEndpoint, CableStartLocation)
+                <= FVector::DistSquared(
+                    ClosestEndpoint, GetRopeEndTarget());
+    }
+    else if (PreviousSource && bSourceAtStart)
+    {
+        CableStartLocation = PreviousSource->GetComponentLocation();
+        bCableStartLocationInitialized = true;
+    }
     ConnectedSource = Source;
     Grabber = nullptr;
     bRopeSleeping = false;
@@ -1213,8 +1748,21 @@ void ACMPowerCableActor::RefreshCableVisualState()
 bool ACMPowerCableActor::TryBuildCableVisual()
 {
     UCMPowerCableDefinition* LoadedDefinition = CableDefinition.Get();
+    if (!LoadedDefinition && !CableDefinition.IsNull())
+    {
+        LoadedDefinition = CableDefinition.LoadSynchronous();
+    }
     UStaticMesh* LoadedMesh = LoadedDefinition
         ? LoadedDefinition->CableMesh.Get() : nullptr;
+
+    // The cable definition can finish loading before its nested soft mesh is
+    // resident. Keep the normal async path, but recover here so a transient
+    // bundle ordering issue cannot leave a physics-only cable in the level.
+    if (LoadedDefinition && !LoadedMesh
+        && !LoadedDefinition->CableMesh.IsNull())
+    {
+        LoadedMesh = LoadedDefinition->CableMesh.LoadSynchronous();
+    }
     if (!LoadedMesh || !CableSpline)
     {
         UE_LOG(LogChimeraStageLoad, Error,

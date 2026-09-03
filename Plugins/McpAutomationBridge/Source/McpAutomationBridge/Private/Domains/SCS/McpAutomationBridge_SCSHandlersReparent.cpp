@@ -7,9 +7,13 @@
 #include "Foundation/HandlerUtils/McpHandlerUtils.h"
 
 #if WITH_EDITOR
+#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Blueprint.h"
+#include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
+#include "GameFramework/Actor.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #endif
 
@@ -67,6 +71,7 @@ FSCSHandlers::ReparentSCSComponent(const FString &BlueprintPath,
   }
 
   USCS_Node *NewParentNode = nullptr;
+  USceneComponent *NewParentComponent = nullptr;
   if (!NewParentName.IsEmpty()) {
     const bool bRootSynonym =
         NewParentName.Equals(TEXT("RootComponent"), ESearchCase::IgnoreCase) ||
@@ -93,7 +98,25 @@ FSCSHandlers::ReparentSCSComponent(const FString &BlueprintPath,
       }
     }
 
-    if (!NewParentNode) {
+    if (!NewParentNode && !NewParentComponent) {
+      if (UBlueprintGeneratedClass *BPGC =
+              Cast<UBlueprintGeneratedClass>(Blueprint->GeneratedClass)) {
+        if (AActor *CDO = BPGC->GetDefaultObject<AActor>()) {
+          for (UActorComponent *ActorComponent : CDO->GetComponents()) {
+            USceneComponent *SceneComponent =
+                Cast<USceneComponent>(ActorComponent);
+            if (SceneComponent &&
+                SceneComponent->GetFName().ToString().Equals(
+                    NewParentName, ESearchCase::IgnoreCase)) {
+              NewParentComponent = SceneComponent;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (!NewParentNode && !NewParentComponent) {
       for (USCS_Node *Node : SCS->GetAllNodes()) {
         if (Node && Node->GetVariableName().IsValid() &&
             Node->GetVariableName().ToString().Equals(
@@ -104,7 +127,7 @@ FSCSHandlers::ReparentSCSComponent(const FString &BlueprintPath,
       }
     }
 
-    if (!NewParentNode) {
+    if (!NewParentNode && !NewParentComponent) {
       Result->SetBoolField(TEXT("success"), false);
       const FString ParentError =
           bRootSynonym
@@ -129,7 +152,11 @@ FSCSHandlers::ReparentSCSComponent(const FString &BlueprintPath,
   }
 
   const FString ExpectedParentName =
-      NewParentNode ? GetSCSNodeName(NewParentNode) : FString();
+      NewParentNode
+          ? GetSCSNodeName(NewParentNode)
+          : (NewParentComponent
+                 ? NewParentComponent->GetFName().ToString()
+                 : FString());
   const FString ParentDisplayName =
       ExpectedParentName.IsEmpty() ? FString(TEXT("(root)")) : ExpectedParentName;
 
@@ -166,8 +193,8 @@ FSCSHandlers::ReparentSCSComponent(const FString &BlueprintPath,
     }
   }
 
-  if ((NewParentNode == nullptr && OldParent == nullptr &&
-       IsSCSRootNode(SCS, ComponentNode)) ||
+  if ((NewParentNode == nullptr && NewParentComponent == nullptr &&
+       OldParent == nullptr && IsSCSRootNode(SCS, ComponentNode)) ||
       (OldParent != nullptr && NewParentNode == OldParent)) {
     Result->SetBoolField(TEXT("success"), true);
     Result->SetStringField(
@@ -197,6 +224,11 @@ FSCSHandlers::ReparentSCSComponent(const FString &BlueprintPath,
 
   if (NewParentNode) {
     NewParentNode->AddChildNode(ComponentNode);
+  } else if (NewParentComponent) {
+    // Native-parented SCS nodes remain SCS roots and store their parent by
+    // component name instead of in another node's ChildNodes array.
+    SCS->AddNode(ComponentNode);
+    ComponentNode->SetParent(NewParentComponent);
   } else {
     SCS->AddNode(ComponentNode);
   }

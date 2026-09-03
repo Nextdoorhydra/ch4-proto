@@ -10,6 +10,7 @@
 class UCMPowerSocketComponent;
 class UCMPowerSourceComponent;
 class UCMPowerCableDefinition;
+class UCableComponent;
 class UBoxComponent;
 class USplineComponent;
 class USplineMeshComponent;
@@ -94,6 +95,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     bool IsTransmittingPower() const;
     bool IsTransmittingPower(TSet<const UCMPowerSocketComponent*>& VisitedSockets) const;
+    bool CanConnectEndpointWithinLength(const FVector& EndpointLocation) const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Power")
     FName GetPowerChannel() const { return PowerChannel; }
@@ -144,6 +146,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
     TObjectPtr<USplineComponent> CableSpline;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
+    TObjectPtr<UCableComponent> CablePhysics;
+
     /** Query-only volume used by the arm hold trace to find the cable. */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Power")
     TObjectPtr<UBoxComponent> GrabVolume;
@@ -187,7 +192,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Override",
         meta = (EditCondition = "bOverrideDefinitionSettings"))
-    float OverrideInitialCableLength = 100.0f;
+    float OverrideInitialCableLength = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Override",
@@ -202,12 +207,12 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Override",
         meta = (EditCondition = "bOverrideDefinitionSettings"))
-    float OverrideRopeDamping = 0.85f;
+    float OverrideRopeDamping = 0.6f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Override",
         meta = (EditCondition = "bOverrideDefinitionSettings"))
-    int32 OverrideRopeConstraintIterations = 8;
+    int32 OverrideRopeConstraintIterations = 16;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Power|Override",
@@ -302,6 +307,13 @@ protected:
     void EnsureCableMeshCount(int32 DesiredCount, UStaticMesh* Mesh);
     void InitializeRope();
     void SimulateRope(float DeltaSeconds);
+    void UpdateCablePhysics();
+    void UpdateRopeContactPoints();
+    void RebuildRopePathFromContactPoints(
+        const FVector& EndTarget,
+        bool bEndIsFixed
+    );
+    void ResolveRopeGroundContact(bool bEndIsFixed);
     void WakeRopeSimulation();
     int32 GetVisualSegmentCount() const;
     float GetCableSag() const;
@@ -324,9 +336,25 @@ protected:
     bool bHasCachedVisualEndpoint = false;
     FVector CachedVisualEndpoint = FVector::ZeroVector;
     bool bRopeInitialized = false;
+    bool bCablePhysicsRegistered = false;
     bool bRopeSleeping = false;
     int32 RopeStableFrameCount = 0;
     float SimulatedRopeLength = 0.0f;
     TArray<FVector> RopePositions;
     TArray<FVector> RopePreviousPositions;
+    TArray<FVector> RopeConstraintStartPositions;
+    TArray<uint8> CollisionLockedNodes;
+
+    struct FCMRopeContactPoint
+    {
+        FVector Location = FVector::ZeroVector;
+        FVector Normal = FVector::UpVector;
+        int32 NodeIndex = INDEX_NONE;
+    };
+
+    TArray<FCMRopeContactPoint> RopeContactPoints;
+    FVector LastWallHitNormal = FVector::ZeroVector;
+    bool bHasLastWallHitNormal = false;
+    bool bWallHitThisFrame = false;
+
 };

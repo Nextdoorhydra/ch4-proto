@@ -4,6 +4,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Stage/CMStageCommandTags.h"
 #include "Stage/CMStageElementComponent.h"
+#include "Stage/Trigger/Component/CMPowerSocketComponent.h"
 
 ACMStageElementBase::ACMStageElementBase()
 {
@@ -22,6 +23,16 @@ void ACMStageElementBase::BeginPlay()
     StageElement->OnStageCommandReceived.AddDynamic(
         this, &ThisClass::HandleStageCommand);
 
+    if (!PowerSocket)
+    {
+        PowerSocket = FindComponentByClass<UCMPowerSocketComponent>();
+    }
+    if (PowerSocket)
+    {
+        PowerSocket->OnPowerStateChanged.AddUniqueDynamic(
+            this, &ThisClass::HandlePowerStateChanged);
+    }
+
     if (HasAuthority())
     {
         bActivationRequested = bStartActive;
@@ -36,6 +47,11 @@ void ACMStageElementBase::BeginPlay()
     {
         HandleElementActiveChanged(bElementActive);
     }
+}
+
+bool ACMStageElementBase::CanActivateElement() const
+{
+    return !PowerSocket || PowerSocket->IsPowered();
 }
 
 // 실제 활성 상태를 모든 클라이언트에 복제
@@ -128,6 +144,14 @@ void ACMStageElementBase::HandleStageCommand(
         || CommandTag.MatchesTagExact(CMStageCommandTags::Effect_Restart))
     {
         ResetElement();
+    }
+}
+
+void ACMStageElementBase::HandlePowerStateChanged(bool bPowered)
+{
+    if (HasAuthority())
+    {
+        RefreshElementActiveState();
     }
 }
 
