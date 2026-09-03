@@ -159,11 +159,16 @@ void AddSCSNodeVerification(TSharedPtr<FJsonObject> Result,
   }
 
   USCS_Node *ParentNode = FindSCSParentNode(SCS, Node);
-  Verification->SetStringField(TEXT("parent"),
-                               ParentNode ? GetSCSNodeName(ParentNode)
-                                          : TEXT("(root)"));
-  Verification->SetBoolField(TEXT("parentVerified"),
-                             ParentNode != nullptr || IsSCSRootNode(SCS, Node));
+  const FString ParentName = Node->bIsParentComponentNative
+                                  ? Node->ParentComponentOrVariableName.ToString()
+                                  : (ParentNode ? GetSCSNodeName(ParentNode)
+                                                : TEXT("(root)"));
+  Verification->SetStringField(TEXT("parent"), ParentName);
+  Verification->SetBoolField(
+      TEXT("parentVerified"),
+      Node->bIsParentComponentNative
+          ? !Node->ParentComponentOrVariableName.IsNone()
+          : (ParentNode != nullptr || IsSCSRootNode(SCS, Node)));
 
   if (USceneComponent *SceneComp =
           Cast<USceneComponent>(Node->ComponentTemplate)) {
@@ -186,6 +191,10 @@ bool SCSParentMatches(USimpleConstructionScript *SCS, USCS_Node *Node,
     // for a 2nd component added without an explicit parent).
     return ActualParent == nullptr || IsSCSRootNode(SCS, Node) ||
            IsSCSRootNode(SCS, ActualParent);
+  }
+  if (Node->bIsParentComponentNative) {
+    return Node->ParentComponentOrVariableName.ToString().Equals(
+        ExpectedParentName, ESearchCase::IgnoreCase);
   }
   if (IsSCSRootAlias(ExpectedParentName)) {
     return ActualParent ? IsSCSRootNode(SCS, ActualParent)

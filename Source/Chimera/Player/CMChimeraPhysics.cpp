@@ -1,7 +1,6 @@
 #include "Player/CMChimera.h"
 
 #include "Components/BoxComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 
 // 전체 환경 Force를 질량 비율로 나눠 모든 마디에 같은 가속도 적용
@@ -16,7 +15,7 @@ void ACMChimera::ApplyEnvironmentalForce(const FVector& TotalForce)
     float TotalMass = 0.0f;
     for (int32 Index = 0; Index < SegmentCount; ++Index)
     {
-        const UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        const UBoxComponent* SegmentBody = BodySegments[Index];
         if (SegmentBody && SegmentBody->IsSimulatingPhysics())
         {
             TotalMass += FMath::Max(SegmentBody->GetMass(), UE_SMALL_NUMBER);
@@ -30,7 +29,7 @@ void ACMChimera::ApplyEnvironmentalForce(const FVector& TotalForce)
 
     for (int32 Index = 0; Index < SegmentCount; ++Index)
     {
-        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        UBoxComponent* SegmentBody = BodySegments[Index];
         if (!SegmentBody || !SegmentBody->IsSimulatingPhysics())
         {
             continue;
@@ -57,7 +56,7 @@ bool ACMChimera::TeleportAssembly(const FTransform& DestinationTransform)
 
     for (int32 Index = 0; Index < SegmentCount; ++Index)
     {
-        const UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        const UBoxComponent* SegmentBody = BodySegments[Index];
         if (!IsValid(SegmentBody))
         {
             return false;
@@ -70,7 +69,7 @@ bool ACMChimera::TeleportAssembly(const FTransform& DestinationTransform)
     ClearPressedControlParts();
     for (int32 Index = 0; Index < SegmentCount; ++Index)
     {
-        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        UBoxComponent* SegmentBody = BodySegments[Index];
         SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
         SegmentBody->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
         SegmentBody->SetWorldTransform(
@@ -94,7 +93,7 @@ void ACMChimera::ConfigureSegments()
 
     for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
     {
-        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        UBoxComponent* SegmentBody = BodySegments[Index];
         UBoxComponent* SegmentHurtbox = SegmentHurtboxes.IsValidIndex(Index)
             ? SegmentHurtboxes[Index]
             : nullptr;
@@ -105,12 +104,12 @@ void ACMChimera::ConfigureSegments()
             continue;
         }
 
-        if (Index > 0 && !SegmentBody->GetStaticMesh())
-        {
-            SegmentBody->SetStaticMesh(BodyMesh->GetStaticMesh());
-        }
-
-        SegmentBody->SetWorldScale3D(FVector(SegmentScale));
+        SegmentBody->SetBoxExtent(FVector(
+            BodyCollisionHalfLength,
+            BodyCollisionHalfWidth,
+            BodyCollisionHalfHeight
+        ));
+        SegmentBody->SetWorldScale3D(FVector::OneVector);
         SegmentBody->SetHiddenInGame(!bIsActive);
         SegmentBody->SetCollisionEnabled(
             bIsActive
@@ -152,8 +151,8 @@ void ACMChimera::ConfigureSegments()
     SegmentConstraints.Reserve(FMath::Max(ActiveSegmentCount - 1, 0));
     for (int32 Index = 0; Index < ActiveSegmentCount - 1; ++Index)
     {
-        UStaticMeshComponent* FrontBody = BodySegments[Index];
-        UStaticMeshComponent* RearBody = BodySegments[Index + 1];
+        UBoxComponent* FrontBody = BodySegments[Index];
+        UBoxComponent* RearBody = BodySegments[Index + 1];
 
         if (!FrontBody
             || !RearBody
@@ -172,7 +171,7 @@ void ACMChimera::ConfigureSegments()
         const FVector RearLocation =
             FrontBody->GetComponentLocation()
             - FrontBody->GetForwardVector()
-                * SegmentSpacing * SegmentScale;
+                * SegmentSpacing;
         RearBody->SetWorldLocationAndRotation(
             RearLocation,
             FrontBody->GetComponentQuat()
@@ -267,7 +266,7 @@ void ACMChimera::ConfigureSegments()
 }
 
 void ACMChimera::ConfigureBodyRotationLock(
-    UStaticMeshComponent* SegmentBody
+    UBoxComponent* SegmentBody
 )
 {
     if (!SegmentBody)
@@ -305,7 +304,7 @@ void ACMChimera::ConfigureNetworkPhysics()
     // 로컬 Chaos 시뮬레이션을 남기면 첫 마디만 서버와 다른 자세가 된다.
     for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
     {
-        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        UBoxComponent* SegmentBody = BodySegments[Index];
         if (SegmentBody)
         {
             SegmentBody->SetSimulatePhysics(false);
@@ -330,7 +329,7 @@ void ACMChimera::UpdateReplicatedSegmentStates()
         StateIndex < ReplicatedSegmentCount;
         ++StateIndex)
     {
-        const UStaticMeshComponent* SegmentBody =
+        const UBoxComponent* SegmentBody =
             BodySegments[StateIndex];
         if (!SegmentBody)
         {
@@ -365,7 +364,7 @@ void ACMChimera::ApplyReplicatedSegmentStates(float DeltaTime)
             continue;
         }
 
-        UStaticMeshComponent* SegmentBody = BodySegments[SegmentIndex];
+        UBoxComponent* SegmentBody = BodySegments[SegmentIndex];
         const FCMReplicatedSegmentState& TargetState =
             ReplicatedSegmentStates[StateIndex];
         const FVector TargetLocation = TargetState.Location;

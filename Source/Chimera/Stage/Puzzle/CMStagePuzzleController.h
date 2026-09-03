@@ -184,6 +184,9 @@ protected:
     TArray<int32> CurrentSequenceIndices;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCMTriggerPresentationTest;
+#endif
     UFUNCTION()
     void HandleTriggerSignal(
         ACMStageTriggerBase* Trigger,

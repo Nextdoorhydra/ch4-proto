@@ -112,11 +112,14 @@ private:
         const FCMTriggerPresentationState& State);
 
     void RecalculatePressure(AActor* ChangedActor);
+    void RefreshOverlaps();
     float ResolveMechanismWeight(const AActor* Actor) const;
     void ApplyPresentationState(const FCMTriggerPresentationState& State);
 
     TMap<TWeakObjectPtr<AActor>, int32> OverlapCounts;
     float CurrentWeight = 0.0f;
+    FTimerHandle OverlapRefreshTimerHandle;
+    bool bHasRefreshedOverlaps = false;
 
     UPROPERTY(Transient)
     TObjectPtr<UMaterialInstanceDynamic> PlateMaterial;

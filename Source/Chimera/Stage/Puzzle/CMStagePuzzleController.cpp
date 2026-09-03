@@ -139,6 +139,7 @@ void ACMStagePuzzleController::HandleTriggerSignal(
     ACMStageTriggerBase* Trigger,
     ECMStageTriggerSignal Signal)
 {
+    UE_LOG(LogChimeraPuzzle, Log, TEXT("[Puzzle Trigger Signal] Controller=%s Trigger=%s Signal=%d Active=%s"), *GetName(), *GetNameSafe(Trigger), static_cast<int32>(Signal), IsElementActive() ? TEXT("true") : TEXT("false"));
     if (!HasAuthority() || !IsElementActive() || !IsValid(Trigger))
     {
         return;
