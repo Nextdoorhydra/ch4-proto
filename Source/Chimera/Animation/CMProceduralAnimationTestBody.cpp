@@ -106,6 +106,14 @@ USceneComponent* ResolveTestBodyRigAnchor(
         }
         return const_cast<UCMPartSlotComponent*>(&PartSlot);
     }
+    if (PartType == ECMPartSlotType::Head)
+    {
+        if (USceneComponent* HeadAnchor = PartSlot.GetHeadRigControlAnchor())
+        {
+            return HeadAnchor;
+        }
+        return const_cast<UCMPartSlotComponent*>(&PartSlot);
+    }
     return nullptr;
 }
 
@@ -133,6 +141,12 @@ bool ResolveTestBodyMountBoneName(
             LowerBone,
             HandBone,
             bOutUsesMirroredLeftChain);
+    }
+    if (PartType == ECMPartSlotType::Head)
+    {
+        return PartSlot.ResolveHeadMountBoneName(
+            PartMesh,
+            OutMountBone);
     }
     return false;
 }
@@ -395,6 +409,20 @@ ACMProceduralAnimationTestBody::ACMProceduralAnimationTestBody()
         SegmentLeftArmRigAnchor->bEditableWhenInherited = true;
         SegmentLeftSlot->SetArmRigControlAnchor(SegmentLeftArmRigAnchor);
         ArmRigControlAnchors.Add(SegmentLeftArmRigAnchor);
+
+        const FName LeftHeadRigAnchorName = Index == 0
+            ? TEXT("LeftHeadRigAnchor")
+            : *FString::Printf(TEXT("LeftHeadRigAnchor_%02d"), Index + 1);
+        USceneComponent* SegmentLeftHeadRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(LeftHeadRigAnchorName);
+        SegmentLeftHeadRigAnchor->SetupAttachment(SegmentLeftSlot);
+        SegmentLeftHeadRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentLeftHeadRigAnchor->bEditableWhenInherited = true;
+        SegmentLeftSlot->SetHeadRigControlAnchor(SegmentLeftHeadRigAnchor);
+        HeadRigControlAnchors.Add(SegmentLeftHeadRigAnchor);
+
         if (Index == 0)
         {
             LeftPartSlot = SegmentLeftSlot;
@@ -442,6 +470,20 @@ ACMProceduralAnimationTestBody::ACMProceduralAnimationTestBody()
         SegmentRightArmRigAnchor->bEditableWhenInherited = true;
         SegmentRightSlot->SetArmRigControlAnchor(SegmentRightArmRigAnchor);
         ArmRigControlAnchors.Add(SegmentRightArmRigAnchor);
+
+        const FName RightHeadRigAnchorName = Index == 0
+            ? TEXT("RightHeadRigAnchor")
+            : *FString::Printf(TEXT("RightHeadRigAnchor_%02d"), Index + 1);
+        USceneComponent* SegmentRightHeadRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(RightHeadRigAnchorName);
+        SegmentRightHeadRigAnchor->SetupAttachment(SegmentRightSlot);
+        SegmentRightHeadRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentRightHeadRigAnchor->bEditableWhenInherited = true;
+        SegmentRightSlot->SetHeadRigControlAnchor(SegmentRightHeadRigAnchor);
+        HeadRigControlAnchors.Add(SegmentRightHeadRigAnchor);
+
         if (Index == 0)
         {
             RightPartSlot = SegmentRightSlot;

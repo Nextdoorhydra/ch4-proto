@@ -83,6 +83,24 @@ public:
     USceneComponent* GetArmRigControlAnchor() const;
 
     /**
+     * Optional editor-authored neck attachment point for a mounted Head.
+     * If unset, Head attachment falls back to the slot transform itself.
+     */
+    void SetHeadRigControlAnchor(USceneComponent* InControlAnchor);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot|Control Rig")
+    USceneComponent* GetHeadRigControlAnchor() const;
+
+    /**
+     * Resolves the skeleton bone used as the Head mount point.
+     * neck_01 is preferred, with neck_02/neck/head fallbacks for alternate skeletons.
+     */
+    bool ResolveHeadMountBoneName(
+        const USkeletalMeshComponent& Mesh,
+        FName& OutMountBone
+    ) const;
+
+    /**
      * Resolves the Arm chain that this slot should consume. Right slots use a
      * mirrored _l chain by default and can opt into a native _r chain.
      */
@@ -144,6 +162,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<USceneComponent> ArmRigControlAnchor;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USceneComponent> HeadRigControlAnchor;
 
     FGameplayAbilitySpecHandle GrantedAbilityHandle;
 };

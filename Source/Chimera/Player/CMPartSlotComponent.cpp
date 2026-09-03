@@ -20,6 +20,10 @@ const FName ArmHandLeftBoneName(TEXT("hand_l"));
 const FName ArmUpperRightBoneName(TEXT("upperarm_r"));
 const FName ArmLowerRightBoneName(TEXT("lowerarm_r"));
 const FName ArmHandRightBoneName(TEXT("hand_r"));
+const FName HeadNeck01BoneName(TEXT("neck_01"));
+const FName HeadNeck02BoneName(TEXT("neck_02"));
+const FName HeadNeckBoneName(TEXT("neck"));
+const FName HeadBoneName(TEXT("head"));
 
 bool TryGetReferenceComponentTransform(
     const USkeletalMeshComponent& Mesh,
@@ -128,6 +132,14 @@ USceneComponent* ResolveRigAnchor(
         }
         return const_cast<UCMPartSlotComponent*>(&PartSlot);
     }
+    if (PartType == ECMPartSlotType::Head)
+    {
+        if (USceneComponent* HeadAnchor = PartSlot.GetHeadRigControlAnchor())
+        {
+            return HeadAnchor;
+        }
+        return const_cast<UCMPartSlotComponent*>(&PartSlot);
+    }
     return nullptr;
 }
 
@@ -155,6 +167,13 @@ bool ResolveMountBoneName(
             LowerBone,
             HandBone,
             bUsesMirroredLeftChain);
+    }
+
+    if (PartType == ECMPartSlotType::Head)
+    {
+        return PartSlot.ResolveHeadMountBoneName(
+            PartMesh,
+            OutMountBone);
     }
 
     return false;
@@ -228,7 +247,8 @@ void ApplyMountedPartTransform(
     }
 
     if (PartType == ECMPartSlotType::Leg
-        || PartType == ECMPartSlotType::Arm)
+        || PartType == ECMPartSlotType::Arm
+        || PartType == ECMPartSlotType::Head)
     {
         AlignPartMountBoneToRigAnchor(PartActor, PartSlot, PartType);
     }
@@ -411,6 +431,43 @@ void UCMPartSlotComponent::SetArmRigControlAnchor(
 USceneComponent* UCMPartSlotComponent::GetArmRigControlAnchor() const
 {
     return ArmRigControlAnchor;
+}
+
+void UCMPartSlotComponent::SetHeadRigControlAnchor(
+    USceneComponent* InControlAnchor
+)
+{
+    HeadRigControlAnchor = InControlAnchor;
+}
+
+USceneComponent* UCMPartSlotComponent::GetHeadRigControlAnchor() const
+{
+    return HeadRigControlAnchor;
+}
+
+bool UCMPartSlotComponent::ResolveHeadMountBoneName(
+    const USkeletalMeshComponent& Mesh,
+    FName& OutMountBone
+) const
+{
+    const FName CandidateBones[] = {
+        HeadNeck01BoneName,
+        HeadNeck02BoneName,
+        HeadNeckBoneName,
+        HeadBoneName
+    };
+
+    for (const FName CandidateBone : CandidateBones)
+    {
+        if (HasReferenceBone(Mesh, CandidateBone))
+        {
+            OutMountBone = CandidateBone;
+            return true;
+        }
+    }
+
+    OutMountBone = NAME_None;
+    return false;
 }
 
 bool UCMPartSlotComponent::ResolveArmReferenceBoneNames(

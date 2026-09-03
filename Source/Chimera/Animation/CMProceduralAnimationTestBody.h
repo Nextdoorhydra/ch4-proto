@@ -80,6 +80,15 @@ public:
             : nullptr;
     }
 
+    UFUNCTION(BlueprintPure,
+        Category = "Chimera|Animation Test|Control Rig")
+    USceneComponent* GetHeadRigControlAnchor(int32 Index) const
+    {
+        return HeadRigControlAnchors.IsValidIndex(Index)
+            ? HeadRigControlAnchors[Index]
+            : nullptr;
+    }
+
     int32 GetSegmentConstraintCount() const
     {
         return SegmentConstraints.Num();
@@ -283,6 +292,11 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Components|Arm Control Rig")
     TArray<TObjectPtr<USceneComponent>> ArmRigControlAnchors;
+
+    /** Per-slot Head neck attachment targets editable in the viewport. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+        Category = "Components|Head Control Rig")
+    TArray<TObjectPtr<USceneComponent>> HeadRigControlAnchors;
 
     /** Construction-time preview of the actual configured Part Blueprint. */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")

@@ -49,6 +49,11 @@ bool UCMPowerSocketComponent::TryConnectCable(
         return false;
     }
 
+    if (!Cable->CanConnectEndpointWithinLength(GetComponentLocation()))
+    {
+        return false;
+    }
+
     ConnectedCables.AddUnique(Cable);
     Cable->SetConnectedSocket(this);
     OnConnectionChanged.Broadcast(true);
