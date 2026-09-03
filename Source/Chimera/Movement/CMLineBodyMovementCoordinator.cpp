@@ -667,9 +667,7 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
     TArray<FArmHoldCandidate> Candidates;
     if (UWorld* World = Chimera.GetWorld())
     {
-        const FVector Start = ArmPart.GetPartMesh()
-            ? ArmPart.GetPartMesh()->GetComponentLocation()
-            : PartSlot->GetComponentLocation();
+        const FVector Start = PartSlot->GetComponentLocation();
         FVector HoldDirection = ArmPart.GetPartMesh()
             ? ArmPart.GetPartMesh()->GetForwardVector()
             : PartSlot->GetForwardVector();

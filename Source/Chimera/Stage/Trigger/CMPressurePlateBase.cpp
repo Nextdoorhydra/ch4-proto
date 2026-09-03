@@ -1,5 +1,6 @@
 #include "Stage/Trigger/CMPressurePlateBase.h"
 
+#include "Collision/CMCollisionChannels.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -40,6 +41,10 @@ void ACMPressurePlateBase::BeginPlay()
         // Blueprint component templates can retain older collision overrides, so restore the gameplay contract at runtime.
         PressureVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
         PressureVolume->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+        PressureVolume->SetCollisionResponseToChannel(
+            CMCollision::ChimeraHurtbox,
+            ECR_Overlap
+        );
         PressureVolume->SetGenerateOverlapEvents(true);
         PressureVolume->OnComponentBeginOverlap.AddUniqueDynamic(
             this,
