@@ -14,6 +14,33 @@ enum class ECMVisionStoneMode : uint8
     RequireNoWatchingPlayers
 };
 
+USTRUCT(BlueprintType)
+struct CHIMERA_API FCMVisionStonePresentationState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly) bool bReady = false;
+    UPROPERTY(BlueprintReadOnly) bool bConditionMet = false;
+    UPROPERTY(BlueprintReadOnly) ECMVisionStoneMode Mode =
+        ECMVisionStoneMode::RequireWatchingPlayers;
+    UPROPERTY(BlueprintReadOnly) int32 WatchingPlayerCount = 0;
+    UPROPERTY(BlueprintReadOnly) int32 RequiredWatchingPlayers = 1;
+
+    bool operator==(const FCMVisionStonePresentationState& Other) const
+    {
+        return bReady == Other.bReady
+            && bConditionMet == Other.bConditionMet
+            && Mode == Other.Mode
+            && WatchingPlayerCount == Other.WatchingPlayerCount
+            && RequiredWatchingPlayers == Other.RequiredWatchingPlayers;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+    FCMVisionStonePresentationSignature,
+    const FCMVisionStonePresentationState&,
+    State);
+
 UCLASS(Blueprintable)
 class CHIMERA_API ACMVisionStoneBase : public ACMStageTriggerBase
 {
@@ -21,6 +48,18 @@ class CHIMERA_API ACMVisionStoneBase : public ACMStageTriggerBase
 
 public:
     ACMVisionStoneBase();
+    virtual void GetLifetimeReplicatedProps(
+        TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Vision Stone|Presentation")
+    FCMVisionStonePresentationState GetVisionPresentationState() const
+    {
+        return VisionPresentationState;
+    }
+
+    UPROPERTY(BlueprintAssignable,
+        Category = "Chimera|Vision Stone|Presentation")
+    FCMVisionStonePresentationSignature OnVisionPresentationStateChanged;
 
 protected:
     virtual void BeginPlay() override;
@@ -51,12 +90,19 @@ protected:
 
 private:
     UFUNCTION()
+    void OnRep_VisionPresentationState();
+
+    UFUNCTION()
     void HandleVisionStoneActivated(AActor* TriggeringActor);
 
     UFUNCTION()
     void HandleVisionStoneDeactivated(AActor* TriggeringActor);
 
     void EvaluateVisionCondition();
+    void RefreshVisionPresentationState(bool bConditionMet);
+
+    UPROPERTY(ReplicatedUsing = OnRep_VisionPresentationState)
+    FCMVisionStonePresentationState VisionPresentationState;
 
     FTimerHandle EvaluationTimerHandle;
 };
