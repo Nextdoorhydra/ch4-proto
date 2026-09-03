@@ -66,6 +66,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot")
     bool HasAttachedPart() const;
 
+    /** Optional editor-authored thigh attachment point for a mounted leg rig. */
+    void SetLegRigControlAnchor(USceneComponent* InControlAnchor);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot|Control Rig")
+    USceneComponent* GetLegRigControlAnchor() const;
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Part Slot")
     FCMPartSlotAttachmentChanged OnAttachedPartChanged;
 
@@ -102,6 +108,9 @@ private:
         Category = "Chimera|Part Slot",
         meta = (AllowPrivateAccess = "true"))
     TObjectPtr<AActor> AttachedPart;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USceneComponent> LegRigControlAnchor;
 
     FGameplayAbilitySpecHandle GrantedAbilityHandle;
 };

@@ -15,7 +15,7 @@ class UPhysicsConstraintComponent;
 class UPhysicsHandleComponent;
 class UPrimitiveComponent;
 class USceneComponent;
-class UStaticMeshComponent;
+class UBoxComponent;
 
 /**
  * Owns the LineBody movement calculation flow.
@@ -88,7 +88,7 @@ protected:
 private:
     bool ApplyArmImpulse(
         ACMChimera& Chimera,
-        UStaticMeshComponent* SegmentBody,
+        UBoxComponent* SegmentBody,
         USceneComponent* ImpulsePoint,
         ACMPlayerState* ContributingPlayerState,
         float MovementImpulse,
@@ -124,6 +124,8 @@ private:
     ) const;
 
     void ApplyActiveLegSteps(ACMChimera& Chimera);
+    void UpdateLegPlantStates(ACMChimera& Chimera);
+    void UpdateReachRecovery(ACMChimera& Chimera, double CurrentTime);
     void UpdatePhysicsHandles(ACMChimera& Chimera);
     void ApplyArmAnchorStaminaDrain(ACMChimera& Chimera);
     void RemoveInvalidArmAnchors(ACMChimera& Chimera);
@@ -147,13 +149,14 @@ private:
     struct FActiveLegStep
     {
         TWeakObjectPtr<ACMLegPart> LegPart;
-        TWeakObjectPtr<UStaticMeshComponent> SegmentBody;
+        TWeakObjectPtr<UBoxComponent> SegmentBody;
         int32 SegmentIndex = INDEX_NONE;
         FVector VirtualFootPoint = FVector::ZeroVector;
         FVector GroundPoint = FVector::ZeroVector;
         FVector GroundNormal = FVector::UpVector;
         FVector PushForce = FVector::ZeroVector;
         double EndTime = 0.0;
+        bool bOwnsVisualStep = false;
     };
 
     struct FActiveArmAnchor
@@ -178,4 +181,5 @@ private:
     TArray<FActiveLegStep> ActiveLegSteps;
     TArray<FActiveArmAnchor> ActiveArmAnchors;
     FTimerHandle CooperationExpiryTimerHandle;
+    double NextReachRecoveryCheckTime = 0.0;
 };
