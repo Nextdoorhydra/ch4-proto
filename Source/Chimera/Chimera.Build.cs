@@ -12,6 +12,7 @@ public class Chimera : ModuleRules
 		PublicDependencyModuleNames.AddRange(new[]
 		{
 			"AsyncPDALoader",
+			"CableComponent",
 			"Core",
 			"CoreUObject",
 			"DeveloperSettings",
