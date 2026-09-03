@@ -2,6 +2,7 @@
 
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
+#include "Net/UnrealNetwork.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 #include "TimerManager.h"
 #include "Vision/CMVisionManagerSubsystem.h"
@@ -14,6 +15,13 @@ ACMVisionStoneBase::ACMVisionStoneBase()
 
     VisionPoint = CreateDefaultSubobject<USceneComponent>(TEXT("VisionPoint"));
     VisionPoint->SetupAttachment(SceneRoot);
+}
+
+void ACMVisionStoneBase::GetLifetimeReplicatedProps(
+    TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ThisClass, VisionPresentationState);
 }
 
 void ACMVisionStoneBase::BeginPlay()
@@ -79,6 +87,31 @@ void ACMVisionStoneBase::EvaluateVisionCondition()
     {
         DeactivateTrigger(nullptr);
     }
+
+    RefreshVisionPresentationState(bConditionMet);
+}
+
+void ACMVisionStoneBase::RefreshVisionPresentationState(bool bConditionMet)
+{
+    FCMVisionStonePresentationState NewState;
+    NewState.bReady = true;
+    NewState.bConditionMet = bConditionMet;
+    NewState.Mode = VisionStoneMode;
+    NewState.WatchingPlayerCount = WatchingPlayerCount;
+    NewState.RequiredWatchingPlayers = FMath::Max(RequiredWatchingPlayers, 1);
+    if (NewState == VisionPresentationState)
+    {
+        return;
+    }
+
+    VisionPresentationState = NewState;
+    ForceNetUpdate();
+    OnRep_VisionPresentationState();
+}
+
+void ACMVisionStoneBase::OnRep_VisionPresentationState()
+{
+    OnVisionPresentationStateChanged.Broadcast(VisionPresentationState);
 }
 
 void ACMVisionStoneBase::HandleVisionStoneActivated(AActor* TriggeringActor)

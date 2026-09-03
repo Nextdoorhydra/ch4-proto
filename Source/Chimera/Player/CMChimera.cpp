@@ -11,6 +11,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/CMCameraOcclusionComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -26,8 +27,9 @@ DEFINE_LOG_CATEGORY(LogChimeraLineBody);
 ACMChimera::ACMChimera()
 {
     constexpr int32 MaxSegmentCount = CMControl::MaxSegments;
-    const FVector LeftSlotLocation(0.0f, -60.0f, -30.0f);
-    const FVector RightSlotLocation(0.0f, 60.0f, -30.0f);
+    const float SlotZ = -BodyCollisionHalfHeight + InitialGroundClearance;
+    const FVector LeftSlotLocation(0.0f, -BodySlotLateralOffset, SlotZ);
+    const FVector RightSlotLocation(0.0f, BodySlotLateralOffset, SlotZ);
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> MarkerMeshAsset(
         TEXT("/Engine/BasicShapes/Cylinder.Cylinder")
@@ -72,12 +74,17 @@ ACMChimera::ACMChimera()
         TEXT("/Game/Chimera/Data/Body/DT_BodyDataTable.DT_BodyDataTable")
     ));
 
-    BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(
+    BodyMesh = CreateDefaultSubobject<UBoxComponent>(
         TEXT("BodyMesh")
     );
     SetRootComponent(BodyMesh);
 
-    BodyMesh->SetSimulatePhysics(true);
+    BodyMesh->SetBoxExtent(FVector(
+        BodyCollisionHalfLength,
+        BodyCollisionHalfWidth,
+        BodyCollisionHalfHeight
+    ));
+    BodyMesh->SetSimulatePhysics(false);
     BodyMesh->SetEnableGravity(bEnableBodyGravity);
     BodyMesh->SetLinearDamping(BodyLinearDamping);
     BodyMesh->SetAngularDamping(BodyAngularDamping);
@@ -86,7 +93,6 @@ ACMChimera::ACMChimera()
         CMCollision::WeaponTrace,
         ECR_Ignore
     );
-    BodyMesh->SetRelativeScale3D(FVector(SegmentScale));
     BodyMesh->SetIsReplicated(false);
 
     LeftFootPoint = CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -102,6 +108,20 @@ ACMChimera::ACMChimera()
     RightFootPoint->SetupAttachment(BodyMesh);
     RightFootPoint->SetRelativeLocation(RightSlotLocation);
     RightFootPoint->InitializeSlotAddress(0, 1);
+
+    USceneComponent* LeftLegRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("LeftLegRigAnchor"));
+    LeftLegRigAnchor->SetupAttachment(LeftFootPoint);
+    LeftLegRigAnchor->SetRelativeLocation(-LeftSlotLocation);
+    LeftLegRigAnchor->bEditableWhenInherited = true;
+    LeftFootPoint->SetLegRigControlAnchor(LeftLegRigAnchor);
+
+    USceneComponent* RightLegRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("RightLegRigAnchor"));
+    RightLegRigAnchor->SetupAttachment(RightFootPoint);
+    RightLegRigAnchor->SetRelativeLocation(-RightSlotLocation);
+    RightLegRigAnchor->bEditableWhenInherited = true;
+    RightFootPoint->SetLegRigControlAnchor(RightLegRigAnchor);
 
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(
         TEXT("CameraBoom")
@@ -147,19 +167,25 @@ ACMChimera::ACMChimera()
     RightFootPoints.Add(RightFootPoint);
     PartSlotPoints.Add(LeftFootPoint);
     PartSlotPoints.Add(RightFootPoint);
+    LegRigControlAnchors.Add(LeftLegRigAnchor);
+    LegRigControlAnchors.Add(RightLegRigAnchor);
 
     for (int32 Index = 1; Index < MaxSegmentCount; ++Index)
     {
-        UStaticMeshComponent* SegmentBody =
-            CreateDefaultSubobject<UStaticMeshComponent>(
+        UBoxComponent* SegmentBody =
+            CreateDefaultSubobject<UBoxComponent>(
                 *FString::Printf(TEXT("BodyMesh_%d"), Index + 1)
             );
         SegmentBody->SetupAttachment(BodyMesh);
         SegmentBody->SetRelativeLocation(
-            FVector(-SegmentSpacing * SegmentScale * Index, 0.0f, 0.0f)
+            FVector(-SegmentSpacing * Index, 0.0f, 0.0f)
         );
-        SegmentBody->SetRelativeScale3D(FVector(SegmentScale));
-        // 생성자에서는 물리를 시작하지 않는다. StaticMesh와 활성 마디 수가 확정된 뒤
+        SegmentBody->SetBoxExtent(FVector(
+            BodyCollisionHalfLength,
+            BodyCollisionHalfWidth,
+            BodyCollisionHalfHeight
+        ));
+        // 생성자에서는 물리를 시작하지 않는다. 충돌 바디와 활성 마디 수가 확정된 뒤
         // ConfigureSegments에서 서버 물리 Body를 한 번에 활성화한다.
         SegmentBody->SetSimulatePhysics(false);
         SegmentBody->SetEnableGravity(bEnableBodyGravity);
@@ -187,11 +213,31 @@ ACMChimera::ACMChimera()
         SegmentRightFoot->SetRelativeLocation(RightSlotLocation);
         SegmentRightFoot->InitializeSlotAddress(Index, 1);
 
+        USceneComponent* SegmentLeftRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("LeftLegRigAnchor_%d"), Index + 1)
+            );
+        SegmentLeftRigAnchor->SetupAttachment(SegmentLeftFoot);
+        SegmentLeftRigAnchor->SetRelativeLocation(-LeftSlotLocation);
+        SegmentLeftRigAnchor->bEditableWhenInherited = true;
+        SegmentLeftFoot->SetLegRigControlAnchor(SegmentLeftRigAnchor);
+
+        USceneComponent* SegmentRightRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("RightLegRigAnchor_%d"), Index + 1)
+            );
+        SegmentRightRigAnchor->SetupAttachment(SegmentRightFoot);
+        SegmentRightRigAnchor->SetRelativeLocation(-RightSlotLocation);
+        SegmentRightRigAnchor->bEditableWhenInherited = true;
+        SegmentRightFoot->SetLegRigControlAnchor(SegmentRightRigAnchor);
+
         BodySegments.Add(SegmentBody);
         LeftFootPoints.Add(SegmentLeftFoot);
         RightFootPoints.Add(SegmentRightFoot);
         PartSlotPoints.Add(SegmentLeftFoot);
         PartSlotPoints.Add(SegmentRightFoot);
+        LegRigControlAnchors.Add(SegmentLeftRigAnchor);
+        LegRigControlAnchors.Add(SegmentRightRigAnchor);
     }
 
     for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
@@ -343,13 +389,13 @@ void ACMChimera::ApplyDebugMovementInput(
         return;
     }
 
-    TArray<UStaticMeshComponent*> SimulatedSegments;
+    TArray<UBoxComponent*> SimulatedSegments;
     FVector CombinedForwardDirection = FVector::ZeroVector;
     const int32 SegmentCount = FMath::Min(
         ActiveSegmentCount, BodySegments.Num());
     for (int32 Index = 0; Index < SegmentCount; ++Index)
     {
-        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        UBoxComponent* SegmentBody = BodySegments[Index];
         if (!SegmentBody || !SegmentBody->IsSimulatingPhysics())
         {
             continue;
@@ -374,7 +420,7 @@ void ACMChimera::ApplyDebugMovementInput(
     {
         const FVector DebugAcceleration =
             ForwardDirection * ForwardInput * DebugMovementForce;
-        for (UStaticMeshComponent* SegmentBody : SimulatedSegments)
+        for (UBoxComponent* SegmentBody : SimulatedSegments)
         {
             // 모든 마디에 같은 가속도를 적용해 질량과 마디 수 영향을 제거
             SegmentBody->AddForce(
@@ -388,7 +434,7 @@ void ACMChimera::ApplyDebugMovementInput(
     {
         const FVector DebugAngularAcceleration =
             FVector::UpVector * TurnInput * DebugTurnTorque;
-        for (UStaticMeshComponent* SegmentBody : SimulatedSegments)
+        for (UBoxComponent* SegmentBody : SimulatedSegments)
         {
             // 모든 마디에 같은 각가속도를 적용해 몸 전체가 함께 회전
             SegmentBody->AddTorqueInRadians(
@@ -506,7 +552,7 @@ void ACMChimera::ApplyPlanarKnockback(FVector WorldDirection, float Speed)
     const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
     for (int32 SegmentIndex = 0; SegmentIndex < SegmentCount; ++SegmentIndex)
     {
-        UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+        UBoxComponent* Segment = BodySegments[SegmentIndex];
         if (Segment && Segment->IsSimulatingPhysics())
             Segment->AddImpulse(VelocityChange, NAME_None, true);
     }
@@ -527,7 +573,7 @@ void ACMChimera::StartPlanarKnockback(
         return;
     }
 
-    UStaticMeshComponent* ReferenceBody = BodySegments[0];
+    UBoxComponent* ReferenceBody = BodySegments[0];
     if (!ReferenceBody || !ReferenceBody->IsSimulatingPhysics())
     {
         return;
@@ -548,7 +594,7 @@ void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
     {
         return;
     }
-    UStaticMeshComponent* ReferenceBody = BodySegments[0];
+    UBoxComponent* ReferenceBody = BodySegments[0];
     if (!ReferenceBody)
     {
         bPlanarKnockbackActive = false;
@@ -569,7 +615,7 @@ void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
         for (int32 SegmentIndex = 0;
             SegmentIndex < SegmentCount; ++SegmentIndex)
         {
-            UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+            UBoxComponent* Segment = BodySegments[SegmentIndex];
             if (!Segment || !Segment->IsSimulatingPhysics())
             {
                 continue;
@@ -589,7 +635,7 @@ void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
     for (int32 SegmentIndex = 0;
         SegmentIndex < SegmentCount; ++SegmentIndex)
     {
-        UStaticMeshComponent* Segment = BodySegments[SegmentIndex];
+        UBoxComponent* Segment = BodySegments[SegmentIndex];
         if (!Segment || !Segment->IsSimulatingPhysics())
         {
             continue;
@@ -614,7 +660,7 @@ bool ACMChimera::AreAllActiveBodySegmentsOverlapping(
         SegmentIndex < ActiveSegmentCount;
         ++SegmentIndex)
     {
-        const UStaticMeshComponent* SegmentBody =
+        const UBoxComponent* SegmentBody =
             BodySegments.IsValidIndex(SegmentIndex)
                 ? BodySegments[SegmentIndex]
                 : nullptr;
@@ -634,13 +680,11 @@ void ACMChimera::ApplyBlueprintSettings()
         1,
         BodySegments.Num()
     );
-
-    const float SafeSegmentScale = FMath::Max(SegmentScale, 0.1f);
-    const float EffectiveSpacing = SegmentSpacing * SafeSegmentScale;
+    RefreshBodyAssembly();
 
     for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
     {
-        UStaticMeshComponent* SegmentBody = BodySegments[Index];
+        UBoxComponent* SegmentBody = BodySegments[Index];
         if (!SegmentBody)
         {
             continue;
@@ -668,14 +712,12 @@ void ACMChimera::ApplyBlueprintSettings()
                 RuntimeBodyPhysicalMaterial
             );
         }
-        SegmentBody->SetWorldScale3D(FVector(SafeSegmentScale));
-
         if (Index > 0 && !SegmentBody->IsSimulatingPhysics())
         {
             const FVector SegmentLocation =
                 BodyMesh->GetComponentLocation()
                 - BodyMesh->GetForwardVector()
-                    * EffectiveSpacing * Index;
+                    * SegmentSpacing * Index;
             SegmentBody->SetWorldLocationAndRotation(
                 SegmentLocation,
                 BodyMesh->GetComponentQuat()
@@ -683,7 +725,7 @@ void ACMChimera::ApplyBlueprintSettings()
         }
 
         const bool bIsActive = Index < ActiveSegmentCount;
-        SegmentBody->SetVisibility(bIsActive, true);
+        SetSegmentVisualsActive(SegmentBody, bIsActive);
     }
 
     for (UPhysicsConstraintComponent* Constraint : SegmentConstraints)
@@ -752,6 +794,98 @@ void ACMChimera::ApplyBlueprintSettings()
         CameraBoom->ProbeChannel = ECC_Camera;
     }
 
+}
+
+void ACMChimera::RefreshBodyAssembly()
+{
+    const float SlotZ = -BodyCollisionHalfHeight + InitialGroundClearance;
+    const FVector LeftSlotLocation(
+        0.0f,
+        -BodySlotLateralOffset,
+        SlotZ
+    );
+    const FVector RightSlotLocation(
+        0.0f,
+        BodySlotLateralOffset,
+        SlotZ
+    );
+
+    for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
+    {
+        UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!SegmentBody)
+        {
+            continue;
+        }
+
+        SegmentBody->SetBoxExtent(FVector(
+            BodyCollisionHalfLength,
+            BodyCollisionHalfWidth,
+            BodyCollisionHalfHeight
+        ));
+        SegmentBody->SetWorldScale3D(FVector::OneVector);
+        if (Index > 0 && !SegmentBody->IsSimulatingPhysics())
+        {
+            SegmentBody->SetRelativeLocation(FVector(
+                -SegmentSpacing * Index,
+                0.0f,
+                0.0f
+            ));
+        }
+
+        UCMPartSlotComponent* LeftSlot = LeftFootPoints.IsValidIndex(Index)
+            ? Cast<UCMPartSlotComponent>(LeftFootPoints[Index])
+            : nullptr;
+        if (LeftSlot)
+        {
+            LeftSlot->SetRelativeLocation(LeftSlotLocation);
+            if (USceneComponent* Anchor = LeftSlot->GetLegRigControlAnchor())
+            {
+                Anchor->SetRelativeLocationAndRotation(
+                    -LeftSlotLocation,
+                    FRotator::ZeroRotator
+                );
+            }
+        }
+
+        UCMPartSlotComponent* RightSlot = RightFootPoints.IsValidIndex(Index)
+            ? Cast<UCMPartSlotComponent>(RightFootPoints[Index])
+            : nullptr;
+        if (RightSlot)
+        {
+            RightSlot->SetRelativeLocation(RightSlotLocation);
+            if (USceneComponent* Anchor = RightSlot->GetLegRigControlAnchor())
+            {
+                Anchor->SetRelativeLocationAndRotation(
+                    -RightSlotLocation,
+                    FRotator::ZeroRotator
+                );
+            }
+        }
+    }
+}
+
+void ACMChimera::SetSegmentVisualsActive(
+    USceneComponent* SegmentBody,
+    const bool bActive
+)
+{
+    if (!SegmentBody)
+    {
+        return;
+    }
+
+    TArray<USceneComponent*> Descendants;
+    SegmentBody->GetChildrenComponents(true, Descendants);
+    for (USceneComponent* Descendant : Descendants)
+    {
+        if (USkeletalMeshComponent* BodyVisual =
+            Cast<USkeletalMeshComponent>(Descendant))
+        {
+            BodyVisual->SetVisibility(bActive, false);
+            BodyVisual->SetHiddenInGame(!bActive, false);
+        }
+    }
 }
 
 void ACMChimera::UpdateCameraFollowOffset()

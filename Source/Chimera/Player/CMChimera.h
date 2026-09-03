@@ -301,7 +301,8 @@ public:
 
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<UStaticMeshComponent> BodyMesh;
+    /** Invisible physics proxy for the first articulated body segment. */
+    TObjectPtr<UBoxComponent> BodyMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMPartSlotComponent> LeftFootPoint;
@@ -341,7 +342,7 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera")
-    TArray<TObjectPtr<UStaticMeshComponent>> BodySegments;
+    TArray<TObjectPtr<UBoxComponent>> BodySegments;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera|Health")
@@ -359,6 +360,11 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera|Part Slots")
     TArray<TObjectPtr<UCMPartSlotComponent>> PartSlotPoints;
+
+    /** Per-slot thigh targets, centered inside their owning body segment. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
+        Category = "Chimera|Part Slots|Control Rig")
+    TArray<TObjectPtr<USceneComponent>> LegRigControlAnchors;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera")
     TArray<TObjectPtr<UPhysicsConstraintComponent>> SegmentConstraints;
@@ -386,10 +392,10 @@ protected:
         meta = (ClampMin = "0.0"))
     float LegStepTraceDepth = 140.0f;
 
-    /** Scales the force converted from the existing impulse balance values. */
+    /** Scales leg force for the 120 cm articulated box-body layout. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
         meta = (ClampMin = "0.0"))
-    float LegStepForceScale = 1.0f;
+    float LegStepForceScale = 3.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
@@ -402,6 +408,31 @@ protected:
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MinimumGroundNormalZ = 0.5f;
+
+    /** Planar error before a planted leg requests a visual-only replant. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.0"))
+    float LegReplantReleaseDistance = 140.0f;
+
+    /** Error below which a newly acquired planted target is considered settled. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.0"))
+    float LegReplantSettleDistance = 90.0f;
+
+    /** Server-side cadence for reach recovery traces, not an animation Tick. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.01"))
+    float LegReplantCheckInterval = 0.08f;
+
+    /** Visual-only replant duration; it never contributes a body force. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.01"))
+    float LegReplantDuration = 0.25f;
+
+    /** Time allowed for a landing contact to recover before entering Recover. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Planted Foot",
+        meta = (ClampMin = "0.0"))
+    float LegLandingContactGrace = 0.08f;
 
     UPROPERTY(EditAnywhere, Category = "Leg")
     float MaxSpeed = 600.0f;
@@ -481,12 +512,28 @@ protected:
     int32 ActiveSegmentCount = 4;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera",
-        meta = (ClampMin = "0.1"))
-    float SegmentScale = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera",
         meta = (ClampMin = "10.0"))
     float SegmentSpacing = 120.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Body",
+        meta = (ClampMin = "1.0"))
+    float BodyCollisionHalfLength = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Body",
+        meta = (ClampMin = "1.0"))
+    float BodyCollisionHalfWidth = 40.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Body",
+        meta = (ClampMin = "1.0"))
+    float BodyCollisionHalfHeight = 35.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Body",
+        meta = (ClampMin = "1.0"))
+    float BodySlotLateralOffset = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Body",
+        meta = (ClampMin = "0.0"))
+    float InitialGroundClearance = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics",
         meta = (ClampMin = "0.0"))
@@ -638,7 +685,7 @@ protected:
 private:
     void ConfigureSegments();
     void ConfigureNetworkPhysics();
-    void ConfigureBodyRotationLock(UStaticMeshComponent* SegmentBody);
+    void ConfigureBodyRotationLock(UBoxComponent* SegmentBody);
     bool InitializeFromBodyData();
     void InitializeSharedAttributes(
         float MaxStamina,
@@ -648,6 +695,8 @@ private:
     void StartStaminaRegeneration();
     void PauseStaminaRegeneration();
     void ApplyBlueprintSettings();
+    void RefreshBodyAssembly();
+    void SetSegmentVisualsActive(USceneComponent* SegmentBody, bool bActive);
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
     void UpdatePlanarKnockback(float DeltaTime);

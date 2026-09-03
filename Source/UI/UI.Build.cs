@@ -27,6 +27,7 @@ public class UI : ModuleRules
 		{
 			"GameplayAbilities",
 			"InputCore",
+			"Niagara",
 			"SlateCore"
 		});
 	}
