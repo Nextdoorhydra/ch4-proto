@@ -546,7 +546,7 @@ void UCMLineBodyMovementCoordinator::MatchCooperativeInputs(
         }
 
         const float SignedForwardImpulse =
-            MatchedImpulse * 2.0f * LeftInput.DirectionSign;
+            MatchedImpulse * 1.0f * LeftInput.DirectionSign;
         ApplyCooperativeForwardImpulse(
             Chimera,
             SignedForwardImpulse

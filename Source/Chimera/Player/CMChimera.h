@@ -395,7 +395,7 @@ protected:
     /** Scales leg force for the 120 cm articulated box-body layout. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Step",
         meta = (ClampMin = "0.0"))
-    float LegStepForceScale = 3.0f;
+    float LegStepForceScale = 2.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
