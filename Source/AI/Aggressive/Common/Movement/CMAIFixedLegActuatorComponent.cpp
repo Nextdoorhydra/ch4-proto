@@ -24,6 +24,15 @@ float CMAIFixedLegActuation::CalculateYawAngularImpulse(const FVector& CenterOfM
     return FVector::CrossProduct(LeverArm, WorldImpulse).Z;
 }
 
+// 접지 구체가 바닥과 겹치지 않은 위치에서 시작하도록 스윕 구간을 계산한다.
+void CMAIFixedLegActuation::CalculateGroundSweepSegment(const FVector& ContactLocation, float GroundCheckRadius, float GroundContactDistance, FVector& OutStart, FVector& OutEnd)
+{
+    const float SafeRadius = FMath::Max(GroundCheckRadius, 0.0f);
+    const float SafeDistance = FMath::Max(GroundContactDistance, 0.0f);
+    OutStart = ContactLocation + FVector::UpVector * (SafeRadius + UE_KINDA_SMALL_NUMBER);
+    OutEnd = OutStart - FVector::UpVector * SafeDistance;
+}
+
 // Tick을 사용하지 않는 고정 다리 구동 컴포넌트를 생성한다.
 UCMAIFixedLegActuatorComponent::UCMAIFixedLegActuatorComponent()
 {
@@ -112,12 +121,15 @@ bool UCMAIFixedLegActuatorComponent::FindGroundContact(const USceneComponent& Co
         return false;
     }
 
-    const FVector Start = ContactPoint.GetComponentLocation();
-    const FVector End = Start - FVector::UpVector * FMath::Max(Settings.GroundContactDistance, 0.0f);
+    FVector Start;
+    FVector End;
+    CMAIFixedLegActuation::CalculateGroundSweepSegment(ContactPoint.GetComponentLocation(), Settings.GroundCheckRadius, Settings.GroundContactDistance, Start, End);
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(Owner);
 
     if (!World->SweepSingleByChannel(OutHit, Start, End, FQuat::Identity, Settings.GroundTraceChannel, FCollisionShape::MakeSphere(Settings.GroundCheckRadius), QueryParams))
+    {
         return false;
+    }
     return OutHit.ImpactNormal.Z >= Settings.MinimumGroundNormalZ;
 }

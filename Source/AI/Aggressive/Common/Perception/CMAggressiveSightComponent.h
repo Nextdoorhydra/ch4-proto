@@ -53,7 +53,8 @@ private:
     void ApplyVisionSettings();
     void DrawSightDebug() const;
     void UpdateAuthoritySight();
-    bool HasClearSightTo(const AActor& Target) const;
+    bool CanSeeTargetPoint(const AActor& Target, const FVector& TargetPoint) const;
+    bool HasClearSightTo(const AActor& Target, const FVector& TargetPoint) const;
     FVector GetSightForward() const;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Sight", meta = (ClampMin = "0.0", Units = "cm", AllowPrivateAccess = "true"))

@@ -19,6 +19,10 @@ bool FCMAggressiveSightGeometryTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Point at the configured distance is visible"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, Forward, 60.0f, 180.0f, 300.0f, FVector(300.0f, 0.0f, 0.0f)));
     TestFalse(TEXT("Point beyond the configured distance is hidden"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, Forward, 60.0f, 180.0f, 300.0f, FVector(300.1f, 0.0f, 0.0f)));
 
+    const FBox PartiallyVisibleTargetBounds(FVector(290.0f, -20.0f, -20.0f), FVector(330.0f, 20.0f, 20.0f));
+    const FVector ClosestTargetPoint = PartiallyVisibleTargetBounds.GetClosestPointTo(Origin);
+    TestTrue(TEXT("A target body edge inside the configured distance is visible"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, Forward, 60.0f, 180.0f, 300.0f, ClosestTargetPoint));
+
     const FVector HorizontalBoundary = FVector(1.0f, 0.0f, 0.0f).RotateAngleAxis(30.0f, FVector::UpVector) * 200.0f;
     const FVector OutsideHorizontal = FVector(1.0f, 0.0f, 0.0f).RotateAngleAxis(30.1f, FVector::UpVector) * 200.0f;
     TestTrue(TEXT("Horizontal half-angle boundary is visible"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, Forward, 60.0f, 180.0f, 300.0f, HorizontalBoundary));

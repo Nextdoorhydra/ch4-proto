@@ -1,6 +1,7 @@
 #include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 
 #include "DrawDebugHelpers.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "GameMode/CMGameState.h"
 #include "HAL/IConsoleManager.h"
@@ -135,7 +136,32 @@ void UCMAggressiveSightComponent::SetSightForwardReversed(bool bInReversed)
 // 거리와 수평·수직 시야각 및 정적 장애물 차폐를 모두 통과한 대상을 감지한다.
 bool UCMAggressiveSightComponent::CanSeeActor(const AActor* Target) const
 {
-    return IsValid(Target) && IsPointInsideSight(GetVisionOrigin(), GetSightForward(), HorizontalSightAngleDegrees, VerticalSightAngleDegrees, SightDistanceCm, Target->GetActorLocation()) && HasClearSightTo(*Target);
+    if (!IsValid(Target))
+    {
+        return false;
+    }
+    if (CanSeeTargetPoint(*Target, Target->GetActorLocation()))
+    {
+        return true;
+    }
+
+    TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents;
+    Target->GetComponents(PrimitiveComponents);
+    const FVector Origin = GetVisionOrigin();
+    for (const UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
+    {
+        if (!PrimitiveComponent || !PrimitiveComponent->IsRegistered() || PrimitiveComponent->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+        {
+            continue;
+        }
+
+        const FVector ClosestPoint = PrimitiveComponent->Bounds.GetBox().GetClosestPointTo(Origin);
+        if (CanSeeTargetPoint(*Target, ClosestPoint))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // 임의 지점이 거리와 수평·수직 각도로 정의된 시야 영역 안인지 판정한다.
@@ -206,8 +232,14 @@ void UCMAggressiveSightComponent::UpdateAuthoritySight()
     SetVisionActive(bPlayerSeen);
 }
 
-// 소유자와 대상 사이를 가로막는 월드 정적 장애물이 없는지 확인한다.
-bool UCMAggressiveSightComponent::HasClearSightTo(const AActor& Target) const
+// 대상 액터의 기준점이나 충돌 몸체 최근접점이 시야 영역과 차폐 검사를 모두 통과하는지 확인한다.
+bool UCMAggressiveSightComponent::CanSeeTargetPoint(const AActor& Target, const FVector& TargetPoint) const
+{
+    return IsPointInsideSight(GetVisionOrigin(), GetSightForward(), HorizontalSightAngleDegrees, VerticalSightAngleDegrees, SightDistanceCm, TargetPoint) && HasClearSightTo(Target, TargetPoint);
+}
+
+// 소유자와 대상 지점 사이를 가로막는 월드 정적 장애물이 없는지 확인한다.
+bool UCMAggressiveSightComponent::HasClearSightTo(const AActor& Target, const FVector& TargetPoint) const
 {
     const UWorld* World = GetWorld();
     if (!World)
@@ -221,7 +253,7 @@ bool UCMAggressiveSightComponent::HasClearSightTo(const AActor& Target) const
     FCollisionObjectQueryParams ObjectQueryParams;
     ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
 
-    return !World->LineTraceTestByObjectType(GetVisionOrigin(), Target.GetActorLocation(), ObjectQueryParams, QueryParams);
+    return !World->LineTraceTestByObjectType(GetVisionOrigin(), TargetPoint, ObjectQueryParams, QueryParams);
 }
 
 FVector UCMAggressiveSightComponent::GetSightForward() const

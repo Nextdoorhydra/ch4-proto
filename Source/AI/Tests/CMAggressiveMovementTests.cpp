@@ -1,4 +1,5 @@
 #include "Aggressive/Common/Core/CMAggressiveAITypes.h"
+#include "Aggressive/Common/Movement/CMAIFixedLegActuatorComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "Misc/AutomationTest.h"
@@ -28,6 +29,15 @@ bool FCMAggressiveMovementRulesTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("A body inside the acceptance radius advances"), CMAggressiveOmnidirectionalPath::ShouldAdvancePathPoint(FVector(95.0f, 0.0f, 0.0f), FVector::ZeroVector, FVector(100.0f, 0.0f, 0.0f), 10.0f, 20.0f, false));
     TestTrue(TEXT("A nearby body past an intermediate point advances"), CMAggressiveOmnidirectionalPath::ShouldAdvancePathPoint(FVector(105.0f, 0.0f, 0.0f), FVector::ZeroVector, FVector(100.0f, 0.0f, 0.0f), 1.0f, 20.0f, false));
     TestFalse(TEXT("Passing a final point outside acceptance does not finish the path"), CMAggressiveOmnidirectionalPath::ShouldAdvancePathPoint(FVector(105.0f, 0.0f, 0.0f), FVector::ZeroVector, FVector(100.0f, 0.0f, 0.0f), 1.0f, 20.0f, true));
+
+    const FVector ContactLocation(100.0f, -50.0f, 128.0f);
+    FVector GroundSweepStart;
+    FVector GroundSweepEnd;
+    CMAIFixedLegActuation::CalculateGroundSweepSegment(ContactLocation, 12.0f, 8.0f, GroundSweepStart, GroundSweepEnd);
+    TestTrue(TEXT("Ground sweep sphere starts clear of the contact plane"), GroundSweepStart.Z - 12.0f > ContactLocation.Z);
+    TestEqual(TEXT("Ground sweep keeps the contact point X coordinate"), GroundSweepStart.X, ContactLocation.X);
+    TestEqual(TEXT("Ground sweep keeps the contact point Y coordinate"), GroundSweepStart.Y, ContactLocation.Y);
+    TestEqual(TEXT("Ground sweep travels the configured distance"), GroundSweepStart.Z - GroundSweepEnd.Z, 8.0);
 
     return true;
 }

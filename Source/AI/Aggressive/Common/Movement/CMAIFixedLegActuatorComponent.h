@@ -17,6 +17,9 @@ namespace CMAIFixedLegActuation
 
     /** 지정 위치의 임펄스가 만드는 월드 Z축 각운동량을 계산한다. */
     AI_API float CalculateYawAngularImpulse(const FVector& CenterOfMass, const FVector& ApplicationLocation, const FVector& WorldImpulse);
+
+    /** 접지 구체가 접촉점 위에서 시작해 허용 거리만큼 아래를 검사하도록 스윕 구간을 계산한다. */
+    AI_API void CalculateGroundSweepSegment(const FVector& ContactLocation, float GroundCheckRadius, float GroundContactDistance, FVector& OutStart, FVector& OutEnd);
 } // namespace CMAIFixedLegActuation
 
 /**
