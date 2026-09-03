@@ -16,6 +16,10 @@ void UCMStageLoadBarrierComponent::BeginBarrier(
     bBlockingRequest = bBlocking;
     ActiveTimeout = FMath::Max(0.0f, TimeoutSeconds);
     RefreshProgress();
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Stage load barrier started. Request=%s Ready=%d Target=%d Timeout=%.1fs"),
+        *ActiveRequestId.ToString(), ReadyControllers.Num(),
+        GetTargetPlayerCount(), ActiveTimeout);
     if (bBlockingRequest && ActiveTimeout > 0.0f)
     {
         GetWorld()->GetTimerManager().SetTimer(
@@ -43,6 +47,10 @@ void UCMStageLoadBarrierComponent::ReportPlayerResult(
 
     ReadyControllers.Add(Controller);
     RefreshProgress();
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Stage load player reported. Request=%s Player=%s Succeeded=true Ready=%d Target=%d"),
+        *ActiveRequestId.ToString(), *GetNameSafe(Controller),
+        ReadyControllers.Num(), GetTargetPlayerCount());
     if (AreAllPlayersReady())
     {
         const FGuid CompletedId = ActiveRequestId;

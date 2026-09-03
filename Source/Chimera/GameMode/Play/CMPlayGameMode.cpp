@@ -909,6 +909,7 @@ void ACMPlayGameMode::FailActiveStageLoad(
     ActiveStageLoadRequestId.Invalidate();
     QueuedStageLoadRequests.Reset();
     bStageLoadReady = false;
+    SetPlayPhase(ECMPlayPhase::Failed);
 }
 
 // 등록된 Director의 보고만 받아 Starting에서 Playing으로 전환
