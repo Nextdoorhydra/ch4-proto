@@ -166,8 +166,9 @@ bool ACMLobbyGameMode::TryStartRouteDefinition(
         return false;
     }
 
-    StageRoute->SetSoloTestMode(
-        bTestRoute && LobbyState->GetLobbyPlayerCount() == 1);
+    const int32 ExpectedPlayerCount = LobbyState->GetLobbyPlayerCount();
+    StageRoute->SetExpectedPlayerCount(ExpectedPlayerCount);
+    StageRoute->SetSoloTestMode(bTestRoute && ExpectedPlayerCount == 1);
 
     const FCMStageRouteEntry* FirstStage = StageRoute->GetCurrentStage();
     const FString MapPackageName = FirstStage
@@ -197,8 +198,8 @@ bool ACMLobbyGameMode::TryStartRouteDefinition(
     }
 
     UE_LOG(LogChimeraStageLoad, Display,
-        TEXT("Lobby started stage route travel. StageRoute=%s Map=%s Requester=%s"),
+        TEXT("Lobby started stage route travel. StageRoute=%s Map=%s Requester=%s ExpectedPlayers=%d"),
         *GetPathNameSafe(RouteDefinition), *MapPackageName,
-        *GetNameSafe(RequestingPlayer));
+        *GetNameSafe(RequestingPlayer), ExpectedPlayerCount);
     return true;
 }
