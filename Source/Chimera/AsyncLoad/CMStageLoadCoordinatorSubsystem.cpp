@@ -155,6 +155,17 @@ bool UCMStageLoadCoordinatorSubsystem::StartStageScheduleRequest(
 		return false;
 	}
 
+	// Seamless Travel 중 구/신 로컬 컨트롤러가 같은 복제 요청을 차례로 전달할 수 있다.
+	// 이미 실행 중인 동일 요청은 취소·재시작하지 않고 기존 실행을 공유한다.
+	if (ActiveStageRequestId == RequestId)
+	{
+		UE_LOG(LogChimeraStageLoad, Display,
+			TEXT("Duplicate local stage schedule request ignored. NetMode=%d Request=%s Schedule=%s"),
+			GetWorld() ? static_cast<int32>(GetWorld()->GetNetMode()) : INDEX_NONE,
+			*RequestId.ToString(), *ScheduleId.ToString());
+		return true;
+	}
+
 	// 이전 스테이지의 Sequential 큐가 남아 있어도 새 스테이지 요청이 안전하게 대체한다.
 	if (ActiveStageRequestId.IsValid() || ScheduleLoadHandle.IsValid()
 		|| !ActiveQueuedGroup.IsNone() || !QueuedLoadGroups.IsEmpty())
@@ -263,6 +274,11 @@ FGuid UCMStageLoadCoordinatorSubsystem::RequestLoadGroup(FName LoadGroupId)
 	// 빈 Schedule 요청은 동기적으로 완료될 수 있으므로 방송 전에 반드시 추적 상태를 먼저 기록한다.
 	PendingRequests.Add(Request.CorrelationId, LoadGroupId);
 	GroupStates.FindOrAdd(LoadGroupId) = ECMStageLoadGroupState::Loading;
+	UE_LOG(LogChimeraStageLoad, Display,
+		TEXT("Stage load group started. NetMode=%d Schedule=%s Group=%s Request=%s Scope=%d"),
+		GetWorld() ? static_cast<int32>(GetWorld()->GetNetMode()) : INDEX_NONE,
+		*GetNameSafe(ActiveSchedule), *LoadGroupId.ToString(),
+		*Request.CorrelationId.ToString(), Request.Scope);
 	UGameplayMessageSubsystem::Get(this).BroadcastMessage(
 		AsyncPDALoaderTags::Message_Load_Request,
 		Request);
@@ -336,6 +352,12 @@ void UCMStageLoadCoordinatorSubsystem::HandleLoadComplete(
 
 	LoadedAssetsByGroup.Add(LoadGroupId, Message.LoadedAssetIds);
 	const bool bSucceeded = Message.Result == EAsyncLoadResult::Succeeded;
+	UE_LOG(LogChimeraStageLoad, Display,
+		TEXT("Stage load group completed. NetMode=%d Schedule=%s Group=%s Request=%s Result=%d Loaded=%d Failed=%d"),
+		GetWorld() ? static_cast<int32>(GetWorld()->GetNetMode()) : INDEX_NONE,
+		*GetNameSafe(ActiveSchedule), *LoadGroupId.ToString(),
+		*Message.CorrelationId.ToString(), static_cast<int32>(Message.Result),
+		Message.LoadedAssetIds.Num(), Message.FailedAssetIds.Num());
 	if (!bSucceeded)
 	{
 		UE_LOG(LogChimeraStageLoad, Error,

@@ -770,13 +770,18 @@ bool ACMPlayGameMode::StartStageLoadRequest(
     Request.ScheduleId = QueuedRequest.ScheduleId;
     Request.bBlocking = true;
 
+    const UCMStageRouteSubsystem* StageRoute = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>()
+        : nullptr;
+
     ActiveStageLoadRequestId = Request.RequestId;
     // 서버 로컬 로드가 요청 게시 중 즉시 완료될 수 있으므로
     // 완료 보고를 받을 배리어를 먼저 연 뒤 GameState에 게시한다.
     StageLoadBarrier->BeginBarrier(
         Request.RequestId,
         true,
-        StageLoadTimeout);
+        StageLoadTimeout,
+        StageRoute ? StageRoute->GetExpectedPlayerCount() : 0);
     PlayState->BeginStageLoadRequest(
         Request,
         StageLoadBarrier->GetTargetPlayerCount(),
@@ -909,6 +914,7 @@ void ACMPlayGameMode::FailActiveStageLoad(
     ActiveStageLoadRequestId.Invalidate();
     QueuedStageLoadRequests.Reset();
     bStageLoadReady = false;
+    SetPlayPhase(ECMPlayPhase::Failed);
 }
 
 // 등록된 Director의 보고만 받아 Starting에서 Playing으로 전환

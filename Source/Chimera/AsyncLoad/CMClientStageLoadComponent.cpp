@@ -2,8 +2,24 @@
 
 #include "AsyncLoad/CMStageLoadLog.h"
 #include "AsyncLoad/CMStageLoadCoordinatorSubsystem.h"
+#include "Engine/LocalPlayer.h"
 #include "GameMode/Play/CMPlayGameState.h"
 #include "Player/CMPlayerController.h"
+
+namespace
+{
+bool IsCurrentLocalPlayerController(
+    ACMPlayerController* Controller,
+    UWorld* World)
+{
+    ULocalPlayer* LocalPlayer = Controller
+        ? Controller->GetLocalPlayer()
+        : nullptr;
+    return Controller && World && Controller->IsLocalController()
+        && LocalPlayer
+        && LocalPlayer->GetPlayerController(World) == Controller;
+}
+}
 
 UCMClientStageLoadComponent::UCMClientStageLoadComponent()
 {
@@ -45,8 +61,18 @@ void UCMClientStageLoadComponent::TickComponent(
 void UCMClientStageLoadComponent::TryBindPlayGameState()
 {
     ACMPlayerController* Controller = Cast<ACMPlayerController>(GetOwner());
-    if (!Controller || !Controller->IsLocalController())
+    if (!IsCurrentLocalPlayerController(Controller, GetWorld()))
     {
+        if (BoundPlayGameState)
+        {
+            BoundPlayGameState->OnStageLoadRequestChanged.RemoveAll(this);
+            BoundPlayGameState = nullptr;
+        }
+        if (StageLoadCoordinator)
+        {
+            StageLoadCoordinator->OnStageStartRequiredFinished.RemoveAll(this);
+            StageLoadCoordinator = nullptr;
+        }
         return;
     }
 
@@ -89,7 +115,8 @@ void UCMClientStageLoadComponent::HandleStageLoadRequestChanged(
     const FCMStageLoadRequest& Request)
 {
     ACMPlayerController* Controller = Cast<ACMPlayerController>(GetOwner());
-    if (!Controller || !Request.IsValid() || Request.RequestId == LastHandledRequestId
+    if (!IsCurrentLocalPlayerController(Controller, GetWorld())
+        || !Request.IsValid() || Request.RequestId == LastHandledRequestId
         || !StageLoadCoordinator)
     {
         return;
@@ -119,7 +146,8 @@ void UCMClientStageLoadComponent::HandleStageStartRequiredFinished(
     FGuid RequestId,
     bool bSucceeded)
 {
-    if (ACMPlayerController* Controller = Cast<ACMPlayerController>(GetOwner()))
+    ACMPlayerController* Controller = Cast<ACMPlayerController>(GetOwner());
+    if (IsCurrentLocalPlayerController(Controller, GetWorld()))
     {
         Controller->ReportLocalStageLoadComplete(RequestId, bSucceeded);
     }

@@ -65,11 +65,18 @@ public:
     void SetSoloTestMode(bool bEnabled) { bSoloTestMode = bEnabled; }
     bool IsSoloTestMode() const { return bSoloTestMode; }
 
+    void SetExpectedPlayerCount(int32 PlayerCount)
+    {
+        ExpectedPlayerCount = FMath::Max(0, PlayerCount);
+    }
+    int32 GetExpectedPlayerCount() const { return ExpectedPlayerCount; }
+
 private:
     UPROPERTY(Transient)
     TObjectPtr<UCMStageRouteDefinition> StageRouteDefinition;
 
     int32 CurrentStageIndex = INDEX_NONE;
     int32 PendingStageIndex = INDEX_NONE;
+    int32 ExpectedPlayerCount = 0;
     bool bSoloTestMode = false;
 };

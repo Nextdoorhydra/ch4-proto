@@ -9,13 +9,19 @@
 void UCMStageLoadBarrierComponent::BeginBarrier(
     FGuid RequestId,
     bool bBlocking,
-    float TimeoutSeconds)
+    float TimeoutSeconds,
+    int32 ExpectedPlayerCount)
 {
     CancelBarrier();
     ActiveRequestId = RequestId;
     bBlockingRequest = bBlocking;
     ActiveTimeout = FMath::Max(0.0f, TimeoutSeconds);
+    ExpectedTargetPlayerCount = FMath::Max(0, ExpectedPlayerCount);
     RefreshProgress();
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Stage load barrier started. Request=%s Ready=%d Target=%d Timeout=%.1fs"),
+        *ActiveRequestId.ToString(), ReadyControllers.Num(),
+        GetTargetPlayerCount(), ActiveTimeout);
     if (bBlockingRequest && ActiveTimeout > 0.0f)
     {
         GetWorld()->GetTimerManager().SetTimer(
@@ -43,6 +49,10 @@ void UCMStageLoadBarrierComponent::ReportPlayerResult(
 
     ReadyControllers.Add(Controller);
     RefreshProgress();
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("Stage load player reported. Request=%s Player=%s Succeeded=true Ready=%d Target=%d"),
+        *ActiveRequestId.ToString(), *GetNameSafe(Controller),
+        ReadyControllers.Num(), GetTargetPlayerCount());
     if (AreAllPlayersReady())
     {
         const FGuid CompletedId = ActiveRequestId;
@@ -88,6 +98,11 @@ void UCMStageLoadBarrierComponent::CancelBarrier()
 // 현재 월드의 Chimera PlayerController 수 계산
 int32 UCMStageLoadBarrierComponent::GetTargetPlayerCount() const
 {
+    if (ExpectedTargetPlayerCount > 0)
+    {
+        return ExpectedTargetPlayerCount;
+    }
+
     int32 Count = 0;
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
