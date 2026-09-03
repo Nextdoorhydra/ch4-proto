@@ -141,6 +141,24 @@ ACMChimera::ACMChimera()
     RightArmRigAnchor->bEditableWhenInherited = true;
     RightFootPoint->SetArmRigControlAnchor(RightArmRigAnchor);
 
+    USceneComponent* LeftHeadRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("LeftHeadRigAnchor"));
+    LeftHeadRigAnchor->SetupAttachment(LeftFootPoint);
+    LeftHeadRigAnchor->SetRelativeLocationAndRotation(
+        FVector::ZeroVector,
+        FRotator::ZeroRotator);
+    LeftHeadRigAnchor->bEditableWhenInherited = true;
+    LeftFootPoint->SetHeadRigControlAnchor(LeftHeadRigAnchor);
+
+    USceneComponent* RightHeadRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("RightHeadRigAnchor"));
+    RightHeadRigAnchor->SetupAttachment(RightFootPoint);
+    RightHeadRigAnchor->SetRelativeLocationAndRotation(
+        FVector::ZeroVector,
+        FRotator::ZeroRotator);
+    RightHeadRigAnchor->bEditableWhenInherited = true;
+    RightFootPoint->SetHeadRigControlAnchor(RightHeadRigAnchor);
+
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(
         TEXT("CameraBoom")
     );
@@ -189,6 +207,8 @@ ACMChimera::ACMChimera()
     LegRigControlAnchors.Add(RightLegRigAnchor);
     ArmRigControlAnchors.Add(LeftArmRigAnchor);
     ArmRigControlAnchors.Add(RightArmRigAnchor);
+    HeadRigControlAnchors.Add(LeftHeadRigAnchor);
+    HeadRigControlAnchors.Add(RightHeadRigAnchor);
 
     for (int32 Index = 1; Index < MaxSegmentCount; ++Index)
     {
@@ -273,6 +293,28 @@ ACMChimera::ACMChimera()
         SegmentRightArmRigAnchor->bEditableWhenInherited = true;
         SegmentRightFoot->SetArmRigControlAnchor(SegmentRightArmRigAnchor);
 
+        USceneComponent* SegmentLeftHeadRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("LeftHeadRigAnchor_%d"), Index + 1)
+            );
+        SegmentLeftHeadRigAnchor->SetupAttachment(SegmentLeftFoot);
+        SegmentLeftHeadRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentLeftHeadRigAnchor->bEditableWhenInherited = true;
+        SegmentLeftFoot->SetHeadRigControlAnchor(SegmentLeftHeadRigAnchor);
+
+        USceneComponent* SegmentRightHeadRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("RightHeadRigAnchor_%d"), Index + 1)
+            );
+        SegmentRightHeadRigAnchor->SetupAttachment(SegmentRightFoot);
+        SegmentRightHeadRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentRightHeadRigAnchor->bEditableWhenInherited = true;
+        SegmentRightFoot->SetHeadRigControlAnchor(SegmentRightHeadRigAnchor);
+
         BodySegments.Add(SegmentBody);
         LeftFootPoints.Add(SegmentLeftFoot);
         RightFootPoints.Add(SegmentRightFoot);
@@ -282,6 +324,8 @@ ACMChimera::ACMChimera()
         LegRigControlAnchors.Add(SegmentRightRigAnchor);
         ArmRigControlAnchors.Add(SegmentLeftArmRigAnchor);
         ArmRigControlAnchors.Add(SegmentRightArmRigAnchor);
+        HeadRigControlAnchors.Add(SegmentLeftHeadRigAnchor);
+        HeadRigControlAnchors.Add(SegmentRightHeadRigAnchor);
     }
 
     for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
