@@ -78,34 +78,126 @@ bool TryGetTestBodyReferenceComponentTransform(
     return true;
 }
 
-bool TryCalculateLegAttachmentTransform(
+bool HasTestBodyReferenceBone(
+    const USkeletalMeshComponent& Mesh,
+    const FName BoneName
+)
+{
+    const USkeletalMesh* SkeletalMesh = Mesh.GetSkeletalMeshAsset();
+    return SkeletalMesh
+        && SkeletalMesh->GetRefSkeleton().FindBoneIndex(BoneName) != INDEX_NONE;
+}
+
+
+USceneComponent* ResolveTestBodyRigAnchor(
+    const UCMPartSlotComponent& PartSlot,
+    const ECMPartSlotType PartType
+)
+{
+    if (PartType == ECMPartSlotType::Leg)
+    {
+        return PartSlot.GetLegRigControlAnchor();
+    }
+    if (PartType == ECMPartSlotType::Arm)
+    {
+        if (USceneComponent* ArmAnchor = PartSlot.GetArmRigControlAnchor())
+        {
+            return ArmAnchor;
+        }
+        return const_cast<UCMPartSlotComponent*>(&PartSlot);
+    }
+    return nullptr;
+}
+
+bool ResolveTestBodyMountBoneName(
     const USkeletalMeshComponent& PartMesh,
+    const UCMPartSlotComponent& PartSlot,
+    const ECMPartSlotType PartType,
+    FName& OutMountBone,
+    bool& bOutUsesMirroredLeftChain
+)
+{
+    bOutUsesMirroredLeftChain = false;
+    if (PartType == ECMPartSlotType::Leg)
+    {
+        OutMountBone = LegThighBoneName;
+        return HasTestBodyReferenceBone(PartMesh, OutMountBone);
+    }
+    if (PartType == ECMPartSlotType::Arm)
+    {
+        FName LowerBone;
+        FName HandBone;
+        return PartSlot.ResolveArmReferenceBoneNames(
+            PartMesh,
+            OutMountBone,
+            LowerBone,
+            HandBone,
+            bOutUsesMirroredLeftChain);
+    }
+    return false;
+}
+
+FVector ResolvePartScaleForSlot(
+    ACMPartActorBase& Part,
+    const UCMPartSlotComponent& PartSlot,
+    FVector RequestedScale
+)
+{
+    const ECMPartSlotType PartType =
+        ICMPartInterface::Execute_GetPartType(&Part);
+    if (PartType != ECMPartSlotType::Arm || !Part.GetPartMesh())
+    {
+        return RequestedScale;
+    }
+
+    FName MountBone;
+    bool bUsesMirroredLeftChain = false;
+    if (ResolveTestBodyMountBoneName(
+            *Part.GetPartMesh(),
+            PartSlot,
+            PartType,
+            MountBone,
+            bUsesMirroredLeftChain))
+    {
+        double YMagnitude = FMath::Abs(RequestedScale.Y);
+        if (YMagnitude <= UE_SMALL_NUMBER)
+        {
+            YMagnitude = 1.0;
+        }
+        RequestedScale.Y = bUsesMirroredLeftChain ? -YMagnitude : YMagnitude;
+    }
+    return RequestedScale;
+}
+
+bool TryCalculatePartAttachmentTransform(
+    const USkeletalMeshComponent& PartMesh,
+    const FName MountBone,
     const FTransform& MeshToAttachmentRoot,
     const FTransform& AnchorRelativeTransform,
     const FTransform& ExistingAttachmentTransform,
     FTransform& OutAttachmentTransform
 )
 {
-    FTransform ThighReferenceTransform = FTransform::Identity;
+    FTransform MountReferenceTransform = FTransform::Identity;
     if (!TryGetTestBodyReferenceComponentTransform(
             PartMesh,
-            LegThighBoneName,
-            ThighReferenceTransform))
+            MountBone,
+            MountReferenceTransform))
     {
         return false;
     }
 
-    const FTransform ThighToAttachmentRoot =
-        ThighReferenceTransform * MeshToAttachmentRoot;
+    const FTransform MountToAttachmentRoot =
+        MountReferenceTransform * MeshToAttachmentRoot;
     FTransform AttachmentTransform(
         AnchorRelativeTransform.GetRotation()
-            * ThighToAttachmentRoot.GetRotation().Inverse(),
+            * MountToAttachmentRoot.GetRotation().Inverse(),
         FVector::ZeroVector,
         ExistingAttachmentTransform.GetScale3D());
-    const FVector ThighLocationWithZeroRoot =
-        (ThighToAttachmentRoot * AttachmentTransform).GetLocation();
+    const FVector MountLocationWithZeroRoot =
+        (MountToAttachmentRoot * AttachmentTransform).GetLocation();
     AttachmentTransform.SetLocation(
-        AnchorRelativeTransform.GetLocation() - ThighLocationWithZeroRoot);
+        AnchorRelativeTransform.GetLocation() - MountLocationWithZeroRoot);
     OutAttachmentTransform = AttachmentTransform;
     return true;
 }
@@ -145,56 +237,46 @@ bool TryGetLegReferenceLengths(
         && OutLowerLength > UE_SMALL_NUMBER;
 }
 
-void AlignLegActorThighToSlotAnchor(
-    ACMPartActorBase& Part,
-    const UCMPartSlotComponent& PartSlot
-)
-{
-    USceneComponent* Anchor = PartSlot.GetLegRigControlAnchor();
-    USceneComponent* RootComponent = Part.GetRootComponent();
-    USkeletalMeshComponent* PartMesh = Part.GetPartMesh();
-    if (!Anchor || !RootComponent || !PartMesh)
-    {
-        return;
-    }
-
-    FTransform AttachmentTransform = FTransform::Identity;
-    const FTransform AnchorRelativeTransform =
-        Anchor->GetComponentTransform().GetRelativeTransform(
-            PartSlot.GetComponentTransform());
-    if (TryCalculateLegAttachmentTransform(
-            *PartMesh,
-            PartMesh->GetRelativeTransform(),
-            AnchorRelativeTransform,
-            RootComponent->GetRelativeTransform(),
-            AttachmentTransform))
-    {
-        RootComponent->SetRelativeTransform(AttachmentTransform);
-    }
-}
-
-void AlignLegPreviewThighToSlotAnchor(
+void AlignPartPreviewMountToSlotAnchor(
     UChildActorComponent& Preview,
     const UCMPartSlotComponent& PartSlot
 )
 {
-    ACMLegPart* LegPart = Cast<ACMLegPart>(Preview.GetChildActor());
-    USceneComponent* Anchor = PartSlot.GetLegRigControlAnchor();
-    if (!LegPart || !Anchor || !LegPart->GetPartMesh()
-        || !LegPart->GetRootComponent())
+    ACMPartActorBase* Part = Cast<ACMPartActorBase>(Preview.GetChildActor());
+    if (!Part || !Part->GetPartMesh() || !Part->GetRootComponent())
     {
         return;
     }
 
-    const FTransform MeshToPreview = LegPart->GetPartMesh()
-        ->GetRelativeTransform() * LegPart->GetRootComponent()
-            ->GetRelativeTransform();
+    const ECMPartSlotType PartType =
+        ICMPartInterface::Execute_GetPartType(Part);
+    USceneComponent* Anchor = ResolveTestBodyRigAnchor(PartSlot, PartType);
+    if (!Anchor)
+    {
+        return;
+    }
+
+    FName MountBone = NAME_None;
+    bool bUsesMirroredLeftChain = false;
+    if (!ResolveTestBodyMountBoneName(
+            *Part->GetPartMesh(),
+            PartSlot,
+            PartType,
+            MountBone,
+            bUsesMirroredLeftChain))
+    {
+        return;
+    }
+
+    const FTransform MeshToPreview = Part->GetPartMesh()->GetRelativeTransform()
+        * Part->GetRootComponent()->GetRelativeTransform();
     FTransform PreviewTransform = FTransform::Identity;
     const FTransform AnchorRelativeTransform =
         Anchor->GetComponentTransform().GetRelativeTransform(
             PartSlot.GetComponentTransform());
-    if (TryCalculateLegAttachmentTransform(
-            *LegPart->GetPartMesh(),
+    if (TryCalculatePartAttachmentTransform(
+            *Part->GetPartMesh(),
+            MountBone,
             MeshToPreview,
             AnchorRelativeTransform,
             Preview.GetRelativeTransform(),
@@ -203,6 +285,7 @@ void AlignLegPreviewThighToSlotAnchor(
         Preview.SetRelativeTransform(PreviewTransform);
     }
 }
+
 }
 
 ACMProceduralAnimationTestBody::ACMProceduralAnimationTestBody()
@@ -299,6 +382,19 @@ ACMProceduralAnimationTestBody::ACMProceduralAnimationTestBody()
         SegmentLeftRigAnchor->bEditableWhenInherited = true;
         SegmentLeftSlot->SetLegRigControlAnchor(SegmentLeftRigAnchor);
         LegRigControlAnchors.Add(SegmentLeftRigAnchor);
+
+        const FName LeftArmRigAnchorName = Index == 0
+            ? TEXT("LeftArmRigAnchor")
+            : *FString::Printf(TEXT("LeftArmRigAnchor_%02d"), Index + 1);
+        USceneComponent* SegmentLeftArmRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(LeftArmRigAnchorName);
+        SegmentLeftArmRigAnchor->SetupAttachment(SegmentLeftSlot);
+        SegmentLeftArmRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentLeftArmRigAnchor->bEditableWhenInherited = true;
+        SegmentLeftSlot->SetArmRigControlAnchor(SegmentLeftArmRigAnchor);
+        ArmRigControlAnchors.Add(SegmentLeftArmRigAnchor);
         if (Index == 0)
         {
             LeftPartSlot = SegmentLeftSlot;
@@ -333,6 +429,19 @@ ACMProceduralAnimationTestBody::ACMProceduralAnimationTestBody()
         SegmentRightRigAnchor->bEditableWhenInherited = true;
         SegmentRightSlot->SetLegRigControlAnchor(SegmentRightRigAnchor);
         LegRigControlAnchors.Add(SegmentRightRigAnchor);
+
+        const FName RightArmRigAnchorName = Index == 0
+            ? TEXT("RightArmRigAnchor")
+            : *FString::Printf(TEXT("RightArmRigAnchor_%02d"), Index + 1);
+        USceneComponent* SegmentRightArmRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(RightArmRigAnchorName);
+        SegmentRightArmRigAnchor->SetupAttachment(SegmentRightSlot);
+        SegmentRightArmRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentRightArmRigAnchor->bEditableWhenInherited = true;
+        SegmentRightSlot->SetArmRigControlAnchor(SegmentRightArmRigAnchor);
+        ArmRigControlAnchors.Add(SegmentRightArmRigAnchor);
         if (Index == 0)
         {
             RightPartSlot = SegmentRightSlot;
@@ -1178,12 +1287,14 @@ bool ACMProceduralAnimationTestBody::TryBeginManualArmHold(
         ArmPart.EndSwing();
     }
 
-    // Arm meshes retain their source-character pivot, so tracing from the
-    // reference-pose hand can start too high to reach the floor. Build the
-    // hold target from the body-mounted slot instead, extending along the
-    // authored left/right axis so the arm plants by opening away from the
-    // body rather than folding along the body's travel direction.
-    FVector GroundTracePoint = PartSlot.GetComponentLocation();
+    // Build the hold target from the authored Arm shoulder mount. This keeps
+    // gameplay tracing aligned with the same anchor used to remove the source-
+    // character pivot during attachment, even when designers offset the Arm
+    // anchor independently from the generic Part slot.
+    const USceneComponent* ArmMountAnchor = PartSlot.GetArmRigControlAnchor();
+    FVector GroundTracePoint = ArmMountAnchor
+        ? ArmMountAnchor->GetComponentLocation()
+        : PartSlot.GetComponentLocation();
     const USceneComponent* BodySegment = PartSlot.GetAttachParent();
     if (BodySegment)
     {
@@ -1424,23 +1535,24 @@ ACMPartActorBase* ACMProceduralAnimationTestBody::SpawnPart(
             PartSlot->GetComponentTransform(),
             SpawnParameters
         );
-    if (!IsValid(SpawnedPart) || !PartSlot->AttachPart(SpawnedPart))
+    if (!IsValid(SpawnedPart))
     {
-        if (IsValid(SpawnedPart))
-        {
-            SpawnedPart->Destroy();
-        }
+        return nullptr;
+    }
+
+    // Apply the final side-aware scale before attachment so the mount-bone
+    // alignment performed by UCMPartSlotComponent uses the final transform.
+    SpawnedPart->SetActorScale3D(
+        ResolvePartScaleForSlot(*SpawnedPart, *PartSlot, RelativeScale));
+    if (!PartSlot->AttachPart(SpawnedPart))
+    {
+        SpawnedPart->Destroy();
         return nullptr;
     }
 
     // Attached Parts are visual/procedural actors on this test body. The box
     // proxy is the sole physical collision shape, avoiding self-depenetration.
     SpawnedPart->SetActorEnableCollision(false);
-    SpawnedPart->SetActorRelativeScale3D(RelativeScale);
-    if (ACMLegPart* LegPart = Cast<ACMLegPart>(SpawnedPart))
-    {
-        AlignLegActorThighToSlotAnchor(*LegPart, *PartSlot);
-    }
     return SpawnedPart;
 }
 
@@ -1562,11 +1674,17 @@ void ACMProceduralAnimationTestBody::RefreshPartPreviews()
             FRotator::ZeroRotator
         );
         Preview->SetRelativeScale3D(RelativeScale);
-        if (AActor* PreviewActor = Preview->GetChildActor())
+        if (ACMPartActorBase* PreviewActor =
+                Cast<ACMPartActorBase>(Preview->GetChildActor()))
         {
             PreviewActor->SetActorEnableCollision(false);
+            Preview->SetRelativeScale3D(
+                ResolvePartScaleForSlot(
+                    *PreviewActor,
+                    *PartSlot,
+                    RelativeScale));
         }
-        AlignLegPreviewThighToSlotAnchor(*Preview, *PartSlot);
+        AlignPartPreviewMountToSlotAnchor(*Preview, *PartSlot);
     };
 
     for (int32 Index = 0; Index < LeftPartPreviews.Num(); ++Index)

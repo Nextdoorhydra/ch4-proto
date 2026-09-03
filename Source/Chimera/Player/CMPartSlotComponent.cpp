@@ -14,6 +14,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogChimeraPartSlot, Log, All);
 namespace
 {
 const FName LegThighBoneName(TEXT("thigh_l"));
+const FName ArmUpperLeftBoneName(TEXT("upperarm_l"));
+const FName ArmLowerLeftBoneName(TEXT("lowerarm_l"));
+const FName ArmHandLeftBoneName(TEXT("hand_l"));
+const FName ArmUpperRightBoneName(TEXT("upperarm_r"));
+const FName ArmLowerRightBoneName(TEXT("lowerarm_r"));
+const FName ArmHandRightBoneName(TEXT("hand_r"));
 
 bool TryGetReferenceComponentTransform(
     const USkeletalMeshComponent& Mesh,
@@ -47,46 +53,185 @@ bool TryGetReferenceComponentTransform(
     return true;
 }
 
-void AlignLegThighToRigAnchor(
-    AActor& PartActor,
+bool HasReferenceBone(
+    const USkeletalMeshComponent& Mesh,
+    const FName BoneName
+)
+{
+    const USkeletalMesh* SkeletalMesh = Mesh.GetSkeletalMeshAsset();
+    return SkeletalMesh
+        && SkeletalMesh->GetRefSkeleton().FindBoneIndex(BoneName) != INDEX_NONE;
+}
+
+bool HasArmReferenceChain(
+    const USkeletalMeshComponent& Mesh,
+    const FName UpperBone,
+    const FName LowerBone,
+    const FName HandBone
+)
+{
+    return HasReferenceBone(Mesh, UpperBone)
+        && HasReferenceBone(Mesh, LowerBone)
+        && HasReferenceBone(Mesh, HandBone);
+}
+
+void ConfigureArmSideScale(
+    ACMPartActorBase& Part,
     const UCMPartSlotComponent& PartSlot
 )
 {
+    USceneComponent* PartRoot = Part.GetRootComponent();
+    USkeletalMeshComponent* PartMesh = Part.GetPartMesh();
+    if (!PartRoot || !PartMesh)
+    {
+        return;
+    }
+
+    FName UpperBone;
+    FName LowerBone;
+    FName HandBone;
+    bool bUsesMirroredLeftChain = false;
+    if (!PartSlot.ResolveArmReferenceBoneNames(
+            *PartMesh,
+            UpperBone,
+            LowerBone,
+            HandBone,
+            bUsesMirroredLeftChain))
+    {
+        return;
+    }
+
+    FVector RelativeScale = PartRoot->GetRelativeScale3D();
+    double YMagnitude = FMath::Abs(RelativeScale.Y);
+    if (YMagnitude <= UE_SMALL_NUMBER)
+    {
+        YMagnitude = 1.0;
+    }
+    RelativeScale.Y = bUsesMirroredLeftChain ? -YMagnitude : YMagnitude;
+    PartRoot->SetRelativeScale3D(RelativeScale);
+}
+
+USceneComponent* ResolveRigAnchor(
+    const UCMPartSlotComponent& PartSlot,
+    const ECMPartSlotType PartType
+)
+{
+    if (PartType == ECMPartSlotType::Leg)
+    {
+        return PartSlot.GetLegRigControlAnchor();
+    }
+    if (PartType == ECMPartSlotType::Arm)
+    {
+        if (USceneComponent* ArmAnchor = PartSlot.GetArmRigControlAnchor())
+        {
+            return ArmAnchor;
+        }
+        return const_cast<UCMPartSlotComponent*>(&PartSlot);
+    }
+    return nullptr;
+}
+
+bool ResolveMountBoneName(
+    const USkeletalMeshComponent& PartMesh,
+    const UCMPartSlotComponent& PartSlot,
+    const ECMPartSlotType PartType,
+    FName& OutMountBone
+)
+{
+    if (PartType == ECMPartSlotType::Leg)
+    {
+        OutMountBone = LegThighBoneName;
+        return HasReferenceBone(PartMesh, OutMountBone);
+    }
+
+    if (PartType == ECMPartSlotType::Arm)
+    {
+        FName LowerBone;
+        FName HandBone;
+        bool bUsesMirroredLeftChain = false;
+        return PartSlot.ResolveArmReferenceBoneNames(
+            PartMesh,
+            OutMountBone,
+            LowerBone,
+            HandBone,
+            bUsesMirroredLeftChain);
+    }
+
+    return false;
+}
+
+void AlignPartMountBoneToRigAnchor(
+    AActor& PartActor,
+    const UCMPartSlotComponent& PartSlot,
+    const ECMPartSlotType PartType
+)
+{
     ACMPartActorBase* Part = Cast<ACMPartActorBase>(&PartActor);
-    USceneComponent* Anchor = PartSlot.GetLegRigControlAnchor();
     USceneComponent* PartRoot = Part ? Part->GetRootComponent() : nullptr;
     USkeletalMeshComponent* PartMesh = Part ? Part->GetPartMesh() : nullptr;
-    if (!Anchor || !PartRoot || !PartMesh)
+    USceneComponent* Anchor = ResolveRigAnchor(PartSlot, PartType);
+    if (!Part || !PartRoot || !PartMesh || !Anchor)
     {
         return;
     }
 
-    FTransform ThighReferenceTransform = FTransform::Identity;
+    FName MountBone = NAME_None;
+    if (!ResolveMountBoneName(*PartMesh, PartSlot, PartType, MountBone))
+    {
+        UE_LOG(LogChimeraPartSlot, Warning,
+            TEXT("[Attach Alignment] Missing mount bone for Part=%s Type=%d Slot=(%d,%d)."),
+            *GetNameSafe(&PartActor),
+            static_cast<int32>(PartType),
+            PartSlot.SegmentIndex,
+            PartSlot.PartSlotIndex);
+        return;
+    }
+
+    FTransform MountReferenceTransform = FTransform::Identity;
     if (!TryGetReferenceComponentTransform(
             *PartMesh,
-            LegThighBoneName,
-            ThighReferenceTransform))
+            MountBone,
+            MountReferenceTransform))
     {
         return;
     }
 
-    const FTransform ThighToPartRoot =
-        ThighReferenceTransform * PartMesh->GetRelativeTransform();
+    const FTransform MountToPartRoot =
+        MountReferenceTransform * PartMesh->GetRelativeTransform();
     const FTransform AnchorRelativeTransform =
         Anchor->GetComponentTransform().GetRelativeTransform(
             PartSlot.GetComponentTransform());
     FTransform PartRootTransform(
         AnchorRelativeTransform.GetRotation()
-            * ThighToPartRoot.GetRotation().Inverse(),
+            * MountToPartRoot.GetRotation().Inverse(),
         FVector::ZeroVector,
         PartRoot->GetRelativeScale3D()
     );
-    const FVector ThighLocationWithZeroRoot =
-        (ThighToPartRoot * PartRootTransform).GetLocation();
+    const FVector MountLocationWithZeroRoot =
+        (MountToPartRoot * PartRootTransform).GetLocation();
     PartRootTransform.SetLocation(
-        AnchorRelativeTransform.GetLocation() - ThighLocationWithZeroRoot
+        AnchorRelativeTransform.GetLocation() - MountLocationWithZeroRoot
     );
     PartRoot->SetRelativeTransform(PartRootTransform);
+}
+
+void ApplyMountedPartTransform(
+    AActor& PartActor,
+    const UCMPartSlotComponent& PartSlot,
+    const ECMPartSlotType PartType
+)
+{
+    ACMPartActorBase* Part = Cast<ACMPartActorBase>(&PartActor);
+    if (PartType == ECMPartSlotType::Arm && Part)
+    {
+        ConfigureArmSideScale(*Part, PartSlot);
+    }
+
+    if (PartType == ECMPartSlotType::Leg
+        || PartType == ECMPartSlotType::Arm)
+    {
+        AlignPartMountBoneToRigAnchor(PartActor, PartSlot, PartType);
+    }
 }
 }
 
@@ -163,10 +308,7 @@ bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
         this,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale
     );
-    if (PartType == ECMPartSlotType::Leg)
-    {
-        AlignLegThighToRigAnchor(*AttachedPart, *this);
-    }
+    ApplyMountedPartTransform(*AttachedPart, *this, PartType);
 
     if (UAbilitySystemComponent* ASC = GetOwnerAbilitySystemComponent())
     {
@@ -259,6 +401,70 @@ USceneComponent* UCMPartSlotComponent::GetLegRigControlAnchor() const
     return LegRigControlAnchor;
 }
 
+void UCMPartSlotComponent::SetArmRigControlAnchor(
+    USceneComponent* InControlAnchor
+)
+{
+    ArmRigControlAnchor = InControlAnchor;
+}
+
+USceneComponent* UCMPartSlotComponent::GetArmRigControlAnchor() const
+{
+    return ArmRigControlAnchor;
+}
+
+bool UCMPartSlotComponent::ResolveArmReferenceBoneNames(
+    const USkeletalMeshComponent& Mesh,
+    FName& OutUpperBone,
+    FName& OutLowerBone,
+    FName& OutHandBone,
+    bool& bOutUsesMirroredLeftChain
+) const
+{
+    const bool bRightSlot = PartSlotIndex == 1;
+    const bool bHasLeftChain = HasArmReferenceChain(
+        Mesh,
+        ArmUpperLeftBoneName,
+        ArmLowerLeftBoneName,
+        ArmHandLeftBoneName);
+    const bool bHasRightChain = HasArmReferenceChain(
+        Mesh,
+        ArmUpperRightBoneName,
+        ArmLowerRightBoneName,
+        ArmHandRightBoneName);
+
+    bOutUsesMirroredLeftChain = false;
+    if (bRightSlot
+        && bPreferNativeRightArmChain
+        && bHasRightChain)
+    {
+        OutUpperBone = ArmUpperRightBoneName;
+        OutLowerBone = ArmLowerRightBoneName;
+        OutHandBone = ArmHandRightBoneName;
+        return true;
+    }
+
+    if (bHasLeftChain)
+    {
+        OutUpperBone = ArmUpperLeftBoneName;
+        OutLowerBone = ArmLowerLeftBoneName;
+        OutHandBone = ArmHandLeftBoneName;
+        bOutUsesMirroredLeftChain = bRightSlot;
+        return true;
+    }
+
+    // Fallback for a right-only Arm asset or diagnostic mesh.
+    if (bHasRightChain)
+    {
+        OutUpperBone = ArmUpperRightBoneName;
+        OutLowerBone = ArmLowerRightBoneName;
+        OutHandBone = ArmHandRightBoneName;
+        return true;
+    }
+
+    return false;
+}
+
 void UCMPartSlotComponent::OnRep_AttachedPart(AActor* PreviousPart)
 {
     if (IsValid(PreviousPart)
@@ -275,11 +481,9 @@ void UCMPartSlotComponent::OnRep_AttachedPart(AActor* PreviousPart)
             this,
             FAttachmentTransformRules::SnapToTargetNotIncludingScale
         );
-        if (ICMPartInterface::Execute_GetPartType(AttachedPart)
-            == ECMPartSlotType::Leg)
-        {
-            AlignLegThighToRigAnchor(*AttachedPart, *this);
-        }
+        const ECMPartSlotType PartType =
+            ICMPartInterface::Execute_GetPartType(AttachedPart);
+        ApplyMountedPartTransform(*AttachedPart, *this, PartType);
     }
 
     OnAttachedPartChanged.Broadcast(this, AttachedPart);

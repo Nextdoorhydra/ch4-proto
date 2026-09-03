@@ -71,6 +71,15 @@ public:
             : nullptr;
     }
 
+    UFUNCTION(BlueprintPure,
+        Category = "Chimera|Animation Test|Control Rig")
+    USceneComponent* GetArmRigControlAnchor(int32 Index) const
+    {
+        return ArmRigControlAnchors.IsValidIndex(Index)
+            ? ArmRigControlAnchors[Index]
+            : nullptr;
+    }
+
     int32 GetSegmentConstraintCount() const
     {
         return SegmentConstraints.Num();
@@ -270,6 +279,11 @@ protected:
         Category = "Components|Leg Control Rig")
     TArray<TObjectPtr<USceneComponent>> LegRigControlAnchors;
 
+    /** Per-slot Arm shoulder attachment targets editable in the viewport. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+        Category = "Components|Arm Control Rig")
+    TArray<TObjectPtr<USceneComponent>> ArmRigControlAnchors;
+
     /** Construction-time preview of the actual configured Part Blueprint. */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UChildActorComponent> LeftPartPreview;
@@ -322,7 +336,11 @@ protected:
         Category = "Chimera|Animation Test|Parts|Arm Test")
     TArray<int32> SimulatedArmSegmentIndices = { 2, 5 };
 
-    /** Mirrors the authored left Part when it is mounted in the right slot. */
+    /**
+     * Default requested right-side scale. Arm Y sign is resolved automatically:
+     * native _r chains stay unmirrored only when the slot opts into them;
+     * otherwise the production left-authored Arm convention is mirrored.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Animation Test|Parts")
     FVector RightPartRelativeScale = FVector(1.0, -1.0, 1.0);

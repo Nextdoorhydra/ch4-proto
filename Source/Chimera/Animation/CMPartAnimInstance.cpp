@@ -15,9 +15,9 @@ namespace
 const FName LegThighBone(TEXT("thigh_l"));
 const FName LegCalfBone(TEXT("calf_l"));
 const FName LegFootBone(TEXT("foot_l"));
-const FName ArmUpperBone(TEXT("upperarm_l"));
-const FName ArmLowerBone(TEXT("lowerarm_l"));
-const FName ArmHandBone(TEXT("hand_l"));
+const FName ArmDefaultUpperBone(TEXT("upperarm_l"));
+const FName ArmDefaultLowerBone(TEXT("lowerarm_l"));
+const FName ArmDefaultHandBone(TEXT("hand_l"));
 
 bool TryGetReferenceComponentTransform(
     const USkeletalMeshComponent& Mesh,
@@ -50,6 +50,9 @@ bool TryGetReferenceComponentTransform(
     }
     return true;
 }
+
+
+
 }
 
 float CMPartAnimation::CalculateLooseMotionAlpha(const float Phase)
@@ -500,20 +503,37 @@ void UCMPartAnimInstance::UpdateArmRuntimeState(
         return;
     }
 
+    UCMPartSlotComponent* PartSlot = ArmPart.GetAttachedPartSlot();
+    FName UpperBone = ArmDefaultUpperBone;
+    FName LowerBone = ArmDefaultLowerBone;
+    FName HandBone = ArmDefaultHandBone;
+    bool bUsesMirroredLeftChain = false;
+    if (PartSlot
+        && !PartSlot->ResolveArmReferenceBoneNames(
+            *Mesh,
+            UpperBone,
+            LowerBone,
+            HandBone,
+            bUsesMirroredLeftChain))
+    {
+        ResetArmSimulation();
+        return;
+    }
+
     FTransform ReferenceShoulder = FTransform::Identity;
     FTransform ReferenceElbow = FTransform::Identity;
     FTransform ReferenceHand = FTransform::Identity;
     const bool bHasReferenceChain = TryGetReferenceComponentTransform(
             *Mesh,
-            ArmUpperBone,
+            UpperBone,
             ReferenceShoulder)
         && TryGetReferenceComponentTransform(
             *Mesh,
-            ArmLowerBone,
+            LowerBone,
             ReferenceElbow)
         && TryGetReferenceComponentTransform(
             *Mesh,
-            ArmHandBone,
+            HandBone,
             ReferenceHand);
     if (!bHasReferenceChain)
     {
@@ -538,16 +558,20 @@ void UCMPartAnimInstance::UpdateArmRuntimeState(
         return;
     }
 
-    UCMPartSlotComponent* PartSlot = ArmPart.GetAttachedPartSlot();
     USceneComponent* BodySegment = PartSlot
         ? PartSlot->GetAttachParent()
+        : nullptr;
+    const USceneComponent* ArmMountAnchor = PartSlot
+        ? PartSlot->GetArmRigControlAnchor()
         : nullptr;
     FVector OutwardDirection = Mesh->GetRightVector();
     if (PartSlot && BodySegment)
     {
+        const FVector MountLocation = ArmMountAnchor
+            ? ArmMountAnchor->GetComponentLocation()
+            : PartSlot->GetComponentLocation();
         OutwardDirection = FVector::VectorPlaneProject(
-            PartSlot->GetComponentLocation()
-                - BodySegment->GetComponentLocation(),
+            MountLocation - BodySegment->GetComponentLocation(),
             FVector::UpVector).GetSafeNormal();
     }
     if (OutwardDirection.IsNearlyZero())

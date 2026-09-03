@@ -110,9 +110,10 @@ namespace CMPartAnimation
  * Shared runtime data source for procedural Part animation Blueprints.
  *
  * A derived Anim Blueprint can feed these component-space targets into IK and
- * use PhysicsBlendWeight with RigidBody or AnimDynamics nodes. The instance
- * deliberately owns no bone names so each Part skeleton remains free to map
- * its own shoulder, elbow, wrist, hip, knee, ankle, and neck chains.
+ * use PhysicsBlendWeight with RigidBody or AnimDynamics nodes. Arm runtime
+ * state resolves the conventional upperarm/lowerarm/hand _l or _r chain from
+ * the mounted slot, while the Anim Blueprint remains free to map the exposed
+ * component-space targets to its Control Rig controls.
  */
 UCLASS(Transient, Blueprintable)
 class CHIMERA_API UCMPartAnimInstance : public UAnimInstance

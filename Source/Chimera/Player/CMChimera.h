@@ -366,6 +366,11 @@ protected:
         Category = "Chimera|Part Slots|Control Rig")
     TArray<TObjectPtr<USceneComponent>> LegRigControlAnchors;
 
+    /** Per-slot Arm shoulder mount targets. Defaults to each slot origin. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
+        Category = "Chimera|Part Slots|Control Rig")
+    TArray<TObjectPtr<USceneComponent>> ArmRigControlAnchors;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera")
     TArray<TObjectPtr<UPhysicsConstraintComponent>> SegmentConstraints;
 

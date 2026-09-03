@@ -10,6 +10,7 @@
 class AActor;
 class UAbilitySystemComponent;
 class UCMPartSlotComponent;
+class USkeletalMeshComponent;
 
 /** Parts may later use this value to validate which physical slots accept them. */
 UENUM(BlueprintType)
@@ -72,6 +73,27 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot|Control Rig")
     USceneComponent* GetLegRigControlAnchor() const;
 
+    /**
+     * Optional editor-authored shoulder attachment point for a mounted Arm.
+     * If unset, Arm attachment falls back to the slot transform itself.
+     */
+    void SetArmRigControlAnchor(USceneComponent* InControlAnchor);
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Slot|Control Rig")
+    USceneComponent* GetArmRigControlAnchor() const;
+
+    /**
+     * Resolves the Arm chain that this slot should consume. Right slots use a
+     * mirrored _l chain by default and can opt into a native _r chain.
+     */
+    bool ResolveArmReferenceBoneNames(
+        const USkeletalMeshComponent& Mesh,
+        FName& OutUpperBone,
+        FName& OutLowerBone,
+        FName& OutHandBone,
+        bool& bOutUsesMirroredLeftChain
+    ) const;
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Part Slot")
     FCMPartSlotAttachmentChanged OnAttachedPartChanged;
 
@@ -87,6 +109,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Part Slot")
     ECMPartSlotType AllowedPartType = ECMPartSlotType::Any;
+
+    /**
+     * Right slots default to mirroring a left-authored Arm and using its _l
+     * chain. Enable only when mounted Arm assets are authored for _r bones.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Part Slot|Arm")
+    bool bPreferNativeRightArmChain = false;
 
 protected:
     virtual void GetLifetimeReplicatedProps(
@@ -111,6 +141,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<USceneComponent> LegRigControlAnchor;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USceneComponent> ArmRigControlAnchor;
 
     FGameplayAbilitySpecHandle GrantedAbilityHandle;
 };
