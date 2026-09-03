@@ -27,7 +27,13 @@ public:
         meta = (ClampMin = "0.0"))
     float TraceRadius = 50.0f;
 
-    /** Used only when the local player has no controlled Head. */
+    /** Fixed distance from the camera boom pivot used as the trace start. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Camera Occlusion",
+        meta = (ClampMin = "0.0"))
+    float TraceStartDistance = 2200.0f;
+
+    /** Vertical offset applied above each player's first controlled slot. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Camera Occlusion")
     float TargetHeightOffset = 80.0f;

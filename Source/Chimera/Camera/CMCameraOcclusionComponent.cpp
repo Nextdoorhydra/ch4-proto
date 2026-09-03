@@ -5,12 +5,11 @@
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/SpringArmComponent.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
-#include "Parts/Head/CMHeadPartActor.h"
-#include "Parts/Head/CMVisionComponent.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMControlTypes.h"
@@ -156,7 +155,6 @@ void UCMCameraOcclusionComponent::FindTargetLocations(
     UWorld* World = GetWorld();
     if (Chimera && World)
     {
-        TSet<const ACMHeadPartActor*> AddedHeads;
         for (TActorIterator<ACMControlBody> It(World); It; ++It)
         {
             const ACMControlBody* ControlBody = *It;
@@ -166,7 +164,6 @@ void UCMCameraOcclusionComponent::FindTargetLocations(
                 continue;
             }
 
-            bool bAddedHeadForControlBody = false;
             FVector FirstSlotLocation = FVector::ZeroVector;
             bool bHasFirstSlot = false;
             for (const FCMPartSlotAddress& SlotAddress
@@ -179,25 +176,9 @@ void UCMCameraOcclusionComponent::FindTargetLocations(
                     FirstSlotLocation = PartSlot->GetComponentLocation();
                     bHasFirstSlot = true;
                 }
-                const ACMHeadPartActor* HeadPart = PartSlot
-                    ? Cast<ACMHeadPartActor>(PartSlot->GetAttachedPart())
-                    : nullptr;
-                if (!HeadPart || AddedHeads.Contains(HeadPart))
-                {
-                    continue;
-                }
-
-                AddedHeads.Add(HeadPart);
-                const UCMVisionComponent* VisionComponent =
-                    HeadPart->GetVisionComponent();
-                OutTargetLocations.Add(VisionComponent
-                    ? VisionComponent->GetVisionOrigin()
-                    : HeadPart->GetActorLocation());
-                bAddedHeadForControlBody = true;
-                break;
             }
 
-            if (!bAddedHeadForControlBody && bHasFirstSlot)
+            if (bHasFirstSlot)
             {
                 OutTargetLocations.Add(
                     FirstSlotLocation
@@ -226,13 +207,24 @@ void UCMCameraOcclusionComponent::FindCurrentOccluders(
     const UCameraComponent* Camera = Owner
         ? Owner->FindComponentByClass<UCameraComponent>()
         : nullptr;
+    const USpringArmComponent* CameraBoom = Owner
+        ? Owner->FindComponentByClass<USpringArmComponent>()
+        : nullptr;
     UWorld* World = GetWorld();
-    if (!Owner || !Camera || !World)
+    if (!Owner || !Camera || !CameraBoom || !World)
     {
         return;
     }
 
     const UCMCameraOcclusionConfig& Config = GetOcclusionConfig();
+    const FVector CameraBoomLocation = CameraBoom->GetComponentLocation();
+    const FVector CameraOffset = Camera->GetComponentLocation()
+        - CameraBoomLocation;
+    const FVector CameraDirection = CameraOffset.IsNearlyZero()
+        ? -Camera->GetForwardVector()
+        : CameraOffset.GetSafeNormal();
+    const FVector TraceStart = CameraBoomLocation
+        + CameraDirection * Config.TraceStartDistance;
     TArray<FVector> TargetLocations;
     FindTargetLocations(Config, TargetLocations);
     int32 ViewportWidth = 0;
@@ -277,7 +269,7 @@ void UCMCameraOcclusionComponent::FindCurrentOccluders(
         TArray<FHitResult> Hits;
         World->SweepMultiByObjectType(
             Hits,
-            Camera->GetComponentLocation(),
+            TraceStart,
             TargetLocation,
             FQuat::Identity,
             ObjectQueryParams,
