@@ -294,7 +294,8 @@ void UCMControlHUDWidget::RebindObservedSlotsAndParts()
         ++ControlIndex)
     {
         const FCMPartSlotAddress Address =
-            CurrentControlBody->GetPartSlotAddressForControlSlot(ControlIndex);
+            CurrentControlBody
+                ->GetEffectivePartSlotAddressForControlInput(ControlIndex);
         UCMPartSlotComponent* PartSlot =
             CurrentChimera->GetPartSlotComponent(Address);
         if (!PartSlot)
@@ -458,7 +459,8 @@ void UCMControlHUDWidget::RefreshAssignedParts()
         ++ControlIndex)
     {
         const FCMPartSlotAddress Address =
-            CurrentControlBody->GetPartSlotAddressForControlSlot(ControlIndex);
+            CurrentControlBody
+                ->GetEffectivePartSlotAddressForControlInput(ControlIndex);
         if (!CMControl::IsValidPartSlot(Address, ActiveSegmentCount))
         {
             continue;
@@ -533,7 +535,8 @@ void UCMControlHUDWidget::RefreshPartHealth()
         ++ControlIndex)
     {
         const FCMPartSlotAddress Address =
-            CurrentControlBody->GetPartSlotAddressForControlSlot(ControlIndex);
+            CurrentControlBody
+                ->GetEffectivePartSlotAddressForControlInput(ControlIndex);
         if (!CMControl::IsValidPartSlot(
                 Address, CurrentChimera->GetActiveSegmentCount()))
         {
@@ -570,7 +573,8 @@ void UCMControlHUDWidget::SetControlSlotHighlighted(
     }
 
     const FCMPartSlotAddress Address =
-        CurrentControlBody->GetPartSlotAddressForControlSlot(ControlIndex);
+        CurrentControlBody
+            ->GetEffectivePartSlotAddressForControlInput(ControlIndex);
     if (!CMControl::IsValidPartSlot(
             Address, CurrentChimera->GetActiveSegmentCount()))
     {
