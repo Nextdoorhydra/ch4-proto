@@ -182,9 +182,15 @@ public:
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;
 
-    // 서버에서 받은 하나의 환경 Force를 활성 몸통 마디의 질량 비율로 분배
+    // 서버에서 받은 환경 가속도를 모든 활성 몸통 마디에 질량과 무관하게 적용
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Physics")
-    void ApplyEnvironmentalForce(const FVector& TotalForce);
+    void ApplyEnvironmentalForce(const FVector& Acceleration);
+
+    // 지정한 몸통 마디 하나에만 환경 가속도 적용
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Physics")
+    void ApplyEnvironmentalForceToSegment(
+        int32 SegmentIndex,
+        const FVector& Acceleration);
 
     // Test Area 이동을 위해 활성 몸통 마디의 상대 배치를 유지하며 전체 물리 조립체 이동
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Testing")

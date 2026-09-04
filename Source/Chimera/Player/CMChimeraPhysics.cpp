@@ -3,41 +3,38 @@
 #include "Components/BoxComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 
-// 전체 환경 Force를 질량 비율로 나눠 모든 마디에 같은 가속도 적용
-void ACMChimera::ApplyEnvironmentalForce(const FVector& TotalForce)
+// 바람·컨베이어 가속도를 질량과 무관하게 적용해 정지 마찰을 넘김
+void ACMChimera::ApplyEnvironmentalForce(const FVector& Acceleration)
 {
-    if (!HasAuthority() || TotalForce.IsNearlyZero())
+    if (!HasAuthority() || Acceleration.IsNearlyZero())
     {
         return;
     }
 
     const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
-    float TotalMass = 0.0f;
     for (int32 Index = 0; Index < SegmentCount; ++Index)
     {
-        const UBoxComponent* SegmentBody = BodySegments[Index];
-        if (SegmentBody && SegmentBody->IsSimulatingPhysics())
-        {
-            TotalMass += FMath::Max(SegmentBody->GetMass(), UE_SMALL_NUMBER);
-        }
+        ApplyEnvironmentalForceToSegment(Index, Acceleration);
     }
+}
 
-    if (TotalMass <= UE_SMALL_NUMBER)
+void ACMChimera::ApplyEnvironmentalForceToSegment(
+    int32 SegmentIndex,
+    const FVector& Acceleration)
+{
+    if (!HasAuthority()
+        || Acceleration.IsNearlyZero()
+        || SegmentIndex < 0
+        || SegmentIndex >= ActiveSegmentCount
+        || !BodySegments.IsValidIndex(SegmentIndex))
     {
         return;
     }
 
-    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    UBoxComponent* SegmentBody = BodySegments[SegmentIndex];
+    if (SegmentBody && SegmentBody->IsSimulatingPhysics())
     {
-        UBoxComponent* SegmentBody = BodySegments[Index];
-        if (!SegmentBody || !SegmentBody->IsSimulatingPhysics())
-        {
-            continue;
-        }
-
-        const float MassFraction =
-            FMath::Max(SegmentBody->GetMass(), UE_SMALL_NUMBER) / TotalMass;
-        SegmentBody->AddForce(TotalForce * MassFraction);
+        SegmentBody->AddForce(Acceleration, NAME_None, true);
     }
 }
 
