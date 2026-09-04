@@ -51,15 +51,6 @@ void ACMRoomEntryTrigger::BeginPlay()
         this, &ThisClass::HandleBeginOverlap);
 }
 
-void ACMRoomEntryTrigger::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    if (EntryBlockerDoor)
-    {
-        EntryBlockerDoor->OnDoorTransitionFinished.RemoveAll(this);
-    }
-    Super::EndPlay(EndPlayReason);
-}
-
 // 활성 몸통 마디 하나 이상이 진입하면 룸 확정 시작
 void ACMRoomEntryTrigger::HandleBeginOverlap(
     UPrimitiveComponent* OverlappedComponent,
@@ -69,7 +60,7 @@ void ACMRoomEntryTrigger::HandleBeginOverlap(
     bool bFromSweep,
     const FHitResult& SweepResult)
 {
-    if (!bCommitStarted)
+    if (HasAuthority() && !bCommitStarted)
     {
         TryCommitForChimera(Cast<ACMChimera>(OtherActor));
     }
@@ -84,31 +75,10 @@ void ACMRoomEntryTrigger::TryCommitForChimera(ACMChimera* Chimera)
     }
 
     bCommitStarted = true;
-    if (!IsValid(EntryBlockerDoor) || !EntryBlockerDoor->IsElementActive())
+    CommitRoom();
+    if (bCommitFinished && IsValid(EntryBlockerDoor) && EntryBlockerDoor->IsElementActive())
     {
-        CommitRoom();
-        return;
-    }
-
-    if (bWaitForDoorClosed)
-    {
-        EntryBlockerDoor->OnDoorTransitionFinished.AddUniqueDynamic(
-            this, &ThisClass::HandleDoorTransitionFinished);
-    }
-    EntryBlockerDoor->DeactivateDevice();
-    if (!bWaitForDoorClosed)
-    {
-        CommitRoom();
-    }
-}
-
-// 닫힘 애니메이션과 블로킹 Collision 완료 신호에서만 룸 전환 진행
-void ACMRoomEntryTrigger::HandleDoorTransitionFinished(bool bIsOpen)
-{
-    if (!bIsOpen)
-    {
-        EntryBlockerDoor->OnDoorTransitionFinished.RemoveAll(this);
-        CommitRoom();
+        EntryBlockerDoor->DeactivateDevice();
     }
 }
 
@@ -134,11 +104,6 @@ EDataValidationResult ACMRoomEntryTrigger::IsDataValid(
     {
         Context.AddWarning(FText::FromString(
             TEXT("RoomEntryTrigger의 RoomId가 비어 있습니다.")));
-    }
-    if (bWaitForDoorClosed && !EntryBlockerDoor)
-    {
-        Context.AddWarning(FText::FromString(
-            TEXT("문 완료를 기다리도록 설정했지만 EntryBlockerDoor가 없습니다. 첫 룸이면 무시할 수 있습니다.")));
     }
     return Result;
 }
