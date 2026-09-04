@@ -234,6 +234,7 @@ private:
     UPROPERTY(ReplicatedUsing = OnRep_GroundAnchor)
     FVector_NetQuantizeNormal GroundAnchorNormal = FVector::UpVector;
 
+    /** Timestamp in GameState's synchronized server-world time domain. */
     UPROPERTY(Replicated)
     float SwingStartTime = 0.0f;
 
