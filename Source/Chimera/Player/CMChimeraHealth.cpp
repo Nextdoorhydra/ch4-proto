@@ -121,6 +121,34 @@ void ACMChimera::ApplyDamageToSegmentAtHit(
     ForceNetUpdate();
 }
 
+bool ACMChimera::RestoreSegmentToFullHealth(int32 SegmentIndex)
+{
+    if (!HasAuthority()
+        || !SegmentHealthStates.IsValidIndex(SegmentIndex))
+    {
+        return false;
+    }
+
+    FCMBodySegmentHealthState& SegmentState =
+        SegmentHealthStates[SegmentIndex];
+    if (SegmentState.bDead || SegmentState.MaxHealth <= 0.0f)
+    {
+        return false;
+    }
+
+    const float PreviousHealth = SegmentState.Health;
+    SegmentState.Health = SegmentState.MaxHealth;
+    OnSegmentStatesChanged.Broadcast();
+    ForceNetUpdate();
+
+    UE_LOG(LogChimeraLineBody, Log,
+        TEXT("[Segment Full Heal] Segment=%d Health=%.1f->%.1f"),
+        SegmentIndex,
+        PreviousHealth,
+        SegmentState.Health);
+    return true;
+}
+
 bool ACMChimera::IsSegmentAlive(int32 SegmentIndex) const
 {
     return SegmentHealthStates.IsValidIndex(SegmentIndex)

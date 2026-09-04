@@ -1129,6 +1129,15 @@ void ACMPlayerController::SetControlSlotPressed(
                 ControlBody->ResolveControlInputSlot(SlotIndex));
         }
 
+        const bool bConsumeModifierHeld =
+            IsInputKeyDown(EKeys::LeftControl)
+            || IsInputKeyDown(EKeys::RightControl);
+        if (bPressed && bConsumeModifierHeld)
+        {
+            ControlBody->RequestConsumePartFromControlSlot(SlotIndex);
+            return;
+        }
+
         if (bPressed && bDetachModifierHeld)
         {
             ControlBody->RequestDetachPartFromControlSlot(SlotIndex);
