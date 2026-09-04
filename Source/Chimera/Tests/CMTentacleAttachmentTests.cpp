@@ -9,6 +9,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "Parts/Core/CMDroppedPartActor.h"
 #include "Parts/Core/CMPartActorBase.h"
@@ -185,13 +186,21 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
     if (TentacleDefaults)
     {
         TestEqual(
-            TEXT("BP_Goo drips Niagara is copied"),
+            TEXT("Legacy BP_Goo drips fallback remains available"),
             GetPathNameSafe(TentacleDefaults->GooDripsNiagaraSystem),
             FString(TEXT("/Game/Vefects/Tentacles_VFX/VFX/Goo/Particles/NS_Goo_Drips.NS_Goo_Drips")));
         TestEqual(
             TEXT("BP_Goo upward Niagara is copied"),
             GetPathNameSafe(TentacleDefaults->SourceNiagaraSystem),
             FString(TEXT("/Game/Vefects/Tentacles_VFX/VFX/Goo/Particles/NS_Goo_Up.NS_Goo_Up")));
+        TestEqual(
+            TEXT("Blueprint Goo drips component keeps its authored Niagara asset"),
+            GetPathNameSafe(TentacleDefaults->GooDripsEffect
+                ? TentacleDefaults->GooDripsEffect->GetAsset()
+                : nullptr),
+            GetPathNameSafe(TentacleDefaults->SourceEffect
+                ? TentacleDefaults->SourceEffect->GetAsset()
+                : nullptr));
         TestEqual(
             TEXT("BP_Spline tip Niagara is copied"),
             GetPathNameSafe(TentacleDefaults->TargetNiagaraSystem),
