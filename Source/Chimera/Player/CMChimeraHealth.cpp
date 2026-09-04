@@ -45,6 +45,16 @@ void ACMChimera::ApplyDamageToSegment(
 
     if (SegmentState.bDead)
     {
+        for (int32 PartSlotIndex = 0;
+            PartSlotIndex < CMControl::PartSlotsPerSegment;
+            ++PartSlotIndex)
+        {
+            FCMPartSlotAddress PartSlotAddress;
+            PartSlotAddress.SegmentIndex = SegmentIndex;
+            PartSlotAddress.PartSlotIndex = PartSlotIndex;
+            DetachPartFromSlot(PartSlotAddress);
+        }
+
         // Every player sharing this Segment loses only the controls mapped to
         // its left or right PartSlot.
         for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
@@ -53,7 +63,7 @@ void ACMChimera::ApplyDamageToSegment(
         }
 
         UE_LOG(LogChimeraLineBody, Warning,
-            TEXT("[Segment Death] Body=%d SegmentIndex=%d died; assigned left/right PartSlot controls were locked for all joint owners."),
+            TEXT("[Segment Death] Body=%d SegmentIndex=%d died; attached Parts were detached and assigned left/right PartSlot controls were locked for all joint owners."),
             SegmentIndex + 1,
             SegmentIndex);
 
