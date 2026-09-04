@@ -38,10 +38,8 @@ FCMDesiredRoomStreamingState ResolveDesiredRoomStreamingState(
     }
 
     FCMDesiredRoomStreamingState Result;
-    Result.bLoaded = RoomIndex >= CurrentRoomIndex
-        && RoomIndex <= CurrentRoomIndex + 2;
-    Result.bVisible = RoomIndex >= CurrentRoomIndex
-        && RoomIndex <= CurrentRoomIndex + 1;
+    Result.bLoaded = RoomIndex <= CurrentRoomIndex + 2;
+    Result.bVisible = RoomIndex <= CurrentRoomIndex + 1;
     return Result;
 }
 }
@@ -201,7 +199,7 @@ ULevelStreaming* ACMRoomStreamingController::ResolveStreamingLevel(
         Room.Level.ToSoftObjectPath().GetAssetFName());
 }
 
-// Room N 기준 N과 N+1은 표시하고 N+2는 숨김 로드하며 이전 룸은 해제
+// Room N 기준 이전 룸부터 N+1까지 표시하고 N+2는 숨김 로드 (지난 룸 유지)
 void ACMRoomStreamingController::ApplyStreamingWindow()
 {
     if (!Rooms.IsValidIndex(CurrentRoomIndex))
@@ -406,8 +404,23 @@ bool FCMRoomStreamingWindowAutomationTest::RunTest(const FString& Parameters)
         Next.bLoaded && Next.bVisible);
     TestTrue(TEXT("Next-next room is loaded but hidden"),
         NextNext.bLoaded && !NextNext.bVisible);
-    TestTrue(TEXT("Previous room is unloaded"),
-        !Previous.bLoaded && !Previous.bVisible);
+    TestTrue(TEXT("Previous room stays loaded and visible"),
+        Previous.bLoaded && Previous.bVisible);
+
+    for (int32 CurrentIndex = 0; CurrentIndex < 5; ++CurrentIndex)
+    {
+        for (int32 PreviousIndex = 0; PreviousIndex <= CurrentIndex; ++PreviousIndex)
+        {
+            const FCMDesiredRoomStreamingState Retained =
+                ResolveDesiredRoomStreamingState(PreviousIndex, CurrentIndex, 5);
+            TestTrue(TEXT("Every visited room remains loaded and visible"),
+                Retained.bLoaded && Retained.bVisible);
+        }
+    }
+    const FCMDesiredRoomStreamingState Distant =
+        ResolveDesiredRoomStreamingState(4, 0, 5);
+    TestTrue(TEXT("Distant future rooms are not preloaded"),
+        !Distant.bLoaded && !Distant.bVisible);
 
     const FCMDesiredRoomStreamingState Final =
         ResolveDesiredRoomStreamingState(4, 4, 5);
