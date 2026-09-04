@@ -1152,6 +1152,7 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
 
     const FVector TraceDirection = (TraceEnd - TraceStart).GetSafeNormal();
     float OccluderDistance = Hit.Distance;
+    float WallSurfaceDepth = 0.0f;
     if (const UPrimitiveComponent* HitComponent = Hit.GetComponent())
     {
         const FBoxSphereBounds Bounds = HitComponent->Bounds;
@@ -1159,6 +1160,13 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
             Bounds.BoxExtent.X,
             Bounds.BoxExtent.Y,
             Bounds.BoxExtent.Z
+        );
+        // The occluder mask must cover the camera-facing wall surface.  Move
+        // it only through the wall's estimated thickness; the base mask still
+        // stops at the first hit and keeps the space behind it hidden.
+        WallSurfaceDepth = FMath::Max(
+            GeometricThickness,
+            RenderConfig->MinimumOccluderThickness
         );
         const float RequiredThickness = FMath::Max(
             RenderConfig->MinimumOccluderThickness
@@ -1169,35 +1177,12 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
             OccluderDistance,
             Hit.Distance + RequiredThickness
         );
-        const float TopHeight = Bounds.Origin.Z + Bounds.BoxExtent.Z;
-        const float LowObstacleTopRevealHeight = FMath::Max(
-            FMath::Max(
-                RenderConfig->VisionHeightTolerance,
-                RenderConfig->OccluderSurfaceRevealDistance
-            ),
-            RenderConfig->VisionBelowHeightAllowance
-        );
-        const float VisionTopHeight = VisionSource.GetVisionOrigin().Z
-            + LowObstacleTopRevealHeight;
-        if (TopHeight <= VisionTopHeight)
-        {
-            const FVector PlanarDirection = TraceDirection.GetSafeNormal2D();
-            const float ProjectedCenter = FVector::DotProduct(
-                Bounds.Origin - TraceStart,
-                PlanarDirection
-            );
-            const float ProjectedExtent = FMath::Abs(PlanarDirection.X)
-                * Bounds.BoxExtent.X
-                + FMath::Abs(PlanarDirection.Y) * Bounds.BoxExtent.Y;
-            OccluderDistance = FMath::Max(
-                OccluderDistance,
-                FMath::Min(ProjectedCenter + ProjectedExtent,
-                    FVector::Distance(TraceStart, TraceEnd))
-            );
-        }
     }
     const float RevealedDistance = FMath::Min(
-        OccluderDistance + FMath::Max(RevealDistance, 0.0f),
+        OccluderDistance + FMath::Max(
+            FMath::Max(RevealDistance, 0.0f),
+            WallSurfaceDepth
+        ),
         FVector::Distance(TraceStart, TraceEnd)
     );
     const FVector RevealedPoint = TraceStart
