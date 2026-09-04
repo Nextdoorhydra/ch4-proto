@@ -274,7 +274,7 @@ void ACMPlayGameMode::RestartPlayer(AController* NewPlayer)
             {
                 if (PlayState->SharedChimera)
                 {
-                    PlayerController->ClientSetViewTarget(PlayState->SharedChimera);
+                    PlayerController->SetViewTarget(PlayState->SharedChimera);
                 }
             }
         }
