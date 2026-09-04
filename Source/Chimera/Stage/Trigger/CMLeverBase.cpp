@@ -25,8 +25,8 @@ void ACMLeverBase::BeginPlay()
     InitialPivotRotation = LeverPivot->GetRelativeRotation().Quaternion();
     bLeverPoseInitialized = true;
     Super::BeginPlay();
-    ActivationTrigger->OnActivated.AddDynamic(this, &ThisClass::HandleLeverTriggerChanged);
-    ActivationTrigger->OnDeactivated.AddDynamic(this, &ThisClass::HandleLeverTriggerChanged);
+    ActivationTrigger->OnActivated.AddUniqueDynamic(this, &ThisClass::HandleLeverTriggerChanged);
+    ActivationTrigger->OnDeactivated.AddUniqueDynamic(this, &ThisClass::HandleLeverTriggerChanged);
     VisualLeverAlpha = LeverAlpha;
     NotifyLeverTargetChanged();
     UpdateVisualRotation(0.0f);
@@ -207,6 +207,8 @@ void ACMLeverBase::HandleElementReset_Implementation()
 
 void ACMLeverBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    ActivationTrigger->OnActivated.RemoveDynamic(this, &ThisClass::HandleLeverTriggerChanged);
+    ActivationTrigger->OnDeactivated.RemoveDynamic(this, &ThisClass::HandleLeverTriggerChanged);
     if (HasAuthority())
     {
         StopArmHold();

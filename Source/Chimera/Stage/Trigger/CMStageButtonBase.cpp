@@ -10,8 +10,15 @@ ACMStageButtonBase::ACMStageButtonBase()
 void ACMStageButtonBase::BeginPlay()
 {
     Super::BeginPlay();
-    ActivationTrigger->OnActivated.AddDynamic(this, &ThisClass::HandleButtonActivated);
-    ActivationTrigger->OnDeactivated.AddDynamic(this, &ThisClass::HandleButtonDeactivated);
+    ActivationTrigger->OnActivated.AddUniqueDynamic(this, &ThisClass::HandleButtonActivated);
+    ActivationTrigger->OnDeactivated.AddUniqueDynamic(this, &ThisClass::HandleButtonDeactivated);
+}
+
+void ACMStageButtonBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    ActivationTrigger->OnActivated.RemoveDynamic(this, &ThisClass::HandleButtonActivated);
+    ActivationTrigger->OnDeactivated.RemoveDynamic(this, &ThisClass::HandleButtonDeactivated);
+    Super::EndPlay(EndPlayReason);
 }
 
 // 버튼의 공통 트리거에 작동 요청 전달

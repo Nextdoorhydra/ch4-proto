@@ -49,18 +49,20 @@ enum class ECMPuzzleSimultaneousMatchState : uint8
 UENUM(BlueprintType)
 enum class ECMPuzzleAcceptedSignal : uint8
 {
-    PulseOrActivated,
-    ActivatedOnly,
-    DeactivatedOnly,
-    Any
+    // 기존 에셋의 enum 이름/값을 보존하는 로드 호환용 항목. 새 설정에서는 숨긴다.
+    PulseOrActivated = 0 UMETA(Hidden),
+    ActivatedOnly = 1 UMETA(DisplayName = "ON Only"),
+    DeactivatedOnly = 2 UMETA(DisplayName = "OFF Only"),
+    Any = 3 UMETA(Hidden),
+    StateChanged = 4 UMETA(DisplayName = "ON / OFF", ToolTip = "ON과 OFF 상태 전환을 모두 받습니다.")
 };
 
 UENUM(BlueprintType)
 enum class ECMPuzzleStepEndBehavior : uint8
 {
-    Stop,          // 마지막 Step 실행 후 채널 종료
-    Loop,          // 마지막 Step 다음에 첫 Step으로 복귀
-    RepeatCurrent  // 현재 Step을 계속 반복
+    Stop UMETA(ToolTip = "마지막 Step 이후 ON/OFF 모두 무시합니다. Reset Puzzle로 재사용합니다."),
+    Loop UMETA(ToolTip = "마지막 Step 이후 이 채널의 첫 Step으로 복귀합니다. 다음 허용 신호를 기다립니다."),
+    RepeatCurrent UMETA(ToolTip = "마지막 Step에 머물러 다음 허용 신호마다 마지막 Step을 실행합니다.")
 };
 
 USTRUCT(BlueprintType)
@@ -68,7 +70,8 @@ struct FCMPuzzleTargetCommand
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        meta = (ToolTip = "Toggle은 허용된 신호마다 대상 상태를 반전합니다. ON/OFF 양쪽 반전은 State Changed + Loop를 사용합니다."))
     ECMPuzzleElementCommand Command = ECMPuzzleElementCommand::Toggle;
 
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly)
@@ -123,7 +126,7 @@ struct FCMPuzzleChannel
     TArray<FCMPuzzleTargetCommand> FailureCommands;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
-    ECMPuzzleAcceptedSignal AcceptedSignal = ECMPuzzleAcceptedSignal::PulseOrActivated;
+    ECMPuzzleAcceptedSignal AcceptedSignal = ECMPuzzleAcceptedSignal::StateChanged;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
     TArray<FCMPuzzleStep> Steps;
@@ -140,6 +143,7 @@ class CHIMERA_API ACMStagePuzzleController : public ACMStageElementBase
 
 public:
     ACMStagePuzzleController();
+    virtual void PostLoad() override;
 
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -209,8 +213,12 @@ private:
         const FCMPuzzleChannel& Channel,
         const ACMStageTriggerBase* Trigger) const;
     void ResetRuntimeState(bool bResetTargets);
+    void NormalizeAcceptedSignals();
     void SetTriggerDirectCommandsEnabled(bool bEnabled);
 
     TArray<TArray<TWeakObjectPtr<ACMStageTriggerBase>>> SatisfiedTriggersByChannel;
     TArray<bool> AllConditionSatisfied;
+
+    // 같은 상태 신호가 중복 전달되어도 Toggle/Sequence는 한 번만 실행한다.
+    TMap<TWeakObjectPtr<ACMStageTriggerBase>, bool> LastTriggerStates;
 };

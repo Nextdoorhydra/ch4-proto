@@ -24,6 +24,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     // 버튼 작동 표현을 C++ 또는 블루프린트에서 구현
     UFUNCTION(BlueprintImplementableEvent, Category = "Chimera|Mechanism|Button")

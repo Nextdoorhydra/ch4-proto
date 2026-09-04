@@ -43,6 +43,7 @@ void ACMBasicButtonBase::BeginPlay()
         ActivationTrigger->bOneShot = false;
     }
     Super::BeginPlay();
+    ActivationTrigger->OnActivated.AddUniqueDynamic(this, &ThisClass::HandleBasicButtonActivated);
 
     ReleasedVisualLocation = ButtonVisualRoot->GetRelativeLocation();
     const FVector PressDirection = LocalPressDirection.GetSafeNormal(
@@ -64,6 +65,7 @@ void ACMBasicButtonBase::EndPlay(
     GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
     OnPresentationStateChanged.RemoveDynamic(
         this, &ThisClass::HandlePresentationStateChanged);
+    ActivationTrigger->OnActivated.RemoveDynamic(this, &ThisClass::HandleBasicButtonActivated);
     Super::EndPlay(EndPlayReason);
 }
 
@@ -126,19 +128,6 @@ void ACMBasicButtonBase::NotifySwingHit(
     HandleValidButtonInput(ArmPart);
 }
 
-ECMStageTriggerSignal ACMBasicButtonBase::ResolveTriggerSignal(
-    bool bActivated) const
-{
-    // 반복 토글 버튼은 현재 눌림 상태를 퍼즐 조건에 전달하고 일회성 버튼은 순간 입력만 전달
-    if (bToggleOnHit)
-    {
-        return bActivated
-            ? ECMStageTriggerSignal::Activated
-            : ECMStageTriggerSignal::Deactivated;
-    }
-    return ECMStageTriggerSignal::Pulse;
-}
-
 // 반복 버튼은 눌림과 해제를 교대하고 일회성 버튼은 최초 눌림만 전달
 void ACMBasicButtonBase::HandleValidButtonInput(AActor* TriggeringActor)
 {
@@ -146,10 +135,15 @@ void ACMBasicButtonBase::HandleValidButtonInput(AActor* TriggeringActor)
     {
         ReleaseButton(TriggeringActor);
     }
-    else if (PressButton(TriggeringActor) && !bToggleOnHit)
+    else
     {
-        MulticastPlayPulseFeedback();
+        PressButton(TriggeringActor);
     }
+}
+
+void ACMBasicButtonBase::HandleBasicButtonActivated(AActor* TriggeringActor)
+{
+    ScheduleMomentaryRelease();
 }
 
 void ACMBasicButtonBase::HandlePresentationStateChanged(
@@ -163,33 +157,26 @@ void ACMBasicButtonBase::HandlePresentationStateChanged(
     bPresentationEnabled = State.bEnabled;
     if (!bPresentationEnabled)
     {
-        GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
-        SetVisualTarget(false);
-    }
-    else if (bToggleOnHit)
-    {
-        SetVisualTarget(State.bTriggered);
-    }
-    else if (!State.bTriggered)
-    {
-        GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
         SetVisualTarget(false);
     }
     else
     {
-        ApplyVisualState();
+        if (!State.bTriggered)
+        {
+            GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
+        }
+        SetVisualTarget(State.bTriggered);
     }
 }
 
-void ACMBasicButtonBase::MulticastPlayPulseFeedback_Implementation()
+void ACMBasicButtonBase::ScheduleMomentaryRelease()
 {
-    if (bToggleOnHit || !bPresentationEnabled)
+    if (!HasAuthority() || bToggleOnHit || !ActivationTrigger->IsTriggered())
     {
         return;
     }
 
     GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
-    SetVisualTarget(true);
     const float ReturnDelay = FMath::Max(PressDuration, 0.0f)
         + FMath::Max(PulseHoldDuration, 0.0f);
     if (ReturnDelay <= SMALL_NUMBER)
@@ -219,7 +206,11 @@ void ACMBasicButtonBase::SetVisualTarget(bool bPressed)
 
 void ACMBasicButtonBase::ReturnPulseVisual()
 {
-    SetVisualTarget(false);
+    // 시각 효과만 복귀시키지 않고 서버 상태도 OFF로 바꿔 퍼즐에 해제를 전달한다.
+    if (HasAuthority())
+    {
+        ReleaseButton(nullptr);
+    }
 }
 
 void ACMBasicButtonBase::ApplyVisualState()

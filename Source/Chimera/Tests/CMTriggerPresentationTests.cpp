@@ -11,6 +11,8 @@
 #include "Stage/Obstacle/CMLaserObstacleBase.h"
 #include "Stage/Puzzle/CMStagePuzzleController.h"
 #include "Stage/Trigger/CMStageButtonBase.h"
+#include "Stage/Trigger/CMBasicButtonBase.h"
+#include "TimerManager.h"
 #include "Stage/Trigger/CMPressurePlateBase.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 #include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
@@ -97,10 +99,12 @@ bool FCMTriggerPresentationTest::RunTest(const FString& Parameters)
     FCMPuzzleTargetCommand LaserCommand;
     LaserCommand.Command = ECMPuzzleElementCommand::Toggle;
     LaserCommand.Targets.Add(Laser);
+    LaserCommand.Targets.Add(Laser); // Duplicate target entries must not cancel a Toggle.
     FCMPuzzleStep PressureStep;
     PressureStep.Commands.Add(LaserCommand);
     FCMPuzzleChannel PressureChannel;
     PressureChannel.ChannelId = TEXT("Pressure");
+    PressureChannel.EndBehavior = ECMPuzzleStepEndBehavior::Loop;
     PressureChannel.Triggers.Add(Plate);
     PressureChannel.Steps.Add(PressureStep);
     PuzzleController->PuzzleChannels.Add(PressureChannel);
@@ -118,6 +122,9 @@ bool FCMTriggerPresentationTest::RunTest(const FString& Parameters)
     PushBox->SetActorLocation(FVector(1000.0f, 0.0f, 0.0f));
     SecondPushBox->SetActorLocation(FVector(1000.0f, 200.0f, 0.0f));
     Plate->RefreshOverlaps();
+    TestTrue(TEXT("OFF transition toggles the laser back on"), Laser->IsElementActive());
+    PuzzleController->HandleTriggerSignal(Plate, ECMStageTriggerSignal::Deactivated);
+    TestTrue(TEXT("Duplicate OFF signal does not toggle twice"), Laser->IsElementActive());
     Plate->RequiredWeight = 100.0f;
     Plate->ReleaseWeight = 90.0f;
     AActor* WeightActor = World->SpawnActor<AActor>();
@@ -143,6 +150,137 @@ bool FCMTriggerPresentationTest::RunTest(const FString& Parameters)
     Plate->ResetElement();
     TestEqual(TEXT("Reset weight snapshot"), Plate->GetPresentationState().CurrentWeight, 0.0f);
     TestFalse(TEXT("Reset pressed snapshot"), Plate->GetPresentationState().bTriggered);
+
+    // Option semantics remain explicit; OFF is not silently accepted by ON-only channels.
+    FCMPuzzleChannel Filter;
+    TestTrue(TEXT("Default accepts ON"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Activated));
+    TestTrue(TEXT("Default accepts OFF"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Deactivated));
+    TestFalse(TEXT("State Changed rejects Pulse"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Pulse));
+    Filter.AcceptedSignal = ECMPuzzleAcceptedSignal::ActivatedOnly;
+    TestFalse(TEXT("ON Only rejects OFF"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Deactivated));
+    Filter.AcceptedSignal = ECMPuzzleAcceptedSignal::DeactivatedOnly;
+    TestFalse(TEXT("OFF Only rejects ON"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Activated));
+    Filter.AcceptedSignal = ECMPuzzleAcceptedSignal::PulseOrActivated;
+    TestFalse(TEXT("Legacy filter still rejects OFF"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Deactivated));
+    TestFalse(TEXT("Legacy ON filter no longer accepts Pulse"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Pulse));
+    Filter.AcceptedSignal = ECMPuzzleAcceptedSignal::Any;
+    TestFalse(TEXT("Legacy Any no longer accepts Pulse"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Pulse));
+    TestTrue(TEXT("Legacy Any still accepts OFF"), PuzzleController->IsSignalAccepted(Filter, ECMStageTriggerSignal::Deactivated));
+    PuzzleController->PuzzleChannels[0].AcceptedSignal = ECMPuzzleAcceptedSignal::PulseOrActivated;
+    PuzzleController->NormalizeAcceptedSignals();
+    TestEqual(TEXT("Legacy PulseOrActivated migrates to ON Only"), PuzzleController->PuzzleChannels[0].AcceptedSignal, ECMPuzzleAcceptedSignal::ActivatedOnly);
+    PuzzleController->PuzzleChannels[0].AcceptedSignal = ECMPuzzleAcceptedSignal::Any;
+    PuzzleController->NormalizeAcceptedSignals();
+    TestEqual(TEXT("Legacy Any migrates to ON/OFF"), PuzzleController->PuzzleChannels[0].AcceptedSignal, ECMPuzzleAcceptedSignal::StateChanged);
+    const UEnum* SignalEnum = StaticEnum<ECMPuzzleAcceptedSignal>();
+    TestTrue(TEXT("Legacy Pulse option is hidden"), SignalEnum->HasMetaData(TEXT("Hidden"), SignalEnum->GetIndexByValue(0)));
+    TestTrue(TEXT("Legacy Any option is hidden"), SignalEnum->HasMetaData(TEXT("Hidden"), SignalEnum->GetIndexByValue(3)));
+
+    ACMBasicButtonBase* BasicButton = World->SpawnActor<ACMBasicButtonBase>();
+    BasicButton->FindComponentByClass<UCMStageElementComponent>()->PlacementId = TEXT("Test.Basic.State");
+    BasicButton->SetDirectTargetCommandEnabled(false);
+    BasicButton->DispatchBeginPlay();
+    PuzzleController->PuzzleChannels[0].Triggers.Add(BasicButton);
+    BasicButton->OnTriggerSignal.AddUniqueDynamic(PuzzleController, &ACMStagePuzzleController::HandleTriggerSignal);
+    PuzzleController->ResetPuzzle();
+    Laser->ActivateElement();
+    BasicButton->HandleValidButtonInput(Button);
+    TestTrue(TEXT("Momentary button is logically ON while lit"), BasicButton->GetPresentationState().bTriggered);
+    TestFalse(TEXT("Momentary ON toggles laser off"), Laser->IsElementActive());
+    // Exercise the actual timer scheduled by valid button input.
+    World->GetTimerManager().Tick(1.0f);
+    ++GFrameCounter; // TimerManager only ticks once per engine frame.
+    World->GetTimerManager().Tick(1.0f);
+    TestFalse(TEXT("Momentary auto-return is logically OFF"), BasicButton->GetPresentationState().bTriggered);
+    TestTrue(TEXT("Momentary OFF toggles laser on"), Laser->IsElementActive());
+    TestFalse(TEXT("OneShot remains used after auto-return"), BasicButton->GetPresentationState().bCanActivate);
+
+    BasicButton->ResetElement();
+    BasicButton->bToggleOnHit = true;
+    BasicButton->FindComponentByClass<UCMActivationTriggerComponent>()->bOneShot = false;
+    PuzzleController->ResetPuzzle();
+    Laser->ActivateElement();
+    BasicButton->HandleValidButtonInput(Button);
+    TestFalse(TEXT("Toggle button ON changes target"), Laser->IsElementActive());
+    PuzzleController->HandleTriggerSignal(BasicButton, ECMStageTriggerSignal::Activated);
+    TestFalse(TEXT("Duplicate ON is ignored"), Laser->IsElementActive());
+    BasicButton->HandleValidButtonInput(Button);
+    TestTrue(TEXT("Toggle button OFF changes target"), Laser->IsElementActive());
+    BasicButton->HandleValidButtonInput(Button);
+    TestFalse(TEXT("Next ON is still accepted after OFF"), Laser->IsElementActive());
+
+    // Stop is intentionally one-shot even when both state edges are accepted.
+    PuzzleController->PuzzleChannels[0].EndBehavior = ECMPuzzleStepEndBehavior::Stop;
+    PuzzleController->ResetPuzzle();
+    Laser->ActivateElement();
+    BasicButton->ReleaseButton(Button);
+    TestFalse(TEXT("Stop executes the first allowed edge"), Laser->IsElementActive());
+    BasicButton->PressButton(Button);
+    TestFalse(TEXT("Stop does not execute later edges"), Laser->IsElementActive());
+
+    Button->FindComponentByClass<UCMActivationTriggerComponent>()->bOneShot = false;
+    Button->OnTriggerSignal.AddUniqueDynamic(PuzzleController, &ACMStagePuzzleController::HandleTriggerSignal);
+    FCMPuzzleChannel& Channel = PuzzleController->PuzzleChannels[0];
+    Channel.Triggers = { Button, BasicButton };
+    Channel.TriggerCondition = ECMPuzzleTriggerCondition::All;
+    Channel.AllConditionMode = ECMPuzzleAllConditionMode::Simultaneous;
+    Channel.SimultaneousMatchState = ECMPuzzleSimultaneousMatchState::AllActive;
+    Channel.AcceptedSignal = ECMPuzzleAcceptedSignal::StateChanged;
+    Channel.EndBehavior = ECMPuzzleStepEndBehavior::Loop;
+    Button->ResetElement();
+    BasicButton->ResetElement();
+    // First switch is already ON when the controller starts observing this condition.
+    Button->PressButton(Button);
+    PuzzleController->ResetPuzzle();
+    Laser->ActivateElement();
+    BasicButton->PressButton(Button);
+    TestFalse(TEXT("Simultaneous includes switches already ON before reset"), Laser->IsElementActive());
+    BasicButton->ReleaseButton(Button);
+    TestFalse(TEXT("Losing AllActive does not implicitly run inverse commands"), Laser->IsElementActive());
+    BasicButton->PressButton(Button);
+    TestTrue(TEXT("AllActive can be satisfied again in Loop"), Laser->IsElementActive());
+
+    Channel.SimultaneousMatchState = ECMPuzzleSimultaneousMatchState::AllInactive;
+    PuzzleController->ResetPuzzle();
+    Laser->ActivateElement();
+    Button->ReleaseButton(Button);
+    TestTrue(TEXT("AllInactive waits for both switches"), Laser->IsElementActive());
+    BasicButton->ReleaseButton(Button);
+    TestFalse(TEXT("AllInactive accepts OFF transition"), Laser->IsElementActive());
+
+    Channel.AllConditionMode = ECMPuzzleAllConditionMode::Latched;
+    Channel.AcceptedSignal = ECMPuzzleAcceptedSignal::ActivatedOnly;
+    PuzzleController->ResetPuzzle();
+    Laser->ActivateElement();
+    Button->PressButton(Button);
+    Button->ReleaseButton(Button);
+    TestTrue(TEXT("Latched waits for the other switch"), Laser->IsElementActive());
+    BasicButton->PressButton(Button);
+    TestFalse(TEXT("Latched retains earlier ON after its OFF"), Laser->IsElementActive());
+
+    Channel.TriggerCondition = ECMPuzzleTriggerCondition::Sequence;
+    Channel.ExpectedTriggerSequence = { Button, BasicButton };
+    Channel.WrongInputBehavior = ECMPuzzleSequenceWrongInputBehavior::ResetSequence;
+    Button->ResetElement();
+    BasicButton->ResetElement();
+    PuzzleController->ResetPuzzle();
+    Laser->ActivateElement();
+    BasicButton->PressButton(Button);
+    TestTrue(TEXT("Wrong sequence does not execute"), Laser->IsElementActive());
+    BasicButton->ReleaseButton(Button);
+    Button->PressButton(Button);
+    BasicButton->PressButton(Button);
+    TestFalse(TEXT("Correct ON sequence executes"), Laser->IsElementActive());
+
+    Channel.TriggerCondition = ECMPuzzleTriggerCondition::Any;
+    Channel.AcceptedSignal = ECMPuzzleAcceptedSignal::StateChanged;
+    Channel.EndBehavior = ECMPuzzleStepEndBehavior::RepeatCurrent;
+    Channel.Steps.Add(PressureStep);
+    PuzzleController->ResetPuzzle();
+    Button->ReleaseButton(Button);
+    TestEqual(TEXT("RepeatCurrent advances to last step first"), PuzzleController->GetCurrentStepIndex(Channel.ChannelId), 1);
+    Button->PressButton(Button);
+    TestEqual(TEXT("RepeatCurrent remains at the last step"), PuzzleController->GetCurrentStepIndex(Channel.ChannelId), 1);
     GEngine->DestroyWorldContext(World);
     World->DestroyWorld(false);
     return true;
