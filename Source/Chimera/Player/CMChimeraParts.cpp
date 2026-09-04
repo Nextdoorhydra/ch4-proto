@@ -8,6 +8,7 @@
 #include "Parts/Leg/CMLegPart.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMPlayerState.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -291,6 +292,31 @@ bool ACMChimera::AttachPartToSlot(
     UCMPartSlotComponent* PartSlot =
         GetPartSlotComponent(PartSlotAddress);
     return PartSlot && PartSlot->AttachPart(PartActor);
+}
+
+bool ACMChimera::TryBeginTentaclePartAttachment(
+    const FCMPartSlotAddress& PartSlotAddress)
+{
+    if (!HasAuthority()
+        || !CMControl::IsValidPartSlot(
+            PartSlotAddress, ActiveSegmentCount))
+    {
+        return false;
+    }
+
+    UCMPartSlotComponent* PartSlot =
+        GetPartSlotComponent(PartSlotAddress);
+    if (!PartSlot || PartSlot->HasAttachedPart())
+    {
+        return false;
+    }
+
+    ACMTentacleSegmentActor* Tentacle =
+        TentacleSegments.IsValidIndex(PartSlotAddress.SegmentIndex)
+            ? TentacleSegments[PartSlotAddress.SegmentIndex]
+            : nullptr;
+    return Tentacle
+        && Tentacle->TryBeginPartAttachment(PartSlotAddress);
 }
 
 AActor* ACMChimera::DetachPartFromSlot(

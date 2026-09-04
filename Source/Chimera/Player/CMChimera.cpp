@@ -4,6 +4,7 @@
 #include "AbilitySystemComponent.h"
 #include "Collision/CMCollisionChannels.h"
 #include "Movement/CMLineBodyMovementCoordinator.h"
+#include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -51,6 +52,7 @@ ACMChimera::ACMChimera()
     SetReplicateMovement(false);
     SetNetUpdateFrequency(30.0f);
     SetMinNetUpdateFrequency(10.0f);
+    TentacleSegmentClass = ACMTentacleSegmentActor::StaticClass();
 
     AbilitySystemComponent = CreateDefaultSubobject<
         UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
@@ -438,6 +440,7 @@ void ACMChimera::BeginPlay()
     InitializeFromBodyData();
     ConfigureSegments();
     ConfigureNetworkPhysics();
+    RefreshTentacleSegments();
 
 }
 
@@ -592,6 +595,7 @@ void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
     bAllSegmentsDeathNotified = false;
     ConfigureSegments();
     ConfigureNetworkPhysics();
+    RefreshTentacleSegments();
     OnSegmentStatesChanged.Broadcast();
     ForceNetUpdate();
 
@@ -600,6 +604,59 @@ void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
         OldSegmentCount,
         ActiveSegmentCount,
         ActiveSegmentCount * CMControl::PartSlotsPerSegment);
+}
+
+void ACMChimera::RefreshTentacleSegments()
+{
+    if (!HasAuthority() || !GetWorld())
+    {
+        return;
+    }
+
+    TentacleSegments.SetNum(CMControl::MaxSegments);
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < CMControl::MaxSegments;
+        ++SegmentIndex)
+    {
+        const bool bShouldExist = SegmentIndex < ActiveSegmentCount
+            && BodySegments.IsValidIndex(SegmentIndex)
+            && BodySegments[SegmentIndex]
+            && TentacleSegmentClass;
+        ACMTentacleSegmentActor* ExistingTentacle =
+            TentacleSegments[SegmentIndex];
+
+        if (!bShouldExist)
+        {
+            if (ExistingTentacle)
+            {
+                ExistingTentacle->Destroy();
+                TentacleSegments[SegmentIndex] = nullptr;
+            }
+            continue;
+        }
+        if (ExistingTentacle)
+        {
+            continue;
+        }
+
+        FActorSpawnParameters SpawnParameters;
+        SpawnParameters.Owner = this;
+        SpawnParameters.SpawnCollisionHandlingOverride =
+            ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        ACMTentacleSegmentActor* NewTentacle =
+            GetWorld()->SpawnActor<ACMTentacleSegmentActor>(
+                TentacleSegmentClass,
+                BodySegments[SegmentIndex]->GetComponentTransform(),
+                SpawnParameters);
+        if (NewTentacle)
+        {
+            NewTentacle->InitializeForSegment(
+                this,
+                SegmentIndex,
+                BodySegments[SegmentIndex]);
+            TentacleSegments[SegmentIndex] = NewTentacle;
+        }
+    }
 }
 int32 ACMChimera::GetActiveSegmentCount() const
 {

@@ -21,6 +21,7 @@ ACMPartActorBase::ACMPartActorBase()
     PrimaryActorTick.bCanEverTick = false;
     bReplicates = true;
     SetReplicateMovement(true);
+    Tags.AddUnique(TEXT("TentacleInteractiveObject"));
 
     SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
     SetRootComponent(SceneRoot);
@@ -168,6 +169,7 @@ void ACMPartActorBase::OnAttachedToPartSlot_Implementation(
 
     AttachedPartSlot = PartSlot;
     AttachedSlotAddress = PartSlot->GetSlotAddress();
+    TentacleReservationOwner.Reset();
     ForceNetUpdate();
 }
 
@@ -500,4 +502,41 @@ ACMPlayerState* ACMPartActorBase::ConsumeContributingPlayerState()
     ACMPlayerState* PlayerState = PendingContributingPlayerState.Get();
     PendingContributingPlayerState.Reset();
     return PlayerState;
+}
+
+bool ACMPartActorBase::TryReserveForTentacle(AActor* Requester)
+{
+    if (!HasAuthority() || !IsValid(Requester) || GetAttachedPartSlot())
+    {
+        return false;
+    }
+    if (TentacleReservationOwner.IsValid()
+        && TentacleReservationOwner.Get() != Requester)
+    {
+        return false;
+    }
+    TentacleReservationOwner = Requester;
+    return true;
+}
+
+void ACMPartActorBase::ReleaseTentacleReservation(AActor* Requester)
+{
+    if (HasAuthority() && TentacleReservationOwner.Get() == Requester)
+    {
+        TentacleReservationOwner.Reset();
+    }
+}
+
+bool ACMPartActorBase::IsReservedForTentacle(
+    const AActor* Requester) const
+{
+    return TentacleReservationOwner.IsValid()
+        && TentacleReservationOwner.Get() != Requester;
+}
+
+bool ACMPartActorBase::IsReservedByTentacle(
+    const AActor* Requester) const
+{
+    return IsValid(Requester)
+        && TentacleReservationOwner.Get() == Requester;
 }
