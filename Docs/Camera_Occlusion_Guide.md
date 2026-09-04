@@ -42,11 +42,15 @@ The project config asset is
 `/Game/Chimera/Character/Camera/Data/DA_CMCameraOcclusionConfig`. It is assigned to
 `CameraOcclusionComponent.OcclusionConfig` on the Chimera Blueprint. Tune trace
 radius, target height, screen fade radius, minimum opacity, edge softness, and
-fade-in/fade-out speed on that asset. Add an object channel to
+fade-in/fade-out speed on that asset. `TraceStartDistance` controls the fixed
+distance from the camera boom pivot used to start occlusion traces, so zooming
+does not move the trace start. Add an object channel to
 `OccluderObjectTypes` if a blocking environment object is not `WorldStatic`.
 
-Each player's first controlled Head contributes a trace and fade center. Adjust
+Each player's first controlled slot contributes a trace and fade center. Adjust
 `ScreenCenterOffset` in normalized viewport UV to move the visible fade circles.
-`TargetHeightOffset` is used as a fallback while no Head is controlled.
+`TargetHeightOffset` raises the trace target above the first slot and can be
+tuned to match the character's floor clearance. It is also used as a fallback
+when no controlled slot is available.
 
 If no asset is assigned, the component uses the config class defaults.

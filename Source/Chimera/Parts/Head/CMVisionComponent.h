@@ -122,7 +122,7 @@ public:
     void SetLocalPredictedAimDirection(const FVector& InAimDirection);
     void ClearLocalAimPrediction();
 
-    /** Logical eye position above the embedded Head actor origin. */
+    /** Logical eye position above the attached part slot. */
     UFUNCTION(BlueprintPure, Category = "Chimera|Vision")
     FVector GetVisionOrigin() const;
 
