@@ -529,11 +529,10 @@ FVector UCMVisionComponent::GetVisionOrigin() const
         ? PartOwner->GetAttachedPartSlot()
         : nullptr;
 
-    // The Part root is snapped to the slot when equipped. Use that replicated
-    // root transform as the stable base, then raise the logical origin to eye
-    // height because this character's rendered Head origin is embedded in the floor.
-    FVector Origin = PartSlot && PartOwner
-        ? PartOwner->GetActorLocation()
+    // Use the replicated slot transform as the stable base. The rendered Head
+    // root can move independently, so it must not define the logical vision origin.
+    FVector Origin = PartSlot
+        ? PartSlot->GetComponentLocation()
         : GetComponentLocation();
     Origin.Z += VisionEyeHeightOffset;
     return Origin;
