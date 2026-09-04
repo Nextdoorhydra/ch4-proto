@@ -12,7 +12,7 @@ class UBoxComponent;
 class UPrimitiveComponent;
 
 UCLASS(Blueprintable)
-// 모든 활성 키메라 몸통이 영역에 들어오고 뒤쪽 문이 닫히면 룸 진입을 확정
+// 활성 키메라 몸통 하나 이상이 영역에 들어오고 뒤쪽 문이 닫히면 룸 진입을 확정
 class CHIMERA_API ACMRoomEntryTrigger : public AActor
 {
     GENERATED_BODY()
