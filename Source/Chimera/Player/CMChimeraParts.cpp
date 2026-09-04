@@ -424,6 +424,155 @@ bool ResolveNamedDebugPart(
 
     return false;
 }
+
+enum class ECMStartingPartType : uint8
+{
+    Empty,
+    Leg,
+    Head
+};
+
+const TArray<ECMStartingPartType>* FindStartingPartLayout(int32 PlayerCount)
+{
+    static const TArray<ECMStartingPartType> TwoPlayerLayout = {
+        ECMStartingPartType::Leg,
+        ECMStartingPartType::Empty,
+        ECMStartingPartType::Head,
+        ECMStartingPartType::Empty
+    };
+    static const TArray<ECMStartingPartType> ThreePlayerLayout = {
+        ECMStartingPartType::Leg,
+        ECMStartingPartType::Empty,
+        ECMStartingPartType::Head,
+        ECMStartingPartType::Empty,
+        ECMStartingPartType::Empty,
+        ECMStartingPartType::Leg
+    };
+    static const TArray<ECMStartingPartType> FourPlayerLayout = {
+        ECMStartingPartType::Leg,
+        ECMStartingPartType::Empty,
+        ECMStartingPartType::Leg,
+        ECMStartingPartType::Head,
+        ECMStartingPartType::Empty,
+        ECMStartingPartType::Leg,
+        ECMStartingPartType::Head,
+        ECMStartingPartType::Leg
+    };
+
+    switch (PlayerCount)
+    {
+    case 2:
+        return &TwoPlayerLayout;
+    case 3:
+        return &ThreePlayerLayout;
+    case 4:
+        return &FourPlayerLayout;
+    default:
+        return nullptr;
+    }
+}
+}
+
+void ACMChimera::SpawnStartingPartsForPlayers(int32 PlayerCount)
+{
+    if (!HasAuthority() || !GetWorld())
+    {
+        return;
+    }
+
+    const TArray<ECMStartingPartType>* Layout =
+        FindStartingPartLayout(PlayerCount);
+    if (!Layout || Layout->Num() != ActiveSegmentCount)
+    {
+        UE_LOG(LogChimeraLineBody, Warning,
+            TEXT("[Starting Parts Skipped] Unsupported or mismatched layout. Players=%d Segments=%d"),
+            PlayerCount,
+            ActiveSegmentCount);
+        return;
+    }
+
+    FDebugPartSpawnOption LegOption;
+    FDebugPartSpawnOption HeadOption;
+    if (!ResolveNamedDebugPart(TEXT("LegTier3"), LegOption)
+        || !ResolveNamedDebugPart(TEXT("DefaultHead"), HeadOption))
+    {
+        UE_LOG(LogChimeraLineBody, Error,
+            TEXT("[Starting Parts Failed] Default Leg or Head Blueprint could not be loaded."));
+        return;
+    }
+
+    for (int32 FlatSlotIndex = 0;
+        FlatSlotIndex < ActiveSegmentCount * CMControl::PartSlotsPerSegment;
+        ++FlatSlotIndex)
+    {
+        if (!PartSlotPoints.IsValidIndex(FlatSlotIndex)
+            || !PartSlotPoints[FlatSlotIndex])
+        {
+            continue;
+        }
+
+        if (AActor* ExistingPart = PartSlotPoints[FlatSlotIndex]->DetachPart())
+        {
+            ExistingPart->Destroy();
+        }
+    }
+
+    int32 AttachedCount = 0;
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < Layout->Num();
+        ++SegmentIndex)
+    {
+        const ECMStartingPartType PartType = (*Layout)[SegmentIndex];
+        if (PartType == ECMStartingPartType::Empty)
+        {
+            continue;
+        }
+
+        const FDebugPartSpawnOption& PartOption =
+            PartType == ECMStartingPartType::Leg ? LegOption : HeadOption;
+        for (int32 PartSlotIndex = 0;
+            PartSlotIndex < CMControl::PartSlotsPerSegment;
+            ++PartSlotIndex)
+        {
+            const int32 FlatSlotIndex =
+                SegmentIndex * CMControl::PartSlotsPerSegment
+                + PartSlotIndex;
+            if (!PartSlotPoints.IsValidIndex(FlatSlotIndex)
+                || !PartSlotPoints[FlatSlotIndex])
+            {
+                continue;
+            }
+
+            ACMPartActorBase* PartActor =
+                ACMPartActorBase::SpawnPartFromDataRows(
+                    this,
+                    PartOption.PartClass,
+                    PartOption.PartRowName,
+                    PartOption.TierRowName,
+                    FTransform(FRotator::ZeroRotator, GetActorLocation()),
+                    this
+                );
+            if (!PartActor)
+            {
+                continue;
+            }
+
+            if (PartSlotPoints[FlatSlotIndex]->AttachPart(PartActor))
+            {
+                ++AttachedCount;
+            }
+            else
+            {
+                PartActor->Destroy();
+            }
+        }
+    }
+
+    UE_LOG(LogChimeraLineBody, Display,
+        TEXT("[Starting Parts Ready] Players=%d Segments=%d Attached=%d"),
+        PlayerCount,
+        ActiveSegmentCount,
+        AttachedCount);
 }
 
 void ACMChimera::SpawnRandomDebugParts()

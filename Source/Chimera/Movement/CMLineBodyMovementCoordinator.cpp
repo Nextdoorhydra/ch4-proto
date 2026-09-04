@@ -105,27 +105,30 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     const float DirectionSign = bReverseMovement ? -1.0f : 1.0f;
     ForwardDirection *= DirectionSign;
 
+    FHitResult SegmentGroundHit;
+    if (!IsSegmentGrounded(
+        Chimera,
+        *SegmentBody,
+        &LegPart,
+        SegmentGroundHit))
+    {
+        UE_LOG(LogChimeraMovement, Warning,
+            TEXT("[Leg Step Rejected] Segment not grounded Part=%s Segment=%d ContactDistance=%.1f"),
+            *GetNameSafe(&LegPart),
+            SegmentIndex,
+            Chimera.GroundContactDistance);
+        return false;
+    }
+
     const FVector VirtualFootPoint =
         PartSlot->GetComponentLocation()
         + ForwardDirection * Chimera.LegStepLength;
-    FHitResult GroundHit;
-    if (!TraceGroundAtPoint(
+    FHitResult GroundHit = SegmentGroundHit;
+    const bool bHasVirtualFootGround = TraceGroundAtPoint(
         Chimera,
         VirtualFootPoint,
         &LegPart,
-        GroundHit))
-    {
-        UE_LOG(LogChimeraMovement, Warning,
-            TEXT("[Leg Step Rejected] No ground Part=%s VirtualFoot=%s TraceHeight=%.1f TraceDepth=%.1f Radius=%.1f Channel=%d MinimumNormalZ=%.2f"),
-            *GetNameSafe(&LegPart),
-            *VirtualFootPoint.ToCompactString(),
-            Chimera.LegStepTraceHeight,
-            Chimera.LegStepTraceDepth,
-            Chimera.GroundCheckRadius,
-            static_cast<int32>(Chimera.GroundTraceChannel.GetValue()),
-            Chimera.MinimumGroundNormalZ);
-        return false;
-    }
+        GroundHit);
 
     // GroundNormal에 투영한 접선 방향은 경사면에서 큰 위쪽 Force 성분을
     // 만들어 좌우 다리를 함께 누를 때 몸 전체를 띄웠다. 추진력은 수평으로
@@ -159,7 +162,9 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     Step.LegPart = &LegPart;
     Step.SegmentBody = SegmentBody;
     Step.SegmentIndex = SegmentIndex;
-    Step.VirtualFootPoint = VirtualFootPoint;
+    Step.VirtualFootPoint = bHasVirtualFootGround
+        ? VirtualFootPoint
+        : SegmentBody->GetComponentLocation();
     Step.GroundPoint = GroundHit.ImpactPoint;
     Step.GroundNormal = GroundHit.ImpactNormal;
     Step.PushForce = PushDirection * PushForceMagnitude;
@@ -1900,6 +1905,98 @@ bool UCMLineBodyMovementCoordinator::TraceGroundAtPoint(
     }
 
     return bHasGroundContact;
+}
+
+bool UCMLineBodyMovementCoordinator::IsSegmentGrounded(
+    const ACMChimera& Chimera,
+    UBoxComponent& SegmentBody,
+    const AActor* IgnoredPart,
+    FHitResult& OutHit
+) const
+{
+    UWorld* World = Chimera.GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    FComponentQueryParams QueryParams(
+        SCENE_QUERY_STAT(CMSegmentGroundContact),
+        &Chimera);
+    if (IgnoredPart)
+    {
+        QueryParams.AddIgnoredActor(IgnoredPart);
+    }
+
+    const int32 ActivePartSlotCount = Chimera.ActiveSegmentCount
+        * CMControl::PartSlotsPerSegment;
+    for (int32 FlatSlotIndex = 0;
+        FlatSlotIndex < ActivePartSlotCount;
+        ++FlatSlotIndex)
+    {
+        const UCMPartSlotComponent* PartSlot =
+            Chimera.PartSlotPoints.IsValidIndex(FlatSlotIndex)
+                ? Chimera.PartSlotPoints[FlatSlotIndex]
+                : nullptr;
+        if (PartSlot && PartSlot->GetAttachedPart())
+        {
+            QueryParams.AddIgnoredActor(PartSlot->GetAttachedPart());
+        }
+    }
+
+    const FVector Start = SegmentBody.GetComponentLocation();
+    const FVector End = Start - FVector::UpVector
+        * FMath::Max(Chimera.GroundContactDistance, KINDA_SMALL_NUMBER);
+    TArray<FHitResult> Hits;
+    World->ComponentSweepMultiByChannel(
+        Hits,
+        &SegmentBody,
+        Start,
+        End,
+        SegmentBody.GetComponentQuat(),
+        Chimera.GroundTraceChannel,
+        QueryParams);
+
+    bool bGrounded = false;
+    float BestTime = MAX_FLT;
+    for (const FHitResult& Hit : Hits)
+    {
+        const FVector SafeNormal = Hit.ImpactNormal.GetSafeNormal();
+        if ((!Hit.bBlockingHit && !Hit.bStartPenetrating)
+            || SafeNormal.IsNearlyZero()
+            || SafeNormal.Z < Chimera.MinimumGroundNormalZ)
+        {
+            continue;
+        }
+
+        const float HitTime = FMath::IsFinite(Hit.Time)
+            ? Hit.Time
+            : 0.0f;
+        if (!bGrounded || HitTime < BestTime)
+        {
+            OutHit = Hit;
+            OutHit.ImpactNormal = SafeNormal;
+            BestTime = HitTime;
+            bGrounded = true;
+        }
+    }
+
+#if ENABLE_DRAW_DEBUG
+    if (Chimera.bDrawGroundContactDebug)
+    {
+        DrawDebugLine(
+            World,
+            Start,
+            End,
+            bGrounded ? FColor::Green : FColor::Red,
+            false,
+            0.5f,
+            0,
+            2.0f);
+    }
+#endif
+
+    return bGrounded;
 }
 
 void UCMLineBodyMovementCoordinator::EndPlay(

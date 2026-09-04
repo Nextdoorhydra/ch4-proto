@@ -87,6 +87,12 @@ void ACMSpringArmPart::Tick(float DeltaSeconds)
 
     const FVector AimDirection = GetCurrentAimDirection();
 
+    if (GetAttachedPartSlot() && !AimDirection.IsNearlyZero())
+    {
+        SweepDirectionArrow->SetWorldLocation(
+            GetHookSpawnLocation(AimDirection));
+    }
+
     if (!AimDirection.IsNearlyZero())
     {
         SweepDirectionArrow->SetWorldRotation(AimDirection.Rotation());
@@ -171,6 +177,22 @@ FVector ACMSpringArmPart::GetCurrentAimDirection() const
     ).GetSafeNormal();
 }
 
+FVector ACMSpringArmPart::GetHookSpawnLocation(
+    const FVector& Direction
+) const
+{
+    const UCMPartSlotComponent* PartSlot = GetAttachedPartSlot();
+    if (!PartSlot)
+    {
+        return GetActorLocation();
+    }
+
+    const float HookRadius = FMath::Max(AttackRadius, 1.0f);
+    return PartSlot->GetComponentLocation()
+        + Direction * HookRadius
+        + FVector::UpVector * (HookRadius + 30.0f);
+}
+
 float ACMSpringArmPart::GetAutomaticSweepPhase() const
 {
     const FCMPartSlotAddress SlotAddress = GetAttachedSlotAddress();
@@ -209,12 +231,7 @@ bool ACMSpringArmPart::LaunchHook()
         return false;
     }
     
-    const float HookRadius = FMath::Max(AttackRadius, 1.0f);
-
-    const FVector SpawnLocation =
-        PartSlot->GetComponentLocation()
-        + Direction * HookRadius
-        + FVector::UpVector * (HookRadius + 30.0f);
+    const FVector SpawnLocation = GetHookSpawnLocation(Direction);
 
     FActorSpawnParameters SpawnParameters;
     SpawnParameters.Owner = Chimera;

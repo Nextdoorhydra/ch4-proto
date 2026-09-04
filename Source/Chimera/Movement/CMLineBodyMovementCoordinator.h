@@ -123,6 +123,13 @@ private:
         FHitResult& OutHit
     ) const;
 
+    bool IsSegmentGrounded(
+        const ACMChimera& Chimera,
+        UBoxComponent& SegmentBody,
+        const AActor* IgnoredPart,
+        FHitResult& OutHit
+    ) const;
+
     void ApplyActiveLegSteps(ACMChimera& Chimera);
     void UpdateLegPlantStates(ACMChimera& Chimera);
     void UpdateReachRecovery(ACMChimera& Chimera, double CurrentTime);
