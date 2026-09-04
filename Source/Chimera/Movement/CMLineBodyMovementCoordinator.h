@@ -22,7 +22,7 @@ class UBoxComponent;
  *
  * This component does not Tick. ACMChimera forwards only the existing server
  * physics update and successful input events, while this object keeps the
- * ground test, impulse math, cooperative-input window, and speed cap together.
+ * ground test, impulse math, directional chain-mass bonus, and speed cap together.
  */
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
 class CHIMERA_API UCMLineBodyMovementCoordinator
@@ -95,27 +95,16 @@ private:
         float MovementImpulseMultiplier
     );
 
-    void RegisterCooperativeInput(
+    float GetDirectionalChainMassMultiplier(
         ACMChimera& Chimera,
-        const struct FCMPartSlotAddress& PartSlotAddress,
-        ACMPlayerState* ContributingPlayerState,
-        const FVector& PlanarImpulse,
-        float DirectionSign = 1.0f
-    );
-    void MatchCooperativeInputs(ACMChimera& Chimera);
-    void ApplyCooperativeForwardImpulse(
-        ACMChimera& Chimera,
-        float SignedForwardImpulse
+        int32 SegmentIndex,
+        bool bReverseMovement
     ) const;
     void ApplyWholeBodyYawAssist(
         ACMChimera& Chimera,
         const struct FCMPartSlotAddress& PartSlotAddress,
         float MovementImpulseMultiplier
     ) const;
-    void PurgeExpiredCooperativeInputs(double CurrentTime);
-    void ScheduleNextCooperativeExpiry(ACMChimera& Chimera);
-    void HandleCooperativeInputExpiry();
-
     bool TraceGroundAtPoint(
         const ACMChimera& Chimera,
         const FVector& DesiredFootPoint,
@@ -137,21 +126,6 @@ private:
     void ApplyArmAnchorStaminaDrain(ACMChimera& Chimera);
     void RemoveInvalidArmAnchors(ACMChimera& Chimera);
     void DestroyArmAnchor(int32 AnchorIndex);
-
-    float GetPlayerCountSpeedMultiplier(
-        const ACMChimera& Chimera
-    ) const;
-    float GetPerControlImpulseMultiplier(
-        const ACMChimera& Chimera
-    ) const;
-
-    struct FPendingCooperativeImpulse
-    {
-        int32 FlatSlotIndex = INDEX_NONE;
-        float RemainingImpulse = 0.0f;
-        float DirectionSign = 1.0f;
-        double ExpireTime = 0.0;
-    };
 
     struct FActiveLegStep
     {
@@ -182,11 +156,7 @@ private:
         bool bRequiresPhysicsHandle = false;
     };
 
-    // Each remaining input keeps its original expiry even after partial use.
-    TArray<FPendingCooperativeImpulse> PendingLeftInputs;
-    TArray<FPendingCooperativeImpulse> PendingRightInputs;
     TArray<FActiveLegStep> ActiveLegSteps;
     TArray<FActiveArmAnchor> ActiveArmAnchors;
-    FTimerHandle CooperationExpiryTimerHandle;
     double NextReachRecoveryCheckTime = 0.0;
 };

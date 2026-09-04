@@ -494,21 +494,12 @@ protected:
     float DebugTurnTorque = 250000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Cooperation", meta = (ClampMin = "0.01"))
-    float CooperationInputWindow = 0.20f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Cooperation",
-        meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float CooperationDirectionThreshold = 0.85f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Cooperation",
+        Category = "Chimera|Movement|Arm",
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float IndividualPlanarTranslationFraction = 0.005f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Cooperation",
+        Category = "Chimera|Movement|Arm",
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float IndividualYawRotationFraction = 0.05f;
 
@@ -525,28 +516,17 @@ protected:
     float MaximumYawAngularSpeedDegrees = 90.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Cooperation", meta = (ClampMin = "0.0"))
-    float MaximumCooperativePlanarImpulse = 10000.0f;
+        Category = "Leg|Directional Force", meta = (ClampMin = "0.0"))
+    float DirectionalChainMassBonusPerBody = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Cooperation", meta = (ClampMin = "0.0"))
-    float MaximumCooperativeYawAngularImpulse = 1000000.0f;
+        Category = "Leg|Directional Force", meta = (ClampMin = "1.0"))
+    float MaximumDirectionalChainMassMultiplier = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Player Scaling", meta = (ClampMin = "0.1"))
-    float OnePlayerTurnTargetSeconds = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Player Scaling", meta = (ClampMin = "0.1"))
-    float TwoPlayerTurnTargetSeconds = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Player Scaling", meta = (ClampMin = "0.1"))
-    float ThreePlayerTurnTargetSeconds = 7.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Leg|Player Scaling", meta = (ClampMin = "0.1"))
-    float FourPlayerTurnTargetSeconds = 3.0f;
+        Category = "Leg|Directional Force",
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float IndividualLegForwardImpulseFraction = 0.5f;
 
     UPROPERTY(ReplicatedUsing = OnRep_ActiveSegmentCount,
         EditAnywhere, BlueprintReadOnly, Category = "Chimera",
