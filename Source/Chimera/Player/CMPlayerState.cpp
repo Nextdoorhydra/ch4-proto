@@ -42,6 +42,11 @@ void ACMPlayerState::ClientInitialize(AController* Controller)
 {
     Super::ClientInitialize(Controller);
     OnRep_VisionSystemEnabled();
+
+    if (ACMGameState* GameState = GetWorld() ? GetWorld()->GetGameState<ACMGameState>() : nullptr)
+    {
+        GameState->NotifyLobbyRosterChanged();
+    }
 }
 
 void ACMPlayerState::SetPlayerName(const FString& NewPlayerName)
