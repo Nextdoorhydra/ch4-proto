@@ -460,6 +460,15 @@ bool ACMPlayGameMode::StartStage()
 
     bStageLoadReady = false;
 
+    if (ACMChimera* SharedChimera = PlayState->SharedChimera)
+    {
+        const int32 StartingLayoutPlayerCount =
+            SharedChimera->GetActiveSegmentCount()
+            / CMControl::SegmentsPerPlayer;
+        SharedChimera->SpawnStartingPartsForPlayers(
+            StartingLayoutPlayerCount);
+    }
+
     GetWorldTimerManager().ClearTimer(StartingPresentationTimeoutHandle);
     if (StartingPresentationTimeout > 0.0f)
     {

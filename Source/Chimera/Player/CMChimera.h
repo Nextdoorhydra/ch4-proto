@@ -251,6 +251,9 @@ public:
 
     /** True while one SpringArm owns the Chimera pull. */
     bool IsSpringArmPulling() const;
+
+    /** Attaches the fixed symmetric starting Part layout for 2-4 players. */
+    void SpawnStartingPartsForPlayers(int32 PlayerCount);
     
     /** Attaches registered production Part Blueprints to empty active slots. */
     void SpawnRandomDebugParts();
