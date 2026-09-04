@@ -82,11 +82,8 @@ public:
 
     const TArray<FCMPartSlotAddress>& GetControlSlots() const;
 
-    /** First of the two consecutive Segments assigned to this player. */
-    void SetOwnedSegmentIndex(int32 NewSegmentIndex);
-
     UFUNCTION(BlueprintPure, Category = "Chimera|Control Body")
-    int32 GetOwnedSegmentIndex() const;
+    bool OwnsSegment(int32 SegmentIndex) const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Control Body")
     bool IsControlInputEnabled() const;
@@ -174,11 +171,6 @@ protected:
         Category = "Chimera|Control Body",
         meta = (AllowPrivateAccess = "true"))
     TArray<FCMPartSlotAddress> ControlSlots;
-
-    UPROPERTY(ReplicatedUsing = OnRep_ControlState, BlueprintReadOnly,
-        Category = "Chimera|Control Body",
-        meta = (AllowPrivateAccess = "true"))
-    int32 OwnedSegmentIndex = INDEX_NONE;
 
     UPROPERTY(ReplicatedUsing = OnRep_ControlState, BlueprintReadOnly,
         Category = "Chimera|Control Body",

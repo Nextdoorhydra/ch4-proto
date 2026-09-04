@@ -38,7 +38,6 @@ void ACMControlBody::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACMControlBody, ControlSlots);
-    DOREPLIFETIME(ACMControlBody, OwnedSegmentIndex);
     DOREPLIFETIME(ACMControlBody, bControlInputEnabled);
     DOREPLIFETIME(ACMControlBody, DisabledControlSlotMask);
     DOREPLIFETIME(ACMControlBody, ConfusionSlotRemap);
@@ -382,18 +381,29 @@ void ACMControlBody::SetControlSlots(
     bControlInputEnabled = true;
     if (const ACMChimera* SharedChimera = GetSharedChimera())
     {
-        if (OwnedSegmentIndex >= 0
-            && !SharedChimera->IsSegmentAlive(OwnedSegmentIndex))
+        const TArray<FCMBodySegmentHealthState> SegmentStates =
+            SharedChimera->GetSegmentHealthStates();
+        for (int32 SlotIndex = 0;
+            SlotIndex < ControlSlots.Num()
+                && SlotIndex < CMControl::MaxKeysPerPlayer;
+            ++SlotIndex)
         {
-            DisabledControlSlotMask |= 0x03; // Q/W
-        }
-        if (OwnedSegmentIndex >= 0
-            && !SharedChimera->IsSegmentAlive(OwnedSegmentIndex + 1))
-        {
-            DisabledControlSlotMask |= 0x0C; // E/R
+            const int32 SegmentIndex =
+                ControlSlots[SlotIndex].SegmentIndex;
+            if (SegmentStates.IsValidIndex(SegmentIndex)
+                && SegmentStates[SegmentIndex].bDead)
+            {
+                DisabledControlSlotMask |= 1u << SlotIndex;
+            }
         }
     }
     bControlInputEnabled = GetEnabledControlCount() > 0;
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetParticipationState(bControlInputEnabled
+            ? ECMPlayerParticipationState::Active
+            : ECMPlayerParticipationState::Defeated);
+    }
     OnRep_ControlSlots();
     OnRep_ControlState();
     ForceNetUpdate();
@@ -690,34 +700,14 @@ const TArray<FCMPartSlotAddress>& ACMControlBody::GetControlSlots() const
     return ControlSlots;
 }
 
-void ACMControlBody::SetOwnedSegmentIndex(int32 NewSegmentIndex)
+bool ACMControlBody::OwnsSegment(int32 SegmentIndex) const
 {
-    if (!HasAuthority() || OwnedSegmentIndex == NewSegmentIndex)
-    {
-        return;
-    }
-
-    ClearPressedControlSlots();
-    OwnedSegmentIndex = NewSegmentIndex;
-    DisabledControlSlotMask = 0;
-    bControlInputEnabled = true;
-    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
-    {
-        CMPlayerState->SetParticipationState(
-            ECMPlayerParticipationState::Active);
-    }
-    OnRep_ControlState();
-    ForceNetUpdate();
-
-    UE_LOG(LogChimeraControlBody, Log,
-        TEXT("[Owned Segment] ControlBody=%s owns Segment=%d"),
-        *GetName(),
-        OwnedSegmentIndex);
-}
-
-int32 ACMControlBody::GetOwnedSegmentIndex() const
-{
-    return OwnedSegmentIndex;
+    return SegmentIndex >= 0
+        && ControlSlots.ContainsByPredicate(
+            [SegmentIndex](const FCMPartSlotAddress& Address)
+            {
+                return Address.SegmentIndex == SegmentIndex;
+            });
 }
 
 bool ACMControlBody::IsControlInputEnabled() const
@@ -733,13 +723,15 @@ void ACMControlBody::HandleSegmentDestroyed(int32 DestroyedSegmentIndex)
     }
 
     uint8 NewlyDisabledMask = 0;
-    if (DestroyedSegmentIndex == OwnedSegmentIndex)
+    for (int32 SlotIndex = 0;
+        SlotIndex < ControlSlots.Num()
+            && SlotIndex < CMControl::MaxKeysPerPlayer;
+        ++SlotIndex)
     {
-        NewlyDisabledMask = 0x03; // Q/W
-    }
-    else if (DestroyedSegmentIndex == OwnedSegmentIndex + 1)
-    {
-        NewlyDisabledMask = 0x0C; // E/R
+        if (ControlSlots[SlotIndex].SegmentIndex == DestroyedSegmentIndex)
+        {
+            NewlyDisabledMask |= 1u << SlotIndex;
+        }
     }
     NewlyDisabledMask &= ~DisabledControlSlotMask;
     if (NewlyDisabledMask == 0)
@@ -748,16 +740,19 @@ void ACMControlBody::HandleSegmentDestroyed(int32 DestroyedSegmentIndex)
     }
 
     ACMChimera* SharedChimera = GetSharedChimera();
-    for (int32 SlotIndex = 0;
-        SlotIndex < CMControl::MaxKeysPerPlayer;
-        ++SlotIndex)
+    for (int32 PhysicalSlotIndex = 0;
+        PhysicalSlotIndex < CMControl::MaxKeysPerPlayer;
+        ++PhysicalSlotIndex)
     {
-        if ((NewlyDisabledMask & (1u << SlotIndex)) == 0)
+        const int32 ResolvedSlotIndex =
+            ResolveControlInputSlot(PhysicalSlotIndex);
+        if ((NewlyDisabledMask & (1u << ResolvedSlotIndex)) == 0)
         {
             continue;
         }
 
-        FCMPartSlotAddress& PressedPartSlot = PressedPartSlots[SlotIndex];
+        FCMPartSlotAddress& PressedPartSlot =
+            PressedPartSlots[PhysicalSlotIndex];
         if (SharedChimera && CMControl::IsValidPartSlot(PressedPartSlot))
         {
             SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
@@ -777,24 +772,6 @@ void ACMControlBody::HandleSegmentDestroyed(int32 DestroyedSegmentIndex)
     }
     OnRep_ControlState();
     ForceNetUpdate();
-
-    if (bControlInputEnabled)
-    {
-        UE_LOG(LogChimeraControlBody, Log,
-            TEXT("[Segment Controls Lost] ControlBody=%s Segment=%d DisabledMask=0x%02X RemainingControls=%d"),
-            *GetName(),
-            DestroyedSegmentIndex,
-            DisabledControlSlotMask,
-            GetEnabledControlCount());
-    }
-    else
-    {
-        UE_LOG(LogChimeraControlBody, Warning,
-            TEXT("[Player Control Defeated] ControlBody=%s Segment=%d DisabledMask=0x%02X; all Q/W/E/R input is disabled."),
-            *GetName(),
-            DestroyedSegmentIndex,
-            DisabledControlSlotMask);
-    }
 }
 
 void ACMControlBody::RestoreControlsAfterRespawn()
@@ -855,12 +832,9 @@ void ACMControlBody::OnRep_ControlState()
     OnControlSlotsChanged.Broadcast();
 
     UE_LOG(LogChimeraControlBody, Log,
-        TEXT("[Control State] ControlBody=%s OwnedSegments=%d,%d DisabledMask=0x%02X InputEnabled=%s"),
+        TEXT("[Control State] ControlBody=%s AssignedSlots=%d DisabledMask=0x%02X InputEnabled=%s"),
         *GetName(),
-        OwnedSegmentIndex,
-        OwnedSegmentIndex >= 0
-            ? OwnedSegmentIndex + 1
-            : INDEX_NONE,
+        ControlSlots.Num(),
         DisabledControlSlotMask,
         bControlInputEnabled ? TEXT("true") : TEXT("false"));
 }

@@ -45,15 +45,16 @@ void ACMChimera::ApplyDamageToSegment(
 
     if (SegmentState.bDead)
     {
-        // Segment ownership is independent from the randomly assigned physical
-        // PartSlots. The first owned Segment disables Q/W and the second E/R.
+        // Every player sharing this Segment loses only the controls mapped to
+        // its left or right PartSlot.
         for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
         {
             It->HandleSegmentDestroyed(SegmentIndex);
         }
 
         UE_LOG(LogChimeraLineBody, Warning,
-            TEXT("[Segment Death] Segment=%d died; its owner's corresponding Q/W or E/R pair was disabled. Physical PartSlot assignment remains random."),
+            TEXT("[Segment Death] Body=%d SegmentIndex=%d died; assigned left/right PartSlot controls were locked for all joint owners."),
+            SegmentIndex + 1,
             SegmentIndex);
 
         OnSegmentDestroyed.Broadcast(SegmentIndex);
