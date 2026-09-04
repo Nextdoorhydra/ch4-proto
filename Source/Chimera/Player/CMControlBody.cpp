@@ -329,6 +329,24 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
         return;
     }
 
+    UCMPartSlotComponent* PartSlot =
+        SharedChimera->GetPartSlotComponent(PartSlotAddress);
+    if (PartSlot
+        && !PartSlot->HasAttachedPart()
+        && SharedChimera->TryBeginTentaclePartAttachment(
+            PartSlotAddress))
+    {
+        // The press is consumed by attachment. In particular, do not
+        // immediately activate the newly mounted Part on this same press.
+        if (CMControl::IsValidPartSlot(PressedPartSlot))
+        {
+            SharedChimera->SetPartSlotPressed(
+                PressedPartSlot, false);
+        }
+        PressedPartSlot = FCMPartSlotAddress();
+        return;
+    }
+
     if (CMControl::IsValidPartSlot(PressedPartSlot)
         && PressedPartSlot != PartSlotAddress)
     {

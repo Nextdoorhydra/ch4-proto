@@ -29,6 +29,7 @@ class ACMPlayerState;
 class ACMArmPart;
 class ACMLegPart;
 class ACMSpringArmPart;
+class ACMTentacleSegmentActor;
 class AActor;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogChimeraLineBody, Log, All);
@@ -218,6 +219,10 @@ public:
         AActor* PartActor
     );
 
+    /** Lets the segment tentacle consume a press only when this slot is empty. */
+    bool TryBeginTentaclePartAttachment(
+        const FCMPartSlotAddress& PartSlotAddress);
+
     /** Server-authoritative detachment entry point. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Part Slots")
@@ -356,6 +361,16 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera")
     TArray<TObjectPtr<UBoxComponent>> BodySegments;
+
+    /** One server-spawned tentacle actor for every active BodyMesh_n. */
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
+        Category = "Chimera|Tentacle")
+    TArray<TObjectPtr<ACMTentacleSegmentActor>> TentacleSegments;
+
+    /** BP child exposes Tentacles_VFX asset defaults without hard references. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle")
+    TSubclassOf<ACMTentacleSegmentActor> TentacleSegmentClass;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
         Category = "Chimera|Health")
@@ -707,6 +722,7 @@ protected:
 
 private:
     void ConfigureSegments();
+    void RefreshTentacleSegments();
     void ConfigureNetworkPhysics();
     void ConfigureBodyRotationLock(UBoxComponent* SegmentBody);
     bool InitializeFromBodyData();
@@ -750,7 +766,8 @@ private:
     // Server-only history for the current key press, independent of anchor lifetime.
     uint32 InteractionConsumedPartSlotMask = 0;
 #if WITH_DEV_AUTOMATION_TESTS
-    friend class FCMLeverInteractionRegressionTest;
+	friend class FCMLeverInteractionRegressionTest;
+	friend class FCMTentacleBlueprintIntegrationTest;
 #endif
 
     UPROPERTY(Transient)

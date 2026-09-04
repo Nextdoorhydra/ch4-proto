@@ -3,10 +3,12 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Gore/CMDismembermentDefinition.h"
+#include "Player/CMControlTypes.h"
 
 #include "CMDroppedPartActor.generated.h"
 
 class ACMPartActorBase;
+class ACMChimera;
 class UPhysicsAsset;
 class USkeletalMesh;
 class USkeletalMeshComponent;
@@ -47,9 +49,27 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Drop")
     USkeletalMeshComponent* GetPartMesh() const { return PartMesh; }
 
+    /** Server-only reservation used to resolve simultaneous slot presses. */
+    bool TryReserveForTentacle(AActor* Requester);
+    void ReleaseTentacleReservation(AActor* Requester);
+    bool IsReservedForTentacle(const AActor* Requester = nullptr) const;
+    bool IsReservedByTentacle(const AActor* Requester) const;
+
+    /** Temporarily hands movement to one tentacle without consuming the pickup. */
+    bool BeginTentaclePull(AActor* Requester);
+    void EndTentaclePull(AActor* Requester);
+
+    /** Spawns the usable Part, attaches it, then consumes this pickup on success. */
+    bool ConsumeIntoPartSlot(
+        ACMChimera* Chimera,
+        const FCMPartSlotAddress& PartSlotAddress);
+
 private:
     UFUNCTION()
     void OnRep_VisualDefinition();
+
+    UFUNCTION()
+    void OnRep_TentaclePulled();
 
     void ApplyVisualDefinition();
 
@@ -76,5 +96,9 @@ private:
     UPROPERTY(ReplicatedUsing = OnRep_VisualDefinition)
     FName DroppedCollisionProfile = TEXT("Ragdoll");
 
+    UPROPERTY(ReplicatedUsing = OnRep_TentaclePulled)
+    bool bTentaclePulled = false;
+
     bool bConsumed = false;
+    TWeakObjectPtr<AActor> TentacleReservationOwner;
 };
