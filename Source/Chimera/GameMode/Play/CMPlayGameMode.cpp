@@ -366,7 +366,6 @@ void ACMPlayGameMode::ExpireDisconnectedPlayer(FString ReconnectKey)
     }
 
     ExpiredReconnectKeys.Add(ReconnectKey);
-    RebalanceControlAssignments();
     UE_LOG(LogChimeraStageLoad, Error,
         TEXT("재접속 유예가 만료되어 담당 파츠를 탈착하고 플레이어를 제외했습니다. Key=%s Grace=%.1fs"),
         *ReconnectKey, ReconnectGracePeriod);
@@ -460,6 +459,15 @@ bool ACMPlayGameMode::StartStage()
     }
 
     bStageLoadReady = false;
+
+    if (ACMChimera* SharedChimera = PlayState->SharedChimera)
+    {
+        const int32 StartingLayoutPlayerCount =
+            SharedChimera->GetActiveSegmentCount()
+            / CMControl::SegmentsPerPlayer;
+        SharedChimera->SpawnStartingPartsForPlayers(
+            StartingLayoutPlayerCount);
+    }
 
     GetWorldTimerManager().ClearTimer(StartingPresentationTimeoutHandle);
     if (StartingPresentationTimeout > 0.0f)

@@ -125,6 +125,7 @@ protected:
 
 private:
     bool LaunchHook();
+    FVector GetHookSpawnLocation(const FVector& Direction) const;
     float GetAutomaticSweepPhase() const;
     void StartBodyPull(
         class ACMChimera* Chimera,

@@ -251,6 +251,9 @@ public:
 
     /** True while one SpringArm owns the Chimera pull. */
     bool IsSpringArmPulling() const;
+
+    /** Attaches the fixed symmetric starting Part layout for 2-4 players. */
+    void SpawnStartingPartsForPlayers(int32 PlayerCount);
     
     /** Attaches registered production Part Blueprints to empty active slots. */
     void SpawnRandomDebugParts();
@@ -413,7 +416,7 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "0.0"))
-    float GroundContactDistance = 8.0f;
+    float GroundContactDistance = 30.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
