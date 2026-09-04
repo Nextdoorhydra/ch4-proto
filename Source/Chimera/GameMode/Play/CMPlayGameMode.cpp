@@ -630,6 +630,35 @@ bool ACMPlayGameMode::TryCheatNextStage()
         && TryCheatGoToStage(Route->GetCurrentStageIndex() + 2);
 }
 
+bool ACMPlayGameMode::TryCheatGoToCheckpoint(int32 OneBasedCheckpointNumber)
+{
+#if UE_BUILD_SHIPPING
+    return false;
+#else
+    if (!HasAuthority() || OneBasedCheckpointNumber < 1 || !CachedPlayGameState
+        || CachedPlayGameState->GetPlayPhase() != ECMPlayPhase::Playing
+        || !IsValid(CachedPlayGameState->SharedChimera)
+        || PendingStageTransitionIndex != INDEX_NONE)
+    {
+        return false;
+    }
+    ACMRoomStreamingController* RoomController = nullptr;
+    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
+    {
+        if (RoomController)
+        {
+            return false;
+        }
+        RoomController = *It;
+    }
+    if (!RoomController || !RoomController->TryCheatSelectCheckpoint(OneBasedCheckpointNumber))
+    {
+        return false;
+    }
+    return TryCheatRespawnAtLatestCheckpoint();
+#endif
+}
+
 bool ACMPlayGameMode::TryCheatGoToStage(int32 OneBasedStageNumber)
 {
 #if UE_BUILD_SHIPPING

@@ -130,6 +130,58 @@ bool ACMRoomStreamingController::CommitRoom(FName RoomId)
     return true;
 }
 
+bool ACMRoomStreamingController::TryCheatSelectCheckpoint(int32 OneBasedCheckpointNumber)
+{
+#if UE_BUILD_SHIPPING
+    return false;
+#else
+    if (!HasAuthority() || OneBasedCheckpointNumber < 1
+        || OneBasedCheckpointNumber > Rooms.Num())
+    {
+        return false;
+    }
+    const int32 TargetIndex = OneBasedCheckpointNumber - 1;
+    const FName RoomId = Rooms[TargetIndex].RoomId;
+    if (RoomId.IsNone() || Rooms.FilterByPredicate([RoomId](const FCMRoomStreamingEntry& Room)
+            { return Room.RoomId == RoomId; }).Num() != 1)
+    {
+        return false;
+    }
+    ULevelStreaming* TargetLevel = ResolveStreamingLevel(Rooms[TargetIndex]);
+    if (!TargetLevel)
+    {
+        return false;
+    }
+
+    // 위치를 검증하기 전에는 진행 상태나 최신 체크포인트를 바꾸지 않는다.
+    // 개발 치트에서만 동기 로드를 사용하며 실제 플레이 스트리밍은 그대로 유지한다.
+    const bool bWasLoaded = TargetLevel->ShouldBeLoaded();
+    TargetLevel->SetShouldBeLoaded(true);
+    GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    const int32 PreviousCheckpoint = ActiveCheckpointRoomIndex;
+    ActiveCheckpointRoomIndex = TargetIndex;
+    FTransform CheckpointTransform;
+    const bool bValidCheckpoint = TryGetActiveCheckpointTransform(CheckpointTransform);
+    ActiveCheckpointRoomIndex = PreviousCheckpoint;
+    if (!bValidCheckpoint)
+    {
+        TargetLevel->SetShouldBeLoaded(bWasLoaded);
+        return false;
+    }
+
+    // 이전 방으로 이동해도 이미 열린 방을 다시 언로드하지 않는다.
+    CurrentRoomIndex = FMath::Max(CurrentRoomIndex, TargetIndex);
+    ApplyStreamingWindow();
+    GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    ActiveCheckpointRoomIndex = TargetIndex;
+    ForceNetUpdate();
+    UE_LOG(LogChimeraRoomStreaming, Display,
+        TEXT("[Cheat] Selected checkpoint Number=%d Room=%s (unreached rooms allowed)."),
+        OneBasedCheckpointNumber, *RoomId.ToString());
+    return true;
+#endif
+}
+
 bool ACMRoomStreamingController::TryGetActiveCheckpointTransform(
     FTransform& OutTransform) const
 {
