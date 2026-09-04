@@ -102,7 +102,7 @@ public:
     /** Wall-only depth allowance; the base world mask remains fully occluded. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion",
         meta = (ClampMin = "0.0"))
-    float OccluderSurfaceRevealDistance = 100.0f;
+    float OccluderSurfaceRevealDistance = 0.0f;
 
     /** Minimum depth used to stabilize thin or single-sided occluder meshes. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Occlusion",
