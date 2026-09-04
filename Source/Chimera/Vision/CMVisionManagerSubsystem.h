@@ -103,6 +103,7 @@ private:
     );
 
     void EnsureVisibilityMask();
+    bool GetViewportSize(FVector2D& OutSize) const;
     void UpdateVisibilityMaskBounds(
         const TArray<UCMVisionComponent*>& ActiveSources
     );
@@ -127,7 +128,7 @@ private:
         const UCMVisionComponent& VisionSource,
         const FVector& WorldLocation
     ) const;
-    FVector2D WorldToMaskPixel(
+    FVector2D WorldToScreenMaskPixel(
         const FVector& WorldLocation,
         int32 Width,
         int32 Height
