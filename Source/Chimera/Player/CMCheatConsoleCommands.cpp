@@ -231,6 +231,66 @@ FAutoConsoleCommandWithWorldAndArgs RespawnAtLatestCheckpointCommand(
     )
 );
 
+#if !UE_BUILD_SHIPPING
+FAutoConsoleCommandWithWorldAndArgs GoToCheckpointCommand(
+    TEXT("CM.GoToCheckpoint"),
+    TEXT("Loads and registers a checkpoint by one-based Rooms array order, including unreached rooms. Usage: CM.GoToCheckpoint 2"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+        [](const TArray<FString>& Args, UWorld* World)
+        {
+            int64 CheckpointNumber = 0;
+            if (Args.Num() != 1 || Args[0].IsEmpty() || Args[0].Len() > 10
+                || Args[0].GetCharArray().ContainsByPredicate([](TCHAR C)
+                    { return C != 0 && (C < TEXT('0') || C > TEXT('9')); })
+                || (CheckpointNumber = FCString::Atoi64(*Args[0])) < 1
+                || CheckpointNumber > MAX_int32)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Usage: CM.GoToCheckpoint <positive checkpoint number>, e.g. CM.GoToCheckpoint 2 (Rooms index 1)"));
+                return;
+            }
+            if (ACMPlayerController* Controller = FindLocalController(World))
+            {
+                Controller->RequestCheatGoToCheckpoint(static_cast<int32>(CheckpointNumber));
+            }
+        }),
+    ECVF_Cheat);
+
+FAutoConsoleCommandWithWorldAndArgs GoToStageCommand(
+    TEXT("CM.GoToStage"),
+    TEXT("Travel to a one-based StageRoute entry. Usage: CM.GoToStage 2"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+        [](const TArray<FString>& Args, UWorld* World)
+        {
+            int64 StageNumber = 0;
+            if (Args.Num() != 1 || Args[0].IsEmpty() || Args[0].Len() > 10
+                || Args[0].GetCharArray().ContainsByPredicate([](TCHAR C)
+                    { return C != 0 && (C < TEXT('0') || C > TEXT('9')); })
+                || (StageNumber = FCString::Atoi64(*Args[0])) < 1 || StageNumber > MAX_int32)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Usage: CM.GoToStage <positive stage number>, e.g. CM.GoToStage 2"));
+                return;
+            }
+            if (ACMPlayerController* Controller = FindLocalController(World))
+            {
+                Controller->RequestCheatGoToStage(static_cast<int32>(StageNumber));
+            }
+        }),
+    ECVF_Cheat);
+
+FAutoConsoleCommandWithWorldAndArgs NextStageCommand(
+    TEXT("CM.NextStage"),
+    TEXT("Skips to the next StageRoute map for all players. Rejected during loading or on the last stage."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+        [](const TArray<FString>& Args, UWorld* World)
+        {
+            if (ACMPlayerController* Controller = FindLocalController(World))
+            {
+                Controller->RequestCheatNextStage();
+            }
+        }),
+    ECVF_Cheat);
+#endif
+
 FAutoConsoleCommandWithWorldAndArgs DamageBodyCommand(
     TEXT("CM.DamageBody"),
     TEXT("Damages a zero-based Chimera body segment. Usage: CM.DamageBody <BodyIndex> <Damage>"),

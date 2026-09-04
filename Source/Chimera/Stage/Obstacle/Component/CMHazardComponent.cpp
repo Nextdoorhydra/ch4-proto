@@ -192,7 +192,12 @@ void UCMHazardComponent::NotifyTargetEntered(
     FTrackedSegment& Tracked = TrackedSegments.FindOrAdd(TargetComponent);
     Tracked.Chimera = Chimera;
     Tracked.SegmentIndex = SegmentIndex;
-    Tracked.ControlBody = FindControlBodyForSegment(SegmentIndex);
+    Tracked.ControlBodies.Reset();
+    for (ACMControlBody* ControlBody
+        : FindControlBodiesForSegment(SegmentIndex))
+    {
+        Tracked.ControlBodies.Add(ControlBody);
+    }
     if (++Tracked.OverlapCount > 1)
     {
         return;
@@ -202,14 +207,20 @@ void UCMHazardComponent::NotifyTargetEntered(
     {
         ApplyConfiguredDamage(*Chimera, SegmentIndex);
     }
-    if (Tracked.ControlBody.IsValid())
+    for (const TWeakObjectPtr<ACMControlBody>& WeakControlBody
+        : Tracked.ControlBodies)
     {
+        ACMControlBody* ControlBody = WeakControlBody.Get();
+        if (!ControlBody)
+        {
+            continue;
+        }
         int32& BodyOverlapCount = ControlBodyOverlapCounts.FindOrAdd(
-            Tracked.ControlBody);
+            ControlBody);
         ++BodyOverlapCount;
         if (BodyOverlapCount == 1 && bHazardEnabled)
         {
-            ApplyControlEffect(*Tracked.ControlBody.Get());
+            ApplyControlEffect(*ControlBody);
         }
     }
     UpdatePeriodicTimer();
@@ -276,10 +287,16 @@ void UCMHazardComponent::NotifyTargetExited(
     }
 
     ACMChimera* Chimera = Tracked->Chimera.Get();
-    ACMControlBody* ControlBody = Tracked->ControlBody.Get();
-    bool bLastControlBodyOverlap = false;
-    if (ControlBody)
+    for (const TWeakObjectPtr<ACMControlBody>& WeakControlBody
+        : Tracked->ControlBodies)
     {
+        ACMControlBody* ControlBody = WeakControlBody.Get();
+        if (!ControlBody)
+        {
+            continue;
+        }
+
+        bool bLastControlBodyOverlap = false;
         if (int32* BodyOverlapCount = ControlBodyOverlapCounts.Find(ControlBody))
         {
             bLastControlBodyOverlap = --*BodyOverlapCount <= 0;
@@ -288,12 +305,12 @@ void UCMHazardComponent::NotifyTargetExited(
                 ControlBodyOverlapCounts.Remove(ControlBody);
             }
         }
-    }
-    if (ControlBody && bLastControlBodyOverlap
-        && ControlEffect.ApplicationPolicy
-            == ECMControlStatusApplicationPolicy::WhileOverlapping)
-    {
-        RemoveControlEffect(*ControlBody);
+        if (bLastControlBodyOverlap
+            && ControlEffect.ApplicationPolicy
+                == ECMControlStatusApplicationPolicy::WhileOverlapping)
+        {
+            RemoveControlEffect(*ControlBody);
+        }
     }
     TrackedSegments.Remove(TargetComponent);
     UpdatePeriodicTimer();
@@ -361,23 +378,23 @@ void UCMHazardComponent::ApplyConfiguredEffect(
     }
 }
 
-ACMControlBody* UCMHazardComponent::FindControlBodyForSegment(
+TArray<ACMControlBody*> UCMHazardComponent::FindControlBodiesForSegment(
     int32 SegmentIndex) const
 {
+    TArray<ACMControlBody*> Result;
     const UWorld* World = GetWorld();
     if (!World)
     {
-        return nullptr;
+        return Result;
     }
     for (TActorIterator<ACMControlBody> It(World); It; ++It)
     {
-        const int32 OwnedSegment = It->GetOwnedSegmentIndex();
-        if (SegmentIndex == OwnedSegment || SegmentIndex == OwnedSegment + 1)
+        if (It->OwnsSegment(SegmentIndex))
         {
-            return *It;
+            Result.Add(*It);
         }
     }
-    return nullptr;
+    return Result;
 }
 
 void UCMHazardComponent::ApplyControlEffect(ACMControlBody& ControlBody)

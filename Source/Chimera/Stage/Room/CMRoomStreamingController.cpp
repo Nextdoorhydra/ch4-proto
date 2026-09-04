@@ -38,10 +38,8 @@ FCMDesiredRoomStreamingState ResolveDesiredRoomStreamingState(
     }
 
     FCMDesiredRoomStreamingState Result;
-    Result.bLoaded = RoomIndex >= CurrentRoomIndex
-        && RoomIndex <= CurrentRoomIndex + 2;
-    Result.bVisible = RoomIndex >= CurrentRoomIndex
-        && RoomIndex <= CurrentRoomIndex + 1;
+    Result.bLoaded = RoomIndex <= CurrentRoomIndex + 2;
+    Result.bVisible = RoomIndex <= CurrentRoomIndex + 1;
     return Result;
 }
 }
@@ -132,6 +130,58 @@ bool ACMRoomStreamingController::CommitRoom(FName RoomId)
     return true;
 }
 
+bool ACMRoomStreamingController::TryCheatSelectCheckpoint(int32 OneBasedCheckpointNumber)
+{
+#if UE_BUILD_SHIPPING
+    return false;
+#else
+    if (!HasAuthority() || OneBasedCheckpointNumber < 1
+        || OneBasedCheckpointNumber > Rooms.Num())
+    {
+        return false;
+    }
+    const int32 TargetIndex = OneBasedCheckpointNumber - 1;
+    const FName RoomId = Rooms[TargetIndex].RoomId;
+    if (RoomId.IsNone() || Rooms.FilterByPredicate([RoomId](const FCMRoomStreamingEntry& Room)
+            { return Room.RoomId == RoomId; }).Num() != 1)
+    {
+        return false;
+    }
+    ULevelStreaming* TargetLevel = ResolveStreamingLevel(Rooms[TargetIndex]);
+    if (!TargetLevel)
+    {
+        return false;
+    }
+
+    // 위치를 검증하기 전에는 진행 상태나 최신 체크포인트를 바꾸지 않는다.
+    // 개발 치트에서만 동기 로드를 사용하며 실제 플레이 스트리밍은 그대로 유지한다.
+    const bool bWasLoaded = TargetLevel->ShouldBeLoaded();
+    TargetLevel->SetShouldBeLoaded(true);
+    GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    const int32 PreviousCheckpoint = ActiveCheckpointRoomIndex;
+    ActiveCheckpointRoomIndex = TargetIndex;
+    FTransform CheckpointTransform;
+    const bool bValidCheckpoint = TryGetActiveCheckpointTransform(CheckpointTransform);
+    ActiveCheckpointRoomIndex = PreviousCheckpoint;
+    if (!bValidCheckpoint)
+    {
+        TargetLevel->SetShouldBeLoaded(bWasLoaded);
+        return false;
+    }
+
+    // 이전 방으로 이동해도 이미 열린 방을 다시 언로드하지 않는다.
+    CurrentRoomIndex = FMath::Max(CurrentRoomIndex, TargetIndex);
+    ApplyStreamingWindow();
+    GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    ActiveCheckpointRoomIndex = TargetIndex;
+    ForceNetUpdate();
+    UE_LOG(LogChimeraRoomStreaming, Display,
+        TEXT("[Cheat] Selected checkpoint Number=%d Room=%s (unreached rooms allowed)."),
+        OneBasedCheckpointNumber, *RoomId.ToString());
+    return true;
+#endif
+}
+
 bool ACMRoomStreamingController::TryGetActiveCheckpointTransform(
     FTransform& OutTransform) const
 {
@@ -201,7 +251,7 @@ ULevelStreaming* ACMRoomStreamingController::ResolveStreamingLevel(
         Room.Level.ToSoftObjectPath().GetAssetFName());
 }
 
-// Room N 기준 N과 N+1은 표시하고 N+2는 숨김 로드하며 이전 룸은 해제
+// Room N 기준 이전 룸부터 N+1까지 표시하고 N+2는 숨김 로드 (지난 룸 유지)
 void ACMRoomStreamingController::ApplyStreamingWindow()
 {
     if (!Rooms.IsValidIndex(CurrentRoomIndex))
@@ -406,8 +456,23 @@ bool FCMRoomStreamingWindowAutomationTest::RunTest(const FString& Parameters)
         Next.bLoaded && Next.bVisible);
     TestTrue(TEXT("Next-next room is loaded but hidden"),
         NextNext.bLoaded && !NextNext.bVisible);
-    TestTrue(TEXT("Previous room is unloaded"),
-        !Previous.bLoaded && !Previous.bVisible);
+    TestTrue(TEXT("Previous room stays loaded and visible"),
+        Previous.bLoaded && Previous.bVisible);
+
+    for (int32 CurrentIndex = 0; CurrentIndex < 5; ++CurrentIndex)
+    {
+        for (int32 PreviousIndex = 0; PreviousIndex <= CurrentIndex; ++PreviousIndex)
+        {
+            const FCMDesiredRoomStreamingState Retained =
+                ResolveDesiredRoomStreamingState(PreviousIndex, CurrentIndex, 5);
+            TestTrue(TEXT("Every visited room remains loaded and visible"),
+                Retained.bLoaded && Retained.bVisible);
+        }
+    }
+    const FCMDesiredRoomStreamingState Distant =
+        ResolveDesiredRoomStreamingState(4, 0, 5);
+    TestTrue(TEXT("Distant future rooms are not preloaded"),
+        !Distant.bLoaded && !Distant.bVisible);
 
     const FCMDesiredRoomStreamingState Final =
         ResolveDesiredRoomStreamingState(4, 4, 5);

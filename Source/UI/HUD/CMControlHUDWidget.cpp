@@ -385,8 +385,11 @@ void UCMControlHUDWidget::RefreshBodySegments()
         CurrentChimera->GetActiveSegmentCount(), SegmentRows.Num());
     const TArray<FCMBodySegmentHealthState> SegmentStates =
         CurrentChimera->GetSegmentHealthStates();
-    const int32 OwnedSegmentIndex =
-        CurrentControlBody->GetOwnedSegmentIndex();
+    const TArray<FCMPartSlotAddress>& ControlSlots =
+        CurrentControlBody->GetControlSlots();
+    static const TCHAR* ControlKeyNames[] = {
+        TEXT("Q"), TEXT("W"), TEXT("E"), TEXT("R")
+    };
     const ACMPlayerState* PlayerState = ObservedPlayerState.Get();
     const FLinearColor PlayerColor = PlayerState
         ? PlayerState->GetPlayerColor()
@@ -406,9 +409,23 @@ void UCMControlHUDWidget::RefreshBodySegments()
             continue;
         }
 
-        const bool bFirstOwned = SegmentIndex == OwnedSegmentIndex;
-        const bool bSecondOwned = SegmentIndex == OwnedSegmentIndex + 1;
-        const bool bOwned = bFirstOwned || bSecondOwned;
+        FString OwnedControlKeys;
+        for (int32 ControlIndex = 0;
+            ControlIndex < ControlSlots.Num()
+                && ControlIndex < CMControl::MaxKeysPerPlayer;
+            ++ControlIndex)
+        {
+            if (ControlSlots[ControlIndex].SegmentIndex != SegmentIndex)
+            {
+                continue;
+            }
+            if (!OwnedControlKeys.IsEmpty())
+            {
+                OwnedControlKeys += TEXT("/");
+            }
+            OwnedControlKeys += ControlKeyNames[ControlIndex];
+        }
+        const bool bOwned = !OwnedControlKeys.IsEmpty();
         const FCMBodySegmentHealthState* SegmentState =
             SegmentStates.IsValidIndex(SegmentIndex)
                 ? &SegmentStates[SegmentIndex]
@@ -423,11 +440,9 @@ void UCMControlHUDWidget::RefreshBodySegments()
             ? GetPercent(SegmentState->Health, SegmentState->MaxHealth)
             : 0.0f);
         Row.BodyControlText->SetStrikeBrush(FSlateBrush());
-        Row.BodyControlText->SetText(bFirstOwned
-            ? LOCTEXT("QWBody", "Q/W")
-            : bSecondOwned
-                ? LOCTEXT("ERBody", "E/R")
-                : FText::GetEmpty());
+        Row.BodyControlText->SetText(bOwned
+            ? FText::FromString(OwnedControlKeys)
+            : FText::GetEmpty());
         Row.BodyControlText->SetRenderOpacity(bDead ? 0.35f : 1.0f);
         Row.BodyStrikeLine->SetVisibility(bOwned && bDead
             ? ESlateVisibility::HitTestInvisible

@@ -236,7 +236,6 @@ void ACMPlayGameMode::Logout(AController* Exiting)
             DisconnectedPlayers.FindOrAdd(ReconnectKey);
         Record.PlayerSlotId = PlayerState->GetPlayerSlotId();
         Record.PlayerColorIndex = PlayerState->GetPlayerColorIndex();
-        Record.OwnedSegmentIndex = ControlBody->GetOwnedSegmentIndex();
         Record.ControlSlots = ControlBody->GetControlSlots();
         GetWorldTimerManager().ClearTimer(Record.ExpirationTimer);
 
@@ -274,7 +273,7 @@ void ACMPlayGameMode::RestartPlayer(AController* NewPlayer)
             {
                 if (PlayState->SharedChimera)
                 {
-                    PlayerController->ClientSetViewTarget(PlayState->SharedChimera);
+                    PlayerController->SetViewTarget(PlayState->SharedChimera);
                 }
             }
         }
@@ -317,7 +316,6 @@ bool ACMPlayGameMode::RestorePreservedControlAssignment(
     PlayerState->SetPlayerSlotId(Record->PlayerSlotId);
     PlayerState->SetPlayerColorIndex(Record->PlayerColorIndex);
     PlayerState->SetParticipationState(ECMPlayerParticipationState::Active);
-    ControlBody->SetOwnedSegmentIndex(Record->OwnedSegmentIndex);
     ControlBody->SetControlSlots(Record->ControlSlots);
     DisconnectedPlayers.Remove(ReconnectKey);
     ExpiredReconnectKeys.Remove(ReconnectKey);
@@ -620,6 +618,87 @@ bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
     GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
     bCheckpointRespawnPending = false;
     return RespawnAtActiveCheckpoint();
+}
+
+bool ACMPlayGameMode::TryCheatNextStage()
+{
+    const UCMStageRouteSubsystem* Route = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
+    return Route && Route->IsStageRouteActive()
+        && TryCheatGoToStage(Route->GetCurrentStageIndex() + 2);
+}
+
+bool ACMPlayGameMode::TryCheatGoToCheckpoint(int32 OneBasedCheckpointNumber)
+{
+#if UE_BUILD_SHIPPING
+    return false;
+#else
+    if (!HasAuthority() || OneBasedCheckpointNumber < 1 || !CachedPlayGameState
+        || CachedPlayGameState->GetPlayPhase() != ECMPlayPhase::Playing
+        || !IsValid(CachedPlayGameState->SharedChimera)
+        || PendingStageTransitionIndex != INDEX_NONE)
+    {
+        return false;
+    }
+    ACMRoomStreamingController* RoomController = nullptr;
+    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
+    {
+        if (RoomController)
+        {
+            return false;
+        }
+        RoomController = *It;
+    }
+    if (!RoomController || !RoomController->TryCheatSelectCheckpoint(OneBasedCheckpointNumber))
+    {
+        return false;
+    }
+    return TryCheatRespawnAtLatestCheckpoint();
+#endif
+}
+
+bool ACMPlayGameMode::TryCheatGoToStage(int32 OneBasedStageNumber)
+{
+#if UE_BUILD_SHIPPING
+    return false;
+#else
+    ACMPlayGameState* PlayState = CachedPlayGameState;
+    UCMStageRouteSubsystem* Route = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
+    if (!HasAuthority() || !PlayState || !Route || !Route->IsStageRouteActive()
+        || OneBasedStageNumber < 1 || OneBasedStageNumber > Route->GetStageCount()
+        || Route->GetPendingStageIndex() != INDEX_NONE
+        || PendingStageTransitionIndex != INDEX_NONE)
+    {
+        return false;
+    }
+    const ECMPlayPhase Phase = PlayState->GetPlayPhase();
+    if (Phase != ECMPlayPhase::Playing && Phase != ECMPlayPhase::Completed
+        && Phase != ECMPlayPhase::Failed)
+    {
+        return false;
+    }
+
+    const int32 TargetIndex = OneBasedStageNumber - 1;
+    if (!Route->PrepareStageAtIndex(TargetIndex))
+    {
+        return false;
+    }
+    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
+    GetWorldTimerManager().ClearTimer(StageLoopRestartTimerHandle);
+    bCheckpointRespawnPending = false;
+    PlayState->SetStagePresentationState(ECMStagePresentationState::None);
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("[Cheat] CM.GoToStage: %d -> %d."),
+        Route->GetCurrentStageIndex() + 1, OneBasedStageNumber);
+    PendingStageTransitionIndex = TargetIndex;
+    StageDirector = nullptr;
+    bStageLoadReady = false;
+    InitializeStageProgress(TargetIndex, Route->GetStageCount());
+    SetPlayPhase(ECMPlayPhase::Loading);
+    BeginStageTransition(TargetIndex);
+    return true;
+#endif
 }
 
 void ACMPlayGameMode::ScheduleCheckpointRespawn()

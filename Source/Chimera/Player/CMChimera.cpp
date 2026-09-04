@@ -818,6 +818,26 @@ bool ACMChimera::AreAllActiveBodySegmentsOverlapping(
     return true;
 }
 
+bool ACMChimera::IsAnyActiveBodySegmentOverlapping(
+    const UPrimitiveComponent* Volume) const
+{
+    if (!IsValid(Volume))
+    {
+        return false;
+    }
+
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const UBoxComponent* Segment = BodySegments[Index];
+        if (IsValid(Segment) && Segment->IsOverlappingComponent(Volume))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void ACMChimera::ApplyBlueprintSettings()
 {
     ActiveSegmentCount = FMath::Clamp(

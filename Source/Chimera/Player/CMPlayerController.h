@@ -57,6 +57,12 @@ public:
     // 최신 룸 체크포인트로 공용 키메라 복구·이동을 서버에 요청
     void RequestCheatRespawnAtCheckpoint();
 
+    void RequestCheatNextStage();
+
+    void RequestCheatGoToStage(int32 OneBasedStageNumber);
+
+    void RequestCheatGoToCheckpoint(int32 OneBasedCheckpointNumber);
+
     /** Console-command entry point using the zero-based body-segment index. */
     void RequestCheatKillSegment(int32 SegmentIndex);
 
@@ -184,6 +190,15 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatRespawnAtCheckpoint();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatNextStage();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatGoToStage(int32 OneBasedStageNumber);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatGoToCheckpoint(int32 OneBasedCheckpointNumber);
 
     UFUNCTION(Server, Reliable)
     void ServerCheatKillSegment(int32 SegmentIndex);

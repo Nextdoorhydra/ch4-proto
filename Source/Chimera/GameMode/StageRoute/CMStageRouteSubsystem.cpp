@@ -59,12 +59,19 @@ bool UCMStageRouteSubsystem::ShouldLoopCurrentStage() const
 // 마지막 스테이지를 넘지 않는 경우에만 다음 인덱스로 진행
 bool UCMStageRouteSubsystem::PrepareNextStage()
 {
-    if (!IsStageRouteActive() || IsLastStage() || PendingStageIndex != INDEX_NONE)
+    return PrepareStageAtIndex(CurrentStageIndex + 1);
+}
+
+bool UCMStageRouteSubsystem::PrepareStageAtIndex(int32 StageIndex)
+{
+    if (!IsStageRouteActive() || PendingStageIndex != INDEX_NONE
+        || !StageRouteDefinition->Stages.IsValidIndex(StageIndex)
+        || !StageRouteDefinition->Stages[StageIndex].IsValid())
     {
         return false;
     }
 
-    PendingStageIndex = CurrentStageIndex + 1;
+    PendingStageIndex = StageIndex;
     return true;
 }
 

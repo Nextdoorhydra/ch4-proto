@@ -113,6 +113,22 @@ bool FChimeraControlAssignmentCountTest::RunTest(
                 NewAssignments[PlayerIndex].Num(),
                 CMControl::MaxKeysPerPlayer
             );
+            if (PlayerCount >= 2)
+            {
+                TSet<int32> OwnedSegments;
+                for (const FCMPartSlotAddress& Address
+                    : NewAssignments[PlayerIndex])
+                {
+                    OwnedSegments.Add(Address.SegmentIndex);
+                }
+                TestEqual(
+                    FString::Printf(
+                        TEXT("Four distinct owned segments for player %d of %d"),
+                        PlayerIndex,
+                        PlayerCount),
+                    OwnedSegments.Num(),
+                    CMControl::MaxKeysPerPlayer);
+            }
             TotalAssignedPartSlots +=
                 NewAssignments[PlayerIndex].Num();
 

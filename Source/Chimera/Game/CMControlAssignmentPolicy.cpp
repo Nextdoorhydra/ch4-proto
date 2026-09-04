@@ -80,6 +80,36 @@ void FCMControlAssignmentPolicy::Rebalance(
         }
         Shuffle(PlayerIndices);
         Shuffle(PlayerSides);
+
+        if (AssignedPlayerCount % 2 != 0)
+        {
+            TArray<int32> SegmentIndices;
+            for (int32 SegmentIndex = 0;
+                SegmentIndex < SafeSegmentCount;
+                ++SegmentIndex)
+            {
+                SegmentIndices.Add(SegmentIndex);
+            }
+            Shuffle(SegmentIndices);
+
+            TArray<FCMPartSlotAddress>& MixedAssignment =
+                OutAssignments[PlayerIndices.Last()];
+            for (int32 ControlIndex = 0;
+                ControlIndex < CMControl::MaxKeysPerPlayer;
+                ++ControlIndex)
+            {
+                FCMPartSlotAddress Address;
+                Address.SegmentIndex = SegmentIndices[ControlIndex];
+                Address.PartSlotIndex = ControlIndex
+                        < CMControl::MaxKeysPerPlayer / 2
+                    ? 0 : 1;
+                MixedAssignment.Add(Address);
+                (Address.PartSlotIndex == 0
+                    ? LeftPartSlots
+                    : RightPartSlots).RemoveSingle(Address);
+            }
+        }
+
         for (int32 TicketIndex = 0;
             TicketIndex < PlayerSides.Num();
             ++TicketIndex)
@@ -98,21 +128,6 @@ void FCMControlAssignmentPolicy::Rebalance(
             }
         }
 
-        if (AssignedPlayerCount % 2 != 0)
-        {
-            TArray<FCMPartSlotAddress>& MixedAssignment =
-                OutAssignments[PlayerIndices.Last()];
-            while (!LeftPartSlots.IsEmpty())
-            {
-                MixedAssignment.Add(
-                    LeftPartSlots.Pop(EAllowShrinking::No));
-            }
-            while (!RightPartSlots.IsEmpty())
-            {
-                MixedAssignment.Add(
-                    RightPartSlots.Pop(EAllowShrinking::No));
-            }
-        }
         return;
     }
 

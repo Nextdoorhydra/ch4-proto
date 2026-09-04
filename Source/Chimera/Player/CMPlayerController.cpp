@@ -123,6 +123,53 @@ void ACMPlayerController::RequestCheatRespawnAtCheckpoint()
     }
 }
 
+void ACMPlayerController::RequestCheatNextStage()
+{
+#if !UE_BUILD_SHIPPING
+    if (IsLocalController())
+    {
+        ServerCheatNextStage();
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatNextStage_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+    ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>() : nullptr;
+    if (!GameMode || !GameMode->TryCheatNextStage())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.NextStage requires Playing/Completed/Failed and an active route with a next stage."));
+    }
+#endif
+}
+
+void ACMPlayerController::RequestCheatGoToStage(int32 OneBasedStageNumber)
+{
+#if !UE_BUILD_SHIPPING
+    if (IsLocalController())
+    {
+        ServerCheatGoToStage(OneBasedStageNumber);
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatGoToStage_Implementation(int32 OneBasedStageNumber)
+{
+#if !UE_BUILD_SHIPPING
+    ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>() : nullptr;
+    if (!GameMode || !GameMode->TryCheatGoToStage(OneBasedStageNumber))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.GoToStage %d: requires a valid route number and Playing/Completed/Failed phase."),
+            OneBasedStageNumber);
+    }
+#endif
+}
+
 void ACMPlayerController::RequestCheatKillSegment(int32 SegmentIndex)
 {
     if (!IsLocalController())
@@ -131,6 +178,30 @@ void ACMPlayerController::RequestCheatKillSegment(int32 SegmentIndex)
     }
 
     ServerCheatKillSegment(SegmentIndex);
+}
+
+void ACMPlayerController::RequestCheatGoToCheckpoint(int32 OneBasedCheckpointNumber)
+{
+#if !UE_BUILD_SHIPPING
+    if (IsLocalController() && OneBasedCheckpointNumber > 0)
+    {
+        ServerCheatGoToCheckpoint(OneBasedCheckpointNumber);
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatGoToCheckpoint_Implementation(int32 OneBasedCheckpointNumber)
+{
+#if !UE_BUILD_SHIPPING
+    ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>() : nullptr;
+    if (!GameMode || !GameMode->TryCheatGoToCheckpoint(OneBasedCheckpointNumber))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.GoToCheckpoint %d: requires Playing, a valid one-based Rooms array number, one room controller and a unique checkpoint."),
+            OneBasedCheckpointNumber);
+    }
+#endif
 }
 
 void ACMPlayerController::RequestCheatDamageSegment(

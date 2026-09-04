@@ -8,6 +8,8 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/Canvas.h"
 #include "Engine/CanvasRenderTarget2D.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
 #include "Engine/Texture2D.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
@@ -161,24 +163,10 @@ void UCMVisionManagerSubsystem::Tick(float DeltaTime)
 
     TArray<UCMVisionComponent*> ActiveSources;
     GetActiveVisionSources(ActiveSources);
-    UpdateVisibilityMaskBounds(ActiveSources);
     BuildVisionRayCache(ActiveSources);
 
     if (PostProcessMaterialInstance)
     {
-        PostProcessMaterialInstance->SetVectorParameterValue(
-            VisionMaskWorldCenterParameterName,
-            FLinearColor(
-                MaskWorldCenter.X,
-                MaskWorldCenter.Y,
-                0.0f,
-                0.0f
-            )
-        );
-        PostProcessMaterialInstance->SetScalarParameterValue(
-            VisionMaskWorldSizeParameterName,
-            MaskWorldHalfExtent * 2.0f
-        );
         PostProcessMaterialInstance->SetScalarParameterValue(
             VisionMaskWorldMinHeightParameterName,
             MaskWorldMinHeight
@@ -506,11 +494,13 @@ void UCMVisionManagerSubsystem::EnsureVisibilityMask()
         return;
     }
 
+    FVector2D ViewportSize;
+    if (!GetViewportSize(ViewportSize))
+    {
+        return;
+    }
     const int32 SafeResolution = FMath::Clamp(
-        RenderConfig->MaskResolution,
-        64,
-        2048
-    );
+        FMath::Max(ViewportSize.X, ViewportSize.Y), 64, 4096);
 
     OccluderVisibilityMask = UCanvasRenderTarget2D::CreateCanvasRenderTarget2D(
         this,
@@ -569,6 +559,16 @@ void UCMVisionManagerSubsystem::EnsureVisibilityMask()
         );
     }
 
+}
+
+bool UCMVisionManagerSubsystem::GetViewportSize(FVector2D& OutSize) const
+{
+    if (!GEngine || !GEngine->GameViewport)
+    {
+        return false;
+    }
+    GEngine->GameViewport->GetViewportSize(OutSize);
+    return OutSize.X > 0 && OutSize.Y > 0;
 }
 
 void UCMVisionManagerSubsystem::UpdateVisibilityMaskBounds(
@@ -1152,6 +1152,7 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
 
     const FVector TraceDirection = (TraceEnd - TraceStart).GetSafeNormal();
     float OccluderDistance = Hit.Distance;
+    float WallSurfaceDepth = 0.0f;
     if (const UPrimitiveComponent* HitComponent = Hit.GetComponent())
     {
         const FBoxSphereBounds Bounds = HitComponent->Bounds;
@@ -1159,6 +1160,13 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
             Bounds.BoxExtent.X,
             Bounds.BoxExtent.Y,
             Bounds.BoxExtent.Z
+        );
+        // The occluder mask must cover the camera-facing wall surface.  Move
+        // it only through the wall's estimated thickness; the base mask still
+        // stops at the first hit and keeps the space behind it hidden.
+        WallSurfaceDepth = FMath::Max(
+            GeometricThickness,
+            RenderConfig->MinimumOccluderThickness
         );
         const float RequiredThickness = FMath::Max(
             RenderConfig->MinimumOccluderThickness
@@ -1169,35 +1177,12 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
             OccluderDistance,
             Hit.Distance + RequiredThickness
         );
-        const float TopHeight = Bounds.Origin.Z + Bounds.BoxExtent.Z;
-        const float LowObstacleTopRevealHeight = FMath::Max(
-            FMath::Max(
-                RenderConfig->VisionHeightTolerance,
-                RenderConfig->OccluderSurfaceRevealDistance
-            ),
-            RenderConfig->VisionBelowHeightAllowance
-        );
-        const float VisionTopHeight = VisionSource.GetVisionOrigin().Z
-            + LowObstacleTopRevealHeight;
-        if (TopHeight <= VisionTopHeight)
-        {
-            const FVector PlanarDirection = TraceDirection.GetSafeNormal2D();
-            const float ProjectedCenter = FVector::DotProduct(
-                Bounds.Origin - TraceStart,
-                PlanarDirection
-            );
-            const float ProjectedExtent = FMath::Abs(PlanarDirection.X)
-                * Bounds.BoxExtent.X
-                + FMath::Abs(PlanarDirection.Y) * Bounds.BoxExtent.Y;
-            OccluderDistance = FMath::Max(
-                OccluderDistance,
-                FMath::Min(ProjectedCenter + ProjectedExtent,
-                    FVector::Distance(TraceStart, TraceEnd))
-            );
-        }
     }
     const float RevealedDistance = FMath::Min(
-        OccluderDistance + FMath::Max(RevealDistance, 0.0f),
+        OccluderDistance + FMath::Max(
+            FMath::Max(RevealDistance, 0.0f),
+            WallSurfaceDepth
+        ),
         FVector::Distance(TraceStart, TraceEnd)
     );
     const FVector RevealedPoint = TraceStart
@@ -1220,21 +1205,26 @@ bool UCMVisionManagerSubsystem::HasLineOfSight(
         .Equals(PlanarTarget, 1.0f);
 }
 
-FVector2D UCMVisionManagerSubsystem::WorldToMaskPixel(
+FVector2D UCMVisionManagerSubsystem::WorldToScreenMaskPixel(
     const FVector& WorldLocation,
     int32 Width,
     int32 Height
 ) const
 {
-    const float SafeWorldSize = FMath::Max(
-        MaskWorldHalfExtent * 2.0f,
-        1.0f
-    );
-    const float U = (WorldLocation.X - MaskWorldCenter.X)
-        / SafeWorldSize + 0.5f;
-    const float V = (WorldLocation.Y - MaskWorldCenter.Y)
-        / SafeWorldSize + 0.5f;
-    return FVector2D(U * Width, V * Height);
+    const APlayerController* PlayerController = GetWorld()
+        ? GetWorld()->GetFirstPlayerController() : nullptr;
+    FVector2D ScreenPosition;
+    FVector2D ViewportSize;
+    if (!PlayerController
+        || !PlayerController->ProjectWorldLocationToScreen(
+            WorldLocation, ScreenPosition, false)
+        || !GetViewportSize(ViewportSize))
+    {
+        return FVector2D(-Width, -Height);
+    }
+    return FVector2D(
+        ScreenPosition.X * Width / static_cast<float>(ViewportSize.X),
+        ScreenPosition.Y * Height / static_cast<float>(ViewportSize.Y));
 }
 
 void UCMVisionManagerSubsystem::DrawOccluderVisibilityMask(
@@ -1337,7 +1327,7 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             continue;
         }
 
-        const FVector2D OriginPixel = WorldToMaskPixel(
+        const FVector2D OriginPixel = WorldToScreenMaskPixel(
             SourceData.Origin,
             Width,
             Height
@@ -1358,11 +1348,7 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
         const FLinearColor DrawColor = bDrawVisionTint
             ? SourceData.VisionTint
             : FLinearColor(1.0f, EncodedHeight, 0.0f, 1.0f);
-        const float NearRadiusPixels = SourceData.NearVisionRadius
-            * Width / FMath::Max(
-                MaskWorldHalfExtent * 2.0f,
-                1.0f
-            );
+        const float NearRadiusPixels = 0.0f;
         const auto AddMaskTriangle = [&Triangles](
             const FVector2D& A,
             const FVector2D& B,
@@ -1419,12 +1405,12 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
                 ? RayB.RevealedEnd
                 : RayB.BaseEnd;
 
-            const FVector2D PointAPixel = WorldToMaskPixel(
+            const FVector2D PointAPixel = WorldToScreenMaskPixel(
                 PointA,
                 Width,
                 Height
             );
-            const FVector2D PointBPixel = WorldToMaskPixel(
+            const FVector2D PointBPixel = WorldToScreenMaskPixel(
                 PointB,
                 Width,
                 Height

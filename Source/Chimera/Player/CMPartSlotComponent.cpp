@@ -5,6 +5,7 @@
 #include "GameplayAbilitySpec.h"
 #include "Net/UnrealNetwork.h"
 #include "Parts/Core/CMPartActorBase.h"
+#include "Player/CMChimera.h"
 #include "Player/CMPartInterface.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
@@ -294,8 +295,11 @@ void UCMPartSlotComponent::GetLifetimeReplicatedProps(
 bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
 {
     AActor* ChimeraOwner = GetOwner();
+    const ACMChimera* Chimera = Cast<ACMChimera>(ChimeraOwner);
     if (!ChimeraOwner
         || !ChimeraOwner->HasAuthority()
+        || !Chimera
+        || !Chimera->IsSegmentAlive(SegmentIndex)
         || !IsValid(PartActor)
         || IsValid(AttachedPart)
         || !PartActor->GetClass()->ImplementsInterface(
@@ -320,33 +324,42 @@ bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
     }
 
     AttachedPart = PartActor;
-    AttachedPart->OnDestroyed.AddDynamic(
+    PartActor->OnDestroyed.AddDynamic(
         this,
         &UCMPartSlotComponent::HandleAttachedPartDestroyed
     );
-    AttachedPart->AttachToComponent(
+    PartActor->AttachToComponent(
         this,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale
     );
-    ApplyMountedPartTransform(*AttachedPart, *this, PartType);
+    if (!IsValid(PartActor) || AttachedPart != PartActor)
+    {
+        return false;
+    }
+
+    ApplyMountedPartTransform(*PartActor, *this, PartType);
+    if (!IsValid(PartActor) || AttachedPart != PartActor)
+    {
+        return false;
+    }
 
     if (UAbilitySystemComponent* ASC = GetOwnerAbilitySystemComponent())
     {
         const TSubclassOf<UGameplayAbility> AbilityClass =
-            ICMPartInterface::Execute_GetGrantedAbilityClass(AttachedPart);
+            ICMPartInterface::Execute_GetGrantedAbilityClass(PartActor);
         if (AbilityClass)
         {
             FGameplayAbilitySpec AbilitySpec(
                 AbilityClass,
                 1,
                 INDEX_NONE,
-                AttachedPart
+                PartActor
             );
             GrantedAbilityHandle = ASC->GiveAbility(AbilitySpec);
         }
     }
 
-    ICMPartInterface::Execute_OnAttachedToPartSlot(AttachedPart, this);
+    ICMPartInterface::Execute_OnAttachedToPartSlot(PartActor, this);
     OnAttachedPartChanged.Broadcast(this, AttachedPart);
     ChimeraOwner->ForceNetUpdate();
 
