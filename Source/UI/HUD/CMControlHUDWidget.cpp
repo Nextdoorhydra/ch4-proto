@@ -617,6 +617,7 @@ void UCMControlHUDWidget::HandleControlPlayerStateChanged()
 void UCMControlHUDWidget::HandleSegmentStatesChanged()
 {
     RefreshBodySegments();
+    RefreshAssignedParts();
 }
 
 void UCMControlHUDWidget::HandlePartAttachmentChanged(

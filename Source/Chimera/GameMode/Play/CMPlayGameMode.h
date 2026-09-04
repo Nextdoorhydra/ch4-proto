@@ -143,7 +143,7 @@ protected:
 
     // 에디터에서 Route를 직접 실행할 때 추가 플레이어 접속을 기다리는 시간, 0이면 즉시 시작
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Testing", meta = (ClampMin = "0.0"))
-    float DirectStageJoinGracePeriod = 0.0f;
+    float DirectStageJoinGracePeriod = 2.0f;
 
     // 접속 종료 후 기존 파츠와 조작 배정을 유지하는 시간
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Reconnect", meta = (ClampMin = "0.0"))

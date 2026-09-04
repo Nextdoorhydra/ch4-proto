@@ -42,6 +42,22 @@ namespace
 
         return true;
     }
+
+    bool IsSingleSideAssignment(
+        const TArray<FCMPartSlotAddress>& Assignment)
+    {
+        if (Assignment.IsEmpty())
+        {
+            return false;
+        }
+
+        const int32 PartSlotIndex = Assignment[0].PartSlotIndex;
+        return Assignment.ContainsByPredicate(
+            [PartSlotIndex](const FCMPartSlotAddress& Address)
+            {
+                return Address.PartSlotIndex != PartSlotIndex;
+            }) == false;
+    }
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -81,6 +97,9 @@ bool FChimeraControlAssignmentCountTest::RunTest(
         );
 
         int32 TotalAssignedPartSlots = 0;
+        int32 LeftOnlyPlayerCount = 0;
+        int32 RightOnlyPlayerCount = 0;
+        int32 MixedPlayerCount = 0;
         for (int32 PlayerIndex = 0;
             PlayerIndex < PlayerCount;
             ++PlayerIndex)
@@ -96,6 +115,29 @@ bool FChimeraControlAssignmentCountTest::RunTest(
             );
             TotalAssignedPartSlots +=
                 NewAssignments[PlayerIndex].Num();
+
+            int32 LeftSlotCount = 0;
+            for (const FCMPartSlotAddress& Address
+                : NewAssignments[PlayerIndex])
+            {
+                LeftSlotCount += Address.PartSlotIndex == 0 ? 1 : 0;
+            }
+            if (LeftSlotCount == CMControl::MaxKeysPerPlayer)
+            {
+                ++LeftOnlyPlayerCount;
+            }
+            else if (LeftSlotCount == 0)
+            {
+                ++RightOnlyPlayerCount;
+            }
+            else
+            {
+                ++MixedPlayerCount;
+                TestEqual(
+                    TEXT("Odd-player mixed assignment has two left slots"),
+                    LeftSlotCount,
+                    CMControl::MaxKeysPerPlayer / 2);
+            }
         }
 
         TestEqual(
@@ -116,72 +158,130 @@ bool FChimeraControlAssignmentCountTest::RunTest(
                 PlayerCount * CMControl::SegmentsPerPlayer
             )
         );
+        if (PlayerCount >= 2)
+        {
+            TestEqual(
+                TEXT("Left-only player count"),
+                LeftOnlyPlayerCount,
+                PlayerCount / 2);
+            TestEqual(
+                TEXT("Right-only player count"),
+                RightOnlyPlayerCount,
+                PlayerCount / 2);
+            TestEqual(
+                TEXT("Only an odd final player receives mixed sides"),
+                MixedPlayerCount,
+                PlayerCount % 2);
+        }
     }
 
     return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FChimeraControlAssignmentFullShuffleTest,
-    "Chimera.Multiplayer.ControlAssignments.FullShuffle",
+    FChimeraControlAssignmentPreservationTest,
+    "Chimera.Multiplayer.ControlAssignments.Preservation",
     EAutomationTestFlags::EditorContext
         | EAutomationTestFlags::EngineFilter
 )
 
-bool FChimeraControlAssignmentFullShuffleTest::RunTest(
+bool FChimeraControlAssignmentPreservationTest::RunTest(
     const FString& Parameters
 )
 {
     constexpr int32 PlayerCount = 3;
     constexpr int32 ActiveSegmentCount =
         PlayerCount * CMControl::SegmentsPerPlayer;
-    TArray<TArray<FCMPartSlotAddress>> FirstExistingAssignments = {
-        { MakeAddress(0, 0), MakeAddress(1, 1) },
-        { MakeAddress(2, 0) },
-        {}
+    TArray<TArray<FCMPartSlotAddress>> ExistingAssignments = {
+        {
+            MakeAddress(0, 0), MakeAddress(1, 0),
+            MakeAddress(2, 0), MakeAddress(3, 0)
+        },
+        {
+            MakeAddress(0, 1), MakeAddress(1, 1),
+            MakeAddress(2, 1), MakeAddress(3, 1)
+        },
+        {
+            MakeAddress(4, 0), MakeAddress(5, 0),
+            MakeAddress(4, 1), MakeAddress(5, 1)
+        }
     };
-    TArray<TArray<FCMPartSlotAddress>> SecondExistingAssignments = {
-        {},
-        { MakeAddress(3, 1), MakeAddress(4, 0) },
-        { MakeAddress(5, 1) }
-    };
-    TArray<TArray<FCMPartSlotAddress>> FirstResult;
-    TArray<TArray<FCMPartSlotAddress>> SecondResult;
-    TArray<TArray<FCMPartSlotAddress>> DifferentSeedResult;
-    FRandomStream FirstRandomStream(42);
-    FRandomStream SecondRandomStream(42);
-    FRandomStream DifferentRandomStream(99);
+    TArray<TArray<FCMPartSlotAddress>> Result;
+    FRandomStream RandomStream(42);
 
     FCMControlAssignmentPolicy::Rebalance(
-        FirstExistingAssignments,
+        ExistingAssignments,
         ActiveSegmentCount,
-        FirstRandomStream,
-        FirstResult
-    );
-    FCMControlAssignmentPolicy::Rebalance(
-        SecondExistingAssignments,
-        ActiveSegmentCount,
-        SecondRandomStream,
-        SecondResult
-    );
-    FCMControlAssignmentPolicy::Rebalance(
-        FirstExistingAssignments,
-        ActiveSegmentCount,
-        DifferentRandomStream,
-        DifferentSeedResult
+        RandomStream,
+        Result
     );
 
     TestTrue(
-        TEXT("Same seed ignores previous ownership"),
-        FirstResult == SecondResult
+        TEXT("Established three-player assignments are preserved"),
+        Result == ExistingAssignments
+    );
+
+    TArray<TArray<FCMPartSlotAddress>> RepeatedResult;
+    FCMControlAssignmentPolicy::Rebalance(
+        Result,
+        ActiveSegmentCount,
+        RandomStream,
+        RepeatedResult
     );
     TestTrue(
-        TEXT("Different seeds produce different assignments"),
-        FirstResult != DifferentSeedResult
+        TEXT("Respawn-style repeated rebalance changes no assignments"),
+        RepeatedResult == Result
+    );
+
+    TArray<TArray<FCMPartSlotAddress>> RemainingAssignments = {
+        Result[0], Result[2]
+    };
+    TArray<TArray<FCMPartSlotAddress>> DisconnectResult;
+    FCMControlAssignmentPolicy::Rebalance(
+        RemainingAssignments,
+        ActiveSegmentCount,
+        RandomStream,
+        DisconnectResult
     );
     TestTrue(
-        TEXT("Fully shuffled assignments remain unique"),
-        HasUniqueValidPartSlots(FirstResult, ActiveSegmentCount)
+        TEXT("Disconnect-style rebalance preserves remaining players"),
+        DisconnectResult == RemainingAssignments
+    );
+
+    constexpr int32 FourPlayerSegmentCount =
+        4 * CMControl::SegmentsPerPlayer;
+    TArray<TArray<FCMPartSlotAddress>> JoiningAssignments = {
+        Result[0], Result[1], Result[2], {}
+    };
+    TArray<TArray<FCMPartSlotAddress>> FourPlayerResult;
+    FCMControlAssignmentPolicy::Rebalance(
+        JoiningAssignments,
+        FourPlayerSegmentCount,
+        RandomStream,
+        FourPlayerResult
+    );
+    for (int32 PlayerIndex = 0;
+        PlayerIndex < FourPlayerResult.Num();
+        ++PlayerIndex)
+    {
+        TestTrue(
+            FString::Printf(
+                TEXT("Joining player %d receives one side only"),
+                PlayerIndex),
+            IsSingleSideAssignment(FourPlayerResult[PlayerIndex])
+        );
+    }
+
+    TArray<TArray<FCMPartSlotAddress>> StableFourPlayerResult;
+    FCMControlAssignmentPolicy::Rebalance(
+        FourPlayerResult,
+        FourPlayerSegmentCount,
+        RandomStream,
+        StableFourPlayerResult
+    );
+    TestTrue(
+        TEXT("Established four-player assignments remain unchanged"),
+        StableFourPlayerResult == FourPlayerResult
     );
 
     return true;

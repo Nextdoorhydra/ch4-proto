@@ -20,15 +20,18 @@ void FCMControlAssignmentPolicy::Rebalance(
     OutAssignments.Reset();
     OutAssignments.SetNum(ExistingAssignments.Num());
 
-    // Four players create eight Segments, therefore each side owns exactly
-    // eight slots. Shuffle two Left and two Right ownership tickets, then give
-    // every player four random slots exclusively from the selected side.
-    const bool bUseFourPlayerSingleSideAssignment =
-        AssignedPlayerCount == 4
-        && ExistingAssignments.Num() == 4
+    const bool bHasIncompleteAssignment =
+        ExistingAssignments.ContainsByPredicate(
+            [](const TArray<FCMPartSlotAddress>& Assignment)
+            {
+                return Assignment.Num() < CMControl::MaxKeysPerPlayer;
+            });
+    const bool bInitializeSideAssignments =
+        AssignedPlayerCount >= 2
         && SafeSegmentCount
-            == 4 * CMControl::SegmentsPerPlayer;
-    if (bUseFourPlayerSingleSideAssignment)
+            == AssignedPlayerCount * CMControl::SegmentsPerPlayer
+        && bHasIncompleteAssignment;
+    if (bInitializeSideAssignments)
     {
         TArray<FCMPartSlotAddress> LeftPartSlots;
         TArray<FCMPartSlotAddress> RightPartSlots;
@@ -60,17 +63,30 @@ void FCMControlAssignmentPolicy::Rebalance(
         Shuffle(LeftPartSlots);
         Shuffle(RightPartSlots);
 
-        // 0=Left, 1=Right. Shuffling makes the side random per player while
-        // keeping the total assignment balanced at two players per side.
-        TArray<uint8> PlayerSides = { 0, 0, 1, 1 };
-        Shuffle(PlayerSides);
-
+        TArray<int32> PlayerIndices;
+        TArray<uint8> PlayerSides;
         for (int32 PlayerIndex = 0;
             PlayerIndex < AssignedPlayerCount;
             ++PlayerIndex)
         {
+            PlayerIndices.Add(PlayerIndex);
+        }
+        for (int32 SidePlayerIndex = 0;
+            SidePlayerIndex < AssignedPlayerCount / 2;
+            ++SidePlayerIndex)
+        {
+            PlayerSides.Add(0);
+            PlayerSides.Add(1);
+        }
+        Shuffle(PlayerIndices);
+        Shuffle(PlayerSides);
+        for (int32 TicketIndex = 0;
+            TicketIndex < PlayerSides.Num();
+            ++TicketIndex)
+        {
+            const int32 PlayerIndex = PlayerIndices[TicketIndex];
             TArray<FCMPartSlotAddress>& SideSlots =
-                PlayerSides[PlayerIndex] == 0
+                PlayerSides[TicketIndex] == 0
                 ? LeftPartSlots
                 : RightPartSlots;
             while (OutAssignments[PlayerIndex].Num()
@@ -78,11 +94,49 @@ void FCMControlAssignmentPolicy::Rebalance(
                 && !SideSlots.IsEmpty())
             {
                 OutAssignments[PlayerIndex].Add(
-                    SideSlots.Pop(EAllowShrinking::No)
-                );
+                    SideSlots.Pop(EAllowShrinking::No));
+            }
+        }
+
+        if (AssignedPlayerCount % 2 != 0)
+        {
+            TArray<FCMPartSlotAddress>& MixedAssignment =
+                OutAssignments[PlayerIndices.Last()];
+            while (!LeftPartSlots.IsEmpty())
+            {
+                MixedAssignment.Add(
+                    LeftPartSlots.Pop(EAllowShrinking::No));
+            }
+            while (!RightPartSlots.IsEmpty())
+            {
+                MixedAssignment.Add(
+                    RightPartSlots.Pop(EAllowShrinking::No));
             }
         }
         return;
+    }
+
+    TSet<FCMPartSlotAddress> ClaimedPartSlots;
+    for (int32 PlayerIndex = 0;
+        PlayerIndex < AssignedPlayerCount;
+        ++PlayerIndex)
+    {
+        for (const FCMPartSlotAddress& Address
+            : ExistingAssignments[PlayerIndex])
+        {
+            if (OutAssignments[PlayerIndex].Num()
+                    >= CMControl::MaxKeysPerPlayer
+                || !CMControl::IsValidPartSlot(
+                    Address,
+                    SafeSegmentCount)
+                || ClaimedPartSlots.Contains(Address))
+            {
+                continue;
+            }
+
+            OutAssignments[PlayerIndex].Add(Address);
+            ClaimedPartSlots.Add(Address);
+        }
     }
 
     TArray<FCMPartSlotAddress> AvailablePartSlots;
@@ -94,29 +148,30 @@ void FCMControlAssignmentPolicy::Rebalance(
             PartSlotIndex < CMControl::PartSlotsPerSegment;
             ++PartSlotIndex)
         {
-            FCMPartSlotAddress& Address =
-                AvailablePartSlots.AddDefaulted_GetRef();
+            FCMPartSlotAddress Address;
             Address.SegmentIndex = SegmentIndex;
             Address.PartSlotIndex = PartSlotIndex;
+            if (!ClaimedPartSlots.Contains(Address))
+            {
+                AvailablePartSlots.Add(Address);
+            }
         }
     }
 
     for (int32 Index = AvailablePartSlots.Num() - 1;
-        Index > 0;
-        --Index)
+         Index > 0;
+         --Index)
     {
         AvailablePartSlots.Swap(
             Index,
-            RandomStream.RandRange(0, Index)
-        );
+            RandomStream.RandRange(0, Index));
     }
 
     for (int32 PlayerIndex = 0;
-        PlayerIndex < ExistingAssignments.Num();
+        PlayerIndex < AssignedPlayerCount;
         ++PlayerIndex)
     {
-        while (PlayerIndex < AssignedPlayerCount
-            && OutAssignments[PlayerIndex].Num()
+        while (OutAssignments[PlayerIndex].Num()
                 < CMControl::MaxKeysPerPlayer
             && !AvailablePartSlots.IsEmpty())
         {
