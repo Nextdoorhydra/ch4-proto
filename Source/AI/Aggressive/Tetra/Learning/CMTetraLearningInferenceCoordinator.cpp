@@ -16,8 +16,6 @@
 #include "Testing/CMAggressiveChaseTestTarget.h"
 #include "TimerManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMTetraInference, Log, All);
-
 // Actor Tick 없이 Tetra 정책 추론과 방해 행동을 타이머로 관리한다.
 ACMTetraLearningInferenceCoordinator::ACMTetraLearningInferenceCoordinator()
 {
@@ -134,9 +132,6 @@ bool ACMTetraLearningInferenceCoordinator::StartInterference(ACMTetraPawn* InInf
         TargetPlayer = nullptr;
         return false;
     }
-    const UCMAggressiveAccelerationMovementComponent* Movement = InferenceAgent->GetAccelerationMovement();
-    UE_LOG(LogCMTetraInference, Display, TEXT("Tetra AI 방해 행동을 시작했습니다. 추격 최고속도: %.1fcm/s"), Movement ? Movement->GetMaximumSpeed() : 0.0f);
-
     return true;
 }
 
@@ -160,8 +155,6 @@ bool ACMTetraLearningInferenceCoordinator::StartChasingTestTarget(ACMTetraPawn* 
         bChasingTestTarget = false;
         return false;
     }
-
-    UE_LOG(LogCMTetraInference, Display, TEXT("Tetra AI가 추격 테스트 목표 추적을 시작했습니다. 목표: %s"), *ChaseTarget->GetActorLocation().ToCompactString());
 
     return true;
 }
@@ -323,7 +316,6 @@ void ACMTetraLearningInferenceCoordinator::BeginStuckRecovery()
         Direction = InferenceAgent->GetAggressiveNavigationReferenceLocation() - GetActiveTarget()->GetActorLocation();
 
     BeginCodeControlledBackUp(Direction, ECMTetraInterferenceState::RecoveringFromStuck);
-    UE_LOG(LogCMTetraInference, Display, TEXT("Tetra AI가 추격 중 정체되어 후진 복구를 시작합니다."));
 }
 
 // 정책 경로를 멈추고 직접 평면 속도로 제어하는 후진 상태를 시작한다.

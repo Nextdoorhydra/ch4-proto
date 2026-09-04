@@ -83,9 +83,6 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Learning")
     FCMAggressiveLearningGoalSettings GoalSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Learning", meta = (ClampMin = "0.1"))
-    float ProgressLogIntervalSeconds = 2.0f;
-
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Learning", meta = (ClampMin = "1.0"))
     float SnapshotSaveIntervalSeconds = 60.0f;
 
@@ -102,7 +99,6 @@ private:
     bool InitializeLearningObjects();
     void RefreshPolicyUpdateState();
     void RunTrainingStep();
-    void LogTrainingProgressIfNeeded();
     void SaveTrainingSnapshotsIfNeeded();
     void SaveTrainingCheckpointIfNeeded();
 
@@ -128,7 +124,6 @@ private:
     int32 InitialPolicyContentHash = 0;
     int32 CurrentPolicyContentHash = 0;
     int32 LastCheckpointPolicyContentHash = 0;
-    double NextProgressLogTime = 0.0;
     double NextSnapshotSaveTime = 0.0;
     bool bHasReceivedPolicyUpdate = false;
 };

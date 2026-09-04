@@ -117,8 +117,6 @@ bool ACMAggressiveChaseTestTarget::TeleportToRandomReachableLocationUsingAgent(F
         if (!SetActorLocation(CandidateLocation, false, nullptr, ETeleportType::TeleportPhysics))
             continue;
 
-        UE_LOG(LogCMAggressiveChaseTest, Display, TEXT("추격 테스트 목표가 안전한 NavMesh 위치로 순간이동했습니다. 위치: %s"), *CandidateLocation.ToCompactString());
-
         return true;
     }
 

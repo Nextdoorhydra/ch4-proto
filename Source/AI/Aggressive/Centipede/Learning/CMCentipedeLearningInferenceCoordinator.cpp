@@ -124,8 +124,6 @@ bool ACMCentipedeLearningInferenceCoordinator::StartChasingTestTarget(ACMCentipe
     }
 
     NextChasePathRefreshTime = GetWorld()->GetTimeSeconds() + FMath::Max(ChasePathRefreshInterval, 0.05f);
-    UE_LOG(LogCMCentipedeInference, Display, TEXT("Centipede AI가 추격 테스트 목표 추적을 시작했습니다. 목표=%s"), *ChaseTarget->GetActorLocation().ToCompactString());
-
     return true;
 }
 
@@ -175,8 +173,6 @@ bool ACMCentipedeLearningInferenceCoordinator::UpdateChaseTargetPath()
     LastGoalDistance = FVector::Dist2D(InferenceAgent->GetAggressiveNavigationReferenceLocation(), ActiveWorldGoal);
     NoProgressSeconds = 0.0f;
     LateralEscapeAttemptCount = 0;
-    UE_LOG(LogCMCentipedeInference, Display, TEXT("추격 목표 이동을 감지해 Centipede AI 경로를 갱신했습니다. 새 목표=%s"), *ActiveWorldGoal.ToCompactString());
-
     return true;
 }
 
@@ -226,8 +222,6 @@ bool ACMCentipedeLearningInferenceCoordinator::BeginLateralEscape()
     ++LateralEscapeAttemptCount;
     bPerformingLateralEscape = true;
     ApplyLateralEscapeVelocity();
-    UE_LOG(LogCMCentipedeInference, Display, TEXT("Centipede AI가 말단 교대 대신 몸 전체의 측면 이탈을 시작했습니다. 시도=%d/%d 방향=%s"), LateralEscapeAttemptCount, FMath::Max(MaximumLateralEscapeAttempts, 1), *LateralEscapeDirection.ToCompactString());
-
     return true;
 }
 
@@ -273,8 +267,6 @@ bool ACMCentipedeLearningInferenceCoordinator::RebuildPathAfterLateralEscape()
     LastProgressCheckTime = World->GetTimeSeconds();
     LastGoalDistance = FVector::Dist2D(InferenceAgent->GetAggressiveNavigationReferenceLocation(), ActiveWorldGoal);
     NoProgressSeconds = 0.0f;
-    UE_LOG(LogCMCentipedeInference, Display, TEXT("Centipede AI가 측면 이탈 후 머리·꼬리 경로를 다시 비교했습니다. 선택 선두=%s 목표=%s"), InferenceAgent->IsTailLeading() ? TEXT("꼬리") : TEXT("머리"), *ActiveWorldGoal.ToCompactString());
-
     return true;
 }
 

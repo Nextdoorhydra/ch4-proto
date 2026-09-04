@@ -21,8 +21,6 @@ namespace CMAggressiveSight
     {
         if (Args.Num() != 1)
         {
-            UE_LOG(LogCMAggressiveSight, Display, TEXT("Usage: CM.AI.SightDebug on|off (current: %s)"), bDrawSightDebug ? TEXT("on") : TEXT("off"));
-
             return;
         }
 
@@ -42,7 +40,6 @@ namespace CMAggressiveSight
             return;
         }
 
-        UE_LOG(LogCMAggressiveSight, Display, TEXT("Aggressive AI sight debug draw: %s"), bDrawSightDebug ? TEXT("on") : TEXT("off"));
     }
 
     FAutoConsoleCommandWithWorldAndArgs SightDebugCommand(TEXT("CM.AI.SightDebug"), TEXT("Draws hostile AI sight cones. Usage: CM.AI.SightDebug on|off"), FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetSightDebugDraw));

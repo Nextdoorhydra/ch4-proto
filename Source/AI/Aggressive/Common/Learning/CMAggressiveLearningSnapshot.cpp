@@ -9,8 +9,6 @@
 #include "Misc/Paths.h"
 #include "UObject/Package.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMAggressiveLearningSnapshot, Log, All);
-
 namespace
 {
     struct FCMLearningSnapshotProfile
@@ -169,8 +167,6 @@ bool CMAggressiveLearningSnapshot::LoadTrainingNetworks(ECMAggressiveLearningSna
     if (!bEncoderLoaded || !bPolicyLoaded || !bDecoderLoaded || !bCriticLoaded)
         return false;
 
-    UE_LOG(LogCMAggressiveLearningSnapshot, Display, TEXT("%s AI 학습 네트워크 네 개를 불러왔습니다: %s"), GetSnapshotProfile(Profile).DisplayName, *Directory);
-
     return true;
 }
 
@@ -183,8 +179,6 @@ bool CMAggressiveLearningSnapshot::LoadInferenceNetworks(ECMAggressiveLearningSn
     const bool bDecoderLoaded = LoadCompatibleNetworkSnapshot(Policy.GetDecoderNetworkAsset(), GetDecoderFilePath(Profile, Directory));
     if (!bEncoderLoaded || !bPolicyLoaded || !bDecoderLoaded)
         return false;
-
-    UE_LOG(LogCMAggressiveLearningSnapshot, Display, TEXT("%s AI 추론 네트워크 세 개를 불러왔습니다: %s"), GetSnapshotProfile(Profile).DisplayName, *Directory);
 
     return true;
 }

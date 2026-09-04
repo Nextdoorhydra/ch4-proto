@@ -74,16 +74,12 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Learning", meta = (ClampMin = "1.0"))
     float SnapshotSaveIntervalSeconds = 60.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Learning", meta = (ClampMin = "0.1"))
-    float ProgressLogIntervalSeconds = 5.0f;
-
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Learning")
     bool bResumeExistingSnapshots = true;
 
 private:
     bool InitializeLearningObjects();
     void RunTrainingStep();
-    void LogTrainingProgressIfNeeded();
     void RefreshPolicyUpdateState();
 
     UPROPERTY(Transient)
@@ -104,9 +100,6 @@ private:
     TArray<int32> TrainingAgentIds;
     FTimerHandle TrainingTimerHandle;
     int32 InitialPolicyContentHash = 0;
-    int64 TotalTrainingStepCount = 0;
-    int64 TotalAgentDecisionCount = 0;
-    double NextProgressLogTime = 0.0;
     double NextSnapshotSaveTime = 0.0;
     bool bHasReceivedPolicyUpdate = false;
 };

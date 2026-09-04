@@ -80,8 +80,6 @@ namespace CMAggressiveBehavior
     {
         if (Args.Num() != 1)
         {
-            UE_LOG(LogCMAggressiveBehavior, Display, TEXT("Usage: CM.AI.WanderDebug on|off (current: %s)"), bDrawWanderGoalDebug ? TEXT("on") : TEXT("off"));
-
             return;
         }
 
@@ -103,7 +101,6 @@ namespace CMAggressiveBehavior
         }
 
         bDrawWanderGoalDebug = bEnabled;
-        UE_LOG(LogCMAggressiveBehavior, Display, TEXT("Aggressive AI wander goal debug draw: %s"), bEnabled ? TEXT("on") : TEXT("off"));
     }
 
     FAutoConsoleCommandWithWorldAndArgs WanderGoalDebugCommand(TEXT("CM.AI.WanderDebug"), TEXT("Draws hostile AI random wander goals. Usage: CM.AI.WanderDebug on|off"), FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetWanderGoalDebugDraw));
@@ -357,7 +354,6 @@ void UCMAggressiveBehaviorComponent::BeginStuckRecovery(const double CurrentTime
     StuckReverseEndTime = CurrentTime + CMAggressiveBehavior::StuckReverseDuration;
     ApplyStuckRecoveryReverseVelocity();
 
-    UE_LOG(LogCMAggressiveBehavior, Display, TEXT("%s was stuck for %.1f seconds; reversing before choosing a new random goal."), *GetNameSafe(OwnerPawn), CMAggressiveBehavior::StuckDetectionSeconds);
 }
 
 void UCMAggressiveBehaviorComponent::ApplyStuckRecoveryReverseVelocity() const
@@ -467,7 +463,6 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
             {
                 CurrentTarget = CloserSacrifice;
                 bMoveIssued = StartMove(CurrentTarget->GetActorLocation(), GetAttackDistance());
-                UE_LOG(LogCMAggressiveBehavior, Verbose, TEXT("%s switched to closer sacrifice %s."), *GetNameSafe(OwnerPawn), *GetNameSafe(CurrentTarget));
             }
         }
     }
