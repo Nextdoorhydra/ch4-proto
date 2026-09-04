@@ -101,7 +101,8 @@ void ACMGameMode::RestartPlayer(AController* NewPlayer)
         // Shared Chimera 카메라를 사용한다.
         if (SharedChimera)
         {
-            PlayerController->ClientSetViewTarget(SharedChimera);
+            // 서버의 복제 시점도 키메라를 따라야 한다. SetViewTarget은 원격 클라이언트에도 전달된다.
+            PlayerController->SetViewTarget(SharedChimera);
         }
     }
 }
@@ -157,7 +158,7 @@ void ACMGameMode::GenericPlayerInitialization(AController* C)
     {
         if (SharedChimera)
         {
-            PlayerController->ClientSetViewTarget(SharedChimera);
+            PlayerController->SetViewTarget(SharedChimera);
         }
     }
 }
@@ -448,6 +449,10 @@ ACMChimera* ACMGameMode::EnsureSharedChimera()
         ExistingController->UnPossess();
     }
 
+    // 플레이어 모두의 카메라 대상인 공용 인스턴스만 거리와 무관하게 유지한다.
+    // 생성자 기본값이 아니라 여기서 지정해 기존 BP 설정에도 적용한다.
+    SharedChimera->bAlwaysRelevant = true;
+    SharedChimera->ForceNetUpdate();
     CMGameState->SetSharedChimera(SharedChimera);
     UE_LOG(
         LogChimeraMultiplayer,
