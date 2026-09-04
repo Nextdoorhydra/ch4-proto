@@ -5,8 +5,6 @@
 #include "LearningAgentsManager.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMCentipedeEpisode, Log, All);
-
 UCMCentipedeLearningTrainingEnvironment*
 // 이동 보상과 관절 추종 패널티를 결합한 Centipede 학습 환경을 생성한다.
 UCMCentipedeLearningTrainingEnvironment::MakeCentipedeTrainingEnvironment(ULearningAgentsManager*& InManager, FCMAggressiveLearningRewardSettings InRewardSettings, FCMAggressiveLearningGoalSettings InGoalSettings, float InJointTrackingPenaltyScale, FName Name)
@@ -149,7 +147,6 @@ void UCMCentipedeLearningTrainingEnvironment::RecordPendingEpisodeResult(int32 A
     ++TotalCompletedEpisodeCount;
     if (EndReason == ECMAggressiveLearningEpisodeEndReason::Arrival)
         ++TotalSuccessfulEpisodeCount;
-    UE_LOG(LogCMCentipedeEpisode, Display, TEXT("Centipede AI 학습 결과 - 에이전트=%d 에피소드=%d 완료=%lld 성공=%lld 성공률=%.1f%%"), AgentId, EpisodeNumbers.IsValidIndex(AgentId) ? EpisodeNumbers[AgentId] : 0, TotalCompletedEpisodeCount, TotalSuccessfulEpisodeCount, GetSuccessRate() * 100.0f);
 }
 
 // 여덟 이동 방향과 네 곡률 프로필을 순환하도록 다음 학습 목표를 설정한다.

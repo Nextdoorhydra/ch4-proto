@@ -12,8 +12,6 @@
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMCentipedePawn, Log, All);
-
 namespace CMCentipedeBody
 {
     constexpr int32 SegmentCount = 4;
@@ -192,15 +190,6 @@ void ACMCentipedePawn::PrepareAggressivePathMove(FVector WorldGoal)
 
     const bool bUseTail = bHasTailPath && (!bHasHeadPath || TailPathLength < HeadPathLength);
     SetTailLeading(bUseTail);
-    UE_LOG(
-        LogCMCentipedePawn,
-        Display,
-        TEXT("Centipede AI가 말단별 경로 길이를 비교해 %s를 선두로 선택했습니다. 머리=%s 꼬리=%s 목표=%s"),
-        bUseTail ? TEXT("꼬리") : TEXT("머리"),
-        bHasHeadPath ? *FString::Printf(TEXT("%.1fcm"), HeadPathLength) : TEXT("경로 없음"),
-        bHasTailPath ? *FString::Printf(TEXT("%.1fcm"), TailPathLength) : TEXT("경로 없음"),
-        *WorldGoal.ToCompactString()
-    );
 }
 
 // 경로 목표를 정리하고 Centipede 이동 완료 결과를 구독자에게 전달한다.

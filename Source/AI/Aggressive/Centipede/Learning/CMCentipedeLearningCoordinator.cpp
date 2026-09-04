@@ -16,8 +16,6 @@
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "TimerManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMCentipedeLearning, Log, All);
-
 // Actor Tick 없이 Centipede 병렬 PPO 학습을 관리할 중앙 Manager를 구성한다.
 ACMCentipedeLearningCoordinator::ACMCentipedeLearningCoordinator()
 {
@@ -104,12 +102,8 @@ bool ACMCentipedeLearningCoordinator::StartTrainingAgents(const TArray<ACMCentip
     LearningManager->SetComponentTickInterval(FMath::Max(DecisionInterval, 0.01f));
     LearningManager->SetComponentTickEnabled(true);
     const double CurrentTime = GetWorld()->GetTimeSeconds();
-    TotalTrainingStepCount = 0;
-    TotalAgentDecisionCount = 0;
-    NextProgressLogTime = CurrentTime + FMath::Max(ProgressLogIntervalSeconds, 0.1f);
     NextSnapshotSaveTime = CurrentTime + FMath::Max(SnapshotSaveIntervalSeconds, 1.0f);
     GetWorldTimerManager().SetTimer(TrainingTimerHandle, this, &ThisClass::RunTrainingStep, FMath::Max(DecisionInterval, 0.01f), true);
-    UE_LOG(LogCMCentipedeLearning, Display, TEXT("Centipede AI PPO 학습을 시작했습니다. 에이전트=%d 관측=32 행동=8 판단주기=%.2f초 저장주기=%.1f초"), TrainingAgentIds.Num(), DecisionInterval, SnapshotSaveIntervalSeconds);
 
     return true;
 }
@@ -157,9 +151,6 @@ bool ACMCentipedeLearningCoordinator::SaveTrainingSnapshots()
         return false;
     RefreshPolicyUpdateState();
     const bool bSaved = bHasReceivedPolicyUpdate && CMAggressiveLearningSnapshot::SaveTrainingNetworks(ECMAggressiveLearningSnapshotProfile::Centipede, *Policy, *Critic, GetSnapshotDirectory());
-    if (bSaved)
-        UE_LOG(LogCMCentipedeLearning, Display, TEXT("Centipede AI 학습 스냅샷 저장 - 판단=%lld 경로=%s"), TotalAgentDecisionCount, *GetSnapshotDirectory());
-
     return bSaved;
 }
 
@@ -233,35 +224,13 @@ void ACMCentipedeLearningCoordinator::RunTrainingStep()
     }
 
     PPOTrainer->RunTraining();
-    ++TotalTrainingStepCount;
-    TotalAgentDecisionCount += TrainingAgentIds.Num();
     RefreshPolicyUpdateState();
-    LogTrainingProgressIfNeeded();
 
     if (GetWorld()->GetTimeSeconds() >= NextSnapshotSaveTime)
     {
         NextSnapshotSaveTime = GetWorld()->GetTimeSeconds() + FMath::Max(SnapshotSaveIntervalSeconds, 1.0f);
         SaveTrainingSnapshots();
     }
-}
-
-void ACMCentipedeLearningCoordinator::LogTrainingProgressIfNeeded()
-{
-    const double CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime < NextProgressLogTime || !TrainingEnvironment)
-        return;
-
-    NextProgressLogTime = CurrentTime + FMath::Max(ProgressLogIntervalSeconds, 0.1f);
-    UE_LOG(
-        LogCMCentipedeLearning,
-        Display,
-        TEXT("Centipede AI 학습 상태 - 학습판단=%lld 에이전트판단=%lld 완료에피소드=%lld 성공=%lld 성공률=%.1f%%"),
-        TotalTrainingStepCount,
-        TotalAgentDecisionCount,
-        TrainingEnvironment->GetCompletedEpisodeCount(),
-        TrainingEnvironment->GetSuccessfulEpisodeCount(),
-        TrainingEnvironment->GetSuccessRate() * 100.0f
-    );
 }
 
 // 초기 정책과 현재 정책의 내용 해시를 비교해 갱신 수신 상태를 기록한다.

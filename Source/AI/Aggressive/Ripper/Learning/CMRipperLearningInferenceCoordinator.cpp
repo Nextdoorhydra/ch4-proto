@@ -82,8 +82,6 @@ bool ACMRipperLearningInferenceCoordinator::StartInferencePath(ACMRipperPawn* In
     ResetStuckProgress();
     Policy->RunInference(0.0f);
     GetWorldTimerManager().SetTimer(InferenceTimerHandle, this, &ThisClass::RunInferenceStep, FMath::Max(DecisionInterval, 0.01f), true);
-    UE_LOG(LogCMRipperInference, Display, TEXT("Ripper AI 저장 정책 경로 추론을 시작했습니다. 목적지: %s"), *WorldGoal.ToCompactString());
-
     return true;
 }
 
@@ -123,8 +121,6 @@ bool ACMRipperLearningInferenceCoordinator::StartChasingTestTarget(ACMRipperPawn
     }
 
     NextChasePathRefreshTime = GetWorld()->GetTimeSeconds() + FMath::Max(ChasePathRefreshInterval, 0.05f);
-    UE_LOG(LogCMRipperInference, Display, TEXT("Ripper AI가 추격 테스트 목표 추적을 시작했습니다. 목표: %s"), *ChaseTarget->GetActorLocation().ToCompactString());
-
     return true;
 }
 
@@ -180,8 +176,6 @@ bool ACMRipperLearningInferenceCoordinator::UpdateChaseTargetPath()
 
     bWaitingForChaseTargetMove = false;
     ResetStuckProgress();
-    UE_LOG(LogCMRipperInference, Display, TEXT("추격 테스트 목표 이동을 감지해 Ripper AI 경로를 갱신했습니다. 새 목표: %s"), *ActiveWorldGoal.ToCompactString());
-
     return true;
 }
 
@@ -273,8 +267,6 @@ bool ACMRipperLearningInferenceCoordinator::BeginStuckRecovery()
     ApplyStuckRecoveryImpulse();
     RecoveryEndTime = World->GetTimeSeconds() + FMath::Max(RecoveryDuration, 0.1f);
     bRecoveringFromStuck = true;
-    UE_LOG(LogCMRipperInference, Display, TEXT("Ripper AI가 벽 바깥쪽 복구 이동을 시작했습니다. 복구: %d/%d, 시작: %s, 목표: %s"), StuckRecoveryAttemptCount, FMath::Max(MaximumStuckRecoveryAttempts, 1), *RecoveryStartLocation.ToCompactString(), *RecoveryTargetLocation.ToCompactString());
-
     return true;
 }
 
@@ -318,8 +310,6 @@ bool ACMRipperLearningInferenceCoordinator::RebuildPathAfterStuckRecovery()
 
     ResetStuckProgress();
     StuckRecoveryAttemptCount = 0;
-    UE_LOG(LogCMRipperInference, Display, TEXT("Ripper AI가 벽에서 누적 %.1fcm 이탈한 뒤 최종 목적지 경로를 다시 생성했습니다."), CumulativeRecoveryDistance);
-
     return true;
 }
 

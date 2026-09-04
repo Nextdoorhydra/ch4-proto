@@ -44,7 +44,6 @@ namespace CMSacrificeSightDebug
             return;
         }
 
-        UE_LOG(LogCMSacrificeSight, Log, TEXT("Sacrifice sight debug: %s"), bDrawSight ? TEXT("on") : TEXT("off"));
     }
 
     FAutoConsoleCommandWithWorldAndArgs SightDebugCommand(TEXT("CM.AI.SacrificeSightDebug"), TEXT("Draw sacrifice sight cones. Usage: CM.AI.SacrificeSightDebug on|off"), FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetSightDebugDraw));

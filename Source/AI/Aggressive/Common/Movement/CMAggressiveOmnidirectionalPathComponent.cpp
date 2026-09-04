@@ -27,14 +27,6 @@ namespace
     {
         if (Args.Num() != 1)
         {
-            UE_LOG(
-                LogCMAggressiveOmnidirectionalPath,
-                Display,
-                TEXT("Usage: CM.AI.AggressivePathDebug on|off "
-                     "(current: %s)"),
-                bDrawAggressivePathDebug ? TEXT("on") : TEXT("off")
-            );
-
             return;
         }
 
@@ -62,7 +54,6 @@ namespace
             }
         }
 
-        UE_LOG(LogCMAggressiveOmnidirectionalPath, Log, TEXT("Aggressive AI path debug: %s"), bDrawAggressivePathDebug ? TEXT("on") : TEXT("off"));
     }
 
     FAutoConsoleCommandWithWorldAndArgs AggressivePathDebugCommand(
@@ -170,7 +161,6 @@ bool UCMAggressiveOmnidirectionalPathComponent::StartPathMove(FVector WorldGoal,
 
     DrawPathDebug();
     World->GetTimerManager().SetTimer(PathUpdateTimerHandle, this, &ThisClass::UpdatePathMove, FMath::Max(PathUpdateInterval, 0.01f), true);
-    UE_LOG(LogCMAggressiveOmnidirectionalPath, Display, TEXT("공격적 AI가 NavMesh 경로 방향 요청을 시작했습니다. 경로점: %d개, 목적지: %s"), ActivePathPoints.Num(), *WorldGoal.ToCompactString());
 
     return true;
 }
@@ -567,7 +557,6 @@ void UCMAggressiveOmnidirectionalPathComponent::UpdatePathMove()
         {
             const FVector RebuildGoal = ActiveWorldGoal;
             const float RebuildAcceptanceRadius = FinalAcceptanceRadius;
-            UE_LOG(LogCMAggressiveOmnidirectionalPath, Display, TEXT("공격적 AI가 중간 경유지 %d번을 지나쳐 현재 선두 위치에서 전체 경로를 다시 계산합니다. 지나친 경유지=%s"), ActivePathPointIndex, *PathPoint.ToCompactString());
             StartPathMove(RebuildGoal, RebuildAcceptanceRadius);
 
             return;

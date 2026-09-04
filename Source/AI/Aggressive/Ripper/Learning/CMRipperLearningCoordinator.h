@@ -68,9 +68,6 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Learning")
     FCMAggressiveLearningGoalSettings GoalSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Learning", meta = (ClampMin = "0.1"))
-    float ProgressLogIntervalSeconds = 5.0f;
-
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Learning", meta = (ClampMin = "1.0"))
     float SnapshotSaveIntervalSeconds = 60.0f;
 
@@ -84,7 +81,6 @@ private:
     bool InitializeLearningObjects();
     void RefreshPolicyUpdateState();
     void RunTrainingStep();
-    void LogTrainingProgressIfNeeded();
     void SaveTrainingSnapshotsIfNeeded();
 
     UPROPERTY(Transient)
@@ -104,9 +100,7 @@ private:
 
     TArray<int32> TrainingAgentIds;
     FTimerHandle TrainingTimerHandle;
-    int64 TotalAgentDecisionCount = 0;
     int32 InitialPolicyContentHash = 0;
-    double NextProgressLogTime = 0.0;
     double NextSnapshotSaveTime = 0.0;
     bool bHasReceivedPolicyUpdate = false;
 };

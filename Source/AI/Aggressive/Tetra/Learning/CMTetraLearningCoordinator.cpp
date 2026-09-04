@@ -18,8 +18,6 @@
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "TimerManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMTetraLearning, Log, All);
-
 // Actor Tick 없이 Tetra AI 병렬 학습을 관리할 중앙 Manager를 생성한다.
 ACMTetraLearningCoordinator::ACMTetraLearningCoordinator()
 {
@@ -109,12 +107,10 @@ bool ACMTetraLearningCoordinator::StartTrainingAgents(const TArray<ACMTetraPawn*
     const double CurrentTime = GetWorld()->GetTimeSeconds();
     TotalAgentDecisionCount = TrainingAgentIds.Num();
     NextCheckpointDecisionCount = FMath::Max(CheckpointDecisionInterval, 100);
-    NextProgressLogTime = CurrentTime + FMath::Max(ProgressLogIntervalSeconds, 0.1f);
     NextSnapshotSaveTime = CurrentTime + FMath::Max(SnapshotSaveIntervalSeconds, 1.0f);
     LearningManager->SetComponentTickInterval(FMath::Max(DecisionInterval, 0.01f));
     LearningManager->SetComponentTickEnabled(true);
     GetWorldTimerManager().SetTimer(TrainingTimerHandle, this, &ThisClass::RunTrainingStep, FMath::Max(DecisionInterval, 0.01f), true);
-    UE_LOG(LogCMTetraLearning, Display, TEXT("Tetra AI CPU PPO 학습을 시작했습니다. 에이전트: %d개, 판단 주기: %.2f초, PPO 수집량: %d"), TrainingAgentIds.Num(), DecisionInterval, MaximumRecordedStepsPerIteration);
 
     return true;
 }
@@ -176,9 +172,6 @@ bool ACMTetraLearningCoordinator::SaveTrainingSnapshots()
 
     const FString Directory = GetSnapshotDirectory();
     const bool bSaved = CMAggressiveLearningSnapshot::SaveTrainingNetworks(ECMAggressiveLearningSnapshotProfile::Tetra, *Policy, *Critic, Directory);
-    if (bSaved)
-        UE_LOG(LogCMTetraLearning, Display, TEXT("Tetra AI 최신 학습 스냅샷을 저장했습니다: %s"), *Directory);
-
     return bSaved;
 }
 
@@ -200,7 +193,6 @@ bool ACMTetraLearningCoordinator::SaveTrainingCheckpoint()
     if (bSaved)
     {
         LastCheckpointPolicyContentHash = CurrentPolicyContentHash;
-        UE_LOG(LogCMTetraLearning, Display, TEXT("Tetra AI 초기 학습 체크포인트를 보존했습니다. 전체 판단: %lld, 경로: %s"), TotalAgentDecisionCount, *Directory);
     }
     return bSaved;
 }
@@ -324,28 +316,8 @@ void ACMTetraLearningCoordinator::RunTrainingStep()
     PPOTrainer->RunTraining();
     TotalAgentDecisionCount += TrainingAgentIds.Num();
     RefreshPolicyUpdateState();
-    LogTrainingProgressIfNeeded();
     SaveTrainingSnapshotsIfNeeded();
     SaveTrainingCheckpointIfNeeded();
-}
-
-// 설정된 주기마다 대표 에이전트의 목표 거리와 속도를 한 줄로 출력한다.
-void ACMTetraLearningCoordinator::LogTrainingProgressIfNeeded()
-{
-    const double CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime < NextProgressLogTime)
-        return;
-    NextProgressLogTime = CurrentTime + FMath::Max(ProgressLogIntervalSeconds, 0.1f);
-
-    ACMTetraPawn* Agent = TrainingAgents.IsEmpty() ? nullptr : TrainingAgents[0];
-    UCMAggressiveMovementCommandComponent* MovementCommand = Agent ? Agent->GetMovementCommand() : nullptr;
-    UPrimitiveComponent* Body = Agent ? Agent->GetAggressiveMovementBody() : nullptr;
-    if (!MovementCommand || !Body || !MovementCommand->HasMovementGoal())
-        return;
-
-    const float GoalDistance = FVector::Dist2D(Body->GetComponentLocation(), MovementCommand->GetMovementGoal().WorldLocation);
-    const float PlanarSpeed = FVector(Body->GetPhysicsLinearVelocity().X, Body->GetPhysicsLinearVelocity().Y, 0.0f).Size();
-    UE_LOG(LogCMTetraLearning, Display, TEXT("Tetra AI 학습 상태 - 전체 판단: %lld, 목표 거리: %.1fcm, 평면 속도: %.1fcm/s, 정책 갱신: %s"), TotalAgentDecisionCount, GoalDistance, PlanarSpeed, bHasReceivedPolicyUpdate ? TEXT("완료") : TEXT("대기"));
 }
 
 // 설정된 시간이 되면 이어서 학습할 최신 네트워크를 저장한다.

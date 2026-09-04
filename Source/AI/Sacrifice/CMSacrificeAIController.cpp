@@ -10,8 +10,6 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "TimerManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMSacrificeAI, Log, All);
-
 ACMSacrificeAIController::ACMSacrificeAIController()
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -639,8 +637,6 @@ bool ACMSacrificeAIController::MoveAwayFromThreat(const float DistanceCm)
             return true;
         }
     }
-
-    UE_LOG(LogCMSacrificeAI, Verbose, TEXT("No reachable flee goal for %s within %.0fcm"), *GetNameSafe(Sacrifice), DistanceCm);
 
     return false;
 }

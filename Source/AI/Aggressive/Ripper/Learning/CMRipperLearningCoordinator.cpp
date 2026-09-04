@@ -17,8 +17,6 @@
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "TimerManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMRipperLearning, Log, All);
-
 // Actor Tick 없이 Ripper AI 학습을 관리할 중앙 Manager를 생성한다.
 ACMRipperLearningCoordinator::ACMRipperLearningCoordinator()
 {
@@ -114,13 +112,10 @@ bool ACMRipperLearningCoordinator::StartTrainingAgents(const TArray<ACMRipperPaw
         return false;
 
     const double CurrentTime = GetWorld()->GetTimeSeconds();
-    TotalAgentDecisionCount = TrainingAgentIds.Num();
-    NextProgressLogTime = CurrentTime + FMath::Max(ProgressLogIntervalSeconds, 0.1f);
     NextSnapshotSaveTime = CurrentTime + FMath::Max(SnapshotSaveIntervalSeconds, 1.0f);
     LearningManager->SetComponentTickInterval(FMath::Max(DecisionInterval, 0.01f));
     LearningManager->SetComponentTickEnabled(true);
     GetWorldTimerManager().SetTimer(TrainingTimerHandle, this, &ThisClass::RunTrainingStep, FMath::Max(DecisionInterval, 0.01f), true);
-    UE_LOG(LogCMRipperLearning, Display, TEXT("Ripper AI PPO 학습을 시작했습니다. 에이전트: %d개, 판단 주기: %.2f초, PPO 수집량: %d"), TrainingAgentIds.Num(), DecisionInterval, MaximumRecordedStepsPerIteration);
 
     return true;
 }
@@ -177,9 +172,6 @@ bool ACMRipperLearningCoordinator::SaveTrainingSnapshots()
 
     const FString Directory = GetSnapshotDirectory();
     const bool bSaved = CMAggressiveLearningSnapshot::SaveTrainingNetworks(ECMAggressiveLearningSnapshotProfile::Ripper, *Policy, *Critic, Directory);
-    if (bSaved)
-        UE_LOG(LogCMRipperLearning, Display, TEXT("Ripper AI 최신 학습 스냅샷을 저장했습니다: %s"), *Directory);
-
     return bSaved;
 }
 
@@ -242,7 +234,6 @@ bool ACMRipperLearningCoordinator::InitializeLearningObjects()
         const FString BootstrapDirectory = CMAggressiveLearningSnapshot::GetBootstrapDirectory(ECMAggressiveLearningSnapshotProfile::Ripper);
         if (!CMAggressiveLearningSnapshot::HasCompleteTrainingSnapshots(ECMAggressiveLearningSnapshotProfile::Ripper, BootstrapDirectory) || !CMAggressiveLearningSnapshot::LoadTrainingNetworks(ECMAggressiveLearningSnapshotProfile::Ripper, *Policy, *Critic, BootstrapDirectory))
             return false;
-        UE_LOG(LogCMRipperLearning, Display, TEXT("Ripper AI V5 완성 정책을 V6 감쇠 미세학습의 초기 정책으로 사용합니다: %s"), *BootstrapDirectory);
     }
 
     const FLearningAgentsCommunicator Communicator = ULearningAgentsCommunicatorLibrary::MakeSharedMemoryTrainingProcess();
@@ -279,35 +270,8 @@ void ACMRipperLearningCoordinator::RunTrainingStep()
     }
 
     PPOTrainer->RunTraining();
-    TotalAgentDecisionCount += TrainingAgentIds.Num();
     RefreshPolicyUpdateState();
-    LogTrainingProgressIfNeeded();
     SaveTrainingSnapshotsIfNeeded();
-}
-
-// 설정된 주기마다 대표 에이전트의 방향과 거리 및 보상을 출력한다.
-void ACMRipperLearningCoordinator::LogTrainingProgressIfNeeded()
-{
-    const double CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime < NextProgressLogTime)
-        return;
-    NextProgressLogTime = CurrentTime + FMath::Max(ProgressLogIntervalSeconds, 0.1f);
-
-    ACMRipperPawn* Agent = TrainingAgents.IsEmpty() ? nullptr : TrainingAgents[0];
-    const int32 AgentId = TrainingAgentIds.IsEmpty() ? INDEX_NONE : TrainingAgentIds[0];
-    UPrimitiveComponent* Body = Agent ? Agent->GetAggressiveMovementBody() : nullptr;
-    UCMAggressiveMovementCommandComponent* MovementCommand = Agent ? Agent->GetMovementCommand() : nullptr;
-    if (!Body || !MovementCommand || !MovementCommand->HasMovementGoal() || !TrainingEnvironment)
-    {
-        return;
-    }
-
-    const FCMAggressiveMovementGoal Goal = MovementCommand->GetMovementGoal();
-    const float Distance = FVector::Dist2D(Body->GetComponentLocation(), Goal.WorldLocation);
-    const float Reward = TrainingEnvironment->HasReward(AgentId) ? TrainingEnvironment->GetReward(AgentId) : 0.0f;
-    UE_LOG(
-        LogCMRipperLearning, Display, TEXT("Ripper AI 학습 상태 - 전체 판단: %lld, 방향: %s, 거리: %.1fcm, 보상: %.4f, 정책 갱신: %s"), TotalAgentDecisionCount, CMAggressiveDirection::GetKoreanDisplayName(Goal.LocalDirection), Distance, Reward, bHasReceivedPolicyUpdate ? TEXT("완료") : TEXT("대기")
-    );
 }
 
 // 설정된 시간이 되면 최신 Ripper AI 학습 네트워크를 저장한다.

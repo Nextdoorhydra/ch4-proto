@@ -6,8 +6,6 @@
 #include "LearningAgentsManager.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogCMAggressiveLearningEpisode, Log, All);
-
 namespace
 {
     // 두 위치 사이의 높이 차이를 제외한 거리를 반환한다.
@@ -29,23 +27,6 @@ namespace
         return FVector::DotProduct(ForwardDirection.GetSafeNormal(), GoalDirection.GetSafeNormal());
     }
 
-    // 공격적 AI 에피소드 종료 원인을 로그에 사용할 한글 이름으로 변환한다.
-    const TCHAR* GetEpisodeEndReasonName(ECMAggressiveLearningEpisodeEndReason Reason)
-    {
-        switch (Reason)
-        {
-        case ECMAggressiveLearningEpisodeEndReason::Arrival:
-            return TEXT("도착");
-        case ECMAggressiveLearningEpisodeEndReason::Overturned:
-            return TEXT("전복");
-        case ECMAggressiveLearningEpisodeEndReason::Timeout:
-            return TEXT("시간 초과");
-        case ECMAggressiveLearningEpisodeEndReason::PolicyUpdate:
-            return TEXT("정책 업데이트");
-        default:
-            return TEXT("없음");
-        }
-    }
 } // namespace
 
 // 목표 접근량과 과회전 및 남은 제한시간으로 한 판단 단계의 보상을 계산한다.
@@ -284,28 +265,6 @@ void UCMAggressiveLearningTrainingEnvironment::LogEpisodeSummary(int32 AgentId, 
             ArrivalHistory.RemoveAt(0, ArrivalHistory.Num() - 8, EAllowShrinking::No);
     }
 
-    const float EndDistance = MovementCommand.HasMovementGoal() ? CalculatePlanarDistance(Body.GetComponentLocation(), MovementCommand.GetMovementGoal().WorldLocation) : 0.0f;
-    const float EpisodeTime = GetEpisodeTime(AgentId);
-    const float RecentArrivalRate = CMAggressiveLearningEpisode::CalculateArrivalRate(ArrivalHistory) * 100.0f;
-    const float TotalArrivalRate = TotalNaturalEpisodeCounts[AgentId] > 0 ? static_cast<float>(TotalArrivalCounts[AgentId]) / static_cast<float>(TotalNaturalEpisodeCounts[AgentId]) * 100.0f : 0.0f;
-    UE_LOG(
-        LogCMAggressiveLearningEpisode,
-        Display,
-        TEXT("공격적 AI 학습 에피소드 종료 - 에이전트: %d, 번호: %lld, 시작 방향: %s, 판단: %d, 경과: %.2f초, 누적 보상: %.4f, 최소 거리: %.1fcm, 종료 거리: %.1fcm, 종료 이유: %s, 최근 %d회 도착률: %.1f%%, 전체 %lld회 도착률: %.1f%%"),
-        AgentId,
-        EpisodeNumbers[AgentId],
-        CMAggressiveDirection::GetKoreanDisplayName(EpisodeStartDirections[AgentId]),
-        EpisodeStepCounts[AgentId],
-        EpisodeTime,
-        EpisodeCumulativeRewards[AgentId],
-        EpisodeMinimumDistances[AgentId],
-        EndDistance,
-        GetEpisodeEndReasonName(EndReason),
-        ArrivalHistory.Num(),
-        RecentArrivalRate,
-        TotalNaturalEpisodeCounts[AgentId],
-        TotalArrivalRate
-    );
 }
 
 // 다음 에피소드가 사용할 누적 통계와 종료 원인을 초기화한다.
