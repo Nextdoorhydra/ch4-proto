@@ -38,6 +38,37 @@ void ACMChimera::ApplyEnvironmentalForceToSegment(
     }
 }
 
+float ACMChimera::GetAssemblyVelocityAlongDirection(
+    const FVector& WorldDirection) const
+{
+    const FVector Direction = WorldDirection.GetSafeNormal();
+    if (Direction.IsNearlyZero())
+    {
+        return 0.0f;
+    }
+
+    FVector MassWeightedVelocity = FVector::ZeroVector;
+    float TotalMass = 0.0f;
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!SegmentBody || !SegmentBody->IsSimulatingPhysics())
+        {
+            continue;
+        }
+
+        const float SegmentMass = FMath::Max(SegmentBody->GetMass(), 0.01f);
+        MassWeightedVelocity += SegmentBody->GetPhysicsLinearVelocity()
+            * SegmentMass;
+        TotalMass += SegmentMass;
+    }
+
+    return TotalMass > UE_SMALL_NUMBER
+        ? FVector::DotProduct(MassWeightedVelocity / TotalMass, Direction)
+        : 0.0f;
+}
+
 // 활성 몸통 마디의 현재 상대 배치를 유지하고 속도를 제거한 뒤 서버에서 일괄 이동
 bool ACMChimera::TeleportAssembly(const FTransform& DestinationTransform)
 {

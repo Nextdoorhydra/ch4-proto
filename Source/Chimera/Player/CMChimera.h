@@ -192,6 +192,10 @@ public:
         int32 SegmentIndex,
         const FVector& Acceleration);
 
+    // 활성 몸통 전체의 질량중심 속도를 지정 방향으로 투영해 반환
+    float GetAssemblyVelocityAlongDirection(
+        const FVector& WorldDirection) const;
+
     // Test Area 이동을 위해 활성 몸통 마디의 상대 배치를 유지하며 전체 물리 조립체 이동
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Testing")
     bool TeleportAssembly(const FTransform& DestinationTransform);

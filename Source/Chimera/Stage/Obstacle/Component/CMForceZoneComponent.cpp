@@ -23,7 +23,8 @@ void UCMForceZoneComponent::TickComponent(
         return;
     }
 
-    const FVector Acceleration = GetWorldForceDirection() * ForceStrength;
+    const FVector ForceDirection = GetWorldForceDirection();
+    const FVector Acceleration = ForceDirection * ForceStrength;
     if (Acceleration.IsNearlyZero())
     {
         return;
@@ -35,6 +36,13 @@ void UCMForceZoneComponent::TickComponent(
         if (!IsValid(Chimera) || It.Value() <= 0)
         {
             It.RemoveCurrent();
+            continue;
+        }
+
+        if (MaxWindSpeed > 0.0f
+            && Chimera->GetAssemblyVelocityAlongDirection(ForceDirection)
+                >= MaxWindSpeed)
+        {
             continue;
         }
 
@@ -50,12 +58,21 @@ void UCMForceZoneComponent::TickComponent(
             continue;
         }
 
+        const bool bReachedMaxWindSpeed = MaxWindSpeed > 0.0f
+            && Chimera->GetAssemblyVelocityAlongDirection(ForceDirection)
+                >= MaxWindSpeed;
+
         for (auto SegmentIt = ChimeraIt.Value().CreateIterator(); SegmentIt; ++SegmentIt)
         {
             if (SegmentIt.Value() <= 0
                 || !Chimera->IsSegmentAlive(SegmentIt.Key()))
             {
                 SegmentIt.RemoveCurrent();
+                continue;
+            }
+
+            if (bReachedMaxWindSpeed)
+            {
                 continue;
             }
 

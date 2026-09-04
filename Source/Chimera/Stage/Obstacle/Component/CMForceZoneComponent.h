@@ -48,6 +48,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|ForceZone", meta = (ClampMin = "0.0"))
     float ForceStrength = 1000.0f;
 
+    // 바람 방향의 조립체 속도 제한. 0이면 제한하지 않음.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|ForceZone", meta = (ClampMin = "0.0", Units = "cm/s"))
+    float MaxWindSpeed = 120.0f;
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Obstacle|ForceZone")
     FCMForceZoneTargetSignature OnTargetEntered;
 
