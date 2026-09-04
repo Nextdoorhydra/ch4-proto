@@ -1,12 +1,35 @@
 #include "Player/CMChimera.h"
 
 #include "Components/BoxComponent.h"
+#include "Gore/CMGoreResponseComponent.h"
 #include "Player/CMControlBody.h"
 #include "EngineUtils.h"
 
 void ACMChimera::ApplyDamageToSegment(
     int32 SegmentIndex,
     float Damage
+)
+{
+    const UBoxComponent* SegmentBody = BodySegments.IsValidIndex(SegmentIndex)
+        ? BodySegments[SegmentIndex]
+        : nullptr;
+    const FVector HitLocation = SegmentBody
+        ? SegmentBody->Bounds.Origin
+        : GetActorLocation();
+    ApplyDamageToSegmentAtHit(
+        SegmentIndex,
+        Damage,
+        HitLocation,
+        FVector::UpVector,
+        FVector::UpVector);
+}
+
+void ACMChimera::ApplyDamageToSegmentAtHit(
+    int32 SegmentIndex,
+    float Damage,
+    const FVector HitLocation,
+    const FVector SurfaceNormal,
+    const FVector BloodDirection
 )
 {
     if (!HasAuthority()
@@ -39,12 +62,27 @@ void ACMChimera::ApplyDamageToSegment(
     SegmentState.bDead = SegmentState.Health <= 0.0f;
     OnSegmentStatesChanged.Broadcast();
 
+    if (GoreResponseComponent)
+    {
+        GoreResponseComponent->SpawnHitEffects(
+            HitLocation,
+            SurfaceNormal,
+            BloodDirection);
+    }
+
     UE_LOG(LogChimeraLineBody, Log,
         TEXT("[Segment Damage] Segment=%d Damage=%.1f Health=%.1f -> %.1f"),
         SegmentIndex, Damage, OldHealth, SegmentState.Health);
 
     if (SegmentState.bDead)
     {
+        if (GoreResponseComponent)
+        {
+            GoreResponseComponent->SpawnDestructionEffects(
+                HitLocation,
+                BloodDirection);
+        }
+
         for (int32 PartSlotIndex = 0;
             PartSlotIndex < CMControl::PartSlotsPerSegment;
             ++PartSlotIndex)
@@ -81,6 +119,34 @@ void ACMChimera::ApplyDamageToSegment(
     }
 
     ForceNetUpdate();
+}
+
+bool ACMChimera::RestoreSegmentToFullHealth(int32 SegmentIndex)
+{
+    if (!HasAuthority()
+        || !SegmentHealthStates.IsValidIndex(SegmentIndex))
+    {
+        return false;
+    }
+
+    FCMBodySegmentHealthState& SegmentState =
+        SegmentHealthStates[SegmentIndex];
+    if (SegmentState.bDead || SegmentState.MaxHealth <= 0.0f)
+    {
+        return false;
+    }
+
+    const float PreviousHealth = SegmentState.Health;
+    SegmentState.Health = SegmentState.MaxHealth;
+    OnSegmentStatesChanged.Broadcast();
+    ForceNetUpdate();
+
+    UE_LOG(LogChimeraLineBody, Log,
+        TEXT("[Segment Full Heal] Segment=%d Health=%.1f->%.1f"),
+        SegmentIndex,
+        PreviousHealth,
+        SegmentState.Health);
+    return true;
 }
 
 bool ACMChimera::IsSegmentAlive(int32 SegmentIndex) const

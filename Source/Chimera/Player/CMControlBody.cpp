@@ -1,11 +1,13 @@
 #include "Player/CMControlBody.h"
 
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameMode/CMGameState.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerState.h"
 #include "Net/UnrealNetwork.h"
+#include "Parts/Core/CMPartActorBase.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraControlBody, Log, All);
@@ -174,6 +176,19 @@ void ACMControlBody::RequestDetachPartFromControlSlot(int32 SlotIndex)
     ServerRequestDetachPartFromControlSlot(SlotIndex);
 }
 
+void ACMControlBody::RequestConsumePartFromControlSlot(int32 SlotIndex)
+{
+    if (!IsLocallyControlled()
+        || !IsControlSlotEnabled(SlotIndex)
+        || SlotIndex < 0
+        || SlotIndex >= CMControl::MaxKeysPerPlayer)
+    {
+        return;
+    }
+
+    ServerRequestConsumePartFromControlSlot(SlotIndex);
+}
+
 void ACMControlBody::ServerRequestAttachPartToControlSlot_Implementation(
     int32 SlotIndex,
     AActor* PartActor
@@ -272,6 +287,62 @@ void ACMControlBody::ServerRequestDetachPartFromControlSlot_Implementation(
         PartSlotAddress.PartSlotIndex,
         *GetNameSafe(DetachedPart),
         DetachedPart ? TEXT("Detached") : TEXT("Empty"));
+}
+
+void ACMControlBody::ServerRequestConsumePartFromControlSlot_Implementation(
+    int32 SlotIndex)
+{
+    if (!IsControlSlotEnabled(SlotIndex)
+        || SlotIndex < 0
+        || SlotIndex >= CMControl::MaxKeysPerPlayer)
+    {
+        return;
+    }
+
+    const int32 ResolvedSlotIndex = ResolveControlInputSlot(SlotIndex);
+    const FCMPartSlotAddress PartSlotAddress =
+        GetEffectivePartSlotAddress(ResolvedSlotIndex);
+    ACMChimera* SharedChimera = GetSharedChimera();
+    UCMPartSlotComponent* PartSlot = SharedChimera
+        ? SharedChimera->GetPartSlotComponent(PartSlotAddress)
+        : nullptr;
+    ACMPartActorBase* Part = PartSlot
+        ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
+        : nullptr;
+    if (!SharedChimera || !Part || !Part->IsAlive())
+    {
+        return;
+    }
+
+    FCMPartSlotAddress& PressedPartSlot = PressedPartSlots[SlotIndex];
+    if (CMControl::IsValidPartSlot(PressedPartSlot))
+    {
+        SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
+        PressedPartSlot = FCMPartSlotAddress();
+    }
+
+    const USkeletalMeshComponent* PartMesh = Part->GetPartMesh();
+    const FVector DestructionLocation = PartMesh
+        ? PartMesh->Bounds.Origin
+        : Part->GetActorLocation();
+    const bool bConsumed = Part->ApplyPartDamageAtHit(
+        Part->GetHealth(),
+        DestructionLocation,
+        FVector::UpVector,
+        FVector::UpVector);
+    const bool bHealed = bConsumed
+        && SharedChimera->RestoreSegmentToFullHealth(
+            PartSlotAddress.SegmentIndex);
+
+    UE_LOG(LogChimeraControlBody, Log,
+        TEXT("[Consume Part] ControlBody=%s ControlSlot=%d Slot=(%d,%d) Part=%s Consumed=%s FullHeal=%s"),
+        *GetName(),
+        SlotIndex,
+        PartSlotAddress.SegmentIndex,
+        PartSlotAddress.PartSlotIndex,
+        *GetNameSafe(Part),
+        bConsumed ? TEXT("true") : TEXT("false"),
+        bHealed ? TEXT("true") : TEXT("false"));
 }
 
 void ACMControlBody::ServerSetControlSlotPressed_Implementation(

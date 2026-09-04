@@ -61,6 +61,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Parts")
     void RequestDetachPartFromControlSlot(int32 SlotIndex);
 
+    /** Used by Ctrl+Q/W/E/R to consume a Part and fully heal its body. */
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Parts")
+    void RequestConsumePartFromControlSlot(int32 SlotIndex);
+
     /** 서버의 할당 정책이 계산한 Q/W/E/R 슬롯을 이 ControlBody에 저장한다. */
     void SetControlSlots(
         const TArray<FCMPartSlotAddress>& NewControlSlots
@@ -157,6 +161,9 @@ protected:
 
     UFUNCTION(Server, Reliable)
     void ServerRequestDetachPartFromControlSlot(int32 SlotIndex);
+
+    UFUNCTION(Server, Reliable)
+    void ServerRequestConsumePartFromControlSlot(int32 SlotIndex);
 
     /**
      * ControlBody는 위치 기반 게임 판정을 하지 않는 논리 Pawn이다.

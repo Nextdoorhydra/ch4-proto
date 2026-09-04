@@ -9,6 +9,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
 #include "Gore/CMDismemberableTarget.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMPartSlotComponent.h"
@@ -22,6 +23,16 @@ DEFINE_LOG_CATEGORY_STATIC(LogChimeraArm, Log, All);
 namespace
 {
     constexpr float SwingDetectionIntervalSeconds = 0.05f;
+
+    float GetArmServerWorldTime(const UWorld* World)
+    {
+        if (const AGameStateBase* GameState =
+            World ? World->GetGameState() : nullptr)
+        {
+            return GameState->GetServerWorldTimeSeconds();
+        }
+        return World ? World->GetTimeSeconds() : 0.0f;
+    }
 }
 
 ACMArmPart::ACMArmPart()
@@ -101,7 +112,7 @@ float ACMArmPart::GetSwingPhase() const
     const UWorld* World = GetWorld();
     return bSwinging && World
         ? FMath::Clamp(
-            (World->GetTimeSeconds() - SwingStartTime)
+            (GetArmServerWorldTime(World) - SwingStartTime)
                 / FMath::Max(SwingDuration, 0.01f),
             0.0f,
             1.0f)
@@ -214,7 +225,7 @@ bool ACMArmPart::BeginSwing()
     }
 
     CurrentSwingAttackId = FGuid::NewGuid();
-    SwingStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    SwingStartTime = GetArmServerWorldTime(GetWorld());
     bSwinging = true;
     OnSwingStateChanged.Broadcast(true);
     ForceNetUpdate();

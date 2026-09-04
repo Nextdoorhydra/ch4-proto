@@ -51,7 +51,7 @@ public:
 		EditAnywhere,
 		Category = "Blood Surface",
 		meta = (ClampMin = "0"))
-	int32 InitialBloodDecalPoolSize = 32;
+	int32 InitialBloodDecalPoolSize = 128;
 
 	/**
 	 * 하나의 Blood Event가 생성 가능한 최대 surface trace 수.
@@ -63,7 +63,7 @@ public:
 		EditAnywhere,
 		Category = "Blood Surface",
 		meta = (ClampMin = "0"))
-	int32 MaxSurfaceSamplesPerEvent = 4;
+	int32 MaxSurfaceSamplesPerEvent = 8;
 
 	/**
 	 * 하나의 World에 유지할 수 있는 logical Blood Mark 최대 개수.
@@ -75,19 +75,19 @@ public:
 		EditAnywhere,
 		Category = "Blood Surface",
 		meta = (ClampMin = "0"))
-	int32 MaxActiveBloodMarks = 256;
+	int32 MaxActiveBloodMarks = 1024;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
 		meta = (ClampMin = "0"))
-	int32 MaxActiveBloodStrokeMarks = 128;
+	int32 MaxActiveBloodStrokeMarks = 768;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
 		meta = (ClampMin = "0"))
-	int32 MaxStrokeStampsPerObject = 20;
+	int32 MaxStrokeStampsPerObject = 64;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
 		meta = (ClampMin = "0"))
-	int32 MaxStrokeStampsPerFrame = 8;
+	int32 MaxStrokeStampsPerFrame = 32;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Blood Stroke",
 		meta = (ClampMin = "0.1"))

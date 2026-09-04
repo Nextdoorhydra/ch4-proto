@@ -84,15 +84,27 @@ void ACMTentacleSegmentActor::BeginPlay()
         GooBody->SetMaterial(0, GooBodyMaterial);
         GooBody->SetVisibility(GooBodyMesh != nullptr, true);
     }
-    if (SourceEffect && SourceNiagaraSystem)
+    if (SourceEffect)
     {
-        SourceEffect->SetAsset(SourceNiagaraSystem);
-        SourceEffect->Activate(true);
+        if (!SourceEffect->GetAsset() && SourceNiagaraSystem)
+        {
+            SourceEffect->SetAsset(SourceNiagaraSystem);
+        }
+        if (SourceEffect->GetAsset())
+        {
+            SourceEffect->Activate(true);
+        }
     }
-    if (GooDripsEffect && GooDripsNiagaraSystem)
+    if (GooDripsEffect)
     {
-        GooDripsEffect->SetAsset(GooDripsNiagaraSystem);
-        GooDripsEffect->Activate(true);
+        if (!GooDripsEffect->GetAsset() && GooDripsNiagaraSystem)
+        {
+            GooDripsEffect->SetAsset(GooDripsNiagaraSystem);
+        }
+        if (GooDripsEffect->GetAsset())
+        {
+            GooDripsEffect->Activate(true);
+        }
     }
     ChimeraOwner = Cast<ACMChimera>(GetOwner());
     OnRep_VisualState();

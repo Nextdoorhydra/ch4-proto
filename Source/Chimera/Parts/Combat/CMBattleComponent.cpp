@@ -67,7 +67,17 @@ ECMPartHitResult UCMBattleComponent::ResolveHit(
     }
 
     const float PreviousHealth = PartActor->GetHealth();
-    const bool bDied = PartActor->ApplyPartDamage(HitPayload.Damage);
+    const FVector HitLocation = HitPayload.ImpactPoint.IsNearlyZero()
+        ? PartActor->GetActorLocation()
+        : HitPayload.ImpactPoint;
+    const FVector SurfaceNormal = HitPayload.ImpactNormal.GetSafeNormal(
+        SMALL_NUMBER,
+        FVector::UpVector);
+    const bool bDied = PartActor->ApplyPartDamageAtHit(
+        HitPayload.Damage,
+        HitLocation,
+        SurfaceNormal,
+        SurfaceNormal);
     const ECMPartHitResult Result = bDied
         ? ECMPartHitResult::Dead
         : ECMPartHitResult::Damaged;

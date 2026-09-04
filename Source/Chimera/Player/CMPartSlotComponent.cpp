@@ -360,6 +360,10 @@ bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
     }
 
     ICMPartInterface::Execute_OnAttachedToPartSlot(PartActor, this);
+    if (ACMPartActorBase* NativePart = Cast<ACMPartActorBase>(PartActor))
+    {
+        NativePart->SynchronizeAttachedPartSlot(this);
+    }
     OnAttachedPartChanged.Broadcast(this, AttachedPart);
     ChimeraOwner->ForceNetUpdate();
 
@@ -383,6 +387,10 @@ AActor* UCMPartSlotComponent::DetachPart()
 
     AActor* DetachedPart = AttachedPart;
     ICMPartInterface::Execute_OnDetachedFromPartSlot(DetachedPart, this);
+    if (ACMPartActorBase* NativePart = Cast<ACMPartActorBase>(DetachedPart))
+    {
+        NativePart->SynchronizeAttachedPartSlot(nullptr);
+    }
     RemoveGrantedAbility();
     DetachedPart->OnDestroyed.RemoveDynamic(
         this,
