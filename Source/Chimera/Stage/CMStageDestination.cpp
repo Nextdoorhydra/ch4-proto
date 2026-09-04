@@ -45,7 +45,7 @@ void ACMStageDestination::BeginPlay()
         this, &ThisClass::HandleDestinationBeginOverlap);
 }
 
-// 키메라 소유 컴포넌트의 진입에만 반응해 전체 마디 조건 확인
+// 키메라 소유 컴포넌트의 진입에만 반응해 활성 몸통 겹침 확인
 void ACMStageDestination::HandleDestinationBeginOverlap(
     UPrimitiveComponent* OverlappedComponent,
     AActor* OtherActor,
@@ -60,12 +60,12 @@ void ACMStageDestination::HandleDestinationBeginOverlap(
     }
 }
 
-// 활성 BodySegment 전부가 Box와 겹칠 때 StageDirector에 완료 보고
+// 활성 BodySegment 하나 이상이 Box와 겹칠 때 StageDirector에 완료 보고
 void ACMStageDestination::TryCompleteStage(ACMChimera* Chimera)
 {
     if (!Chimera
         || !StageDirector
-        || !Chimera->AreAllActiveBodySegmentsOverlapping(
+        || !Chimera->IsAnyActiveBodySegmentOverlapping(
             DestinationVolume))
     {
         return;
@@ -73,7 +73,7 @@ void ACMStageDestination::TryCompleteStage(ACMChimera* Chimera)
 
     bCompletionReported = true;
     UE_LOG(LogChimeraDestination, Display,
-        TEXT("모든 활성 몸통 마디가 목적지에 도착했습니다. Destination=%s Segments=%d"),
+        TEXT("활성 몸통 마디가 목적지에 도착했습니다. Destination=%s Segments=%d"),
         *GetName(), Chimera->GetActiveSegmentCount());
     StageDirector->CompleteStage();
 }

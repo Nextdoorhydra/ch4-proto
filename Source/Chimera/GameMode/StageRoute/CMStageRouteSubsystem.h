@@ -29,6 +29,9 @@ public:
     // 다음 스테이지를 Pending으로 예약하되 현재 인덱스는 유지
     bool PrepareNextStage();
 
+    // 지정한 스테이지를 예약하며 현재 진행도와 접속 인원 설정은 보존
+    bool PrepareStageAtIndex(int32 StageIndex);
+
     // 새 맵 도착 후 Pending 인덱스를 현재 스테이지로 확정
     bool CommitPendingStage();
 

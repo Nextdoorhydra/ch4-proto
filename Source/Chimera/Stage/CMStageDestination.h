@@ -11,7 +11,7 @@ class UBoxComponent;
 class UPrimitiveComponent;
 
 UCLASS()
-// 모든 활성 몸통 마디가 영역에 들어오면 현재 스테이지 완료 보고
+// 활성 몸통 마디 하나 이상이 영역에 들어오면 현재 스테이지 완료 보고
 class CHIMERA_API ACMStageDestination : public AActor
 {
     GENERATED_BODY()
@@ -23,7 +23,7 @@ protected:
     virtual void BeginPlay() override;
 
 private:
-    // 몸통 컴포넌트가 영역에 들어올 때 전체 활성 마디 충족 여부 재검사
+    // 몸통 컴포넌트가 영역에 들어올 때 활성 마디 겹침 여부 재검사
     UFUNCTION()
     void HandleDestinationBeginOverlap(
         UPrimitiveComponent* OverlappedComponent,

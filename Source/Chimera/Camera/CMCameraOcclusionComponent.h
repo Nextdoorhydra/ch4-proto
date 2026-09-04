@@ -12,6 +12,17 @@ class UMaterialInterface;
 class UPrimitiveComponent;
 
 USTRUCT()
+struct FCMCameraOccluderInstanceFadeState
+{
+    GENERATED_BODY()
+
+    int32 InstanceIndex = INDEX_NONE;
+    TArray<FVector2D> ScreenCenters;
+    float Fade = 0.0f;
+    bool bOccluding = false;
+};
+
+USTRUCT()
 struct FCMCameraOccluderFadeState
 {
     GENERATED_BODY()
@@ -25,6 +36,9 @@ struct FCMCameraOccluderFadeState
     TArray<TObjectPtr<UMaterialInstanceDynamic>> DynamicMaterials;
 
     TArray<FVector2D> ScreenCenters;
+
+    UPROPERTY(Transient)
+    TArray<FCMCameraOccluderInstanceFadeState> InstanceFadeStates;
 
     float Fade = 0.0f;
     bool bOccluding = false;
@@ -57,7 +71,8 @@ private:
     ) const;
     void FindCurrentOccluders(
         APlayerController& PlayerController,
-        TMap<UPrimitiveComponent*, TArray<FVector2D>>& OutOccluders
+        TMap<UPrimitiveComponent*,
+            TMap<int32, TArray<FVector2D>>>& OutOccluders
     ) const;
     FCMCameraOccluderFadeState* FindOrAddFadeState(
         UPrimitiveComponent& Component

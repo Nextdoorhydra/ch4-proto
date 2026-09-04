@@ -60,7 +60,7 @@ void ACMRoomEntryTrigger::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Super::EndPlay(EndPlayReason);
 }
 
-// 마지막 몸통 컴포넌트 진입 이벤트에서 전체 활성 몸통 포함 여부 재검사
+// 활성 몸통 마디 하나 이상이 진입하면 룸 확정 시작
 void ACMRoomEntryTrigger::HandleBeginOverlap(
     UPrimitiveComponent* OverlappedComponent,
     AActor* OtherActor,
@@ -78,7 +78,7 @@ void ACMRoomEntryTrigger::HandleBeginOverlap(
 void ACMRoomEntryTrigger::TryCommitForChimera(ACMChimera* Chimera)
 {
     if (!IsValid(Chimera)
-        || !Chimera->AreAllActiveBodySegmentsOverlapping(EntryVolume))
+        || !Chimera->IsAnyActiveBodySegmentOverlapping(EntryVolume))
     {
         return;
     }

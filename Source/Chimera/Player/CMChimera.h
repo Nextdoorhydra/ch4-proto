@@ -183,6 +183,10 @@ public:
     bool AreAllActiveBodySegmentsOverlapping(
         const UPrimitiveComponent* Volume) const;
 
+    // 지정 Volume과 활성 몸통 마디 하나 이상이 겹치는지 확인 (파츠 제외)
+    bool IsAnyActiveBodySegmentOverlapping(
+        const UPrimitiveComponent* Volume) const;
+
     // 서버에서 받은 환경 가속도를 모든 활성 몸통 마디에 질량과 무관하게 적용
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Physics")
     void ApplyEnvironmentalForce(const FVector& Acceleration);
