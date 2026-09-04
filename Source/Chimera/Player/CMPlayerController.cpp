@@ -1173,6 +1173,22 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
         return;
     }
 
+    UCMPartSlotComponent* PartSlot =
+        SharedChimera->GetPartSlotComponent(PartSlotAddress);
+    if (PartSlot
+        && !PartSlot->HasAttachedPart()
+        && SharedChimera->TryBeginTentaclePartAttachment(
+            PartSlotAddress))
+    {
+        if (CMControl::IsValidPartSlot(PressedPartSlot))
+        {
+            SharedChimera->SetPartSlotPressed(
+                PressedPartSlot, false);
+        }
+        PressedPartSlot = FCMPartSlotAddress();
+        return;
+    }
+
     if (CMControl::IsValidPartSlot(PressedPartSlot)
         && PressedPartSlot != PartSlotAddress)
     {

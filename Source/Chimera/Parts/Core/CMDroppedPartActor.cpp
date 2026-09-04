@@ -3,6 +3,9 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Parts/Core/CMPartActorBase.h"
+#include "Parts/Tentacle/CMTentacleSegmentActor.h"
+#include "Player/CMChimera.h"
+#include "Player/CMPartSlotComponent.h"
 
 ACMDroppedPartActor::ACMDroppedPartActor()
 {
@@ -13,6 +16,9 @@ ACMDroppedPartActor::ACMDroppedPartActor()
     PartMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("PartMesh"));
     SetRootComponent(PartMesh);
     PartMesh->SetIsReplicated(true);
+    PartMesh->SetGenerateOverlapEvents(true);
+    Tags.AddUnique(
+        ACMTentacleSegmentActor::TentacleInteractiveActorTag);
 }
 
 void ACMDroppedPartActor::GetLifetimeReplicatedProps(
@@ -25,6 +31,7 @@ void ACMDroppedPartActor::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMDroppedPartActor, DroppedMesh);
     DOREPLIFETIME(ACMDroppedPartActor, DroppedPhysicsAsset);
     DOREPLIFETIME(ACMDroppedPartActor, DroppedCollisionProfile);
+    DOREPLIFETIME(ACMDroppedPartActor, bTentaclePulled);
 }
 
 void ACMDroppedPartActor::InitializeDroppedPart(
@@ -68,10 +75,129 @@ void ACMDroppedPartActor::ApplyVisualDefinition()
     PartMesh->SetSkeletalMeshAsset(DroppedMesh);
     PartMesh->SetPhysicsAsset(DroppedPhysicsAsset, false);
     PartMesh->SetCollisionProfileName(DroppedCollisionProfile);
-    PartMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    PartMesh->SetAllBodiesSimulatePhysics(true);
-    PartMesh->SetSimulatePhysics(true);
-    PartMesh->WakeAllRigidBodies();
+    PartMesh->SetCollisionEnabled(
+        bTentaclePulled
+            ? ECollisionEnabled::NoCollision
+            : ECollisionEnabled::QueryAndPhysics);
+    PartMesh->SetAllBodiesSimulatePhysics(!bTentaclePulled);
+    PartMesh->SetSimulatePhysics(!bTentaclePulled);
+    if (!bTentaclePulled)
+    {
+        PartMesh->WakeAllRigidBodies();
+    }
+}
+
+void ACMDroppedPartActor::OnRep_TentaclePulled()
+{
+    ApplyVisualDefinition();
+}
+
+bool ACMDroppedPartActor::TryReserveForTentacle(AActor* Requester)
+{
+    if (!HasAuthority() || !IsValid(Requester) || bConsumed)
+    {
+        return false;
+    }
+    if (TentacleReservationOwner.IsValid()
+        && TentacleReservationOwner.Get() != Requester)
+    {
+        return false;
+    }
+    TentacleReservationOwner = Requester;
+    return true;
+}
+
+void ACMDroppedPartActor::ReleaseTentacleReservation(AActor* Requester)
+{
+    if (HasAuthority() && TentacleReservationOwner.Get() == Requester)
+    {
+        TentacleReservationOwner.Reset();
+    }
+}
+
+bool ACMDroppedPartActor::IsReservedForTentacle(
+    const AActor* Requester) const
+{
+    return TentacleReservationOwner.IsValid()
+        && TentacleReservationOwner.Get() != Requester;
+}
+
+bool ACMDroppedPartActor::IsReservedByTentacle(
+    const AActor* Requester) const
+{
+    return IsValid(Requester)
+        && TentacleReservationOwner.Get() == Requester;
+}
+
+bool ACMDroppedPartActor::BeginTentaclePull(AActor* Requester)
+{
+    if (!HasAuthority()
+        || TentacleReservationOwner.Get() != Requester
+        || bConsumed
+        || !PartMesh)
+    {
+        return false;
+    }
+
+    bTentaclePulled = true;
+    PartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    PartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+    ApplyVisualDefinition();
+    ForceNetUpdate();
+    return true;
+}
+
+void ACMDroppedPartActor::EndTentaclePull(AActor* Requester)
+{
+    if (!HasAuthority() || TentacleReservationOwner.Get() != Requester)
+    {
+        return;
+    }
+    bTentaclePulled = false;
+    ApplyVisualDefinition();
+    ForceNetUpdate();
+}
+
+bool ACMDroppedPartActor::ConsumeIntoPartSlot(
+    ACMChimera* Chimera,
+    const FCMPartSlotAddress& PartSlotAddress)
+{
+    UCMPartSlotComponent* PartSlot = Chimera
+        ? Chimera->GetPartSlotComponent(PartSlotAddress)
+        : nullptr;
+    if (!HasAuthority()
+        || bConsumed
+        || !bTentaclePulled
+        || !TentacleReservationOwner.IsValid()
+        || !UsablePartClass
+        || !PartSlot
+        || PartSlot->HasAttachedPart())
+    {
+        return false;
+    }
+
+    ACMPartActorBase* UsablePart = ACMPartActorBase::SpawnPartFromDataRows(
+        this,
+        UsablePartClass,
+        NAME_None,
+        NAME_None,
+        PartSlot->GetComponentTransform(),
+        Chimera);
+    if (!UsablePart)
+    {
+        return false;
+    }
+
+    if (!Chimera->AttachPartToSlot(PartSlotAddress, UsablePart))
+    {
+        UsablePart->Destroy();
+        return false;
+    }
+
+    bConsumed = true;
+    TentacleReservationOwner.Reset();
+    Destroy();
+    return true;
 }
 
 ACMPartActorBase* ACMDroppedPartActor::CreateUsablePart(
@@ -79,7 +205,11 @@ ACMPartActorBase* ACMDroppedPartActor::CreateUsablePart(
     AActor* NewOwner
 )
 {
-    if (!HasAuthority() || bConsumed || !UsablePartClass)
+    if (!HasAuthority()
+        || bConsumed
+        || bTentaclePulled
+        || TentacleReservationOwner.IsValid()
+        || !UsablePartClass)
     {
         return nullptr;
     }

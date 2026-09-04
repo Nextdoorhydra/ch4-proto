@@ -160,6 +160,12 @@ public:
     void SetContributingPlayerState(ACMPlayerState* PlayerState);
     ACMPlayerState* ConsumeContributingPlayerState();
 
+    /** Server-only reservation while a segment tentacle pulls this loose Part. */
+    bool TryReserveForTentacle(AActor* Requester);
+    void ReleaseTentacleReservation(AActor* Requester);
+    bool IsReservedForTentacle(const AActor* Requester = nullptr) const;
+    bool IsReservedByTentacle(const AActor* Requester) const;
+
 protected:
     virtual void BeginPlay() override;
 
@@ -274,4 +280,5 @@ private:
 
     TWeakObjectPtr<UCMPartSlotComponent> AttachedPartSlot;
     TWeakObjectPtr<ACMPlayerState> PendingContributingPlayerState;
+    TWeakObjectPtr<AActor> TentacleReservationOwner;
 };
