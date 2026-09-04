@@ -6,6 +6,8 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -35,6 +37,8 @@ static_assert(
 const FName ScreenRadiusParameterName(TEXT("CM_OcclusionRadius"));
 const FName MinimumOpacityParameterName(TEXT("CM_OcclusionMinOpacity"));
 const FName EdgeSoftnessParameterName(TEXT("CM_OcclusionEdgeSoftness"));
+const FName UseInstanceFadeParameterName(TEXT("CM_OcclusionUseInstanceFade"));
+constexpr int32 OcclusionInstanceFadeDataIndex = 0;
 }
 
 UCMCameraOcclusionComponent::UCMCameraOcclusionComponent()
@@ -60,7 +64,8 @@ void UCMCameraOcclusionComponent::TickComponent(
         return;
     }
 
-    TMap<UPrimitiveComponent*, TArray<FVector2D>> CurrentOccluders;
+    TMap<UPrimitiveComponent*,
+        TMap<int32, TArray<FVector2D>>> CurrentOccluders;
     FindCurrentOccluders(
         *PlayerController,
         CurrentOccluders
@@ -68,8 +73,11 @@ void UCMCameraOcclusionComponent::TickComponent(
 
     for (FCMCameraOccluderFadeState& State : FadeStates)
     {
-        const TArray<FVector2D>* ScreenCenters =
+        const TMap<int32, TArray<FVector2D>>* OccluderInstances =
             CurrentOccluders.Find(State.Component.Get());
+        const TArray<FVector2D>* ScreenCenters = OccluderInstances
+            ? OccluderInstances->Find(INDEX_NONE)
+            : nullptr;
         const bool bWasOccluding = State.bOccluding;
         State.bOccluding = ScreenCenters != nullptr;
         if (ScreenCenters)
@@ -89,16 +97,54 @@ void UCMCameraOcclusionComponent::TickComponent(
                 State.ScreenCenters.Num()
             );
         }
+        for (FCMCameraOccluderInstanceFadeState& InstanceState
+            : State.InstanceFadeStates)
+        {
+            InstanceState.bOccluding = false;
+        }
     }
 
-    for (const TPair<UPrimitiveComponent*, TArray<FVector2D>>& Pair
+    for (const TPair<UPrimitiveComponent*,
+        TMap<int32, TArray<FVector2D>>>& Pair
         : CurrentOccluders)
     {
         if (FCMCameraOccluderFadeState* State =
             FindOrAddFadeState(*Pair.Key))
         {
-            State->bOccluding = true;
-            State->ScreenCenters = Pair.Value;
+            if (Pair.Key->IsA<UInstancedStaticMeshComponent>())
+            {
+                for (const TPair<int32, TArray<FVector2D>>& InstancePair
+                    : Pair.Value)
+                {
+                    FCMCameraOccluderInstanceFadeState* InstanceState =
+                        State->InstanceFadeStates.FindByPredicate(
+                            [&InstancePair](
+                                const FCMCameraOccluderInstanceFadeState& Value)
+                            {
+                                return Value.InstanceIndex == InstancePair.Key;
+                            });
+                    if (!InstanceState)
+                    {
+                        FCMCameraOccluderInstanceFadeState NewInstanceState;
+                        NewInstanceState.InstanceIndex = InstancePair.Key;
+                        InstanceState =
+                            &State->InstanceFadeStates.Add_GetRef(
+                                MoveTemp(NewInstanceState));
+                    }
+                    InstanceState->bOccluding = true;
+                    InstanceState->ScreenCenters = InstancePair.Value;
+                    for (const FVector2D& Center : InstancePair.Value)
+                    {
+                        State->ScreenCenters.AddUnique(Center);
+                    }
+                }
+            }
+            else if (const TArray<FVector2D>* ComponentCenters =
+                Pair.Value.Find(INDEX_NONE))
+            {
+                State->bOccluding = true;
+                State->ScreenCenters = *ComponentCenters;
+            }
         }
     }
 
@@ -200,7 +246,8 @@ void UCMCameraOcclusionComponent::FindTargetLocations(
 
 void UCMCameraOcclusionComponent::FindCurrentOccluders(
     APlayerController& PlayerController,
-    TMap<UPrimitiveComponent*, TArray<FVector2D>>& OutOccluders
+    TMap<UPrimitiveComponent*,
+        TMap<int32, TArray<FVector2D>>>& OutOccluders
 ) const
 {
     const AActor* Owner = GetOwner();
@@ -261,6 +308,13 @@ void UCMCameraOcclusionComponent::FindCurrentOccluders(
         {
             continue;
         }
+        if (ScreenPosition.X < 0.0f
+            || ScreenPosition.X > ViewportWidth
+            || ScreenPosition.Y < 0.0f
+            || ScreenPosition.Y > ViewportHeight)
+        {
+            continue;
+        }
         const FVector2D ScreenCenter = FVector2D(
             ScreenPosition.X / ViewportWidth,
             ScreenPosition.Y / ViewportHeight
@@ -289,7 +343,18 @@ void UCMCameraOcclusionComponent::FindCurrentOccluders(
             }
             if (UPrimitiveComponent* Component = Hit.GetComponent())
             {
-                OutOccluders.FindOrAdd(Component).AddUnique(ScreenCenter);
+                int32 InstanceIndex = INDEX_NONE;
+                if (Component->IsA<UInstancedStaticMeshComponent>())
+                {
+                    InstanceIndex = Hit.Item;
+                    if (InstanceIndex == INDEX_NONE)
+                    {
+                        continue;
+                    }
+                }
+                OutOccluders.FindOrAdd(Component)
+                    .FindOrAdd(InstanceIndex)
+                    .AddUnique(ScreenCenter);
             }
         }
     }
@@ -311,6 +376,16 @@ UCMCameraOcclusionComponent::FindOrAddFadeState(
 
     FCMCameraOccluderFadeState NewState;
     NewState.Component = &Component;
+    if (UInstancedStaticMeshComponent* InstancedComponent =
+        Cast<UInstancedStaticMeshComponent>(&Component))
+    {
+        if (InstancedComponent->NumCustomDataFloats <=
+            OcclusionInstanceFadeDataIndex)
+        {
+            InstancedComponent->SetNumCustomDataFloats(
+                OcclusionInstanceFadeDataIndex + 1);
+        }
+    }
     const int32 MaterialCount = Component.GetNumMaterials();
     NewState.OriginalMaterials.SetNum(MaterialCount);
     NewState.DynamicMaterials.SetNum(MaterialCount);
@@ -415,6 +490,9 @@ void UCMCameraOcclusionComponent::UpdateFadeStates(float DeltaTime)
                 continue;
             }
             Material->SetScalarParameterValue(FadeParameterName, State.Fade);
+            Material->SetScalarParameterValue(
+                UseInstanceFadeParameterName,
+                State.InstanceFadeStates.IsEmpty() ? 0.0f : 1.0f);
             Material->SetVectorParameterValue(
                 ScreenCenterParameterName,
                 State.ScreenCenters.IsValidIndex(0)
@@ -448,8 +526,41 @@ void UCMCameraOcclusionComponent::UpdateFadeStates(float DeltaTime)
             );
             Material->SetScalarParameterValue(
                 EdgeSoftnessParameterName,
-            Config.EdgeSoftness
+                Config.EdgeSoftness
             );
+        }
+
+        if (UInstancedStaticMeshComponent* InstancedComponent =
+            Cast<UInstancedStaticMeshComponent>(State.Component.Get()))
+        {
+            for (int32 InstanceIndex = State.InstanceFadeStates.Num() - 1;
+                InstanceIndex >= 0;
+                --InstanceIndex)
+            {
+                FCMCameraOccluderInstanceFadeState& InstanceState =
+                    State.InstanceFadeStates[InstanceIndex];
+                const float TargetInstanceFade =
+                    InstanceState.bOccluding ? 1.0f : 0.0f;
+                const float InstanceFadeSpeed = InstanceState.bOccluding
+                    ? Config.FadeOutSpeed
+                    : Config.FadeInSpeed;
+                InstanceState.Fade = FMath::FInterpConstantTo(
+                    InstanceState.Fade,
+                    TargetInstanceFade,
+                    DeltaTime,
+                    InstanceFadeSpeed);
+                InstancedComponent->SetCustomDataValue(
+                    InstanceState.InstanceIndex,
+                    OcclusionInstanceFadeDataIndex,
+                    InstanceState.Fade,
+                    false);
+                if (!InstanceState.bOccluding
+                    && InstanceState.Fade <= KINDA_SMALL_NUMBER)
+                {
+                    State.InstanceFadeStates.RemoveAtSwap(InstanceIndex);
+                }
+            }
+            InstancedComponent->MarkRenderStateDirty();
         }
 
         if (State.bOccluding
@@ -487,7 +598,9 @@ void UCMCameraOcclusionComponent::UpdateFadeStates(float DeltaTime)
             );
         }
 
-        if (!State.bOccluding && State.Fade <= KINDA_SMALL_NUMBER)
+        if (!State.bOccluding
+            && State.Fade <= KINDA_SMALL_NUMBER
+            && State.InstanceFadeStates.IsEmpty())
         {
             RestoreFadeState(State);
             FadeStates.RemoveAtSwap(Index);

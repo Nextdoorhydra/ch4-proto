@@ -11,6 +11,7 @@
 #include "Materials/MaterialExpressionMin.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionParameter.h"
+#include "Materials/MaterialExpressionPerInstanceCustomData.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionScreenPosition.h"
 #include "Materials/MaterialExpressionSmoothStep.h"
@@ -23,6 +24,7 @@ namespace
 {
 		const TCHAR* CameraOcclusionDitherFunctionPath = TEXT("/Engine/Functions/Engine_MaterialFunctions02/Utility/DitherTemporalAA.DitherTemporalAA");
 		const FName CameraOcclusionFadeParameter(TEXT("CM_OcclusionFade"));
+		const FName CameraOcclusionUseInstanceFadeParameter(TEXT("CM_OcclusionUseInstanceFade"));
 		const FName CameraOcclusionCenterParameter(TEXT("CM_OcclusionCenter"));
 		const FName CameraOcclusionRadiusParameter(TEXT("CM_OcclusionRadius"));
 		const FName CameraOcclusionMinOpacityParameter(TEXT("CM_OcclusionMinOpacity"));
@@ -41,15 +43,25 @@ namespace
 			{
 				return false;
 			}
+			bool bHasFadeParameter = false;
+			bool bHasInstanceFadeParameter = false;
 			for (const UMaterialExpression* Expression : EditorOnlyData->ExpressionCollection.Expressions)
 			{
 				const UMaterialExpressionParameter* Parameter = Cast<UMaterialExpressionParameter>(Expression);
-				if (Parameter && Parameter->ParameterName == CameraOcclusionFadeParameter)
+				if (!Parameter)
 				{
-					return true;
+					continue;
+				}
+				if (Parameter->ParameterName == CameraOcclusionFadeParameter)
+				{
+					bHasFadeParameter = true;
+				}
+				else if (Parameter->ParameterName == CameraOcclusionUseInstanceFadeParameter)
+				{
+					bHasInstanceFadeParameter = true;
 				}
 			}
-			return false;
+			return bHasFadeParameter && bHasInstanceFadeParameter;
 		}
 	
 		UMaterialExpressionScalarParameter* CreateScalarParameter(UMaterial* Material, FName Name, float DefaultValue)
@@ -128,17 +140,22 @@ namespace
 			FExpressionInput OriginalMask = Material.GetEditorOnlyData()->OpacityMask;
 			UMaterialExpressionConstant* One = CreateCameraOcclusionExpression<UMaterialExpressionConstant>(&Material);
 			UMaterialExpressionScalarParameter* Fade = CreateScalarParameter(&Material, CameraOcclusionFadeParameter, 0.0f);
+			UMaterialExpressionScalarParameter* UseInstanceFade = CreateScalarParameter(&Material, CameraOcclusionUseInstanceFadeParameter, 0.0f);
+			UMaterialExpressionPerInstanceCustomData* InstanceFade =
+				CreateCameraOcclusionExpression<UMaterialExpressionPerInstanceCustomData>(&Material);
 			UMaterialExpressionScalarParameter* Radius = CreateScalarParameter(&Material, CameraOcclusionRadiusParameter, 0.15f);
 			UMaterialExpressionScalarParameter* MinOpacity = CreateScalarParameter(&Material, CameraOcclusionMinOpacityParameter, 0.1f);
 			UMaterialExpressionScalarParameter* EdgeSoftness = CreateScalarParameter(&Material, CameraOcclusionEdgeSoftnessParameter, 0.03f);
 			UMaterialExpressionScreenPosition* ScreenPosition = CreateCameraOcclusionExpression<UMaterialExpressionScreenPosition>(&Material);
 			UMaterialExpressionComponentMask* ScreenUV = CreateCameraOcclusionExpression<UMaterialExpressionComponentMask>(&Material);
-			if (!One || !Fade || !Radius || !MinOpacity || !EdgeSoftness || !ScreenPosition || !ScreenUV)
+			if (!One || !Fade || !UseInstanceFade || !InstanceFade || !Radius || !MinOpacity || !EdgeSoftness || !ScreenPosition || !ScreenUV)
 			{
 				OutReason = TEXT("failed to create material expressions");
 				return false;
 			}
 			One->R = 1.0f;
+			InstanceFade->DataIndex = 0;
+			InstanceFade->ConstDefaultValue = 0.0f;
 			ScreenUV->R = true;
 			ScreenUV->G = true;
 			ScreenUV->Input.Expression = ScreenPosition;
@@ -183,10 +200,11 @@ namespace
 			UMaterialExpressionAdd* RadiusWithEdge = CreateCameraOcclusionExpression<UMaterialExpressionAdd>(&Material);
 			UMaterialExpressionSmoothStep* SoftCircle = CreateCameraOcclusionExpression<UMaterialExpressionSmoothStep>(&Material);
 			UMaterialExpressionLinearInterpolate* LocalOpacity = CreateCameraOcclusionExpression<UMaterialExpressionLinearInterpolate>(&Material);
+			UMaterialExpressionLinearInterpolate* FadeSource = CreateCameraOcclusionExpression<UMaterialExpressionLinearInterpolate>(&Material);
 			UMaterialExpressionLinearInterpolate* FadedOpacity = CreateCameraOcclusionExpression<UMaterialExpressionLinearInterpolate>(&Material);
 			UMaterialExpressionMaterialFunctionCall* Dither = CreateCameraOcclusionExpression<UMaterialExpressionMaterialFunctionCall>(&Material);
 			UMaterialExpressionMultiply* CombinedMask = CreateCameraOcclusionExpression<UMaterialExpressionMultiply>(&Material);
-			if (!RadiusWithEdge || !SoftCircle || !LocalOpacity || !FadedOpacity || !Dither || !CombinedMask)
+			if (!RadiusWithEdge || !SoftCircle || !LocalOpacity || !FadeSource || !FadedOpacity || !Dither || !CombinedMask)
 			{
 				OutReason = TEXT("failed to create fade expressions");
 				return false;
@@ -199,9 +217,12 @@ namespace
 			LocalOpacity->A.Expression = MinOpacity;
 			LocalOpacity->B.Expression = One;
 			LocalOpacity->Alpha.Expression = SoftCircle;
+			FadeSource->A.Expression = Fade;
+			FadeSource->B.Expression = InstanceFade;
+			FadeSource->Alpha.Expression = UseInstanceFade;
 			FadedOpacity->A.Expression = One;
 			FadedOpacity->B.Expression = LocalOpacity;
-			FadedOpacity->Alpha.Expression = Fade;
+			FadedOpacity->Alpha.Expression = FadeSource;
 			Dither->SetMaterialFunction(DitherFunction);
 			Dither->UpdateFromFunctionResource();
 			if (Dither->FunctionInputs.IsEmpty())
