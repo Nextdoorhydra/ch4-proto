@@ -413,7 +413,7 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "0.0"))
-    float GroundContactDistance = 8.0f;
+    float GroundContactDistance = 30.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
