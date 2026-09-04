@@ -10,6 +10,7 @@
 
 class UGameplayAbility;
 class UCMBattleComponent;
+class UCMGoreResponseComponent;
 class UCMPartStatusComponent;
 class UBoxComponent;
 class USceneComponent;
@@ -91,6 +92,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     UCMBattleComponent* GetBattleComponent() const;
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Gore")
+    UCMGoreResponseComponent* GetGoreResponseComponent() const
+    {
+        return GoreResponseComponent;
+    }
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     UCMPartStatusComponent* GetPartStatusComponent() const;
 
@@ -138,10 +145,23 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     bool IsOperational() const;
 
+    /** Keeps the native attachment/physics invariant even for BP overrides. */
+    void SynchronizeAttachedPartSlot(UCMPartSlotComponent* PartSlot);
+
     /** Server-owned HP change used after BattleComponent resolves a hit. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Part")
     bool ApplyPartDamage(float Damage);
+
+    /** Damage entry point that preserves the exact impact for blood effects. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Part")
+    bool ApplyPartDamageAtHit(
+        float Damage,
+        FVector HitLocation,
+        FVector SurfaceNormal,
+        FVector BloodDirection
+    );
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Part")
@@ -186,6 +206,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMPartStatusComponent> PartStatusComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UCMGoreResponseComponent> GoreResponseComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Part")
     ECMPartSlotType PartType = ECMPartSlotType::Any;
@@ -245,6 +268,9 @@ protected:
 
 private:
     bool InitializeFromPartData();
+    void ApplyDestroyedState();
+    void CaptureMountedPhysicsState();
+    void ApplyAttachmentPhysicsState();
 
     UFUNCTION()
     void OnRep_MaxHealth();
@@ -258,10 +284,17 @@ private:
     UFUNCTION()
     void OnRep_Disabled();
 
-    UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
+    UFUNCTION()
+    void OnRep_AttachmentPhysicsState();
+
+    UPROPERTY(ReplicatedUsing = OnRep_AttachmentPhysicsState,
+        VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Part",
         meta = (AllowPrivateAccess = "true"))
     FCMPartSlotAddress AttachedSlotAddress;
+
+    UPROPERTY(ReplicatedUsing = OnRep_AttachmentPhysicsState)
+    bool bTentaclePullActive = false;
 
     UPROPERTY(ReplicatedUsing = OnRep_Health,
         VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Part",
@@ -281,4 +314,12 @@ private:
     TWeakObjectPtr<UCMPartSlotComponent> AttachedPartSlot;
     TWeakObjectPtr<ACMPlayerState> PendingContributingPlayerState;
     TWeakObjectPtr<AActor> TentacleReservationOwner;
+
+    FName MountedMeshCollisionProfile = NAME_None;
+    TEnumAsByte<ECollisionEnabled::Type> MountedMeshCollisionEnabled =
+        ECollisionEnabled::NoCollision;
+    TEnumAsByte<ECollisionEnabled::Type> MountedHurtboxCollisionEnabled =
+        ECollisionEnabled::QueryOnly;
+    bool bMountedMeshGenerateOverlapEvents = false;
+    bool bMountedPhysicsStateCaptured = false;
 };

@@ -1,6 +1,7 @@
 #include "Parts/Leg/CMLegPart.h"
 
 #include "Ability/CMLegGameplayAbility.h"
+#include "Components/CMBloodTransferComponent.h"
 #include "Data/Part/CMPartLegArmTableRow.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
@@ -25,6 +26,10 @@ ACMLegPart::ACMLegPart()
     PartType = ECMPartSlotType::Leg;
     GrantedAbilityClass = UCMLegGameplayAbility::StaticClass();
     PartRowName = TEXT("DefaultLeg");
+    BloodTransferComponent =
+        CreateDefaultSubobject<UCMBloodTransferComponent>(
+            TEXT("BloodTransferComponent"));
+    BloodTransferComponent->InitializeTransfer(PartMesh, TEXT("Human.Red"));
     MechanismWeightComponent = CreateDefaultSubobject<UCMMechanismWeightComponent>(TEXT("MechanismWeight"));
     MechanismWeightComponent->MechanismWeight = 0.0f;
 }
@@ -147,6 +152,14 @@ void ACMLegPart::InitializePlantedContact(
     PlantSnapshot.Duration = 0.0f;
     ++PlantSnapshot.Sequence;
 
+    if (BloodTransferComponent)
+    {
+        BloodTransferComponent->ProcessContactSample(
+            GroundLocation,
+            SafeNormal,
+            0.0f);
+    }
+
     StepDirection = PlantSnapshot.StepDirection;
     StepGroundLocation = PlantSnapshot.GroundLocation;
     StepGroundNormal = PlantSnapshot.GroundNormal;
@@ -188,6 +201,17 @@ void ACMLegPart::BeginPlantTransition(
     const float SafeDuration = FMath::Max(Duration, 0.01f);
     const float CurrentTime = GetLegServerWorldTime(GetWorld());
 
+    if (BloodTransferComponent)
+    {
+        const float ContactSpeed = FVector::Distance(
+            StartLocation,
+            GroundLocation) / SafeDuration;
+        BloodTransferComponent->ProcessContactSample(
+            StartLocation,
+            StartNormal,
+            ContactSpeed);
+    }
+
     PlantSnapshot.State = ECMLegPlantState::Swing;
     PlantSnapshot.Trigger = Trigger;
     PlantSnapshot.StepDirection = NewStepDirection;
@@ -214,6 +238,18 @@ void ACMLegPart::EndProceduralStep()
             && PlantSnapshot.State != ECMLegPlantState::Landing))
     {
         return;
+    }
+
+    if (BloodTransferComponent && PlantSnapshot.bContactValid)
+    {
+        const float ContactSpeed = FVector::Distance(
+            FVector(PlantSnapshot.StartGroundLocation),
+            FVector(PlantSnapshot.GroundLocation)) /
+            FMath::Max(PlantSnapshot.Duration, 0.01f);
+        BloodTransferComponent->ProcessContactSample(
+            PlantSnapshot.GroundLocation,
+            PlantSnapshot.GroundNormal,
+            ContactSpeed);
     }
 
     PlantSnapshot.State = PlantSnapshot.bContactValid

@@ -21,6 +21,7 @@ class UAbilitySystemComponent;
 class UCMChimeraAttributeSet;
 class UCMVisionComponent;
 class UCMLineBodyMovementCoordinator;
+class UCMGoreResponseComponent;
 class UCMPartSlotComponent;
 class UPrimitiveComponent;
 class UDataTable;
@@ -126,6 +127,22 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Health")
     void ApplyDamageToSegment(int32 SegmentIndex, float Damage);
+
+    /** Damage entry point for attacks that have an exact world-space hit. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Health")
+    void ApplyDamageToSegmentAtHit(
+        int32 SegmentIndex,
+        float Damage,
+        FVector HitLocation,
+        FVector SurfaceNormal,
+        FVector BloodDirection
+    );
+
+    /** Restores one living body segment to its configured maximum health. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Health")
+    bool RestoreSegmentToFullHealth(int32 SegmentIndex);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     bool IsSegmentAlive(int32 SegmentIndex) const;
@@ -348,6 +365,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Movement")
     TObjectPtr<UCMLineBodyMovementCoordinator> MovementCoordinator;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Gore")
+    TObjectPtr<UCMGoreResponseComponent> GoreResponseComponent;
 
     // ASC가 소유하는 키메라 전체 공용 체력/스태미나 데이터다.
     UPROPERTY()

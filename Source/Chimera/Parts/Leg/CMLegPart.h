@@ -5,6 +5,8 @@
 
 #include "CMLegPart.generated.h"
 
+class UCMBloodTransferComponent;
+
 UENUM(BlueprintType)
 enum class ECMLegStepDirection : uint8
 {
@@ -199,6 +201,9 @@ public:
     FCMLegStepStateChangedSignature OnStepStateChanged;
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Gore")
+    TObjectPtr<UCMBloodTransferComponent> BloodTransferComponent;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism")
     TObjectPtr<class UCMMechanismWeightComponent> MechanismWeightComponent;
 

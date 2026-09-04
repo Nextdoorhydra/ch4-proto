@@ -4,6 +4,7 @@
 #include "AbilitySystemComponent.h"
 #include "Collision/CMCollisionChannels.h"
 #include "Movement/CMLineBodyMovementCoordinator.h"
+#include "Gore/CMGoreResponseComponent.h"
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -71,6 +72,10 @@ ACMChimera::ACMChimera()
         CreateDefaultSubobject<UCMLineBodyMovementCoordinator>(
             TEXT("LineBodyMovementCoordinator")
         );
+
+    GoreResponseComponent = CreateDefaultSubobject<UCMGoreResponseComponent>(
+        TEXT("GoreResponseComponent")
+    );
 
     BodyDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(
         TEXT("/Game/Chimera/Data/Body/DT_BodyDataTable.DT_BodyDataTable")

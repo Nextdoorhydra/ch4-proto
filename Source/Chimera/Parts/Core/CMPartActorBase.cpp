@@ -9,6 +9,7 @@
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Gore/CMGoreResponseComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Parts/Combat/CMBattleComponent.h"
 #include "Parts/Core/CMPartStatusComponent.h"
@@ -58,6 +59,9 @@ ACMPartActorBase::ACMPartActorBase()
     );
     PartStatusComponent = CreateDefaultSubobject<UCMPartStatusComponent>(
         TEXT("PartStatusComponent")
+    );
+    GoreResponseComponent = CreateDefaultSubobject<UCMGoreResponseComponent>(
+        TEXT("GoreResponseComponent")
     );
 
     PartDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(
@@ -404,6 +408,22 @@ bool ACMPartActorBase::IsOperational() const
 
 bool ACMPartActorBase::ApplyPartDamage(float Damage)
 {
+    const FVector HitLocation = PartMesh
+        ? PartMesh->Bounds.Origin
+        : GetActorLocation();
+    return ApplyPartDamageAtHit(
+        Damage,
+        HitLocation,
+        FVector::UpVector,
+        FVector::UpVector);
+}
+
+bool ACMPartActorBase::ApplyPartDamageAtHit(
+    float Damage,
+    const FVector HitLocation,
+    const FVector SurfaceNormal,
+    const FVector BloodDirection)
+{
     if (!HasAuthority() || !IsAlive() || Damage <= 0.0f)
     {
         return false;
@@ -411,9 +431,23 @@ bool ACMPartActorBase::ApplyPartDamage(float Damage)
 
     const float PreviousHealth = Health;
     Health = FMath::Clamp(Health - Damage, 0.0f, MaxHealth);
+    // The last durability point is not playable health; crossing into it
+    // destroys the Part and publishes a single final value of zero.
+    const bool bDiedNow = Health <= 1.0f;
+    if (bDiedNow)
+    {
+        Health = 0.0f;
+    }
     OnHealthChanged.Broadcast(PreviousHealth, Health, MaxHealth);
 
-    const bool bDiedNow = Health <= 0.0f;
+    if (GoreResponseComponent)
+    {
+        GoreResponseComponent->SpawnHitEffects(
+            HitLocation,
+            SurfaceNormal,
+            BloodDirection);
+    }
+
     if (bDiedNow)
     {
         bDead = true;
@@ -426,10 +460,18 @@ bool ACMPartActorBase::ApplyPartDamage(float Damage)
         OnPartDied.Broadcast();
         OnDisabledChanged.Broadcast(true);
 
+        if (GoreResponseComponent)
+        {
+            GoreResponseComponent->SpawnDestructionEffects(
+                HitLocation,
+                BloodDirection);
+        }
+
         if (UCMPartSlotComponent* PartSlot = GetAttachedPartSlot())
         {
             PartSlot->DetachPart();
         }
+        ApplyDestroyedState();
     }
 
     ForceNetUpdate();
@@ -442,6 +484,79 @@ bool ACMPartActorBase::ApplyPartDamage(float Damage)
         Health,
         bDiedNow ? TEXT("true") : TEXT("false"));
     return bDiedNow;
+}
+
+void ACMPartActorBase::ApplyDestroyedState()
+{
+    if (PartMesh)
+    {
+        PartMesh->SetVisibility(false, true);
+        PartMesh->SetHiddenInGame(true, true);
+        PartMesh->SetSimulatePhysics(false);
+        PartMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+    if (DamageHurtbox)
+    {
+        DamageHurtbox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+}
+
+void ACMPartActorBase::CaptureMountedPhysicsState()
+{
+    if (bMountedPhysicsStateCaptured || !PartMesh || !DamageHurtbox)
+    {
+        return;
+    }
+
+    MountedMeshCollisionProfile = PartMesh->GetCollisionProfileName();
+    MountedMeshCollisionEnabled = PartMesh->GetCollisionEnabled();
+    MountedHurtboxCollisionEnabled = DamageHurtbox->GetCollisionEnabled();
+    bMountedMeshGenerateOverlapEvents =
+        PartMesh->GetGenerateOverlapEvents();
+    bMountedPhysicsStateCaptured = true;
+}
+
+void ACMPartActorBase::ApplyAttachmentPhysicsState()
+{
+    if (!bMountedPhysicsStateCaptured || !PartMesh || !DamageHurtbox)
+    {
+        return;
+    }
+    if (bDead)
+    {
+        ApplyDestroyedState();
+        return;
+    }
+
+    const bool bMounted =
+        CMControl::IsValidPartSlot(AttachedSlotAddress);
+    PartMesh->SetAllBodiesSimulatePhysics(false);
+    PartMesh->SetSimulatePhysics(false);
+    PartMesh->SetPhysicsBlendWeight(0.0f);
+
+    if (bMounted)
+    {
+        PartMesh->SetCollisionProfileName(MountedMeshCollisionProfile);
+        PartMesh->SetCollisionEnabled(MountedMeshCollisionEnabled);
+        PartMesh->SetGenerateOverlapEvents(
+            bMountedMeshGenerateOverlapEvents);
+        DamageHurtbox->SetCollisionEnabled(
+            MountedHurtboxCollisionEnabled);
+        return;
+    }
+
+    // A loose usable Part is represented only by its authored Physics Asset.
+    DamageHurtbox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PartMesh->SetCollisionProfileName(TEXT("Ragdoll"));
+    PartMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    PartMesh->SetGenerateOverlapEvents(true);
+    if (!bTentaclePullActive)
+    {
+        PartMesh->SetAllBodiesSimulatePhysics(true);
+        PartMesh->SetSimulatePhysics(true);
+        PartMesh->SetAllBodiesPhysicsBlendWeight(1.0f, false);
+        PartMesh->WakeAllRigidBodies();
+    }
 }
 
 void ACMPartActorBase::SetPartDisabled(bool bNewDisabled)
@@ -478,6 +593,7 @@ void ACMPartActorBase::OnRep_Dead()
 {
     if (bDead)
     {
+        ApplyDestroyedState();
         OnPartDied.Broadcast();
     }
 }
