@@ -121,6 +121,7 @@ void ACMPartActorBase::BeginPlay()
     Super::BeginPlay();
 
     InitializeFromPartData();
+    CaptureMountedPhysicsState();
 
     if (HasAuthority())
     {
@@ -130,6 +131,7 @@ void ACMPartActorBase::BeginPlay()
         bDisabled = false;
         ForceNetUpdate();
     }
+    ApplyAttachmentPhysicsState();
 }
 
 void ACMPartActorBase::GetLifetimeReplicatedProps(
@@ -138,6 +140,7 @@ void ACMPartActorBase::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACMPartActorBase, AttachedSlotAddress);
+    DOREPLIFETIME(ACMPartActorBase, bTentaclePullActive);
     DOREPLIFETIME(ACMPartActorBase, MaxHealth);
     DOREPLIFETIME(ACMPartActorBase, Health);
     DOREPLIFETIME(ACMPartActorBase, Strength);
@@ -166,15 +169,12 @@ void ACMPartActorBase::OnAttachedToPartSlot_Implementation(
     UCMPartSlotComponent* PartSlot
 )
 {
-    if (!HasAuthority() || !PartSlot)
+    if (!PartSlot)
     {
         return;
     }
 
-    AttachedPartSlot = PartSlot;
-    AttachedSlotAddress = PartSlot->GetSlotAddress();
-    TentacleReservationOwner.Reset();
-    ForceNetUpdate();
+    SynchronizeAttachedPartSlot(PartSlot);
 }
 
 void ACMPartActorBase::OnDetachedFromPartSlot_Implementation(
@@ -186,7 +186,6 @@ void ACMPartActorBase::OnDetachedFromPartSlot_Implementation(
         return;
     }
 
-    AttachedPartSlot.Reset();
     PendingContributingPlayerState.Reset();
     if (PartStatusComponent)
     {
@@ -196,7 +195,24 @@ void ACMPartActorBase::OnDetachedFromPartSlot_Implementation(
     {
         BattleComponent->EndParryWindow();
     }
-    AttachedSlotAddress = FCMPartSlotAddress();
+    SynchronizeAttachedPartSlot(nullptr);
+}
+
+void ACMPartActorBase::SynchronizeAttachedPartSlot(
+    UCMPartSlotComponent* PartSlot)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    AttachedPartSlot = PartSlot;
+    AttachedSlotAddress = PartSlot
+        ? PartSlot->GetSlotAddress()
+        : FCMPartSlotAddress();
+    bTentaclePullActive = false;
+    TentacleReservationOwner.Reset();
+    ApplyAttachmentPhysicsState();
     ForceNetUpdate();
 }
 
@@ -603,6 +619,12 @@ void ACMPartActorBase::OnRep_Disabled()
     OnDisabledChanged.Broadcast(bDisabled);
 }
 
+void ACMPartActorBase::OnRep_AttachmentPhysicsState()
+{
+    CaptureMountedPhysicsState();
+    ApplyAttachmentPhysicsState();
+}
+
 void ACMPartActorBase::SetContributingPlayerState(
     ACMPlayerState* PlayerState
 )
@@ -632,6 +654,9 @@ bool ACMPartActorBase::TryReserveForTentacle(AActor* Requester)
         return false;
     }
     TentacleReservationOwner = Requester;
+    bTentaclePullActive = true;
+    ApplyAttachmentPhysicsState();
+    ForceNetUpdate();
     return true;
 }
 
@@ -640,6 +665,9 @@ void ACMPartActorBase::ReleaseTentacleReservation(AActor* Requester)
     if (HasAuthority() && TentacleReservationOwner.Get() == Requester)
     {
         TentacleReservationOwner.Reset();
+        bTentaclePullActive = false;
+        ApplyAttachmentPhysicsState();
+        ForceNetUpdate();
     }
 }
 

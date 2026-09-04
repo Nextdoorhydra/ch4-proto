@@ -276,6 +276,7 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
 		// Exercise only the production tentacle synchronization path. Dispatching the
 		// complete Chimera BeginPlay in this synthetic world also initializes GAS,
 		// whose project attribute sets are intentionally absent from this fixture.
+		Chimera->InitializeSegmentHealth(100.0f);
 		Chimera->RefreshTentacleSegments();
     }
 
@@ -310,7 +311,11 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             break;
         }
     }
+    UClass* RuntimeArmClass = LoadClass<ACMArmPart>(
+        nullptr,
+        TEXT("/Game/Chimera/Character/Part/Arm/BP_CMArmPart.BP_CMArmPart_C"));
     ACMArmPart* RuntimeTarget = World->SpawnActor<ACMArmPart>(
+        RuntimeArmClass,
         RuntimeTentacle
             ? RuntimeTentacle->GetActorLocation() + FVector(200.0f, 0.0f, 0.0f)
             : FVector::ZeroVector,
@@ -318,6 +323,26 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
     TestNotNull(TEXT("Runtime tentacle target spawns"), RuntimeTarget);
     if (RuntimeTentacle && RuntimeTarget)
     {
+        const ECollisionEnabled::Type ExpectedMountedMeshCollision =
+            RuntimeTarget->GetPartMesh()->GetCollisionEnabled();
+        const ECollisionEnabled::Type ExpectedMountedHurtboxCollision =
+            RuntimeTarget->GetDamageHurtbox()->GetCollisionEnabled();
+        if (!RuntimeTarget->HasActorBegunPlay())
+        {
+            RuntimeTarget->DispatchBeginPlay();
+        }
+        TestTrue(
+            TEXT("Loose usable Part runs skeletal-mesh ragdoll"),
+            RuntimeTarget->GetPartMesh()->IsSimulatingPhysics());
+        TestEqual(
+            TEXT("Loose usable Part disables its separate hurtbox"),
+            RuntimeTarget->GetDamageHurtbox()->GetCollisionEnabled(),
+            ECollisionEnabled::NoCollision);
+        TestEqual(
+            TEXT("Loose usable Part uses skeletal-mesh collision"),
+            RuntimeTarget->GetPartMesh()->GetCollisionEnabled(),
+            ECollisionEnabled::QueryAndPhysics);
+
         RuntimeTentacle->SetTetheredActor(RuntimeTarget);
         RuntimeTentacle->UpdateVisual(1.0f);
 
@@ -358,6 +383,9 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         TestTrue(
             TEXT("Loose usable Part is reserved during the pull"),
             RuntimeTarget->IsReservedByTentacle(RuntimeTentacle));
+        TestFalse(
+            TEXT("Tentacle pull temporarily stops loose Part ragdoll"),
+            RuntimeTarget->GetPartMesh()->IsSimulatingPhysics());
 
         RuntimeTentacle->UpdatePull(RuntimeTentacle->PullDuration);
         TestEqual(
@@ -367,6 +395,31 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         TestFalse(
             TEXT("Part reservation clears after attachment"),
             RuntimeTarget->IsReservedByTentacle(RuntimeTentacle));
+        TestFalse(
+            TEXT("Attached Part keeps ragdoll disabled"),
+            RuntimeTarget->GetPartMesh()->IsSimulatingPhysics());
+        TestEqual(
+            TEXT("Attached Part restores its authored mesh collision"),
+            RuntimeTarget->GetPartMesh()->GetCollisionEnabled(),
+            ExpectedMountedMeshCollision);
+        TestEqual(
+            TEXT("Attached Part restores its authored gameplay hurtbox"),
+            RuntimeTarget->GetDamageHurtbox()->GetCollisionEnabled(),
+            ExpectedMountedHurtboxCollision);
+
+        AActor* DetachedPart = Chimera->DetachPartFromSlot(
+            PullSlotAddress);
+        TestEqual(
+            TEXT("Mounted Part can be detached again"),
+            DetachedPart,
+            static_cast<AActor*>(RuntimeTarget));
+        TestTrue(
+            TEXT("Detached Part returns to skeletal-mesh ragdoll"),
+            RuntimeTarget->GetPartMesh()->IsSimulatingPhysics());
+        TestEqual(
+            TEXT("Detached Part disables its gameplay hurtbox again"),
+            RuntimeTarget->GetDamageHurtbox()->GetCollisionEnabled(),
+            ECollisionEnabled::NoCollision);
     }
 
     World->DestroyWorld(false);
