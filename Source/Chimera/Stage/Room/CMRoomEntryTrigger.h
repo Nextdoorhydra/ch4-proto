@@ -12,7 +12,7 @@ class UBoxComponent;
 class UPrimitiveComponent;
 
 UCLASS(Blueprintable)
-// 활성 키메라 몸통 하나 이상이 영역에 들어오고 뒤쪽 문이 닫히면 룸 진입을 확정
+// 활성 키메라 몸통 하나 이상이 영역에 들어오면 문 상태와 무관하게 룸 진입 확정
 class CHIMERA_API ACMRoomEntryTrigger : public AActor
 {
     GENERATED_BODY()
@@ -30,7 +30,6 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Stage|Room Streaming")
@@ -40,14 +39,10 @@ protected:
         Category = "Chimera|Stage|Room Streaming")
     FName RoomId;
 
-    // 첫 룸은 비워두고 이후 룸은 같은 서브레벨의 뒤쪽 차단 문 지정
+    // 선택 사항: 진입 시 닫기 명령을 보낼 문. 닫힘 완료는 기다리지 않음
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Stage|Room Streaming")
     TObjectPtr<ACMStageDoorBase> EntryBlockerDoor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-        Category = "Chimera|Stage|Room Streaming")
-    bool bWaitForDoorClosed = true;
 
 private:
     UFUNCTION()
@@ -58,9 +53,6 @@ private:
         int32 OtherBodyIndex,
         bool bFromSweep,
         const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void HandleDoorTransitionFinished(bool bIsOpen);
 
     void TryCommitForChimera(ACMChimera* Chimera);
     void CommitRoom();

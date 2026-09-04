@@ -26,6 +26,8 @@
 #include "Engine/DataTable.h"
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionScreenPosition.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/GoogleDataForgeIntegrationTestTypes.h"
 #include "UObject/Package.h"
@@ -36,6 +38,65 @@
 
 namespace
 {
+
+	void ConvertVisionMaterialToScreenSpace()
+	{
+		const FString SourcePath = TEXT("/Game/Chimera/Character/Part/Head/Vision/M_CMVisionMaskPostProcess");
+		const FString TargetPath = TEXT("/Game/Chimera/Character/Part/Head/Vision/M_CMVisionMaskScreenPostProcess");
+		UMaterial* Source = LoadObject<UMaterial>(nullptr, *SourcePath);
+		if (!Source)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Vision material conversion failed: source not found."));
+			return;
+		}
+		if (LoadObject<UMaterial>(nullptr, *TargetPath))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Vision material conversion skipped: target already exists."));
+			return;
+		}
+
+		UPackage* Package = CreatePackage(*TargetPath);
+		UMaterial* Target = Cast<UMaterial>(StaticDuplicateObject(
+			Source, Package, TEXT("M_CMVisionMaskScreenPostProcess")));
+		if (!Target)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Vision material conversion failed: duplicate failed."));
+			return;
+		}
+
+		UMaterialExpressionScreenPosition* ScreenPosition = NewObject<UMaterialExpressionScreenPosition>(Target);
+		ScreenPosition->MaterialExpressionEditorX = -900;
+		ScreenPosition->MaterialExpressionEditorY = -300;
+		Target->GetExpressionCollection().AddExpression(ScreenPosition);
+
+		int32 Changed = 0;
+		for (UMaterialExpression* Expression : Target->GetExpressionCollection().Expressions)
+		{
+			UMaterialExpressionTextureSampleParameter2D* Sample = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
+			if (!Sample || Sample->ParameterName == NAME_None)
+			{
+				continue;
+			}
+			if (Sample->ParameterName == TEXT("BaseVisionMask")
+				|| Sample->ParameterName == TEXT("OccluderVisionMask")
+				|| Sample->ParameterName == TEXT("VisionTintMask"))
+			{
+				ScreenPosition->ConnectExpression(&Sample->Coordinates, 0);
+				++Changed;
+			}
+		}
+
+		Target->PostEditChange();
+		Target->MarkPackageDirty();
+		const FString Filename = FPackageName::LongPackageNameToFilename(
+			TargetPath, FPackageName::GetAssetPackageExtension());
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		if (UPackage::SavePackage(Package, Target, *Filename, SaveArgs))
+		{
+			UE_LOG(LogTemp, Display, TEXT("Vision screen material created: %s (mask samples changed=%d)"), *TargetPath, Changed);
+		}
+	}
 	bool ReferencesGoogleSheetConfig(const UDataForgeRuleSet& RuleSet, const FSoftObjectPath& ConfigPath)
 	{
 		if (RuleSet.Source.AdapterId == TEXT("GoogleSheetCache"))
@@ -288,6 +349,10 @@ void FChimeraEditorModule::StartupModule()
 	FDataForgeSourceAdapterRegistry::Get().Register(MakeShared<FMultiSourceDataForgeAdapter>());
 	GoogleSheetCacheUpdatedHandle = UGoogleSheetConfig::OnCacheUpdated().AddRaw(this, &FChimeraEditorModule::OnGoogleSheetCacheUpdated);
 	DataForgeMcpCommand = DataForgeMcpCommands::Register();
+	static FAutoConsoleCommand ConvertVisionMaterialCommand(
+		TEXT("CM.Vision.CreateScreenMaterial"),
+		TEXT("Creates the screen-space vision material from the existing graph."),
+		FConsoleCommandDelegate::CreateStatic(&ConvertVisionMaterialToScreenSpace));
 }
 
 void FChimeraEditorModule::ShutdownModule()
