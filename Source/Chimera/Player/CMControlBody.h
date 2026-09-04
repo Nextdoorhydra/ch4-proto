@@ -95,6 +95,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Control Status")
     int32 ResolveControlInputSlot(int32 PhysicalSlotIndex) const;
 
+    /** 혼란과 착란을 모두 반영해 물리 Q/W/E/R이 실제 제어하는 파츠 슬롯을 반환한다. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Control Status")
+    FCMPartSlotAddress GetEffectivePartSlotAddressForControlInput(
+        int32 PhysicalSlotIndex
+    ) const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Control Status")
     bool IsConfused() const { return !ConfusionSlotRemap.IsEmpty(); }
 

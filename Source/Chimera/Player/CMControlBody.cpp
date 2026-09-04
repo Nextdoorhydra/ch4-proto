@@ -407,6 +407,14 @@ int32 ACMControlBody::ResolveControlInputSlot(int32 PhysicalSlotIndex) const
         : PhysicalSlotIndex;
 }
 
+FCMPartSlotAddress
+ACMControlBody::GetEffectivePartSlotAddressForControlInput(
+    int32 PhysicalSlotIndex) const
+{
+    return GetEffectivePartSlotAddress(
+        ResolveControlInputSlot(PhysicalSlotIndex));
+}
+
 void ACMControlBody::ApplyConfusion(float Duration, UObject* Source)
 {
     if (!HasAuthority() || !IsValid(Source))
