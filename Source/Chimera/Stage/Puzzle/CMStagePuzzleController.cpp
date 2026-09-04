@@ -1,11 +1,33 @@
 #include "Stage/Puzzle/CMStagePuzzleController.h"
 
 #include "Net/UnrealNetwork.h"
+#include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPuzzle, Log, All);
 
 ACMStagePuzzleController::ACMStagePuzzleController()
 {
+}
+
+void ACMStagePuzzleController::PostLoad()
+{
+    Super::PostLoad();
+    NormalizeAcceptedSignals();
+}
+
+void ACMStagePuzzleController::NormalizeAcceptedSignals()
+{
+    for (FCMPuzzleChannel& Channel : PuzzleChannels)
+    {
+        if (Channel.AcceptedSignal == ECMPuzzleAcceptedSignal::PulseOrActivated)
+        {
+            Channel.AcceptedSignal = ECMPuzzleAcceptedSignal::ActivatedOnly;
+        }
+        else if (Channel.AcceptedSignal == ECMPuzzleAcceptedSignal::Any)
+        {
+            Channel.AcceptedSignal = ECMPuzzleAcceptedSignal::StateChanged;
+        }
+    }
 }
 
 void ACMStagePuzzleController::GetLifetimeReplicatedProps(
@@ -21,6 +43,8 @@ void ACMStagePuzzleController::GetLifetimeReplicatedProps(
 void ACMStagePuzzleController::BeginPlay()
 {
     Super::BeginPlay();
+    // PIE 복제 및 Construction Script에서 설정된 호환 값도 정규화한다.
+    NormalizeAcceptedSignals();
     if (!HasAuthority())
     {
         return;
@@ -140,7 +164,23 @@ void ACMStagePuzzleController::HandleTriggerSignal(
     ECMStageTriggerSignal Signal)
 {
     UE_LOG(LogChimeraPuzzle, Log, TEXT("[Puzzle Trigger Signal] Controller=%s Trigger=%s Signal=%d Active=%s"), *GetName(), *GetNameSafe(Trigger), static_cast<int32>(Signal), IsElementActive() ? TEXT("true") : TEXT("false"));
-    if (!HasAuthority() || !IsElementActive() || !IsValid(Trigger))
+    if (!HasAuthority() || !IsValid(Trigger))
+    {
+        return;
+    }
+
+    if (Signal != ECMStageTriggerSignal::Pulse)
+    {
+        const bool bOn = Signal == ECMStageTriggerSignal::Activated;
+        const bool* Previous = LastTriggerStates.Find(Trigger);
+        if (Previous && *Previous == bOn)
+        {
+            return;
+        }
+        LastTriggerStates.Add(Trigger, bOn);
+    }
+
+    if (!IsElementActive())
     {
         return;
     }
@@ -163,14 +203,14 @@ bool ACMStagePuzzleController::IsSignalAccepted(
     switch (Channel.AcceptedSignal)
     {
     case ECMPuzzleAcceptedSignal::PulseOrActivated:
-        return Signal == ECMStageTriggerSignal::Pulse
-            || Signal == ECMStageTriggerSignal::Activated;
     case ECMPuzzleAcceptedSignal::ActivatedOnly:
         return Signal == ECMStageTriggerSignal::Activated;
     case ECMPuzzleAcceptedSignal::DeactivatedOnly:
         return Signal == ECMStageTriggerSignal::Deactivated;
     case ECMPuzzleAcceptedSignal::Any:
-        return true;
+    case ECMPuzzleAcceptedSignal::StateChanged:
+        return Signal == ECMStageTriggerSignal::Activated
+            || Signal == ECMStageTriggerSignal::Deactivated;
     default:
         return false;
     }
@@ -237,6 +277,17 @@ void ACMStagePuzzleController::HandleChannelSignal(
         if (bTriggerStateChanged)
         {
             AllConditionSatisfied[ChannelIndex] = false;
+        }
+        // 구독 전에 이미 ON이었던 트리거도 현재 상태 조건에 포함한다.
+        SatisfiedTriggers.Reset();
+        for (ACMStageTriggerBase* RequiredTrigger : Channel.Triggers)
+        {
+            const UCMActivationTriggerComponent* State = IsValid(RequiredTrigger)
+                ? RequiredTrigger->FindComponentByClass<UCMActivationTriggerComponent>() : nullptr;
+            if (State && State->IsTriggered())
+            {
+                SatisfiedTriggers.AddUnique(RequiredTrigger);
+            }
         }
     }
     else if (IsSignalAccepted(Channel, Signal))
@@ -435,12 +486,14 @@ void ACMStagePuzzleController::ExecuteCurrentStep(int32 ChannelIndex)
 void ACMStagePuzzleController::ExecuteTargetCommand(
     const FCMPuzzleTargetCommand& TargetCommand)
 {
+    TSet<ACMStageElementBase*> ExecutedTargets;
     for (ACMStageElementBase* Target : TargetCommand.Targets)
     {
-        if (!IsValid(Target) || Target == this)
+        if (!IsValid(Target) || Target == this || ExecutedTargets.Contains(Target))
         {
             continue;
         }
+        ExecutedTargets.Add(Target);
 
         switch (TargetCommand.Command)
         {
@@ -464,6 +517,7 @@ void ACMStagePuzzleController::ExecuteTargetCommand(
 void ACMStagePuzzleController::ResetRuntimeState(bool bResetTargets)
 {
     CurrentStepIndices.Init(0, PuzzleChannels.Num());
+    LastTriggerStates.Reset();
     CompletedChannels.Init(false, PuzzleChannels.Num());
     CurrentSequenceIndices.Init(0, PuzzleChannels.Num());
     SatisfiedTriggersByChannel.SetNum(PuzzleChannels.Num());

@@ -15,8 +15,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 UENUM(BlueprintType)
 enum class ECMStageTriggerSignal : uint8
 {
-    Pulse,       // 버튼처럼 누를 때마다 발생하는 순간 입력
-    Activated,   // 압력판이나 레버의 조건이 충족된 상태
+    Pulse,       // 상태가 없는 외부/호환용 순간 입력. 기본 스위치는 사용하지 않는다.
+    Activated,   // 버튼/레버/압력판/시야석의 ON 조건 충족
     Deactivated  // 유지 조건이 해제된 상태
 };
 
@@ -97,7 +97,7 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "Chimera|Mechanism|Trigger")
     void OnTriggerDeactivated(AActor* TriggeringActor);
 
-    // 기본 트리거는 상태 신호, 일반 버튼은 양쪽 상태 변화를 Pulse로 변환
+    // 모든 기본 스위치는 ON=Activated, OFF=Deactivated를 사용한다.
     virtual ECMStageTriggerSignal ResolveTriggerSignal(bool bActivated) const;
 
 private:

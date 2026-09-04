@@ -17,14 +17,16 @@ void ACMStageTriggerBase::BeginPlay()
 {
     ActivationTrigger->OnStateUpdated.AddUObject(this, &ThisClass::RefreshPresentationState);
     Super::BeginPlay();
-    ActivationTrigger->OnActivated.AddDynamic(this, &ThisClass::HandleTriggerActivated);
-    ActivationTrigger->OnDeactivated.AddDynamic(this, &ThisClass::HandleTriggerDeactivated);
+    ActivationTrigger->OnActivated.AddUniqueDynamic(this, &ThisClass::HandleTriggerActivated);
+    ActivationTrigger->OnDeactivated.AddUniqueDynamic(this, &ThisClass::HandleTriggerDeactivated);
     RefreshPresentationState();
 }
 
 void ACMStageTriggerBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     ActivationTrigger->OnStateUpdated.RemoveAll(this);
+    ActivationTrigger->OnActivated.RemoveDynamic(this, &ThisClass::HandleTriggerActivated);
+    ActivationTrigger->OnDeactivated.RemoveDynamic(this, &ThisClass::HandleTriggerDeactivated);
     Super::EndPlay(EndPlayReason);
 }
 

@@ -30,8 +30,6 @@ protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void HandleElementReset_Implementation() override;
-    virtual ECMStageTriggerSignal ResolveTriggerSignal(
-        bool bActivated) const override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Basic Button")
     TObjectPtr<UBoxComponent> HitVolume;
@@ -43,7 +41,7 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Basic Button|Presentation")
     TObjectPtr<UStaticMeshComponent> ButtonVisualMesh;
 
-    // 타격할 때마다 눌림과 해제를 번갈아 실행하고 Activated/Deactivated 신호 전달
+    // 켜면 타격마다 ON/OFF 전환. 끄면 잠시 ON 후 자동 OFF. 둘 다 상태 신호를 전달한다.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Mechanism|Basic Button")
     bool bToggleOnHit = false;
 
@@ -94,12 +92,17 @@ protected:
     FName EmissiveParameterName = TEXT("EmissiveIntensity");
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCMTriggerPresentationTest;
+#endif
     UFUNCTION()
     void HandlePresentationStateChanged(
         const FCMTriggerPresentationState& State);
 
-    UFUNCTION(NetMulticast, Reliable)
-    void MulticastPlayPulseFeedback();
+    UFUNCTION()
+    void HandleBasicButtonActivated(AActor* TriggeringActor);
+
+    void ScheduleMomentaryRelease();
 
     void SetVisualTarget(bool bPressed);
     void ReturnPulseVisual();

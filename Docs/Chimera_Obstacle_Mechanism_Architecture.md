@@ -109,10 +109,10 @@ UCMForceZoneComponent는 LocalDirection/ForceStrength로 서버에서 영역 안
 - 서버 팔 스윙 범위 검사에서 정확히 HitVolume에 맞으면 NotifySwingHit()를 호출한다. 같은 팔의 같은 AttackId는 한 번만 처리한다.
 - 몸통 Overlap 임시 테스트 기능은 제거되었다. 팔이 가만히 닿는 것만으로도 누르지 않는다.
 - Toggle On Hit=true: 타격마다 눌림/해제 교대. BeginPlay에서 One Shot=false로 설정한다.
-- Toggle On Hit=false: Press를 시도하고 Pulse를 보낸다. 자동 Release는 없으므로 보통 최초 눌림 후 재입력이 상태를 바꾸지 않는다. One Shot 기본값은 true지만 이 분기가 저장값을 강제로 true로 덮지는 않는다.
+- Toggle On Hit=false: ON(Activated) 후 Press Duration + Pulse Hold Duration이 지나면 서버에서 OFF(Deactivated)로 자동 복귀한다. One Shot 기본값은 true지만 이 분기가 저장값을 강제로 true로 덮지는 않는다.
 - 직접 연결의 Target/Release Command는 **런타임에 둘 다 Toggle로 강제**한다. 명시적인 Activate/Deactivate 동작은 PuzzleController에서 설정한다.
 
-표현용 메시를 네이티브 ButtonVisualMesh에 지정한다. ButtonVisualRoot만 이동하므로 HitVolume과 논리 판정은 움직이지 않는다. 머티리얼은 ButtonColor(Vector)와 EmissiveIntensity(Scalar) 파라미터를 가진 것을 사용하며 이름은 인스턴스에서 변경할 수 있다. PressDepth/LocalPressDirection과 Press·Hold·Release 시간을 설정하고 Off/On/Disabled Color 및 Emissive 강도를 버튼별로 조정한다. Toggle On Hit=true는 복제된 bTriggered 상태를 따라 눌림·점등을 유지하고 다음 타격에서 복귀한다. false인 원샷은 서버 성공 입력을 Reliable Multicast 표현으로 재생해 눌림·점등 후 자동 복귀하며 논리 One Shot 이력은 유지한다.
+표현용 메시를 네이티브 ButtonVisualMesh에 지정한다. ButtonVisualRoot만 이동하므로 HitVolume과 논리 판정은 움직이지 않는다. 머티리얼은 ButtonColor(Vector)와 EmissiveIntensity(Scalar) 파라미터를 가진 것을 사용하며 이름은 인스턴스에서 변경할 수 있다. PressDepth/LocalPressDirection과 Press·Hold·Release 시간을 설정하고 Off/On/Disabled Color 및 Emissive 강도를 버튼별로 조정한다. 두 모드 모두 복제된 bTriggered를 따라 눌림·점등한다. Toggle On Hit=true는 다음 타격에서 복귀하고 false는 서버 타이머로 자동 OFF가 된다. 자동 OFF 이후에도 One Shot 이력은 Reset까지 유지한다.
 
 One Shot은 한 번 활성화한 이력을 Reset까지 유지하여 재활성화를 막는다. One Shot을 끄는 것과 현재 눌림 해제는 별개다.
 
@@ -161,7 +161,7 @@ UI는 공통 GetPresentationState()/OnPresentationStateChanged(State)를 사용�
 | All + Simultaneous | Activated/Deactivated로 추적한 상태 평가. Pulse 무시 |
 | Sequence | Expected Trigger Sequence에 등록한 순서가 정확히 완성되면 실행 |
 | All Active / All Inactive / All Equal | 모두 ON / 모두 OFF / 모두 같은 상태 |
-| Accepted Signal | PulseOrActivated / ActivatedOnly / DeactivatedOnly / Any |
+| Accepted Signal | ON Only / OFF Only / ON / OFF(기본값). 기존 PulseOrActivated는 ON Only, Any는 ON / OFF로 로드 시 변환 |
 | Wrong Input Behavior | Ignore / Reset Sequence / Reset And Execute Failure Commands |
 | Failure Commands | 오입력 시 실행할 Activate / Deactivate / Toggle / Reset 명령 |
 | Steps → Commands | Activate / Deactivate / Toggle / Reset 및 대상 목록 |
@@ -174,10 +174,10 @@ Simultaneous는 수락 여부와 별개로 ON/OFF를 추적하지만 실행을 �
 
 | 목적 | 예시 |
 |---|---|
-| 토글 버튼 매 타격마다 여러 대상 반전 | Toggle On Hit=true; Any + Accepted Any; Step 0 Toggle; Repeat Current |
+| 토글 버튼 매 타격마다 여러 대상 반전 | Toggle On Hit=true; Any + Accepted ON / OFF; Step 0 Toggle; Loop |
 | 모두 ON 또는 모두 OFF에서 반전 | All + Simultaneous + All Equal + Accepted Any; Toggle; Repeat Current |
 | 모두 ON이면 레이저 OFF, 모두 OFF이면 ON | 채널 A: AllActive + ActivatedOnly → Deactivate / 채널 B: AllInactive + DeactivatedOnly → Activate. 둘 다 All + Simultaneous + Repeat Current |
-| 버튼과 압력판을 한 번씩 충족 | All + Latched + PulseOrActivated |
+| 버튼과 압력판을 한 번씩 충족 | All + Latched + ON Only |
 | 매 입력마다 다른 대상 제어 | Any + Accepted Any; Step 0/1/2에 명령; Loop 또는 Stop |
 | A → C → B 순서로 눌러 문 열기 | Sequence; Expected Trigger Sequence=[A,C,B]; ActivatedOnly; Step 0에서 Door Deactivate; Stop |
 | 오답이면 버튼과 장치 초기화 | Sequence; Wrong Input Behavior=Reset And Execute Failure Commands; Failure Commands에 버튼/장치 Reset 등록 |

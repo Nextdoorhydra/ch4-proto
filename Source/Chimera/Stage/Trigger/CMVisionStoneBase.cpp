@@ -28,9 +28,9 @@ void ACMVisionStoneBase::BeginPlay()
 {
     Super::BeginPlay();
 
-    ActivationTrigger->OnActivated.AddDynamic(
+    ActivationTrigger->OnActivated.AddUniqueDynamic(
         this, &ThisClass::HandleVisionStoneActivated);
-    ActivationTrigger->OnDeactivated.AddDynamic(
+    ActivationTrigger->OnDeactivated.AddUniqueDynamic(
         this, &ThisClass::HandleVisionStoneDeactivated);
 
     if (HasAuthority())
@@ -47,6 +47,8 @@ void ACMVisionStoneBase::BeginPlay()
 
 void ACMVisionStoneBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    ActivationTrigger->OnActivated.RemoveDynamic(this, &ThisClass::HandleVisionStoneActivated);
+    ActivationTrigger->OnDeactivated.RemoveDynamic(this, &ThisClass::HandleVisionStoneDeactivated);
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(EvaluationTimerHandle);
