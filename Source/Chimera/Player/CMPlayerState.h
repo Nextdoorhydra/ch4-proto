@@ -15,9 +15,9 @@ UENUM(BlueprintType)
 enum class ECMPlayerParticipationState : uint8
 {
     Lobby,            // 로비에서 게임 시작 대기
-    Active,           // 담당 몸통 마디와 Q/W/E/R 입력 활성화
+    Active,           // 배정된 파츠 슬롯과 Q/W/E/R 입력 활성화
     Spectating,       // 현재 스테이지 관전 중
-    Defeated,         // 담당 몸통 마디 파괴로 입력 불가
+    Defeated,         // 배정된 파츠 슬롯의 몸통이 모두 파괴되어 입력 불가
     Disconnected,     // 플레이 도중 접속 종료
     WaitingNextStage  // 중도 합류 후 다음 스테이지 활성화 대기
 };

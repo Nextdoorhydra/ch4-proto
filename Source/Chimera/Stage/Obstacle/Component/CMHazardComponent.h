@@ -76,7 +76,7 @@ private:
         TWeakObjectPtr<ACMChimera> Chimera;
         int32 SegmentIndex = INDEX_NONE;
         int32 OverlapCount = 0;
-        TWeakObjectPtr<ACMControlBody> ControlBody;
+        TArray<TWeakObjectPtr<ACMControlBody>> ControlBodies;
     };
 
     ACMPartActorBase* ResolveSupportedPart(
@@ -89,7 +89,8 @@ private:
     void ApplyHeadVisionEffect(ACMHeadPartActor& Head);
     void RemoveHeadVisionEffect(ACMHeadPartActor& Head);
     void ApplyConfiguredDamage(ACMChimera& Chimera, int32 SegmentIndex);
-    ACMControlBody* FindControlBodyForSegment(int32 SegmentIndex) const;
+    TArray<ACMControlBody*> FindControlBodiesForSegment(
+        int32 SegmentIndex) const;
     void ApplyControlEffect(ACMControlBody& ControlBody);
     void RemoveControlEffect(ACMControlBody& ControlBody);
     void UpdatePeriodicTimer();

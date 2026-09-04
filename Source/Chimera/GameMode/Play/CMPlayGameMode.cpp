@@ -236,7 +236,6 @@ void ACMPlayGameMode::Logout(AController* Exiting)
             DisconnectedPlayers.FindOrAdd(ReconnectKey);
         Record.PlayerSlotId = PlayerState->GetPlayerSlotId();
         Record.PlayerColorIndex = PlayerState->GetPlayerColorIndex();
-        Record.OwnedSegmentIndex = ControlBody->GetOwnedSegmentIndex();
         Record.ControlSlots = ControlBody->GetControlSlots();
         GetWorldTimerManager().ClearTimer(Record.ExpirationTimer);
 
@@ -317,7 +316,6 @@ bool ACMPlayGameMode::RestorePreservedControlAssignment(
     PlayerState->SetPlayerSlotId(Record->PlayerSlotId);
     PlayerState->SetPlayerColorIndex(Record->PlayerColorIndex);
     PlayerState->SetParticipationState(ECMPlayerParticipationState::Active);
-    ControlBody->SetOwnedSegmentIndex(Record->OwnedSegmentIndex);
     ControlBody->SetControlSlots(Record->ControlSlots);
     DisconnectedPlayers.Remove(ReconnectKey);
     ExpiredReconnectKeys.Remove(ReconnectKey);

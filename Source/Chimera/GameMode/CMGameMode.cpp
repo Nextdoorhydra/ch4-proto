@@ -518,57 +518,6 @@ void ACMGameMode::RebalanceControlAssignments(
         RequestedPlayerCount
     );
 
-    // OwnedSegmentIndex is the first of the player's two consecutive
-    // Segments. Preserve existing pairs and give a new player an unused pair.
-    TSet<int32> ClaimedSegmentIndices;
-    const int32 ActiveSegmentCount =
-        CMGameState->SharedChimera->GetActiveSegmentCount();
-    for (const ACMControlBody* ControlBody : ControlBodies)
-    {
-        if (ControlBody
-            && ControlBody->GetOwnedSegmentIndex() >= 0
-            && ControlBody->GetOwnedSegmentIndex()
-                % CMControl::SegmentsPerPlayer == 0
-            && ControlBody->GetOwnedSegmentIndex() + 1
-                < ActiveSegmentCount)
-        {
-            ClaimedSegmentIndices.Add(
-                ControlBody->GetOwnedSegmentIndex()
-            );
-            ClaimedSegmentIndices.Add(
-                ControlBody->GetOwnedSegmentIndex() + 1
-            );
-        }
-    }
-    for (ACMControlBody* ControlBody : ControlBodies)
-    {
-        const bool bHasValidOwnedPair = ControlBody
-            && ControlBody->GetOwnedSegmentIndex() >= 0
-            && ControlBody->GetOwnedSegmentIndex()
-                % CMControl::SegmentsPerPlayer == 0
-            && ControlBody->GetOwnedSegmentIndex() + 1
-                < ActiveSegmentCount;
-        if (!ControlBody || bHasValidOwnedPair)
-        {
-            continue;
-        }
-
-        for (int32 SegmentIndex = 0;
-            SegmentIndex + 1
-                < ActiveSegmentCount;
-            SegmentIndex += CMControl::SegmentsPerPlayer)
-        {
-            if (!ClaimedSegmentIndices.Contains(SegmentIndex)
-                && !ClaimedSegmentIndices.Contains(SegmentIndex + 1))
-            {
-                ControlBody->SetOwnedSegmentIndex(SegmentIndex);
-                ClaimedSegmentIndices.Add(SegmentIndex);
-                ClaimedSegmentIndices.Add(SegmentIndex + 1);
-                break;
-            }
-        }
-    }
-
     TArray<TArray<FCMPartSlotAddress>> ExistingAssignments;
     ExistingAssignments.Reserve(ControlBodies.Num());
     for (const ACMControlBody* ControlBody : ControlBodies)
@@ -589,37 +538,7 @@ void ACMGameMode::RebalanceControlAssignments(
         PlayerIndex < Players.Num();
         ++PlayerIndex)
     {
-        ControlBodies[PlayerIndex]->SetControlSlots(
-            NewAssignments[PlayerIndex]
-        );
-
-        const bool bAllLeft = !NewAssignments[PlayerIndex].IsEmpty()
-            && !NewAssignments[PlayerIndex].ContainsByPredicate(
-                [](const FCMPartSlotAddress& Address)
-                {
-                    return !CMControl::IsLeftPartSlot(Address);
-                });
-        const bool bAllRight = !NewAssignments[PlayerIndex].IsEmpty()
-            && !NewAssignments[PlayerIndex].ContainsByPredicate(
-                [](const FCMPartSlotAddress& Address)
-                {
-                    return !CMControl::IsRightPartSlot(Address);
-                });
-        const TCHAR* AssignedSide = bAllLeft
-            ? TEXT("Left")
-            : bAllRight
-                ? TEXT("Right")
-                : TEXT("Mixed");
-
-        UE_LOG(
-            LogChimeraMultiplayer,
-            Log,
-            TEXT("Assigned %d %s-side PartSlot(s) to %s. OwnedSegments=%d,%d"),
-            NewAssignments[PlayerIndex].Num(),
-            AssignedSide,
-            *Players[PlayerIndex]->GetPlayerName(),
-            ControlBodies[PlayerIndex]->GetOwnedSegmentIndex(),
-            ControlBodies[PlayerIndex]->GetOwnedSegmentIndex() + 1
-        );
+        ACMControlBody* ControlBody = ControlBodies[PlayerIndex];
+        ControlBody->SetControlSlots(NewAssignments[PlayerIndex]);
     }
 }

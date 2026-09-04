@@ -24,7 +24,6 @@ struct FCMDisconnectedPlayerRecord
 {
     int32 PlayerSlotId = INDEX_NONE;
     int32 PlayerColorIndex = INDEX_NONE;
-    int32 OwnedSegmentIndex = INDEX_NONE;
     TArray<FCMPartSlotAddress> ControlSlots;
     FTimerHandle ExpirationTimer;
 };
