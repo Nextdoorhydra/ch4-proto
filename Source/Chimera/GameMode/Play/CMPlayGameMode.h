@@ -55,6 +55,8 @@ public:
 
     bool TryCheatGoToStage(int32 OneBasedStageNumber);
 
+    bool TryCheatGoToCheckpoint(int32 OneBasedCheckpointNumber);
+
     // 전역 플레이 Phase·제한 시간 변경 처리
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Game Flow")
     void SetPlayPhase(ECMPlayPhase NewPhase, float Duration = 0.0f);

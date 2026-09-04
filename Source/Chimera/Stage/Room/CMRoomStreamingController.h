@@ -51,6 +51,9 @@ public:
     // 마지막으로 통과가 확정된 룸의 체크포인트 위치 반환
     bool TryGetActiveCheckpointTransform(FTransform& OutTransform) const;
 
+    // 개발용: Rooms 배열 순서(1부터)로 미도달 룸도 선택한다. 클리어 이벤트는 발생시키지 않는다.
+    bool TryCheatSelectCheckpoint(int32 OneBasedCheckpointNumber);
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Stage|Room Streaming")
     FCMFinalRoomCommittedSignature OnFinalRoomCommitted;
 
