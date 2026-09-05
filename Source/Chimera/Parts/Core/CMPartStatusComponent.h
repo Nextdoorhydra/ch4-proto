@@ -45,6 +45,13 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Status")
     bool HasStatus(FGameplayTag StatusTag) const;
 
+    /** Replicated status tags exposed read-only for HUD presentation. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Status")
+    const FGameplayTagContainer& GetActiveStatusTags() const
+    {
+        return ActiveStatusTags;
+    }
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Status")
     bool BlocksAbility() const { return bAbilityBlocked; }
 

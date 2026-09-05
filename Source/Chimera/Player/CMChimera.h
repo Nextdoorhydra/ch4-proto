@@ -162,6 +162,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     UBoxComponent* GetSegmentHurtbox(int32 SegmentIndex) const;
 
+    /** Read-only visual/HUD source for one articulated body segment. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Health")
+    UBoxComponent* GetBodySegmentComponent(int32 SegmentIndex) const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     TArray<FCMBodySegmentHealthState> GetSegmentHealthStates() const;
 

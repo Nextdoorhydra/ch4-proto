@@ -6,6 +6,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Misc/AutomationTest.h"
 #include "Parts/Arm/CMArmPart.h"
+#include "Parts/Core/CMPartStatusComponent.h"
 #include "Player/CMChimera.h"
 #include "Stage/Obstacle/Component/CMAttackEmitterComponent.h"
 
@@ -32,6 +33,16 @@ bool FCMPartUsesSkeletalMeshComponentTest::RunTest(
     TestFalse(
         TEXT("PartMesh no longer forces a static mesh component"),
         PartMesh && PartMesh->IsA<UStaticMeshComponent>());
+
+    const UCMPartStatusComponent* PartStatus = ArmDefaults
+        ? ArmDefaults->GetPartStatusComponent()
+        : nullptr;
+    TestNotNull(
+        TEXT("Part exposes its replicated status component to presentation"),
+        PartStatus);
+    TestTrue(
+        TEXT("Part status tags are empty by default"),
+        PartStatus && PartStatus->GetActiveStatusTags().IsEmpty());
 
     const UBoxComponent* PartHurtbox = ArmDefaults
         ? ArmDefaults->GetDamageHurtbox()
@@ -72,6 +83,9 @@ bool FCMChimeraSegmentHurtboxMappingTest::RunTest(
     const UBoxComponent* FirstHurtbox = ChimeraDefaults
         ? ChimeraDefaults->GetSegmentHurtbox(0)
         : nullptr;
+    const UBoxComponent* FirstBodySegment = ChimeraDefaults
+        ? ChimeraDefaults->GetBodySegmentComponent(0)
+        : nullptr;
 
     TestNotNull(
         TEXT("Chimera creates a hurtbox for its first segment"),
@@ -107,6 +121,14 @@ bool FCMChimeraSegmentHurtboxMappingTest::RunTest(
         TEXT("Out-of-range segment has no hurtbox"),
         ChimeraDefaults
             ? ChimeraDefaults->GetSegmentHurtbox(CMControl::MaxSegments)
+            : nullptr);
+    TestNotNull(
+        TEXT("HUD can read the first articulated body segment"),
+        FirstBodySegment);
+    TestNull(
+        TEXT("HUD body segment lookup rejects out-of-range indices"),
+        ChimeraDefaults
+            ? ChimeraDefaults->GetBodySegmentComponent(CMControl::MaxSegments)
             : nullptr);
 
     const UCMAttackEmitterComponent* AttackEmitterDefaults =
