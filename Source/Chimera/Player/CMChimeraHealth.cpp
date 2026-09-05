@@ -155,6 +155,15 @@ bool ACMChimera::IsSegmentAlive(int32 SegmentIndex) const
         && !SegmentHealthStates[SegmentIndex].bDead;
 }
 
+UBoxComponent* ACMChimera::GetBodySegmentComponent(
+    int32 SegmentIndex
+) const
+{
+    return BodySegments.IsValidIndex(SegmentIndex)
+        ? BodySegments[SegmentIndex]
+        : nullptr;
+}
+
 int32 ACMChimera::GetSegmentIndexFromHurtbox(
     const UPrimitiveComponent* HitComponent
 ) const
