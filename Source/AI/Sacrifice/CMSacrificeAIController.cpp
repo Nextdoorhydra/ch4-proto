@@ -2,6 +2,7 @@
 
 #include "Aggressive/Common/Core/CMAggressiveMovementAgent.h"
 #include "NavigationSystem.h"
+#include "NavigationData.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "Sacrifice/CMSacrificeActionAbilities.h"
 #include "Sacrifice/CMSacrificeCharacter.h"
@@ -539,7 +540,8 @@ void ACMSacrificeAIController::SelectAmbientAction()
         FNavLocation RandomPoint;
         if (UNavigationSystemV1* Nav = UNavigationSystemV1::GetCurrent(GetWorld()))
         {
-            if (Nav->GetRandomReachablePointInRadius(Sacrifice->GetActorLocation(), 300.0f, RandomPoint))
+            ANavigationData* NavigationData = Nav->GetNavDataForProps(Sacrifice->GetNavAgentPropertiesRef());
+            if (NavigationData && Nav->GetRandomReachablePointInRadius(Sacrifice->GetActorLocation(), 300.0f, RandomPoint, NavigationData))
             {
                 bMoveStarted = MoveToProjectedLocation(RandomPoint.Location, 30.0f);
             }
@@ -645,8 +647,9 @@ bool ACMSacrificeAIController::MoveAwayFromThreat(const float DistanceCm)
 bool ACMSacrificeAIController::MoveToProjectedLocation(const FVector& Goal, const float AcceptanceRadius)
 {
     UNavigationSystemV1* Nav = UNavigationSystemV1::GetCurrent(GetWorld());
+    ANavigationData* NavigationData = Nav && Sacrifice ? Nav->GetNavDataForProps(Sacrifice->GetNavAgentPropertiesRef()) : nullptr;
     FNavLocation Projected;
-    if (!Nav || !Nav->ProjectPointToNavigation(Goal, Projected, FVector(200.0f, 200.0f, 300.0f)))
+    if (!NavigationData || !Nav->ProjectPointToNavigation(Goal, Projected, FVector(200.0f, 200.0f, 300.0f), NavigationData))
     {
         return false;
     }
