@@ -46,6 +46,11 @@ ACMChimera::ACMChimera()
         MarkerTextMaterialAsset(
             TEXT("/Engine/EngineMaterials/UnlitText.UnlitText")
         );
+    static ConstructorHelpers::FClassFinder<ACMChimeraBodySegmentActor>
+        BodySegmentPresentationBlueprint(
+            TEXT("/Game/Chimera/Character/Chimera/Blueprint/"
+                "BP_CMChimeraBodySegment")
+        );
 
     PrimaryActorTick.bCanEverTick = true;
     bReplicates = true;
@@ -56,8 +61,13 @@ ACMChimera::ACMChimera()
     SetNetUpdateFrequency(30.0f);
     SetMinNetUpdateFrequency(10.0f);
     TentacleSegmentClass = ACMTentacleSegmentActor::StaticClass();
-    BodySegmentPresentationClass =
-        ACMChimeraBodySegmentActor::StaticClass();
+    // Keep the project default independent from a serialized override in the
+    // legacy root Blueprint. Derived classes can still override the property.
+    BodySegmentPresentationClass = ACMChimeraBodySegmentActor::StaticClass();
+    if (BodySegmentPresentationBlueprint.Succeeded())
+    {
+        BodySegmentPresentationClass = BodySegmentPresentationBlueprint.Class;
+    }
 
     AbilitySystemComponent = CreateDefaultSubobject<
         UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));

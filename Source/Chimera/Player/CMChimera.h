@@ -398,7 +398,7 @@ protected:
     TArray<TObjectPtr<UBoxComponent>> BodySegments;
 
     /** Stable presentation ChildActorComponent paired 1:1 with BodyMesh_n. */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
+    UPROPERTY(BlueprintReadOnly, Transient,
         Category = "Chimera|Body Segment")
     TArray<TObjectPtr<UChildActorComponent>> SegmentPresentationComponents;
 
