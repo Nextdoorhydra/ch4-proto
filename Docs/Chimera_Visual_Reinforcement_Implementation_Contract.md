@@ -1,9 +1,9 @@
 # 키메라 비주얼 보강 구현 계약
 
-> 문서 상태: Phase 4 표면 샘플러·Idle 촉수 런타임 1차 구현 완료  
-> 작성 기준일: 2026-09-06  
-> 대상 엔진: Unreal Engine 5.7  
-> 다음 구현 단계: 키메라 이동 궤적 decal stamp pool
+> 문서 상태: Phase 5 키메라 이동 궤적 decal stamp pool 구현 완료
+> 작성 기준일: 2026-09-07
+> 대상 엔진: Unreal Engine 5.7
+> 다음 구현 단계: 타겟 메시를 휘감는 촉수
 
 ## 1. 목적
 
@@ -406,6 +406,42 @@ triangle-to-bone 바인딩 또는 baked surface data를 추가한다.
 - 최소 거리 55 cm에서 기본 4개 anchor가 안정적으로 선택되는지
 - 마디별 길이·폭과 기존 Goo Arm Mesh의 연결부 스케일
 - 역할 전환 및 사망 pose에서 anchor가 외피 밖에 유지되는지
+
+### 8.3 Phase 5 키메라 이동 궤적 결과
+
+`UCMChimeraTrailComponent`를 `ACMChimera`의 고정 서브오브젝트로 추가했다.
+컴포넌트는 복제하지 않는 로컬 cosmetic이며 전용 서버에서는 Tick하지 않는다.
+
+구현된 동작은 다음과 같다.
+
+1. Tick 시간이 아니라 각 활성 `BodyMesh_n` 촉수마디의 누적 평면 이동 거리를
+   독립적으로 추적해 스탬프한다. 활성 마디가 8개이면 8개 위치에서 동시에 칠한다.
+2. 각 마디의 프레임 사이 이동 구간을 보간해 `StampSpacing` 간격으로 데칼을 배치한다.
+3. 지면 line trace의 충돌점과 normal에 데칼을 정렬하고 이동 방향을 접선으로 사용한다.
+4. `PoolCapacity` 크기의 `UDecalComponent`를 한 번 만들고 수명 만료 또는 순환 시
+   재사용한다.
+5. 기본 수명은 60초이며 마지막 20초 동안 스탬프별 동적 머티리얼의 `Opacity`를
+   1에서 0까지 선형으로 낮춰 흔적이 서서히 말라 사라지는 인상을 만든다.
+6. 순간이동은 `TeleportDistance`로 판별해 중간 경로를 칠하지 않으며, 비활성·숨김
+   상태에서는 누적 이동을 초기화하고 새 스탬프를 만들지 않는다.
+7. 한 프레임의 생성 수를 `MaxStampsPerFrame`으로 제한하고 제한 시 최신 경로를
+   우선한다.
+8. 바닥 궤적은 CMGore/Blood Definition 재료와 분리된 전용
+   `M_CMChimeraTrailDecal`을 사용한다. 이 재료는 `BrushTexture`의 R 채널을 데칼
+   opacity에 직접 곱하므로 `/Game/TPBDMat/Textures/T_splat0_wall_v2`의 모양을
+   변경하지 않는다. 표면 normal을 로컬 X 투영축, 이동 tangent를 로컬 Z축으로
+   사용하며 정사각형 UV 비율을 유지한다.
+9. 기본 데칼 폭과 길이는 각각 37.5cm이며,
+   `TrailMaterial`, `BrushTexture`, 폭, 길이, 간격, 수명, trace 범위를 Blueprint에서
+   교체하거나 조정할 수 있다.
+10. 8개 마디의 60초 흔적을 가능한 한 유지하도록 기본 풀은 8192개이며, 급격한
+    생성 폭증은 프레임당 최대 64개로 제한한다.
+
+자동화 테스트는 거리 누적·프레임 제한·순간이동 판정, 비복제 소유권과 실제 transient
+게임 월드에서 100cm 이동 시 두 개의 데칼 스탬프가 활성화되는 경로를 검증한다.
+또한 60초/20초 수명 설정, 정사각형 브러시 크기, 8192개 풀, 표면 normal/tangent
+투영축, 전용 머티리얼과 요청 브러시, 초기 `Opacity=1`과 페이드 중간 시점의
+`Opacity=0.5` 적용을 검증한다.
 
 ## 9. 기준선 및 완료 검증
 

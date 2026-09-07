@@ -7,6 +7,7 @@
 #include "Gore/CMGoreResponseComponent.h"
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Player/CMChimeraTrailComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
@@ -89,6 +90,10 @@ ACMChimera::ACMChimera()
 
     GoreResponseComponent = CreateDefaultSubobject<UCMGoreResponseComponent>(
         TEXT("GoreResponseComponent")
+    );
+
+    TrailComponent = CreateDefaultSubobject<UCMChimeraTrailComponent>(
+        TEXT("ChimeraTrail")
     );
 
     BodyDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(

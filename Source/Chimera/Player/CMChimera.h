@@ -22,6 +22,7 @@ class UCMChimeraAttributeSet;
 class UCMVisionComponent;
 class UCMLineBodyMovementCoordinator;
 class UCMGoreResponseComponent;
+class UCMChimeraTrailComponent;
 class UCMPartSlotComponent;
 class UPrimitiveComponent;
 class UDataTable;
@@ -379,6 +380,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         Category = "Chimera|Gore")
     TObjectPtr<UCMGoreResponseComponent> GoreResponseComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+        Category = "Chimera|VFX")
+    TObjectPtr<UCMChimeraTrailComponent> TrailComponent;
 
     // ASC가 소유하는 키메라 전체 공용 체력/스태미나 데이터다.
     UPROPERTY()
