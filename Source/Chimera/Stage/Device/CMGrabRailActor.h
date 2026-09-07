@@ -10,6 +10,7 @@ class UBoxComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 class UCMRailMovementComponent;
+class UCMInteractionHighlightComponent;
 
 // Generic grab-and-slide prop. Its rail/root stays still; only RailBody and its children move.
 UCLASS(Blueprintable)
@@ -25,6 +26,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void HandleElementActiveChanged_Implementation(bool bIsActive) override;
     virtual void HandleElementReset_Implementation() override;
 
@@ -38,4 +40,15 @@ protected:
     TObjectPtr<USphereComponent> GrabHandle;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<UCMRailMovementComponent> RailMovement;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
+    TObjectPtr<UCMInteractionHighlightComponent> InteractionHighlight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Interaction Hint", meta = (ClampMin = "0.02", Units = "s"))
+    float InteractionHintRefreshInterval = 0.1f;
+
+private:
+    void RefreshInteractionHighlight();
+
+    FTimerHandle InteractionHintTimerHandle;
 };

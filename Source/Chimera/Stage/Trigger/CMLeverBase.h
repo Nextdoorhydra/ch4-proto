@@ -58,6 +58,15 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever", meta = (ClampMin = "0.0", Units = "s"))
     float RotationTransitionDuration = 0.3f;
 
+    // When enabled, releasing the arm deactivates the lever and returns it to its default pose.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever")
+    bool bRequiresHoldToStayActivated = false;
+
+    // Releases the arm when it moves this far from the handle. Zero disables the limit.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever",
+        meta = (ClampMin = "0.0", Units = "cm"))
+    float MaximumHoldDistance = 200.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever")
     FVector LocalRotationAxis = FVector::RightVector;
 
@@ -97,6 +106,7 @@ private:
     void UpdateArmHold();
     void UpdateVisualRotation(float DeltaSeconds);
     void StopArmHold();
+    bool IsHoldDistanceExceeded(const ACMArmPart& ArmPart) const;
     bool SetLeverPressed(bool bPressed, AActor* InstigatorActor);
 
     TWeakObjectPtr<ACMArmPart> HoldingArm;
