@@ -45,12 +45,35 @@ bool FCMLeverInteractionRegressionTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Hold keeps continuous angle"), Lever->LeverAlpha, 0.85f);
     Lever->ReleaseButton(Puller);
 
+    Lever->bRequiresHoldToStayActivated = false;
+    Lever->PressButton(Puller);
+    Lever->StopArmHold();
+    TestTrue(TEXT("Default lever stays active after release"),
+        Lever->FindComponentByClass<UCMActivationTriggerComponent>()->IsTriggered());
+    TestEqual(TEXT("Default lever stays at active pose"), Lever->LeverAlpha, 1.0f);
+    Lever->ReleaseButton(Puller);
+
+    Lever->bRequiresHoldToStayActivated = true;
+    {
+        TGuardValue<bool> Guard(Lever->bUpdatingFromHold, true);
+        TestTrue(TEXT("Hold-required lever activates while held"),
+            Lever->SetLeverPressed(true, Puller));
+    }
+    TestTrue(TEXT("Hold-required lever remains active during hold"),
+        Lever->FindComponentByClass<UCMActivationTriggerComponent>()->IsTriggered());
+    Lever->StopArmHold();
+    TestFalse(TEXT("Hold-required lever deactivates after release"),
+        Lever->FindComponentByClass<UCMActivationTriggerComponent>()->IsTriggered());
+    TestEqual(TEXT("Hold-required lever returns to default pose"), Lever->LeverAlpha, -1.0f);
+
     const FVector PositiveOrigin = Lever->GetActorLocation() + FVector(200, 0, 0);
     const FVector NegativeOrigin = Lever->GetActorLocation() - FVector(200, 0, 0);
     auto Pull = [&](FVector Origin, float Strength = 100.0f)
     {
         return ICMGrabPullTarget::Execute_HandlePullWithResult(Lever, Puller, Origin, Strength);
     };
+    TestEqual(TEXT("Hold-required lever rejects impulse activation"), Pull(PositiveOrigin), ECMGrabPullResult::HandledNoChange);
+    Lever->bRequiresHoldToStayActivated = false;
     TestEqual(TEXT("Positive pull applies"), Pull(PositiveOrigin), ECMGrabPullResult::Applied);
     TestEqual(TEXT("Repeated positive consumes without change"), Pull(PositiveOrigin), ECMGrabPullResult::HandledNoChange);
     TestEqual(TEXT("Negative pull applies"), Pull(NegativeOrigin), ECMGrabPullResult::Applied);
@@ -72,6 +95,13 @@ bool FCMLeverInteractionRegressionTest::RunTest(const FString& Parameters)
 
     ACMChimera* Chimera = World->SpawnActor<ACMChimera>();
     ACMArmPart* Arm = World->SpawnActor<ACMArmPart>();
+    Lever->MaximumHoldDistance = 200.0f;
+    Arm->SetActorLocation(Lever->GetActorLocation() + FVector(1000.0f));
+    TestTrue(TEXT("Distant arm exceeds lever hold distance"),
+        Lever->IsHoldDistanceExceeded(*Arm));
+    Lever->MaximumHoldDistance = 0.0f;
+    TestFalse(TEXT("Zero lever hold distance disables release"),
+        Lever->IsHoldDistanceExceeded(*Arm));
     FCMPartSlotAddress Slot;
     Slot.SegmentIndex = 0;
     Slot.PartSlotIndex = 0;
