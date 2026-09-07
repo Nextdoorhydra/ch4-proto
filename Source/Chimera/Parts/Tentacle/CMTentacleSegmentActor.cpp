@@ -2,6 +2,7 @@
 
 #include "Collision/CMCollisionChannels.h"
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/SplineMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -13,6 +14,7 @@
 #include "Parts/Core/CMDroppedPartActor.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMChimera.h"
+#include "Player/CMChimeraBodySegmentActor.h"
 #include "Player/CMPartSlotComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraTentacle, Log, All);
@@ -107,6 +109,12 @@ void ACMTentacleSegmentActor::BeginPlay()
         }
     }
     ChimeraOwner = Cast<ACMChimera>(GetOwner());
+    if (ACMChimeraBodySegmentActor* SegmentPresentation =
+        Cast<ACMChimeraBodySegmentActor>(GetParentActor()))
+    {
+        SetSegmentActive(SegmentPresentation->IsSegmentActive());
+        SegmentPresentation->RefreshIdleTentacleSource();
+    }
     OnRep_VisualState();
 }
 
@@ -166,7 +174,8 @@ void ACMTentacleSegmentActor::GetLifetimeReplicatedProps(
 void ACMTentacleSegmentActor::InitializeForSegment(
     ACMChimera* InChimera,
     int32 InSegmentIndex,
-    UPrimitiveComponent* InBodySegment)
+    UPrimitiveComponent* InBodySegment,
+    const bool bAttachToBodySegment)
 {
     if (!HasAuthority() || !InChimera || !InBodySegment)
     {
@@ -176,12 +185,44 @@ void ACMTentacleSegmentActor::InitializeForSegment(
     ChimeraOwner = InChimera;
     SegmentIndex = InSegmentIndex;
     SetOwner(InChimera);
-    AttachToComponent(
-        InBodySegment,
-        FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+    if (bAttachToBodySegment)
+    {
+        AttachToComponent(
+            InBodySegment,
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+    }
     SetActorRelativeLocation(SourceRelativeOffset);
     DetectionSphere->SetSphereRadius(DetectionRadius);
     ForceNetUpdate();
+}
+
+void ACMTentacleSegmentActor::SetSegmentActive(const bool bInActive)
+{
+    if (!bInActive && HasAuthority())
+    {
+        if (TentacleState == ECMTentacleState::Pulling)
+        {
+            AbortPull();
+        }
+        SetTetheredActor(nullptr);
+    }
+
+    bSegmentActive = bInActive;
+    SetActorTickEnabled(bInActive);
+    SetActorHiddenInGame(!bInActive);
+
+    if (DetectionSphere)
+    {
+        DetectionSphere->SetCollisionEnabled(
+            bInActive && HasAuthority()
+                ? ECollisionEnabled::QueryOnly
+                : ECollisionEnabled::NoCollision);
+    }
+
+    if (bInActive)
+    {
+        OnRep_VisualState();
+    }
 }
 
 bool ACMTentacleSegmentActor::HasAttachablePart() const
@@ -296,7 +337,8 @@ void ACMTentacleSegmentActor::RefreshOverlapTarget()
         }
 
         const float DistanceSquared = FVector::DistSquared(
-            SourceLocation, Candidate->GetActorLocation());
+            SourceLocation,
+            ResolveVisualTargetLocation(Candidate));
         if (DistanceSquared < NearestDistanceSquared)
         {
             NearestDistanceSquared = DistanceSquared;
@@ -316,7 +358,8 @@ void ACMTentacleSegmentActor::SetTetheredActor(AActor* NewTarget)
 
     if (TetheredActor)
     {
-        LastVisualTargetLocation = TetheredActor->GetActorLocation();
+        LastVisualTargetLocation = ResolveVisualTargetLocation(
+            TetheredActor);
     }
     TetheredActor = NewTarget;
     TentacleState = TetheredActor
@@ -423,9 +466,55 @@ void ACMTentacleSegmentActor::OnRep_VisualState()
 {
     if (TetheredActor)
     {
-        LastVisualTargetLocation = TetheredActor->GetActorLocation();
+        LastVisualTargetLocation = ResolveVisualTargetLocation(
+            TetheredActor);
         EnsureVisualComponents();
     }
+}
+
+USkeletalMeshComponent* ACMTentacleSegmentActor::ResolveTargetPartMesh(
+    AActor* Target) const
+{
+    if (ACMDroppedPartActor* DroppedPart =
+        Cast<ACMDroppedPartActor>(Target))
+    {
+        return DroppedPart->GetPartMesh();
+    }
+    if (ACMPartActorBase* UsablePart = Cast<ACMPartActorBase>(Target))
+    {
+        return UsablePart->GetPartMesh();
+    }
+    return nullptr;
+}
+
+FVector ACMTentacleSegmentActor::ResolveVisualTargetLocation(
+    AActor* Target) const
+{
+    if (!Target)
+    {
+        return LastVisualTargetLocation;
+    }
+
+    USkeletalMeshComponent* TargetMesh = ResolveTargetPartMesh(Target);
+    if (!TargetMesh)
+    {
+        return Target->GetActorLocation();
+    }
+
+    FVector ClosestPosition = TargetMesh->Bounds.Origin;
+    FVector ClosestNormal = FVector::ZeroVector;
+    FName ClosestBone = NAME_None;
+    float ClosestDistance = 0.0f;
+    if (TargetMesh->K2_GetClosestPointOnPhysicsAsset(
+        GetActorLocation(),
+        ClosestPosition,
+        ClosestNormal,
+        ClosestBone,
+        ClosestDistance))
+    {
+        return ClosestPosition;
+    }
+    return TargetMesh->Bounds.Origin;
 }
 
 void ACMTentacleSegmentActor::EnsureVisualComponents()
@@ -471,9 +560,11 @@ void ACMTentacleSegmentActor::EnsureVisualComponents()
         RuntimeSplineMesh->SetVisibility(true, true);
     }
 
-    USceneComponent* TargetRoot = TetheredActor
-        ? TetheredActor->GetRootComponent()
-        : nullptr;
+    USceneComponent* TargetRoot = ResolveTargetPartMesh(TetheredActor);
+    if (!TargetRoot && TetheredActor)
+    {
+        TargetRoot = TetheredActor->GetRootComponent();
+    }
     if (TargetEffect
         && TargetEffect->GetAttachParent() != TargetRoot)
     {
@@ -532,7 +623,8 @@ void ACMTentacleSegmentActor::UpdateVisual(float DeltaTime)
 
     if (TetheredActor)
     {
-        LastVisualTargetLocation = TetheredActor->GetActorLocation();
+        LastVisualTargetLocation = ResolveVisualTargetLocation(
+            TetheredActor);
         EnsureVisualComponents();
     }
     if (!RuntimeSplineMesh)
@@ -548,12 +640,21 @@ void ACMTentacleSegmentActor::UpdateVisual(float DeltaTime)
         RandomStream.FRandRange(-TangentNoise, TangentNoise),
         RandomStream.FRandRange(-TangentNoise, TangentNoise));
     const FVector Tangent = LocalTarget * 0.5f + Noise;
+    RuntimeSplineMesh->SetStartScale(
+        FVector2D(TetheredTentacleWidth),
+        false);
+    RuntimeSplineMesh->SetEndScale(
+        FVector2D(TetheredTentacleWidth),
+        false);
     RuntimeSplineMesh->SetStartAndEnd(
         FVector::ZeroVector,
         Tangent,
         LocalTarget,
         Tangent,
-        true);
+        false);
+    RuntimeSplineMesh->UpdateMesh();
+    RuntimeSplineMesh->UpdateBounds();
+    RuntimeSplineMesh->MarkRenderTransformDirty();
     if (RuntimeMaterial && !CollapseMaterialParameter.IsNone())
     {
         RuntimeMaterial->SetScalarParameterValue(

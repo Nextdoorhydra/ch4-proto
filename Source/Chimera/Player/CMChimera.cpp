@@ -11,6 +11,7 @@
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Components/BoxComponent.h"
+#include "Components/ChildActorComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -21,6 +22,7 @@
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Engine/DataTable.h"
 #include "Net/UnrealNetwork.h"
+#include "Player/CMChimeraBodySegmentActor.h"
 
 // LineBody 데이터 흐름과 상태 변화만 모아 볼 수 있는 전용 로그 카테고리다.
 // 콘솔에서 `Log LogChimeraLineBody Verbose`로 상세 로그를 켤 수 있다.
@@ -54,6 +56,8 @@ ACMChimera::ACMChimera()
     SetNetUpdateFrequency(30.0f);
     SetMinNetUpdateFrequency(10.0f);
     TentacleSegmentClass = ACMTentacleSegmentActor::StaticClass();
+    BodySegmentPresentationClass =
+        ACMChimeraBodySegmentActor::StaticClass();
 
     AbilitySystemComponent = CreateDefaultSubobject<
         UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
@@ -337,6 +341,16 @@ ACMChimera::ACMChimera()
 
     for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
     {
+        UChildActorComponent* SegmentPresentation =
+            CreateDefaultSubobject<UChildActorComponent>(
+                *FString::Printf(
+                    TEXT("SegmentPresentation_%d"),
+                    Index + 1));
+        SegmentPresentation->SetupAttachment(BodySegments[Index]);
+        SegmentPresentation->SetChildActorClass(
+            BodySegmentPresentationClass);
+        SegmentPresentationComponents.Add(SegmentPresentation);
+
         UBoxComponent* SegmentHurtbox =
             CreateDefaultSubobject<UBoxComponent>(
                 *FString::Printf(TEXT("SegmentHurtbox_%d"), Index + 1)
@@ -613,59 +627,77 @@ void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
 
 void ACMChimera::RefreshTentacleSegments()
 {
-    if (!HasAuthority() || !GetWorld())
-    {
-        return;
-    }
-
+    RefreshBodySegmentPresentationClasses();
     TentacleSegments.SetNum(CMControl::MaxSegments);
     for (int32 SegmentIndex = 0;
         SegmentIndex < CMControl::MaxSegments;
         ++SegmentIndex)
     {
-        const bool bShouldExist = SegmentIndex < ActiveSegmentCount
-            && BodySegments.IsValidIndex(SegmentIndex)
-            && BodySegments[SegmentIndex]
-            && TentacleSegmentClass;
-        ACMTentacleSegmentActor* ExistingTentacle =
-            TentacleSegments[SegmentIndex];
-
-        if (!bShouldExist)
+        ACMChimeraBodySegmentActor* Presentation =
+            GetBodySegmentPresentation(SegmentIndex);
+        UPrimitiveComponent* SegmentBody =
+            BodySegments.IsValidIndex(SegmentIndex)
+                ? BodySegments[SegmentIndex]
+                : nullptr;
+        if (!Presentation || !SegmentBody)
         {
-            if (ExistingTentacle)
-            {
-                ExistingTentacle->Destroy();
-                TentacleSegments[SegmentIndex] = nullptr;
-            }
-            continue;
-        }
-        if (ExistingTentacle)
-        {
+            TentacleSegments[SegmentIndex] = nullptr;
             continue;
         }
 
-        FActorSpawnParameters SpawnParameters;
-        SpawnParameters.Owner = this;
-        SpawnParameters.SpawnCollisionHandlingOverride =
-            ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-        ACMTentacleSegmentActor* NewTentacle =
-            GetWorld()->SpawnActor<ACMTentacleSegmentActor>(
-                TentacleSegmentClass,
-                BodySegments[SegmentIndex]->GetComponentTransform(),
-                SpawnParameters);
-        if (NewTentacle)
+        if (HasAuthority())
         {
-            NewTentacle->InitializeForSegment(
-                this,
+            Presentation->SetTentacleActorClass(TentacleSegmentClass);
+        }
+        Presentation->InitializeForSegment(
+            this,
+            SegmentIndex,
+            SegmentBody);
+        Presentation->SetSegmentPresentation(
+            SegmentIndex < ActiveSegmentCount,
+            CMChimeraVisual::ResolveSegmentVisualRole(
                 SegmentIndex,
-                BodySegments[SegmentIndex]);
-            TentacleSegments[SegmentIndex] = NewTentacle;
+                ActiveSegmentCount));
+        TentacleSegments[SegmentIndex] = Presentation->GetTentacleActor();
+    }
+}
+
+void ACMChimera::RefreshBodySegmentPresentationClasses()
+{
+    if (!BodySegmentPresentationClass)
+    {
+        return;
+    }
+
+    for (UChildActorComponent* PresentationComponent
+        : SegmentPresentationComponents)
+    {
+        if (PresentationComponent
+            && PresentationComponent->GetChildActorClass()
+                != BodySegmentPresentationClass)
+        {
+            PresentationComponent->SetChildActorClass(
+                BodySegmentPresentationClass);
         }
     }
 }
+
 int32 ACMChimera::GetActiveSegmentCount() const
 {
     return ActiveSegmentCount;
+}
+
+ACMChimeraBodySegmentActor* ACMChimera::GetBodySegmentPresentation(
+    const int32 SegmentIndex) const
+{
+    const UChildActorComponent* PresentationComponent =
+        SegmentPresentationComponents.IsValidIndex(SegmentIndex)
+            ? SegmentPresentationComponents[SegmentIndex]
+            : nullptr;
+    return PresentationComponent
+        ? Cast<ACMChimeraBodySegmentActor>(
+            PresentationComponent->GetChildActor())
+        : nullptr;
 }
 
 float ACMChimera::AdjustLocalCameraDistance(float WheelInput)
@@ -851,6 +883,12 @@ void ACMChimera::ApplyBlueprintSettings()
         BodySegments.Num()
     );
     RefreshBodyAssembly();
+
+    // Do not change ChildActorClass from OnConstruction. Setting it rebuilds
+    // the owning actor's construction hierarchy; doing that while the
+    // Blueprint editor creates its preview actor recursively re-enters this
+    // function and can overflow the stack. BeginPlay/RefreshTentacleSegments
+    // performs the same synchronization once the runtime actor is stable.
 
     for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
     {
