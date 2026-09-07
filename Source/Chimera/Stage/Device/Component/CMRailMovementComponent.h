@@ -28,6 +28,7 @@ public:
     void ConfigureRail(USplineComponent* InRail, UBoxComponent* InMovingBody, UPrimitiveComponent* InHandle);
 
     bool QueryArmHold(ACMArmPart* Arm, FCMArmHoldSpec& OutSpec) const;
+    bool CanArmHold(ACMArmPart* Arm) const;
     bool BeginArmHold(ACMArmPart* Arm);
     void EndArmHold(ACMArmPart* Arm);
 
