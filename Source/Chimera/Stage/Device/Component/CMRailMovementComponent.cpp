@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Parts/Arm/CMArmPart.h"
+#include "Player/CMPartSlotComponent.h"
 
 namespace
 {
@@ -68,17 +69,24 @@ void UCMRailMovementComponent::ApplyPose()
 
 bool UCMRailMovementComponent::QueryArmHold(ACMArmPart* Arm, FCMArmHoldSpec& OutSpec) const
 {
-    if (!GetOwner()->HasAuthority() || !IsConfigured() || !bInteractionEnabled
-        || bTrackingHold || bAutomaticMove || !IsValid(Arm) || !Arm->IsOperational()) return false;
+    if (!CanArmHold(Arm)) return false;
     // The owning actor may be hit anywhere, but only its handle is a valid grip.
     const FVector Grip = Handle->GetComponentLocation();
-    if (FVector::Dist(Arm->GetActorLocation(), Grip) > Arm->GetHoldRange() + Arm->GetHoldRadius()) return false;
     OutSpec.Priority = 100;
     OutSpec.HoldLocation = Grip;
     OutSpec.HoldNormal = Handle->GetForwardVector();
     OutSpec.TargetComponent = Handle;
     OutSpec.bUsePhysicsHandle = false;
     return true;
+}
+
+bool UCMRailMovementComponent::CanArmHold(ACMArmPart* Arm) const
+{
+    if (!GetOwner()->HasAuthority() || !IsConfigured() || !bInteractionEnabled
+        || bTrackingHold || bAutomaticMove || !IsValid(Arm) || !Arm->IsOperational()) return false;
+
+    return FVector::Dist(Arm->GetActorLocation(), Handle->GetComponentLocation())
+        <= Arm->GetHoldRange() + Arm->GetHoldRadius();
 }
 
 bool UCMRailMovementComponent::BeginArmHold(ACMArmPart* Arm)
@@ -159,6 +167,14 @@ bool UCMRailMovementComponent::IsSegmentBlocked(float FromDistance, float ToDist
     FCollisionQueryParams Query(SCENE_QUERY_STAT(CMRailMove), false);
     Query.AddIgnoredComponent(MovingBody.Get());
     Query.AddIgnoredComponent(Handle.Get());
+    if (ACMArmPart* Arm = HoldingArm.Get())
+    {
+        Query.AddIgnoredActor(Arm);
+        if (const UCMPartSlotComponent* PartSlot = Arm->GetAttachedPartSlot())
+        {
+            Query.AddIgnoredActor(PartSlot->GetOwner());
+        }
+    }
     // Do NOT ignore the owner: a separate frame component must still block its moving panel.
     const FCollisionResponseParams Response(MovingBody->GetCollisionResponseToChannels());
     FHitResult Hit;

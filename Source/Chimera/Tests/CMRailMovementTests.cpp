@@ -3,10 +3,12 @@
 #include "Misc/AutomationTest.h"
 #include "Components/BoxComponent.h"
 #include "Components/SplineComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "Materials/Material.h"
+#include "Stage/Device/Component/CMInteractionHighlightComponent.h"
 #include "Stage/Device/Component/CMRailMovementComponent.h"
 #include "Parts/Arm/CMArmPart.h"
-#include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include <limits>
 
@@ -44,6 +46,22 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
     UCMRailMovementComponent* Movement = NewObject<UCMRailMovementComponent>(Owner);
     Movement->RegisterComponent();
     Movement->ConfigureRail(Spline, Body, Grip);
+
+    UStaticMeshComponent* HighlightMesh = NewObject<UStaticMeshComponent>(Owner);
+    HighlightMesh->SetupAttachment(Root);
+    HighlightMesh->RegisterComponent();
+    UMaterial* OriginalOverlay = NewObject<UMaterial>();
+    UMaterial* HighlightOverlay = NewObject<UMaterial>();
+    HighlightMesh->SetOverlayMaterial(OriginalOverlay);
+    UCMInteractionHighlightComponent* Highlight = NewObject<UCMInteractionHighlightComponent>(Owner);
+    Highlight->HighlightMaterial = HighlightOverlay;
+    Highlight->RegisterComponent();
+    Highlight->AddHighlightTarget(HighlightMesh);
+    Highlight->SetHighlighted(true);
+    TestTrue(TEXT("Available interaction applies overlay"), HighlightMesh->GetOverlayMaterial() == HighlightOverlay);
+    Highlight->SetHighlighted(false);
+    TestTrue(TEXT("Unavailable interaction restores overlay"), HighlightMesh->GetOverlayMaterial() == OriginalOverlay);
+
     TestTrue(TEXT("Configured open rail"), Movement->IsConfigured());
     TestTrue(TEXT("Forward travel"), Movement->AdvanceDistance(40));
     TestTrue(TEXT("Continuous progress"), FMath::IsNearlyEqual(Movement->GetProgress(), 0.4f));
@@ -112,17 +130,26 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
     Movement->InitialProgress = 0;
     Movement->RotationOffset = FRotator::ZeroRotator;
     Movement->ResetRail();
-    Body->SetCollisionEnabled(ECollisionEnabled::NoCollision); // Collision is tested independently above.
-    ACMChimera* Chimera = World->SpawnActor<ACMChimera>();
+    Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    AActor* ChimeraProxy = World->SpawnActor<AActor>();
+    UBoxComponent* SegmentBody = NewObject<UBoxComponent>(ChimeraProxy);
+    ChimeraProxy->SetRootComponent(SegmentBody);
+    SegmentBody->SetBoxExtent(FVector(10));
+    SegmentBody->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+    SegmentBody->RegisterComponent();
+    SegmentBody->SetWorldLocation(FVector(0, 20, 100));
+    UCMPartSlotComponent* PartSlot = NewObject<UCMPartSlotComponent>(ChimeraProxy);
+    PartSlot->SetupAttachment(SegmentBody);
+    PartSlot->RegisterComponent();
     ACMArmPart* Arm = World->SpawnActor<ACMArmPart>();
     Arm->DispatchBeginPlay(); // Initializes health; a pre-BeginPlay native part is not operational.
-    FCMPartSlotAddress Slot;
-    Slot.SegmentIndex = 0;
-    Slot.PartSlotIndex = 0;
-    UCMPartSlotComponent* PartSlot = Chimera->GetPartSlotComponent(Slot);
     if (TestNotNull(TEXT("Arm slot"), PartSlot))
     {
-        TestTrue(TEXT("Attach arm"), PartSlot->AttachPart(Arm));
+        TestTrue(TEXT("Attach arm"), Arm->AttachToComponent(
+            PartSlot, FAttachmentTransformRules::KeepWorldTransform));
+        Arm->SynchronizeAttachedPartSlot(PartSlot);
+        TestTrue(TEXT("Attached arm is operational"), Arm->IsOperational());
+        Body->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
         Arm->SetActorLocation(FVector(0, 20, 100));
         FCMArmHoldSpec Spec;
         TestTrue(TEXT("Handle can be queried"), Movement->QueryArmHold(Arm, Spec));
