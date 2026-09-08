@@ -7,6 +7,8 @@
 
 #include "CMLeverBase.generated.h"
 
+class UAudioComponent;
+
 UCLASS(Blueprintable)
 // 일반 팔의 홀드 이동으로 회전하며 양끝 임계점에서 상태를 전환하는 레버
 class CHIMERA_API ACMLeverBase
@@ -105,6 +107,10 @@ private:
     void HandleLeverTriggerChanged(AActor* TriggeringActor);
     void UpdateArmHold();
     void UpdateVisualRotation(float DeltaSeconds);
+    void StartLeverMoveSound();
+    void HandleLeverMoveSoundIdle();
+    void StopLeverMoveSound();
+    void PlayLeverSettleSound();
     void StopArmHold();
     bool IsHoldDistanceExceeded(const ACMArmPart& ArmPart) const;
     bool SetLeverPressed(bool bPressed, AActor* InstigatorActor);
@@ -117,5 +123,11 @@ private:
     bool bTrackingArmHold = false;
     float VisualLeverAlpha = -1.0f;
     bool bUpdatingFromHold = false;
+    bool bLeverMovementSoundActive = false;
     ECMGrabPullResult LastPullResult = ECMGrabPullResult::Unhandled;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> LeverMoveLoopComponent;
+
+    FTimerHandle LeverMoveSoundStopTimerHandle;
 };

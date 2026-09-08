@@ -439,6 +439,7 @@ void ACMChimera::OnRep_ActiveSegmentCount()
 {
     ConfigureSegments();
     ConfigureNetworkPhysics();
+    RefreshTentacleSegments();
     OnSegmentStatesChanged.Broadcast();
 
     UE_LOG(LogChimeraLineBody, Log,

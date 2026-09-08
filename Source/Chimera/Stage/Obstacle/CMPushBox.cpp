@@ -1,10 +1,15 @@
 #include "Stage/Obstacle/CMPushBox.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "Net/UnrealNetwork.h"
 #include "Parts/Arm/CMArmPart.h"
 #include "Player/CMChimera.h"
+#include "Sound/CMGameSoundBridgeSubsystem.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -39,10 +44,39 @@ ACMPushBox::ACMPushBox()
 void ACMPushBox::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge = GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.AddUObject(this, &ThisClass::HandleSoundCatalogsRebuilt);
+        }
+    }
+
     SetActorTickEnabled(true);
     ApplyEditorSettings();
     BoxMesh->OnComponentHit.AddDynamic(this, &ThisClass::HandleBoxHit);
     UE_LOG(LogChimeraPushBox, Log, TEXT("[PushBox Ready] Box=%s Weight=%.1f GenerateOverlap=%s Location=%s Extent=%s"), *GetName(), MechanismWeight ? MechanismWeight->GetMechanismWeight() : 0.0f, BoxMesh && BoxMesh->GetGenerateOverlapEvents() ? TEXT("true") : TEXT("false"), *GetActorLocation().ToCompactString(), BoxMesh ? *BoxMesh->Bounds.BoxExtent.ToCompactString() : TEXT("None"));
+}
+
+void ACMPushBox::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge = GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.RemoveAll(this);
+        }
+    }
+    StopMoveLoopSound();
+
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACMPushBox::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ThisClass, bIsMoving);
 }
 
 void ACMPushBox::OnConstruction(const FTransform& Transform)
@@ -202,6 +236,11 @@ bool ACMPushBox::StartPush(FVector WorldDirection)
 
     PushDirection = WorldDirection;
     RemainingPushDistance = PushDistance;
+    if (!bIsMoving)
+    {
+        bIsMoving = true;
+        OnRep_IsMoving();
+    }
     return true;
 }
 
@@ -210,4 +249,46 @@ void ACMPushBox::StopPush()
     BoxMesh->ClearMoveIgnoreActors();
     PushDirection = FVector::ZeroVector;
     RemainingPushDistance = 0.0f;
+    if (bIsMoving)
+    {
+        bIsMoving = false;
+        OnRep_IsMoving();
+    }
+}
+
+void ACMPushBox::HandleSoundCatalogsRebuilt()
+{
+    RefreshMoveLoopSound();
+}
+
+void ACMPushBox::OnRep_IsMoving()
+{
+    RefreshMoveLoopSound();
+}
+
+void ACMPushBox::RefreshMoveLoopSound()
+{
+    if (!bIsMoving)
+    {
+        StopMoveLoopSound();
+        return;
+    }
+
+    if (IsValid(MoveLoopSoundComponent) && MoveLoopSoundComponent->IsPlaying())
+    {
+        return;
+    }
+
+    MoveLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        BoxMesh,
+        CMSoundTags::Stage_Obstacle_PushBox_MoveLoop);
+}
+
+void ACMPushBox::StopMoveLoopSound()
+{
+    if (IsValid(MoveLoopSoundComponent))
+    {
+        MoveLoopSoundComponent->Stop();
+        MoveLoopSoundComponent = nullptr;
+    }
 }

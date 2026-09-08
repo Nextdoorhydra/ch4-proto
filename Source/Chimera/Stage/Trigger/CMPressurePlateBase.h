@@ -115,9 +115,12 @@ private:
     void RefreshOverlaps();
     float ResolveMechanismWeight(const AActor* Actor) const;
     void ApplyPresentationState(const FCMTriggerPresentationState& State);
+    void PlayWeightChangeSound();
 
     TMap<TWeakObjectPtr<AActor>, int32> OverlapCounts;
     float CurrentWeight = 0.0f;
+    float LastPresentedWeight = 0.0f;
+    bool bHasPresentedWeight = false;
     FTimerHandle OverlapRefreshTimerHandle;
     bool bHasRefreshedOverlaps = false;
 

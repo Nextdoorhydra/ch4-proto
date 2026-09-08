@@ -7,6 +7,7 @@
 #include "CMPushBox.generated.h"
 
 class UCMMechanismWeightComponent;
+class UAudioComponent;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 
@@ -21,10 +22,12 @@ public:
 
     virtual void Tick(float DeltaTime) override;
     virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual bool ReceiveCombatHit_Implementation(const FCMCombatHitRequest& Request) override;
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Push Box")
     TObjectPtr<UStaticMeshComponent> BoxMesh;
@@ -56,6 +59,18 @@ private:
     FVector ResolveCardinalPushDirection(const FVector& ImpactPoint, const FVector& FallbackDirection) const;
     bool StartPush(FVector WorldDirection);
     void StopPush();
+    void HandleSoundCatalogsRebuilt();
+    void RefreshMoveLoopSound();
+    void StopMoveLoopSound();
+
+    UFUNCTION()
+    void OnRep_IsMoving();
+
+    UPROPERTY(ReplicatedUsing = OnRep_IsMoving)
+    bool bIsMoving = false;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> MoveLoopSoundComponent;
 
     FVector PushDirection = FVector::ZeroVector;
     float RemainingPushDistance = 0.0f;

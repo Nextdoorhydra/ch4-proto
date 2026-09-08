@@ -11,6 +11,7 @@ public class Shared : ModuleRules
 		{
 			"Core",
 			"CoreUObject",
+			"Engine",
 			"GameplayTags"
 		});
 	}
