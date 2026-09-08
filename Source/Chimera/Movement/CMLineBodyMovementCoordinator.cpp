@@ -843,9 +843,11 @@ float UCMLineBodyMovementCoordinator::GetPlayerCountForceMultiplier(
     );
     if (PlayerCount == 1)
     {
-        return 2.0f;
+        return 1.0f + 2.0f * Chimera.PlayerCountForceMultiplier;
     }
-    return static_cast<float>(PlayerCount) * 0.5f;
+    return 1.0f
+        + static_cast<float>(PlayerCount - 2)
+            * Chimera.PlayerCountForceMultiplier;
 }
 
 void UCMLineBodyMovementCoordinator::ApplyWholeBodyYawAssist(

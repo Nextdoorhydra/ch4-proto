@@ -523,6 +523,10 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Leg")
     float MaxSpeed = 600.0f;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Movement")
+    float PlayerCountForceMultiplier = 0.3f;
     
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
     Category = "Chimera|Movement|SpringArm",

@@ -82,19 +82,22 @@ bool ACMChimera::InitializeFromBodyData()
     BodyLinearDamping = BodyRow->LinearDamping;
     BodyAngularDamping = BodyRow->AngularDamping;
     MaxSpeed = BodyRow->MaxVelocity;
+    PlayerCountForceMultiplier =
+        FMath::Max(BodyRow->PlayerCountForceMultiplier, 0.0f);
 
     RuntimeBodyPhysicalMaterial = NewObject<UPhysicalMaterial>(this);
     RuntimeBodyPhysicalMaterial->Friction = BodyGroundFriction;
 
     UE_LOG(LogChimeraLineBody, Log,
-        TEXT("[CSV -> Physics] Row=%s Type=%s Mass=%.1f Friction=%.2f LinearDamping=%.2f AngularDamping=%.2f MaxVelocity=%.1f"),
+        TEXT("[CSV -> Physics] Row=%s Type=%s Mass=%.1f Friction=%.2f LinearDamping=%.2f AngularDamping=%.2f MaxVelocity=%.1f PlayerCountForceMultiplier=%.2f"),
         *BodyRowName.ToString(),
         *BodyRow->BodyType.ToString(),
         BodySegmentMass,
         BodyGroundFriction,
         BodyLinearDamping,
         BodyAngularDamping,
-        MaxSpeed);
+        MaxSpeed,
+        PlayerCountForceMultiplier);
 
     if (HasAuthority())
     {
