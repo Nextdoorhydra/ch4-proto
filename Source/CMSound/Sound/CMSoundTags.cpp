@@ -9,6 +9,7 @@ namespace CMSoundTags
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(BGM_Ending, "Chimera.Sound.BGM.Ending", "엔딩 BGM");
 
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Body_Footstep, "Chimera.Sound.Body.Footstep", "공용 몸통 발걸음");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Body_BloodDragLoop, "Chimera.Sound.Body.BloodDragLoop", "키메라 혈흔 끌림 루프");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Body_Hit, "Chimera.Sound.Body.Hit", "공용 몸통 피격");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Body_Death, "Chimera.Sound.Body.Death", "공용 몸통 사망");
 

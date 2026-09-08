@@ -1,5 +1,6 @@
 #include "Player/CMChimeraTrailComponent.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/World.h"
@@ -8,6 +9,8 @@
 #include "Materials/MaterialInterface.h"
 #include "Math/RotationMatrix.h"
 #include "Player/CMChimera.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Engine/Texture.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -121,6 +124,8 @@ void UCMChimeraTrailComponent::BeginPlay()
 void UCMChimeraTrailComponent::EndPlay(
     const EEndPlayReason::Type EndPlayReason)
 {
+    StopDragLoopSound();
+
     for (UDecalComponent* Decal : DecalPool)
     {
         if (IsValid(Decal))
@@ -157,6 +162,7 @@ void UCMChimeraTrailComponent::TickComponent(
         || !IsValid(TrailMaterial)
         || Owner->IsHidden())
     {
+        StopDragLoopSound();
         ResetMovementSamples();
         return;
     }
@@ -168,6 +174,7 @@ void UCMChimeraTrailComponent::TickComponent(
     }
 
     int32 RemainingStampBudget = FMath::Max(1, MaxStampsPerFrame);
+    bool bAnySourceMoving = false;
     for (int32 SourceIndex = 0;
         SourceIndex < SourceCount;
         ++SourceIndex)
@@ -175,6 +182,20 @@ void UCMChimeraTrailComponent::TickComponent(
         FVector SourceLocation;
         if (GetSourceLocation(SourceIndex, SourceLocation))
         {
+            if (SourceStates.IsValidIndex(SourceIndex)
+                && SourceStates[SourceIndex].bHasSample
+                && DeltaTime > SMALL_NUMBER)
+            {
+                FVector PlanarDisplacement =
+                    SourceLocation - SourceStates[SourceIndex].PreviousLocation;
+                PlanarDisplacement.Z = 0.0f;
+                const float MovementDistance = PlanarDisplacement.Size();
+                bAnySourceMoving |=
+                    MovementDistance > SMALL_NUMBER
+                    && !CMChimeraTrail::IsTeleport(MovementDistance, TeleportDistance)
+                    && MovementDistance / DeltaTime
+                        >= FMath::Max(0.0f, DragSoundMinimumSpeed);
+            }
             RemainingStampBudget -= UpdateSourceTrail(
                 SourceIndex,
                 SourceLocation,
@@ -182,6 +203,7 @@ void UCMChimeraTrailComponent::TickComponent(
                 RemainingStampBudget);
         }
     }
+    UpdateDragLoopSound(bAnySourceMoving, WorldTime);
 }
 
 void UCMChimeraTrailComponent::SetEffectActive(const bool bInActive)
@@ -192,7 +214,49 @@ void UCMChimeraTrailComponent::SetEffectActive(const bool bInActive)
     }
 
     bEffectActive = bInActive;
+    if (!bEffectActive)
+    {
+        StopDragLoopSound();
+    }
     ResetMovementSamples();
+}
+
+void UCMChimeraTrailComponent::UpdateDragLoopSound(
+    const bool bAnySourceMoving,
+    const float WorldTime)
+{
+    if (bAnySourceMoving)
+    {
+        LastDragMovementTime = WorldTime;
+        if (!IsValid(DragLoopSoundComponent)
+            || !DragLoopSoundComponent->IsPlaying())
+        {
+            AActor* Owner = GetOwner();
+            DragLoopSoundComponent = Owner
+                ? FCMSoundPlayback::PlayAttachedSFX(
+                    Owner->GetRootComponent(),
+                    CMSoundTags::Body_BloodDragLoop)
+                : nullptr;
+        }
+        return;
+    }
+
+    if (LastDragMovementTime >= 0.0f
+        && WorldTime - LastDragMovementTime
+            >= FMath::Max(0.0f, DragSoundStopDelay))
+    {
+        StopDragLoopSound();
+    }
+}
+
+void UCMChimeraTrailComponent::StopDragLoopSound()
+{
+    if (IsValid(DragLoopSoundComponent))
+    {
+        DragLoopSoundComponent->Stop();
+        DragLoopSoundComponent = nullptr;
+    }
+    LastDragMovementTime = -1.0f;
 }
 
 int32 UCMChimeraTrailComponent::GetActiveStampCount() const
