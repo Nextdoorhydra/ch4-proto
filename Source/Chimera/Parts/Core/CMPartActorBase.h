@@ -148,6 +148,9 @@ public:
     /** Keeps the native attachment/physics invariant even for BP overrides. */
     void SynchronizeAttachedPartSlot(UCMPartSlotComponent* PartSlot);
 
+    /** Stops loose-part physics and restores the authored mesh mount before snapping. */
+    void PrepareForPartSlotAttachment();
+
     /** Server-owned HP change used after BattleComponent resolves a hit. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Part")
@@ -322,4 +325,5 @@ private:
         ECollisionEnabled::QueryOnly;
     bool bMountedMeshGenerateOverlapEvents = false;
     bool bMountedPhysicsStateCaptured = false;
+    FTransform MountedMeshRelativeTransform = FTransform::Identity;
 };

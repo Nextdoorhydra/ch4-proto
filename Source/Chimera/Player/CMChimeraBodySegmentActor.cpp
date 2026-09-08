@@ -8,6 +8,7 @@
 #include "Player/CMChimeraIdleTentacleComponent.h"
 #include "Player/CMRuntimeChildActorComponent.h"
 #include "Player/CMChimeraVisualDefinition.h"
+#include "Net/UnrealNetwork.h"
 
 ECMChimeraSegmentVisualRole CMChimeraVisual::ResolveSegmentVisualRole(
     const int32 SegmentIndex,
@@ -51,6 +52,15 @@ ACMChimeraBodySegmentActor::ACMChimeraBodySegmentActor()
     IdleTentacles->SetupAttachment(SceneRoot);
 }
 
+void ACMChimeraBodySegmentActor::GetLifetimeReplicatedProps(
+    TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ACMChimeraBodySegmentActor, SegmentIndex);
+    DOREPLIFETIME(ACMChimeraBodySegmentActor, bSegmentActive);
+    DOREPLIFETIME(ACMChimeraBodySegmentActor, VisualRole);
+}
+
 void ACMChimeraBodySegmentActor::OnConstruction(
     const FTransform& Transform)
 {
@@ -83,6 +93,10 @@ void ACMChimeraBodySegmentActor::SetTentacleActorClass(
         SegmentTentacle->SetSegmentActive(bSegmentActive);
     }
     RefreshIdleTentacleSource();
+    if (HasAuthority())
+    {
+        ForceNetUpdate();
+    }
 }
 
 void ACMChimeraBodySegmentActor::InitializeForSegment(
@@ -155,6 +169,17 @@ void ACMChimeraBodySegmentActor::SetSegmentPresentation(
     {
         K2_SetSegmentVisualActive(bInActive);
     }
+    if (HasAuthority() && (bRoleChanged || bActiveChanged))
+    {
+        ForceNetUpdate();
+    }
+}
+
+void ACMChimeraBodySegmentActor::OnRep_PresentationState()
+{
+    bHasPresentationState = false;
+    SetSegmentPresentation(bSegmentActive, VisualRole);
+    RefreshIdleTentacleSource();
 }
 
 void ACMChimeraBodySegmentActor::ApplyVisualPreset()

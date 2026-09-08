@@ -210,7 +210,6 @@ private:
     bool BuildSkeletalSurfaceCandidates(
         USkeletalMeshComponent& SkeletalSource);
     bool BuildStaticSurfaceCandidates(UStaticMeshComponent& StaticSource);
-    bool HasUsableSourceMesh() const;
     void AddSurfaceCandidate(
         const FVector& SourceLocalPosition,
         const FVector& SourceLocalNormal);

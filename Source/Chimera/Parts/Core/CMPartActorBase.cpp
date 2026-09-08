@@ -216,6 +216,45 @@ void ACMPartActorBase::SynchronizeAttachedPartSlot(
     ForceNetUpdate();
 }
 
+void ACMPartActorBase::PrepareForPartSlotAttachment()
+{
+    CaptureMountedPhysicsState();
+    if (!bMountedPhysicsStateCaptured || !PartMesh || !SceneRoot)
+    {
+        return;
+    }
+
+    PartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    PartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+    PartMesh->SetAllBodiesSimulatePhysics(false);
+    PartMesh->SetSimulatePhysics(false);
+    PartMesh->SetAllBodiesPhysicsBlendWeight(0.0f, false);
+    PartMesh->SetPhysicsBlendWeight(0.0f);
+    PartMesh->AttachToComponent(
+        SceneRoot,
+        FAttachmentTransformRules::KeepWorldTransform);
+    PartMesh->SetRelativeTransform(
+        MountedMeshRelativeTransform,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+
+    PartMesh->SetCollisionProfileName(MountedMeshCollisionProfile);
+    ECollisionEnabled::Type MountedQueryCollision =
+        MountedMeshCollisionEnabled.GetValue();
+    if (MountedQueryCollision == ECollisionEnabled::QueryAndPhysics)
+    {
+        MountedQueryCollision = ECollisionEnabled::QueryOnly;
+    }
+    else if (MountedQueryCollision == ECollisionEnabled::PhysicsOnly)
+    {
+        MountedQueryCollision = ECollisionEnabled::NoCollision;
+    }
+    PartMesh->SetCollisionEnabled(MountedQueryCollision);
+    PartMesh->SetGenerateOverlapEvents(bMountedMeshGenerateOverlapEvents);
+    DamageHurtbox->SetCollisionEnabled(MountedHurtboxCollisionEnabled);
+}
+
 UCMPartSlotComponent* ACMPartActorBase::GetAttachedPartSlot() const
 {
     if (UCMPartSlotComponent* PartSlot = AttachedPartSlot.Get())
@@ -529,6 +568,7 @@ void ACMPartActorBase::CaptureMountedPhysicsState()
     MountedHurtboxCollisionEnabled = DamageHurtbox->GetCollisionEnabled();
     bMountedMeshGenerateOverlapEvents =
         PartMesh->GetGenerateOverlapEvents();
+    MountedMeshRelativeTransform = PartMesh->GetRelativeTransform();
     bMountedPhysicsStateCaptured = true;
 }
 
@@ -546,20 +586,16 @@ void ACMPartActorBase::ApplyAttachmentPhysicsState()
 
     const bool bMounted =
         CMControl::IsValidPartSlot(AttachedSlotAddress);
-    PartMesh->SetAllBodiesSimulatePhysics(false);
-    PartMesh->SetSimulatePhysics(false);
-    PartMesh->SetPhysicsBlendWeight(0.0f);
 
     if (bMounted)
     {
-        PartMesh->SetCollisionProfileName(MountedMeshCollisionProfile);
-        PartMesh->SetCollisionEnabled(MountedMeshCollisionEnabled);
-        PartMesh->SetGenerateOverlapEvents(
-            bMountedMeshGenerateOverlapEvents);
-        DamageHurtbox->SetCollisionEnabled(
-            MountedHurtboxCollisionEnabled);
+        PrepareForPartSlotAttachment();
         return;
     }
+
+    PartMesh->SetAllBodiesSimulatePhysics(false);
+    PartMesh->SetSimulatePhysics(false);
+    PartMesh->SetPhysicsBlendWeight(0.0f);
 
     // A loose usable Part is represented only by its authored Physics Asset.
     DamageHurtbox->SetCollisionEnabled(ECollisionEnabled::NoCollision);

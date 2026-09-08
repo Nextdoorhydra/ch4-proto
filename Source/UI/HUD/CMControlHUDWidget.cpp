@@ -30,6 +30,7 @@
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Fonts/FontMeasure.h"
+#include "Camera/PlayerCameraManager.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 #include "Rendering/DrawElements.h"
@@ -87,6 +88,43 @@ void AddStatusTextUnique(TArray<FText>& StatusTexts, const FText& Text)
         StatusTexts.Add(Text);
     }
 }
+
+FText GetPartTypeText(const ACMPartActorBase* PartActor)
+{
+    if (!PartActor)
+    {
+        return FText::GetEmpty();
+    }
+
+    switch (ICMPartInterface::Execute_GetPartType(
+        const_cast<ACMPartActorBase*>(PartActor)))
+    {
+    case ECMPartSlotType::Head:
+        return LOCTEXT("PartTypeHead", "Head");
+    case ECMPartSlotType::Arm:
+        return LOCTEXT("PartTypeArm", "Arm");
+    case ECMPartSlotType::Leg:
+        return LOCTEXT("PartTypeLeg", "Leg");
+    case ECMPartSlotType::Organ:
+        return LOCTEXT("PartTypeOrgan", "Organ");
+    default:
+        return FText::GetEmpty();
+    }
+}
+
+FText GetControlKeyText(
+    const TCHAR* KeyName,
+    const ACMPartActorBase* PartActor)
+{
+    const FText KeyText = FText::FromString(KeyName);
+    const FText PartTypeText = GetPartTypeText(PartActor);
+    return PartTypeText.IsEmpty()
+        ? KeyText
+        : FText::Format(
+            LOCTEXT("ControlKeyWithPartType", "{0} - {1}"),
+            KeyText,
+            PartTypeText);
+}
 }
 
 UCMControlHUDWidget::UCMControlHUDWidget(
@@ -113,7 +151,6 @@ void UCMControlHUDWidget::NativeOnInitialized()
     }
 
     SetVisibility(ESlateVisibility::HitTestInvisible);
-    RuntimeWireframeCameraRotation = WireframeCameraRotation;
     RuntimeWireframeZoom = 1.0f;
     InitializeWireframeHUD();
 }
@@ -666,7 +703,6 @@ void UCMControlHUDWidget::RefreshAssignedParts()
 
         FPartSlotVisual& Visual = PhysicalPartSlots[FlatSlotIndex];
         Visual.Root->SetVisibility(ESlateVisibility::HitTestInvisible);
-        Visual.KeyText->SetText(FText::FromString(KeyNames[ControlIndex]));
         Visual.KeyText->SetColorAndOpacity(
             FSlateColor(CurrentControlBody->IsControlSlotEnabled(ControlIndex)
                 ? IdleControlKeyColor
@@ -677,6 +713,8 @@ void UCMControlHUDWidget::RefreshAssignedParts()
         const ACMPartActorBase* PartActor = PartSlot
             ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
             : nullptr;
+        Visual.KeyText->SetText(GetControlKeyText(
+            KeyNames[ControlIndex], PartActor));
         UTexture2D* PartTexture = GetPartTexture(PartActor);
         const FVector2D PartImageScale = CMControl::IsRightPartSlot(Address)
             ? FVector2D(-1.0f, 1.0f)
@@ -935,7 +973,6 @@ void UCMControlHUDWidget::TeardownWireframeHUD()
     WireframeCallouts.Reset();
     SmoothedCalloutPositions.Reset();
     CalloutRightSideById.Reset();
-    bWireframeOrbitActive = false;
     if (WireframeRenderImage)
     {
         WireframeRenderImage->SetVisibility(ESlateVisibility::Collapsed);
@@ -997,31 +1034,6 @@ void UCMControlHUDWidget::UpdateWireframeCameraInput()
         && ImageGeometry.IsUnderLocation(
             FSlateApplication::Get().GetCursorPos());
 
-    if (OwningPlayer->WasInputKeyJustPressed(EKeys::RightMouseButton)
-        && bCursorOverPanel)
-    {
-        bWireframeOrbitActive = true;
-    }
-    if (!OwningPlayer->IsInputKeyDown(EKeys::RightMouseButton))
-    {
-        bWireframeOrbitActive = false;
-    }
-
-    if (bWireframeOrbitActive)
-    {
-        float MouseDeltaX = 0.0f;
-        float MouseDeltaY = 0.0f;
-        OwningPlayer->GetInputMouseDelta(MouseDeltaX, MouseDeltaY);
-        RuntimeWireframeCameraRotation.Yaw +=
-            MouseDeltaX * WireframeOrbitSensitivity;
-        RuntimeWireframeCameraRotation.Pitch = FMath::Clamp(
-            RuntimeWireframeCameraRotation.Pitch
-                - MouseDeltaY * WireframeOrbitSensitivity,
-            FMath::Min(WireframePitchLimits.X, WireframePitchLimits.Y),
-            FMath::Max(WireframePitchLimits.X, WireframePitchLimits.Y));
-        RuntimeWireframeCameraRotation.Normalize();
-    }
-
     if (bCursorOverPanel)
     {
         const float MinZoom = FMath::Max(
@@ -1047,8 +1059,11 @@ void UCMControlHUDWidget::UpdateWireframeCameraInput()
         }
     }
 
+    const float PlayerScreenYaw = OwningPlayer->PlayerCameraManager
+        ? OwningPlayer->PlayerCameraManager->GetCameraRotation().Yaw
+        : WireframeCameraRotation.Yaw;
     WireframeCaptureActor->SetCameraView(
-        RuntimeWireframeCameraRotation,
+        FRotator(-90.0f, PlayerScreenYaw, 0.0f),
         RuntimeWireframeZoom);
 }
 
@@ -1097,8 +1112,14 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             if (CMControl::IsValidPartSlot(
                     Address, CurrentChimera->GetActiveSegmentCount()))
             {
+                const UCMPartSlotComponent* PartSlot =
+                    CurrentChimera->GetPartSlotComponent(Address);
+                const ACMPartActorBase* PartActor = PartSlot
+                    ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
+                    : nullptr;
                 LocalKeyBySlot.FindOrAdd(Address) =
-                    FText::FromString(ControlKeyNames[ControlIndex]);
+                    GetControlKeyText(
+                        ControlKeyNames[ControlIndex], PartActor);
             }
         }
     }

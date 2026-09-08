@@ -472,12 +472,28 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         RuntimeIdleTentacles);
     if (RuntimeIdleTentacles && RuntimeTentacle)
     {
+        UMeshComponent* ExpectedIdleSource =
+            RuntimeTentacle->GetGooBodyComponent();
         TestEqual(
             TEXT("IdleTentacles samples the tentacle segment GooBody"),
             RuntimeIdleTentacles->GetSourceMeshComponent(),
-            static_cast<UMeshComponent*>(
-                RuntimeTentacle->GetGooBodyComponent()));
+            ExpectedIdleSource);
+        RuntimeIdleTentacles->SetEffectActive(false);
+        RuntimeIdleTentacles->ConfigureSource(
+            nullptr, RuntimeTentacle->GetSegmentIndex());
         RuntimeIdleTentacles->SetEffectActive(true);
+        for (int32 RetryIndex = 0; RetryIndex < 10; ++RetryIndex)
+        {
+            RuntimeIdleTentacles->TickComponent(
+                0.25f,
+                LEVELTICK_All,
+                nullptr);
+        }
+        TestTrue(
+            TEXT("Client idle tentacles keep retrying while their source mesh is pending"),
+            RuntimeIdleTentacles->IsComponentTickEnabled());
+        RuntimeIdleTentacles->ConfigureSource(
+            ExpectedIdleSource, RuntimeTentacle->GetSegmentIndex());
         RuntimeIdleTentacles->TickComponent(
             0.3f,
             LEVELTICK_All,
@@ -624,10 +640,24 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
     TestNotNull(TEXT("Runtime tentacle target spawns"), RuntimeTarget);
     if (RuntimeTentacle && RuntimeTarget)
     {
-        const ECollisionEnabled::Type ExpectedMountedMeshCollision =
+        ECollisionEnabled::Type ExpectedMountedMeshCollision =
             RuntimeTarget->GetPartMesh()->GetCollisionEnabled();
+        if (ExpectedMountedMeshCollision
+            == ECollisionEnabled::QueryAndPhysics)
+        {
+            ExpectedMountedMeshCollision = ECollisionEnabled::QueryOnly;
+        }
+        else if (ExpectedMountedMeshCollision
+            == ECollisionEnabled::PhysicsOnly)
+        {
+            ExpectedMountedMeshCollision = ECollisionEnabled::NoCollision;
+        }
         const ECollisionEnabled::Type ExpectedMountedHurtboxCollision =
             RuntimeTarget->GetDamageHurtbox()->GetCollisionEnabled();
+        const ACMArmPart* RuntimeArmDefaults =
+            RuntimeArmClass->GetDefaultObject<ACMArmPart>();
+        const FTransform ExpectedMountedMeshRelativeTransform =
+            RuntimeArmDefaults->GetPartMesh()->GetRelativeTransform();
         if (!RuntimeTarget->HasActorBegunPlay())
         {
             RuntimeTarget->DispatchBeginPlay();
@@ -646,8 +676,6 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
 
         USkeletalMeshComponent* RuntimeTargetMesh =
             RuntimeTarget->GetPartMesh();
-        const FTransform OriginalTargetMeshTransform =
-            RuntimeTargetMesh->GetComponentTransform();
         const FVector TargetActorOrigin = RuntimeTarget->GetActorLocation();
         RuntimeTargetMesh->SetWorldLocation(
             TargetActorOrigin + FVector(0.0f, 0.0f, 150.0f),
@@ -708,13 +736,6 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                 FVector2D(1.8f));
         }
 
-        RuntimeTargetMesh->SetWorldTransform(
-            OriginalTargetMeshTransform,
-            false,
-            nullptr,
-            ETeleportType::TeleportPhysics);
-        RuntimeTargetMesh->UpdateBounds();
-
         FCMPartSlotAddress PullSlotAddress;
         PullSlotAddress.SegmentIndex = RuntimeTentacle->GetSegmentIndex();
         PullSlotAddress.PartSlotIndex = 0;
@@ -743,7 +764,15 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             TEXT("Attached Part keeps ragdoll disabled"),
             RuntimeTarget->GetPartMesh()->IsSimulatingPhysics());
         TestEqual(
-            TEXT("Attached Part restores its authored mesh collision"),
+            TEXT("Attached Part mesh returns to its authored root"),
+            RuntimeTarget->GetPartMesh()->GetAttachParent(),
+            RuntimeTarget->GetRootComponent());
+        TestTrue(
+            TEXT("Attached Part restores its authored relative transform"),
+            RuntimeTarget->GetPartMesh()->GetRelativeTransform().Equals(
+                ExpectedMountedMeshRelativeTransform));
+        TestEqual(
+            TEXT("Attached Part restores query-only authored mesh collision"),
             RuntimeTarget->GetPartMesh()->GetCollisionEnabled(),
             ExpectedMountedMeshCollision);
         TestEqual(

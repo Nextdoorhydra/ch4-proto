@@ -20,7 +20,6 @@
 namespace
 {
 constexpr int32 SurfaceCandidateMultiplier = 8;
-constexpr int32 MaximumSurfaceBuildAttempts = 8;
 constexpr float SurfaceBuildRetryInterval = 0.25f;
 constexpr float MinimumRenderableLengthAlpha = 0.01f;
 }
@@ -177,18 +176,13 @@ void UCMChimeraIdleTentacleComponent::TickComponent(
     if (SurfaceCandidates.IsEmpty())
     {
         SurfaceBuildRetryTime -= DeltaTime;
-        if (SurfaceBuildRetryTime <= 0.0f
-            && SurfaceBuildAttempts < MaximumSurfaceBuildAttempts)
+        if (SurfaceBuildRetryTime <= 0.0f)
         {
             ++SurfaceBuildAttempts;
             SurfaceBuildRetryTime = SurfaceBuildRetryInterval;
             if (BuildSurfaceCandidates())
             {
                 EnsurePool();
-            }
-            else if (SurfaceBuildAttempts >= MaximumSurfaceBuildAttempts)
-            {
-                SetComponentTickEnabled(false);
             }
         }
         return;
@@ -231,9 +225,10 @@ void UCMChimeraIdleTentacleComponent::NotifySourceMeshChanged()
         Runtime.RespawnDelay = 0.0f;
     }
 
-    SetComponentTickEnabled(bEffectActive
-        && HasUsableSourceMesh()
-        && TentacleMesh);
+    // Clients can receive the active presentation state before their child
+    // actor has applied the Goo source mesh. Keep ticking so the retry path
+    // above can recover as soon as that local cosmetic source is ready.
+    SetComponentTickEnabled(bEffectActive && TentacleMesh);
 }
 
 void UCMChimeraIdleTentacleComponent::SetEffectActive(
@@ -566,21 +561,6 @@ bool UCMChimeraIdleTentacleComponent::BuildStaticSurfaceCandidates(
         AddSurfaceCandidate(SourcePosition, SourceNormal.GetSafeNormal());
     }
     return !SurfaceCandidates.IsEmpty();
-}
-
-bool UCMChimeraIdleTentacleComponent::HasUsableSourceMesh() const
-{
-    if (const USkeletalMeshComponent* SkeletalSource =
-        Cast<USkeletalMeshComponent>(SourceMesh))
-    {
-        return SkeletalSource->GetSkeletalMeshAsset() != nullptr;
-    }
-    if (const UStaticMeshComponent* StaticSource =
-        Cast<UStaticMeshComponent>(SourceMesh))
-    {
-        return StaticSource->GetStaticMesh() != nullptr;
-    }
-    return false;
 }
 
 void UCMChimeraIdleTentacleComponent::AddSurfaceCandidate(
