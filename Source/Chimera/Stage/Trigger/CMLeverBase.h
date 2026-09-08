@@ -9,6 +9,13 @@
 
 class UAudioComponent;
 
+UENUM(BlueprintType)
+enum class ECMLeverInteractionMode : uint8
+{
+    LinearPull,
+    WheelRotation
+};
+
 UCLASS(Blueprintable)
 // 일반 팔의 홀드 이동으로 회전하며 양끝 임계점에서 상태를 전환하는 레버
 class CHIMERA_API ACMLeverBase
@@ -49,6 +56,11 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever", meta = (ClampMin = "1.0"))
     float FullTravelDistance = 100.0f;
+
+    // Linear levers follow planar hand displacement; wheel levers follow the
+    // hand's signed angle around LocalRotationAxis.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever")
+    ECMLeverInteractionMode InteractionMode = ECMLeverInteractionMode::LinearPull;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever", meta = (ClampMin = "0.01", ClampMax = "1.0"))
     float SwitchThreshold = 0.8f;
@@ -113,10 +125,12 @@ private:
     void PlayLeverSettleSound();
     void StopArmHold();
     bool IsHoldDistanceExceeded(const ACMArmPart& ArmPart) const;
+    float CalculateLeverAlphaFromArmLocation(const FVector& ArmLocation) const;
     bool SetLeverPressed(bool bPressed, AActor* InstigatorActor);
 
     TWeakObjectPtr<ACMArmPart> HoldingArm;
     FVector GrabStartArmLocation = FVector::ZeroVector;
+    FVector GrabStartWheelDirection = FVector::ZeroVector;
     float GrabStartAlpha = -1.0f;
     FQuat InitialPivotRotation = FQuat::Identity;
     bool bLeverPoseInitialized = false;

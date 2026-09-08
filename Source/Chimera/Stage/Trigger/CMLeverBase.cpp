@@ -49,15 +49,23 @@ void ACMLeverBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 
 bool ACMLeverBase::QueryArmHold_Implementation(ACMArmPart* ArmPart, FCMArmHoldSpec& OutSpec) const
 {
+    FVector PlanarPullAxis = GetActorTransform()
+        .TransformVectorNoScale(LocalPullAxis);
+    PlanarPullAxis.Z = 0.0f;
     if (!HasAuthority() || !IsValid(ArmPart) || !ArmPart->IsOperational()
-        || !IsElementActive() || HoldingArm.IsValid() || LocalPullAxis.IsNearlyZero()
+        || !IsElementActive() || HoldingArm.IsValid()
+        || (InteractionMode == ECMLeverInteractionMode::LinearPull
+            && PlanarPullAxis.IsNearlyZero())
+        || (InteractionMode == ECMLeverInteractionMode::WheelRotation
+            && LocalRotationAxis.IsNearlyZero())
         || (!ActivationTrigger->IsTriggered() && !ActivationTrigger->CanActivate()))
     {
         return false;
     }
     OutSpec.Priority = 100;
     OutSpec.HoldLocation = ArmHoldVolume->GetComponentLocation();
-    OutSpec.HoldNormal = -GetActorTransform().TransformVectorNoScale(LocalPullAxis).GetSafeNormal();
+    OutSpec.HoldNormal = -PlanarPullAxis.GetSafeNormal(
+        SMALL_NUMBER, -ArmHoldVolume->GetForwardVector());
     OutSpec.TargetComponent = ArmHoldVolume;
     OutSpec.bUsePhysicsHandle = false;
     return true;
@@ -73,6 +81,11 @@ bool ACMLeverBase::BeginArmHold_Implementation(ACMArmPart* ArmPart)
     HoldingArm = ArmPart;
     GrabStartArmLocation = ArmPart->GetActorLocation();
     GrabStartAlpha = LeverAlpha;
+    const FVector WorldRotationAxis = GetActorTransform()
+        .TransformVectorNoScale(LocalRotationAxis).GetSafeNormal();
+    GrabStartWheelDirection = FVector::VectorPlaneProject(
+        GrabStartArmLocation - LeverPivot->GetComponentLocation(),
+        WorldRotationAxis).GetSafeNormal();
     bTrackingArmHold = true;
     SetActorTickEnabled(true);
     return true;
@@ -101,9 +114,7 @@ void ACMLeverBase::UpdateArmHold()
         StopArmHold();
         return;
     }
-    const FVector Axis = GetActorTransform().TransformVectorNoScale(LocalPullAxis).GetSafeNormal();
-    const float Distance = FVector::DotProduct(Arm->GetActorLocation() - GrabStartArmLocation, Axis);
-    LeverAlpha = FMath::Clamp(GrabStartAlpha + 2.0f * Distance / FMath::Max(FullTravelDistance, 1.0f), -1.0f, 1.0f);
+    LeverAlpha = CalculateLeverAlphaFromArmLocation(Arm->GetActorLocation());
     const float Threshold = FMath::Clamp(SwitchThreshold, 0.01f, 1.0f);
     if (bRequiresHoldToStayActivated)
     {
@@ -167,8 +178,48 @@ void ACMLeverBase::StopArmHold()
 bool ACMLeverBase::IsHoldDistanceExceeded(const ACMArmPart& ArmPart) const
 {
     return MaximumHoldDistance > 0.0f
-        && FVector::DistSquared(ArmPart.GetActorLocation(), ArmHoldVolume->GetComponentLocation())
+        && FVector::DistSquared2D(
+            ArmPart.GetActorLocation(), ArmHoldVolume->GetComponentLocation())
             > FMath::Square(MaximumHoldDistance);
+}
+
+float ACMLeverBase::CalculateLeverAlphaFromArmLocation(
+    const FVector& ArmLocation) const
+{
+    if (InteractionMode == ECMLeverInteractionMode::WheelRotation)
+    {
+        const FVector WorldAxis = GetActorTransform()
+            .TransformVectorNoScale(LocalRotationAxis).GetSafeNormal();
+        const FVector CurrentDirection = FVector::VectorPlaneProject(
+            ArmLocation - LeverPivot->GetComponentLocation(),
+            WorldAxis).GetSafeNormal();
+        if (WorldAxis.IsNearlyZero() || GrabStartWheelDirection.IsNearlyZero()
+            || CurrentDirection.IsNearlyZero())
+        {
+            return LeverAlpha;
+        }
+
+        const float SignedAngle = FMath::RadiansToDegrees(FMath::Atan2(
+            FVector::DotProduct(
+                WorldAxis,
+                FVector::CrossProduct(GrabStartWheelDirection, CurrentDirection)),
+            FVector::DotProduct(GrabStartWheelDirection, CurrentDirection)));
+        return FMath::Clamp(
+            GrabStartAlpha + SignedAngle / FMath::Max(RotationHalfAngle, 1.0f),
+            -1.0f,
+            1.0f);
+    }
+
+    FVector Axis = GetActorTransform().TransformVectorNoScale(LocalPullAxis);
+    Axis.Z = 0.0f;
+    Axis.Normalize();
+    FVector PlanarDelta = ArmLocation - GrabStartArmLocation;
+    PlanarDelta.Z = 0.0f;
+    const float Distance = FVector::DotProduct(PlanarDelta, Axis);
+    return FMath::Clamp(
+        GrabStartAlpha + 2.0f * Distance / FMath::Max(FullTravelDistance, 1.0f),
+        -1.0f,
+        1.0f);
 }
 
 void ACMLeverBase::HandleLeverTriggerChanged(AActor* TriggeringActor)
@@ -327,16 +378,19 @@ bool ACMLeverBase::TryHandlePull_Implementation(
     LastPullResult = ECMGrabPullResult::HandledNoChange;
     if (!IsElementActive() || HoldingArm.IsValid()
         || bRequiresHoldToStayActivated
+        || InteractionMode == ECMLeverInteractionMode::WheelRotation
         || !FMath::IsFinite(PullStrength) || PullStrength < RequiredPullStrength
         || PullOrigin.ContainsNaN())
     {
         return true;
     }
 
-    const FVector PullDirection =
-        (PullOrigin - LeverPivot->GetComponentLocation()).GetSafeNormal();
-    const FVector PullAxis =
-        GetActorTransform().TransformVectorNoScale(LocalPullAxis).GetSafeNormal();
+    FVector PullDirection = PullOrigin - LeverPivot->GetComponentLocation();
+    PullDirection.Z = 0.0f;
+    PullDirection.Normalize();
+    FVector PullAxis = GetActorTransform().TransformVectorNoScale(LocalPullAxis);
+    PullAxis.Z = 0.0f;
+    PullAxis.Normalize();
     const float Alignment = FVector::DotProduct(PullDirection, PullAxis);
     if (PullDirection.IsNearlyZero() || PullAxis.IsNearlyZero()
         || FMath::IsNearlyZero(Alignment)
