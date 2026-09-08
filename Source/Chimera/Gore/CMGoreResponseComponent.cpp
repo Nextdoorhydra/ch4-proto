@@ -16,6 +16,7 @@
 UCMGoreResponseComponent::UCMGoreResponseComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
+    SetIsReplicatedByDefault(true);
     FleshChunkMesh = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(
         TEXT("/Engine/BasicShapes/Cube.Cube")));
     FleshChunkMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(
@@ -34,12 +35,11 @@ void UCMGoreResponseComponent::SpawnHitEffects(
         return;
     }
 
-    BroadcastBloodImpact(
+    MulticastSpawnHitEffects(
         HitLocation,
         SurfaceNormal,
         BloodDirection,
         FMath::Max(0.0f, Intensity));
-    SpawnGroundBloodDecal(HitLocation);
 }
 
 void UCMGoreResponseComponent::SpawnDestructionEffects(
@@ -48,6 +48,43 @@ void UCMGoreResponseComponent::SpawnDestructionEffects(
 {
     AActor* Owner = GetOwner();
     if (!Owner || !Owner->HasAuthority())
+    {
+        return;
+    }
+
+    MulticastSpawnDestructionEffects(
+        Location,
+        Direction.GetSafeNormal(
+            SMALL_NUMBER,
+            FVector::UpVector));
+}
+
+void UCMGoreResponseComponent::MulticastSpawnHitEffects_Implementation(
+    const FVector_NetQuantize10 HitLocation,
+    const FVector_NetQuantizeNormal SurfaceNormal,
+    const FVector_NetQuantizeNormal BloodDirection,
+    const float Intensity)
+{
+    const UWorld* World = GetWorld();
+    if (!World || World->GetNetMode() == NM_DedicatedServer)
+    {
+        return;
+    }
+
+    BroadcastBloodImpact(
+        HitLocation,
+        SurfaceNormal,
+        BloodDirection,
+        FMath::Max(0.0f, Intensity));
+    SpawnGroundBloodDecal(HitLocation);
+}
+
+void UCMGoreResponseComponent::MulticastSpawnDestructionEffects_Implementation(
+    const FVector_NetQuantize10 Location,
+    const FVector_NetQuantizeNormal Direction)
+{
+    const UWorld* World = GetWorld();
+    if (!World || World->GetNetMode() == NM_DedicatedServer)
     {
         return;
     }

@@ -87,6 +87,22 @@ public:
     float BloodPoolLifetime = 45.0f;
 
 private:
+    /** Replays a frequent, non-authoritative hit presentation on relevant peers. */
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastSpawnHitEffects(
+        FVector_NetQuantize10 HitLocation,
+        FVector_NetQuantizeNormal SurfaceNormal,
+        FVector_NetQuantizeNormal BloodDirection,
+        float Intensity
+    );
+
+    /** Reliably replays the one-shot destruction presentation on relevant peers. */
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastSpawnDestructionEffects(
+        FVector_NetQuantize10 Location,
+        FVector_NetQuantizeNormal Direction
+    );
+
     void BroadcastBloodImpact(
         const FVector& Location,
         const FVector& SurfaceNormal,
