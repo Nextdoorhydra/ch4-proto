@@ -7,6 +7,8 @@
 #include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartInterface.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 
@@ -366,6 +368,7 @@ bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
     }
     OnAttachedPartChanged.Broadcast(this, AttachedPart);
     ChimeraOwner->ForceNetUpdate();
+    MulticastPlayPartAttachmentSound(true, GetComponentLocation());
 
     UE_LOG(LogChimeraPartSlot, Log,
         TEXT("[Part Attached] Slot=(%d,%d) Part=%s AbilityHandleValid=%s"),
@@ -403,6 +406,7 @@ AActor* UCMPartSlotComponent::DetachPart()
 
     OnAttachedPartChanged.Broadcast(this, nullptr);
     ChimeraOwner->ForceNetUpdate();
+    MulticastPlayPartAttachmentSound(false, GetComponentLocation());
 
     UE_LOG(LogChimeraPartSlot, Log,
         TEXT("[Part Detached] Slot=(%d,%d) Part=%s"),
@@ -579,6 +583,18 @@ void UCMPartSlotComponent::HandleAttachedPartDestroyed(AActor* DestroyedPart)
     AttachedPart = nullptr;
     OnAttachedPartChanged.Broadcast(this, nullptr);
     GetOwner()->ForceNetUpdate();
+}
+
+void UCMPartSlotComponent::MulticastPlayPartAttachmentSound_Implementation(
+    const bool bAttached,
+    const FVector_NetQuantize10 SoundLocation)
+{
+    FCMSoundPlayback::PlaySFXAtLocation(
+        GetOwner(),
+        SoundLocation,
+        bAttached
+            ? CMSoundTags::Part_Attach
+            : CMSoundTags::Part_Detach);
 }
 
 UAbilitySystemComponent*
