@@ -22,6 +22,7 @@ class AI_API ACMAggressivePawnBase : public APawn, public IAbilitySystemInterfac
 public:
     ACMAggressivePawnBase();
     virtual void BeginPlay() override;
+    virtual void SpawnDefaultController() override;
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
     virtual bool ReceiveCombatHit_Implementation(const FCMCombatHitRequest& Request) override;
 

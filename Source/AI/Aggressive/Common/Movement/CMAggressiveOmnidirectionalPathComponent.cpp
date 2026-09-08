@@ -233,6 +233,31 @@ FName UCMAggressiveOmnidirectionalPathComponent::GetNavigationAgentName() const
     return NavigationAgentName;
 }
 
+// 기본 NavData에 의존하지 않고 이 몸체에 지정된 에이전트의 NavMesh에서 배회 목적지를 찾는다.
+bool UCMAggressiveOmnidirectionalPathComponent::FindRandomReachableLocation(FVector Origin, float Radius, FVector& OutLocation) const
+{
+    UWorld* World = GetWorld();
+    UNavigationSystemV1* NavigationSystem = World ? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World) : nullptr;
+    if (!NavigationSystem)
+        return false;
+
+    FNavDataConfig AgentConfig;
+    const ANavigationData* NavigationData = nullptr;
+    if (!FindNavigationAgent(*NavigationSystem, AgentConfig, NavigationData))
+        return false;
+
+    FNavLocation ProjectedOrigin;
+    if (!NavigationSystem->ProjectPointToNavigation(Origin, ProjectedOrigin, NavigationProjectionExtent, NavigationData))
+        return false;
+
+    FNavLocation RandomLocation;
+    if (!NavigationSystem->GetRandomReachablePointInRadius(ProjectedOrigin.Location, FMath::Max(Radius, 0.0f), RandomLocation, const_cast<ANavigationData*>(NavigationData)))
+        return false;
+
+    OutLocation = RandomLocation.Location;
+    return true;
+}
+
 // 지정한 시작점과 목적지 사이의 완전한 전용 NavMesh 경로 길이를 계산한다.
 bool UCMAggressiveOmnidirectionalPathComponent::CalculateNavigationPathLength(FVector StartLocation, FVector WorldGoal, float& OutPathLength)
 {
