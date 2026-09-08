@@ -4,6 +4,8 @@
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 #include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 #include "TimerManager.h"
@@ -34,7 +36,13 @@ void ACMPressurePlateBase::BeginPlay()
         FMath::Max(MaterialSlotIndex, 0));
     OnPresentationStateChanged.AddUniqueDynamic(
         this, &ThisClass::HandlePresentationStateChanged);
-    ApplyPresentationState(GetPresentationState());
+    const FCMTriggerPresentationState& InitialState = GetPresentationState();
+    ApplyPresentationState(InitialState);
+    if (InitialState.bReady)
+    {
+        LastPresentedWeight = InitialState.CurrentWeight;
+        bHasPresentedWeight = true;
+    }
 
     if (HasAuthority())
     {
@@ -193,6 +201,26 @@ void ACMPressurePlateBase::HandlePresentationStateChanged(
     const FCMTriggerPresentationState& State)
 {
     ApplyPresentationState(State);
+    if (!State.bReady)
+    {
+        return;
+    }
+
+    if (bHasPresentedWeight
+        && !FMath::IsNearlyEqual(LastPresentedWeight, State.CurrentWeight))
+    {
+        PlayWeightChangeSound();
+    }
+    LastPresentedWeight = State.CurrentWeight;
+    bHasPresentedWeight = true;
+}
+
+// 복제된 무게 Snapshot이 달라질 때 각 머신에서 감압판 위치 SFX를 재생한다.
+void ACMPressurePlateBase::PlayWeightChangeSound()
+{
+    FCMSoundPlayback::PlaySFXAtActor(
+        this,
+        CMSoundTags::Stage_PressurePlate_WeightChanged);
 }
 
 void ACMPressurePlateBase::ApplyPresentationState(
