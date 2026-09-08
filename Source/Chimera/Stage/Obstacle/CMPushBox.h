@@ -53,6 +53,7 @@ private:
     void HandleBoxHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
 
     void ApplyEditorSettings();
+    FVector ResolveCardinalPushDirection(const FVector& ImpactPoint, const FVector& FallbackDirection) const;
     bool StartPush(FVector WorldDirection);
     void StopPush();
 

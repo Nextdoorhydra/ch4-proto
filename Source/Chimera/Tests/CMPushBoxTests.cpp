@@ -87,6 +87,17 @@ bool FCMPushBoxMovementTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Fixed push distance is 100 cm"), FMath::IsNearlyEqual(PushBox->GetActorLocation().X, 100.0f, 0.1f));
     TestFalse(TEXT("Push source ignore is cleared after movement"), BoxMesh->GetMoveIgnoreActors().Contains(Attacker));
 
+    ACMPushBox* CardinalPushBox = World->SpawnActor<ACMPushBox>(FVector(0.0f, -200.0f, 100.0f), FRotator::ZeroRotator);
+    CardinalPushBox->DispatchBeginPlay();
+    FCMCombatHitRequest CardinalRequest = Request;
+    CardinalRequest.AttackId = FGuid::NewGuid();
+    CardinalRequest.ImpactPoint = FVector(-50.0f, -190.0f, 100.0f);
+    CardinalRequest.ImpactDirection = FVector(0.25f, 1.0f, 0.0f);
+    TestTrue(TEXT("Diagonal arm hit accepted"), ICMCombatHitTarget::Execute_ReceiveCombatHit(CardinalPushBox, CardinalRequest));
+    CardinalPushBox->Tick(0.1f);
+    TestTrue(TEXT("Push direction follows the opposite of the hit face"), FMath::IsNearlyEqual(CardinalPushBox->GetActorLocation().X, 30.0f, 0.1f));
+    TestTrue(TEXT("Push direction has no diagonal movement"), FMath::IsNearlyEqual(CardinalPushBox->GetActorLocation().Y, -200.0f, 0.1f));
+
     AActor* EnvironmentBlocker = World->SpawnActor<AActor>(FVector(180.0f, 0.0f, 100.0f), FRotator::ZeroRotator);
     UBoxComponent* EnvironmentCollision = NewObject<UBoxComponent>(EnvironmentBlocker);
     EnvironmentBlocker->SetRootComponent(EnvironmentCollision);

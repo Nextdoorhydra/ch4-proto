@@ -83,7 +83,7 @@ void ACMPushBox::Tick(float DeltaTime)
             continue;
         }
 
-        const FVector BlockingNormal = SweepHit.ImpactNormal.IsNearlyZero() ? SweepHit.Normal.GetSafeNormal() : SweepHit.ImpactNormal.GetSafeNormal();
+        const FVector BlockingNormal = SweepHit.bStartPenetrating || SweepHit.ImpactNormal.IsNearlyZero() ? SweepHit.Normal.GetSafeNormal() : SweepHit.ImpactNormal.GetSafeNormal();
         if (FVector::DotProduct(PushDirection, BlockingNormal) >= -KINDA_SMALL_NUMBER)
         {
             continue;
@@ -116,7 +116,7 @@ bool ACMPushBox::ReceiveCombatHit_Implementation(const FCMCombatHitRequest& Requ
 
     AActor* PushSource = IsValid(Request.Attacker) ? Request.Attacker.Get() : Request.SourcePart.Get();
     BoxMesh->IgnoreActorWhenMoving(PushSource, true);
-    if (!StartPush(Request.ImpactDirection))
+    if (!StartPush(ResolveCardinalPushDirection(Request.ImpactPoint, Request.ImpactDirection)))
     {
         BoxMesh->IgnoreActorWhenMoving(PushSource, false);
         return false;
@@ -146,7 +146,7 @@ void ACMPushBox::HandleBoxHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
     }
 
     BoxMesh->IgnoreActorWhenMoving(OtherActor, true);
-    if (!StartPush(ContactDirection))
+    if (!StartPush(ResolveCardinalPushDirection(Hit.ImpactPoint, ContactDirection)))
     {
         BoxMesh->IgnoreActorWhenMoving(OtherActor, false);
     }
@@ -162,6 +162,34 @@ void ACMPushBox::ApplyEditorSettings()
     {
         MechanismWeight->MechanismWeight = FMath::Max(WeightInKg, 0.0f);
     }
+}
+
+FVector ACMPushBox::ResolveCardinalPushDirection(const FVector& ImpactPoint, const FVector& FallbackDirection) const
+{
+    FVector FaceDirection = BoxMesh ? BoxMesh->Bounds.Origin - ImpactPoint : FVector::ZeroVector;
+    FaceDirection.Z = 0.0f;
+    if (BoxMesh && !ImpactPoint.IsNearlyZero())
+    {
+        const FVector Extent = BoxMesh->Bounds.BoxExtent;
+        const float XFaceRatio = FMath::Abs(FaceDirection.X) / FMath::Max(Extent.X, 1.0f);
+        const float YFaceRatio = FMath::Abs(FaceDirection.Y) / FMath::Max(Extent.Y, 1.0f);
+        if (!FaceDirection.IsNearlyZero())
+        {
+            return XFaceRatio >= YFaceRatio ? FVector(FMath::Sign(FaceDirection.X), 0.0f, 0.0f) : FVector(0.0f, FMath::Sign(FaceDirection.Y), 0.0f);
+        }
+    }
+
+    FVector CardinalDirection = FallbackDirection;
+    CardinalDirection.Z = 0.0f;
+    if (FMath::Abs(CardinalDirection.X) >= FMath::Abs(CardinalDirection.Y))
+    {
+        CardinalDirection = FVector(FMath::Sign(CardinalDirection.X), 0.0f, 0.0f);
+    }
+    else
+    {
+        CardinalDirection = FVector(0.0f, FMath::Sign(CardinalDirection.Y), 0.0f);
+    }
+    return CardinalDirection;
 }
 
 bool ACMPushBox::StartPush(FVector WorldDirection)
