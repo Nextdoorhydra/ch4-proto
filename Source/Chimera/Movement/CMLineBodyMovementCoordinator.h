@@ -100,6 +100,9 @@ private:
         int32 SegmentIndex,
         bool bReverseMovement
     ) const;
+    float GetPlayerCountForceMultiplier(
+        const ACMChimera& Chimera
+    ) const;
     void ApplyWholeBodyYawAssist(
         ACMChimera& Chimera,
         const struct FCMPartSlotAddress& PartSlotAddress,
