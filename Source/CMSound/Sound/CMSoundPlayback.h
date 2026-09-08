@@ -12,6 +12,10 @@ class CMSOUND_API FCMSoundPlayback
 {
 public:
     static void PlaySFXAtActor(AActor* SourceActor, FGameplayTag SoundTag);
+    static void PlaySFXAtLocation(
+        AActor* SourceActor,
+        FVector Location,
+        FGameplayTag SoundTag);
     static UAudioComponent* PlayAttachedSFX(
         USceneComponent* AttachToComponent,
         FGameplayTag SoundTag);

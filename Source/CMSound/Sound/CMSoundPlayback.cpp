@@ -7,7 +7,19 @@
 
 void FCMSoundPlayback::PlaySFXAtActor(AActor* SourceActor, FGameplayTag SoundTag)
 {
+    PlaySFXAtLocation(
+        SourceActor,
+        IsValid(SourceActor) ? SourceActor->GetActorLocation() : FVector::ZeroVector,
+        SoundTag);
+}
+
+void FCMSoundPlayback::PlaySFXAtLocation(
+    AActor* SourceActor,
+    const FVector Location,
+    FGameplayTag SoundTag)
+{
     if (!IsValid(SourceActor) || !SoundTag.IsValid()
+        || Location.ContainsNaN()
         || SourceActor->GetNetMode() == NM_DedicatedServer)
     {
         return;
@@ -17,7 +29,7 @@ void FCMSoundPlayback::PlaySFXAtActor(AActor* SourceActor, FGameplayTag SoundTag
     {
         Sound->PlaySFXForActor(
             SoundTag,
-            SourceActor->GetActorLocation(),
+            Location,
             SourceActor);
     }
 }
