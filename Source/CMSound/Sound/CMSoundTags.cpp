@@ -18,6 +18,7 @@ namespace CMSoundTags
 
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Button_Press, "Chimera.Sound.Stage.Button.Press", "스테이지 버튼 입력");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_PressurePlate_WeightChanged, "Chimera.Sound.Stage.PressurePlate.WeightChanged", "감압판 무게 변화");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Obstacle_RotatingBlade_ActiveLoop, "Chimera.Sound.Stage.Obstacle.RotatingBlade.ActiveLoop", "회전 톱날 활성 루프");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Open, "Chimera.Sound.Stage.Door.Open", "스테이지 문 열림");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Close, "Chimera.Sound.Stage.Door.Close", "스테이지 문 닫힘");
 

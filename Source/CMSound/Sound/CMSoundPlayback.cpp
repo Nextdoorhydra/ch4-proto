@@ -1,5 +1,6 @@
 #include "Sound/CMSoundPlayback.h"
 
+#include "Components/SceneComponent.h"
 #include "GameFramework/Actor.h"
 #include "Sound/NKMSoundHelper.h"
 #include "Sound/NKMSoundSubsystem.h"
@@ -19,4 +20,24 @@ void FCMSoundPlayback::PlaySFXAtActor(AActor* SourceActor, FGameplayTag SoundTag
             SourceActor->GetActorLocation(),
             SourceActor);
     }
+}
+
+UAudioComponent* FCMSoundPlayback::PlayAttachedSFX(
+    USceneComponent* AttachToComponent,
+    FGameplayTag SoundTag)
+{
+    const AActor* SourceActor = IsValid(AttachToComponent)
+        ? AttachToComponent->GetOwner()
+        : nullptr;
+    if (!IsValid(SourceActor) || !SoundTag.IsValid()
+        || SourceActor->GetNetMode() == NM_DedicatedServer)
+    {
+        return nullptr;
+    }
+
+    if (UNKMSoundSubsystem* Sound = FNKMSoundHelper::Get(AttachToComponent))
+    {
+        return Sound->PlayAttachedSFX(SoundTag, AttachToComponent);
+    }
+    return nullptr;
 }

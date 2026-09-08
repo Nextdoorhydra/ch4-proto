@@ -61,11 +61,17 @@ void UCMGameSoundBridgeSubsystem::RebuildRegisteredSoundCatalogs()
     }
 
     SoundSubsystem->ClearSoundDataAssets();
+    bool bRegisteredAnyCatalog = false;
     for (const FPrimaryAssetId& AssetId : Settings->SoundDataAssetIds)
     {
         if (UObject* SoundCatalog = Loader->FindCachedAsset(AssetId))
         {
-            SoundSubsystem->RegisterSoundCatalog(SoundCatalog);
+            bRegisteredAnyCatalog |= SoundSubsystem->RegisterSoundCatalog(SoundCatalog);
         }
+    }
+
+    if (bRegisteredAnyCatalog)
+    {
+        OnSoundCatalogsRebuilt.Broadcast();
     }
 }

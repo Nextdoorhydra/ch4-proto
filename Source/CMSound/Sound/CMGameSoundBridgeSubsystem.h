@@ -9,6 +9,8 @@
 class UNKMSoundSubsystem;
 struct FAsyncLoadCompleteMessage;
 
+DECLARE_MULTICAST_DELEGATE(FCMSoundCatalogsRebuilt);
+
 UCLASS()
 // AsyncPDALoader의 현재 캐시를 태그 기반 사운드 조회표로 변환
 class CMSOUND_API UCMGameSoundBridgeSubsystem : public UGameInstanceSubsystem
@@ -18,6 +20,8 @@ class CMSOUND_API UCMGameSoundBridgeSubsystem : public UGameInstanceSubsystem
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+
+    FCMSoundCatalogsRebuilt OnSoundCatalogsRebuilt;
 
 private:
     void HandleLoadComplete(FGameplayTag Channel, const FAsyncLoadCompleteMessage& Message);
