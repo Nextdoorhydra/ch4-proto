@@ -4,11 +4,15 @@
 
 #include "Collision/CMCollisionChannels.h"
 #include "Components/BoxComponent.h"
+#include "Components/ChildActorComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/SplineMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "Parts/Core/CMDroppedPartActor.h"
@@ -16,6 +20,9 @@
 #include "Parts/Arm/CMArmPart.h"
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMChimera.h"
+#include "Player/CMChimeraBodySegmentActor.h"
+#include "Player/CMChimeraIdleTentacleComponent.h"
+#include "Player/CMRuntimeChildActorComponent.h"
 #include "Player/CMPartSlotComponent.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -105,7 +112,6 @@ bool FCMTentacleReservationTest::RunTest(const FString& Parameters)
     {
         return false;
     }
-
     ACMDroppedPartActor* DroppedPart =
         World->SpawnActor<ACMDroppedPartActor>();
     AActor* FirstRequester = World->SpawnActor<AActor>();
@@ -154,6 +160,44 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FCMTentacleBlueprintIntegrationTest::RunTest(
     const FString& Parameters)
 {
+    UClass* SegmentPresentationClass =
+        LoadClass<ACMChimeraBodySegmentActor>(
+            nullptr,
+            TEXT("/Game/Chimera/Character/Chimera/Blueprint/BP_CMChimeraBodySegment.BP_CMChimeraBodySegment_C"));
+    const ACMChimeraBodySegmentActor* SegmentPresentationDefaults =
+        SegmentPresentationClass
+            ? SegmentPresentationClass
+                ->GetDefaultObject<ACMChimeraBodySegmentActor>()
+            : nullptr;
+    TestNotNull(
+        TEXT("Body segment presentation Blueprint class loads"),
+        SegmentPresentationDefaults);
+    TestNotNull(
+        TEXT("Body segment Blueprint contains BodyVisual"),
+        SegmentPresentationDefaults
+            ? SegmentPresentationDefaults
+                ->FindComponentByClass<USkeletalMeshComponent>()
+            : nullptr);
+    const UChildActorComponent* SegmentTentacleSlot =
+        SegmentPresentationDefaults
+            ? SegmentPresentationDefaults
+                ->FindComponentByClass<UChildActorComponent>()
+            : nullptr;
+    TestNotNull(
+        TEXT("Body segment Blueprint explicitly contains TentacleActor"),
+        SegmentTentacleSlot);
+    TestTrue(
+        TEXT("Only the nested TentacleActor is runtime-only in editor previews"),
+        SegmentTentacleSlot
+            && SegmentTentacleSlot->IsA<
+                UCMRuntimeChildActorComponent>());
+    TestNotNull(
+        TEXT("Body segment Blueprint contains the surface-sampled IdleTentacles component"),
+        SegmentPresentationDefaults
+            ? SegmentPresentationDefaults->FindComponentByClass<
+                UCMChimeraIdleTentacleComponent>()
+            : nullptr);
+
     UClass* TentacleClass = LoadClass<ACMTentacleSegmentActor>(
         nullptr,
         TEXT("/Game/Chimera/Character/Tentacle/BP_CMTentacleSegment.BP_CMTentacleSegment_C"));
@@ -272,10 +316,37 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
     {
         return false;
     }
+    FWorldContext& WorldContext = GEngine->CreateNewWorldContext(
+        EWorldType::Game);
+    WorldContext.SetCurrentWorld(World);
 
     UClass* ChimeraClass = LoadClass<ACMChimera>(
         nullptr,
         TEXT("/Game/Chimera/Character/BP_CMChimera.BP_CMChimera_C"));
+    const ACMChimera* ChimeraDefaults = ChimeraClass
+        ? ChimeraClass->GetDefaultObject<ACMChimera>()
+        : nullptr;
+    TArray<UChildActorComponent*> PresentationSlots;
+    if (ChimeraDefaults)
+    {
+        ChimeraDefaults->GetComponents(PresentationSlots);
+        PresentationSlots.RemoveAll([](const UChildActorComponent* Component)
+        {
+            return !Component
+                || !Component->GetName().StartsWith(
+                    TEXT("SegmentPresentation_"));
+        });
+    }
+    TestEqual(
+        TEXT("BP_CMChimera exposes every segment presentation in its editor viewport"),
+        PresentationSlots.Num(),
+        CMControl::MaxSegments);
+    for (const UChildActorComponent* PresentationSlot : PresentationSlots)
+    {
+        TestFalse(
+            TEXT("Outer presentation slots are not suppressed in editor worlds"),
+            PresentationSlot->IsA<UCMRuntimeChildActorComponent>());
+    }
     ACMChimera* Chimera = ChimeraClass
         ? World->SpawnActor<ACMChimera>(ChimeraClass)
         : nullptr;
@@ -290,35 +361,256 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
     }
 
     int32 OwnedTentacleCount = 0;
+    int32 ActiveTentacleCount = 0;
     TSet<int32> SegmentIndices;
+    TSet<int32> ActiveSegmentIndices;
+    TArray<ACMChimeraBodySegmentActor*> InitialPresentations;
     for (TActorIterator<ACMTentacleSegmentActor> It(World); It; ++It)
     {
         if (It->GetOwner() == Chimera)
         {
             ++OwnedTentacleCount;
             SegmentIndices.Add(It->GetSegmentIndex());
+            if (It->IsSegmentActive())
+            {
+                ++ActiveTentacleCount;
+                ActiveSegmentIndices.Add(It->GetSegmentIndex());
+            }
         }
     }
     if (Chimera)
     {
         TestEqual(
-            TEXT("BP_CMChimera creates one tentacle per active segment"),
+            TEXT("BP_CMChimera keeps one pre-authored tentacle per segment"),
             OwnedTentacleCount,
-            Chimera->GetActiveSegmentCount());
+            CMControl::MaxSegments);
         TestEqual(
             TEXT("Each tentacle maps to one distinct BodyMesh_n"),
             SegmentIndices.Num(),
+            CMControl::MaxSegments);
+        TestEqual(
+            TEXT("Only active body segments enable their tentacle"),
+            ActiveTentacleCount,
             Chimera->GetActiveSegmentCount());
+        TestEqual(
+            TEXT("Each active tentacle maps to one distinct BodyMesh_n"),
+            ActiveSegmentIndices.Num(),
+            Chimera->GetActiveSegmentCount());
+
+        for (int32 SegmentIndex = 0;
+            SegmentIndex < CMControl::MaxSegments;
+            ++SegmentIndex)
+        {
+            ACMChimeraBodySegmentActor* Presentation =
+                Chimera->GetBodySegmentPresentation(SegmentIndex);
+            InitialPresentations.Add(Presentation);
+            TestNotNull(
+                *FString::Printf(
+                    TEXT("Segment %d owns a presentation"),
+                    SegmentIndex),
+                Presentation);
+            if (Presentation)
+            {
+                TestTrue(
+                    *FString::Printf(
+                        TEXT("Segment %d uses the body segment Blueprint"),
+                        SegmentIndex),
+                    SegmentPresentationClass
+                        && Presentation->IsA(SegmentPresentationClass));
+                TestEqual(
+                    *FString::Printf(
+                        TEXT("Segment %d keeps a stable index"),
+                        SegmentIndex),
+                    Presentation->GetSegmentIndex(),
+                    SegmentIndex);
+                TestEqual(
+                    *FString::Printf(
+                        TEXT("Segment %d active state follows the Chimera"),
+                        SegmentIndex),
+                    Presentation->IsSegmentActive(),
+                    SegmentIndex < Chimera->GetActiveSegmentCount());
+            }
+        }
+
+        if (!InitialPresentations.Contains(nullptr))
+        {
+            TestEqual(
+                TEXT("The first active segment is Head"),
+                InitialPresentations[0]->GetVisualRole(),
+                ECMChimeraSegmentVisualRole::Head);
+            TestEqual(
+                TEXT("The last active segment is Tail"),
+                InitialPresentations[Chimera->GetActiveSegmentCount() - 1]
+                    ->GetVisualRole(),
+                ECMChimeraSegmentVisualRole::Tail);
+        }
     }
 
     ACMTentacleSegmentActor* RuntimeTentacle = nullptr;
     for (TActorIterator<ACMTentacleSegmentActor> It(World); It; ++It)
     {
-        if (It->GetOwner() == Chimera)
+        if (It->GetOwner() == Chimera && It->IsSegmentActive())
         {
             RuntimeTentacle = *It;
             break;
         }
+    }
+    UCMChimeraIdleTentacleComponent* RuntimeIdleTentacles = nullptr;
+    ACMChimeraBodySegmentActor* RuntimePresentation = nullptr;
+    if (Chimera && RuntimeTentacle)
+    {
+        RuntimePresentation = Chimera->GetBodySegmentPresentation(
+            RuntimeTentacle->GetSegmentIndex());
+        if (RuntimePresentation)
+        {
+            RuntimeIdleTentacles = RuntimePresentation->FindComponentByClass<
+                UCMChimeraIdleTentacleComponent>();
+        }
+    }
+    TestNotNull(
+        TEXT("Active segment contains IdleTentacles"),
+        RuntimeIdleTentacles);
+    if (RuntimeIdleTentacles && RuntimeTentacle)
+    {
+        TestEqual(
+            TEXT("IdleTentacles samples the tentacle segment GooBody"),
+            RuntimeIdleTentacles->GetSourceMeshComponent(),
+            static_cast<UMeshComponent*>(
+                RuntimeTentacle->GetGooBodyComponent()));
+        RuntimeIdleTentacles->SetEffectActive(true);
+        RuntimeIdleTentacles->TickComponent(
+            0.3f,
+            LEVELTICK_All,
+            nullptr);
+        TestTrue(
+            TEXT("SM_VFX_Smooth_Sphere_01 produces upper-surface candidates"),
+            RuntimeIdleTentacles->GetSurfaceCandidateCount() > 0);
+        TestEqual(
+            TEXT("Idle tentacles use the shortened ninety-centimeter length"),
+            RuntimeIdleTentacles->GetTentacleLength(),
+            90.0f);
+        RuntimeIdleTentacles->TickComponent(
+            0.01f,
+            LEVELTICK_All,
+            nullptr);
+        TestEqual(
+            TEXT("Each active segment grows four idle tentacles"),
+            RuntimeIdleTentacles->GetActiveTentacleCount(),
+            4);
+        RuntimeIdleTentacles->TickComponent(
+            0.3f,
+            LEVELTICK_All,
+            nullptr);
+        TArray<USplineMeshComponent*> IdleSplineMeshes;
+        RuntimePresentation->GetComponents<USplineMeshComponent>(
+            IdleSplineMeshes);
+        int32 VisibleNonDegenerateIdleSpans = 0;
+        const USplineMeshComponent* VisibleIdleSplineMesh = nullptr;
+        for (const USplineMeshComponent* IdleSplineMesh
+            : IdleSplineMeshes)
+        {
+            if (IdleSplineMesh
+                && IdleSplineMesh->IsVisible()
+                && !IdleSplineMesh->bHiddenInGame
+                && !IdleSplineMesh->GetStartPosition().Equals(
+                    IdleSplineMesh->GetEndPosition()))
+            {
+                ++VisibleNonDegenerateIdleSpans;
+                VisibleIdleSplineMesh = IdleSplineMesh;
+            }
+        }
+        TestTrue(
+            TEXT("Growing idle tentacles render non-degenerate spline spans"),
+            VisibleNonDegenerateIdleSpans > 0);
+        TestNotNull(
+            TEXT("Growing idle tentacles expose a visible spline mesh"),
+            VisibleIdleSplineMesh);
+        if (VisibleIdleSplineMesh)
+        {
+            TestEqual(
+                TEXT("Idle spline uses the existing arm mesh"),
+                GetPathNameSafe(VisibleIdleSplineMesh->GetStaticMesh()),
+                FString(TEXT("/Game/Vefects/Tentacles_VFX/VFX/Goo/SM/SM_VFX_Arm_03.SM_VFX_Arm_03")));
+            TestNotNull(
+                TEXT("Idle spline uses a dynamic Goo Arm material"),
+                Cast<UMaterialInstanceDynamic>(
+                    VisibleIdleSplineMesh->GetMaterial(0)));
+            TestTrue(
+                TEXT("Idle spline is rendered with a thin cross-section"),
+                VisibleIdleSplineMesh->GetStartScale().GetMax()
+                    <= 0.6f
+                && VisibleIdleSplineMesh->GetEndScale().GetMax()
+                    <= 0.6f);
+            TestFalse(
+                TEXT("Idle spline start tangent follows the animated curve"),
+                VisibleIdleSplineMesh->GetStartTangent().IsNearlyZero());
+            TestFalse(
+                TEXT("Idle spline end tangent follows the animated curve"),
+                VisibleIdleSplineMesh->GetEndTangent().IsNearlyZero());
+            const FTransform& SplineMeshTransform =
+                VisibleIdleSplineMesh->GetComponentTransform();
+            const FBox SplineMeshBounds =
+                VisibleIdleSplineMesh->Bounds.GetBox();
+            TestTrue(
+                TEXT("Animated start remains inside spline render bounds"),
+                SplineMeshBounds.IsInsideOrOn(
+                    SplineMeshTransform.TransformPosition(
+                        VisibleIdleSplineMesh->GetStartPosition())));
+            TestTrue(
+                TEXT("Animated end remains inside spline render bounds"),
+                SplineMeshBounds.IsInsideOrOn(
+                    SplineMeshTransform.TransformPosition(
+                        VisibleIdleSplineMesh->GetEndPosition())));
+        }
+
+        USkeletalMeshComponent* RuntimeBodyVisual =
+            RuntimePresentation->FindComponentByClass<
+                USkeletalMeshComponent>();
+        TestEqual(
+            TEXT("Idle tentacles attach independently from BodyVisual"),
+            RuntimeIdleTentacles->GetAttachParent(),
+            RuntimePresentation->GetRootComponent());
+        if (RuntimeBodyVisual)
+        {
+            RuntimeBodyVisual->SetVisibility(false, true);
+            RuntimeBodyVisual->SetHiddenInGame(true, true);
+            TestTrue(
+                TEXT("BodyVisual visibility does not hide idle spline meshes"),
+                VisibleIdleSplineMesh
+                && VisibleIdleSplineMesh->IsVisible()
+                && !VisibleIdleSplineMesh->bHiddenInGame);
+            RuntimeBodyVisual->SetVisibility(true, true);
+            RuntimeBodyVisual->SetHiddenInGame(false, true);
+        }
+
+        RuntimeIdleTentacles->TickComponent(
+            3.0f,
+            LEVELTICK_All,
+            nullptr);
+        RuntimeIdleTentacles->TickComponent(
+            1.0f,
+            LEVELTICK_All,
+            nullptr);
+        RuntimeIdleTentacles->TickComponent(
+            0.3f,
+            LEVELTICK_All,
+            nullptr);
+        int32 VisibleRespawnedIdleSpans = 0;
+        for (const USplineMeshComponent* IdleSplineMesh
+            : IdleSplineMeshes)
+        {
+            if (IdleSplineMesh
+                && IdleSplineMesh->IsVisible()
+                && !IdleSplineMesh->bHiddenInGame
+                && !IdleSplineMesh->GetStartPosition().Equals(
+                    IdleSplineMesh->GetEndPosition()))
+            {
+                ++VisibleRespawnedIdleSpans;
+            }
+        }
+        TestTrue(
+            TEXT("Idle spline meshes remain visible after respawning"),
+            VisibleRespawnedIdleSpans > 0);
     }
     UClass* RuntimeArmClass = LoadClass<ACMArmPart>(
         nullptr,
@@ -352,6 +644,28 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             RuntimeTarget->GetPartMesh()->GetCollisionEnabled(),
             ECollisionEnabled::QueryAndPhysics);
 
+        USkeletalMeshComponent* RuntimeTargetMesh =
+            RuntimeTarget->GetPartMesh();
+        const FTransform OriginalTargetMeshTransform =
+            RuntimeTargetMesh->GetComponentTransform();
+        const FVector TargetActorOrigin = RuntimeTarget->GetActorLocation();
+        RuntimeTargetMesh->SetWorldLocation(
+            TargetActorOrigin + FVector(0.0f, 0.0f, 150.0f),
+            false,
+            nullptr,
+            ETeleportType::TeleportPhysics);
+        RuntimeTargetMesh->UpdateBounds();
+        const FVector ResolvedMeshTarget =
+            RuntimeTentacle->ResolveVisualTargetLocation(RuntimeTarget);
+        TestTrue(
+            TEXT("Ragdoll target resolves toward its displaced skeletal mesh"),
+            FVector::DistSquared(
+                ResolvedMeshTarget,
+                RuntimeTargetMesh->Bounds.Origin)
+            < FVector::DistSquared(
+                TargetActorOrigin,
+                RuntimeTargetMesh->Bounds.Origin));
+
         RuntimeTentacle->SetTetheredActor(RuntimeTarget);
         RuntimeTentacle->UpdateVisual(1.0f);
 
@@ -378,7 +692,28 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             TestNotNull(
                 TEXT("Runtime spline uses the Goo Arm material"),
                 RuntimeSpline->GetMaterial(0));
+            TestTrue(
+                TEXT("Runtime spline ends on the ragdoll skeletal mesh"),
+                RuntimeSpline->GetComponentTransform().TransformPosition(
+                    RuntimeSpline->GetEndPosition()).Equals(
+                        ResolvedMeshTarget,
+                        1.0f));
+            TestEqual(
+                TEXT("Part-targeting tentacle uses the enlarged width"),
+                RuntimeSpline->GetStartScale(),
+                FVector2D(1.8f));
+            TestEqual(
+                TEXT("Part-targeting tentacle keeps its enlarged target width"),
+                RuntimeSpline->GetEndScale(),
+                FVector2D(1.8f));
         }
+
+        RuntimeTargetMesh->SetWorldTransform(
+            OriginalTargetMeshTransform,
+            false,
+            nullptr,
+            ETeleportType::TeleportPhysics);
+        RuntimeTargetMesh->UpdateBounds();
 
         FCMPartSlotAddress PullSlotAddress;
         PullSlotAddress.SegmentIndex = RuntimeTentacle->GetSegmentIndex();
@@ -431,7 +766,60 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             ECollisionEnabled::NoCollision);
     }
 
+    if (Chimera
+        && InitialPresentations.Num() == CMControl::MaxSegments
+        && !InitialPresentations.Contains(nullptr))
+    {
+        Chimera->SetActiveSegmentCountForPlayers(1);
+        TestEqual(
+            TEXT("One player activates two segments"),
+            Chimera->GetActiveSegmentCount(),
+            2);
+        for (int32 SegmentIndex = 0;
+            SegmentIndex < CMControl::MaxSegments;
+            ++SegmentIndex)
+        {
+            ACMChimeraBodySegmentActor* Presentation =
+                Chimera->GetBodySegmentPresentation(SegmentIndex);
+            TestEqual(
+                *FString::Printf(
+                    TEXT("Segment %d presentation survives shrink"),
+                    SegmentIndex),
+                Presentation,
+                InitialPresentations[SegmentIndex]);
+            TestEqual(
+                *FString::Printf(
+                    TEXT("Segment %d active state follows one-player layout"),
+                    SegmentIndex),
+                Presentation && Presentation->IsSegmentActive(),
+                SegmentIndex < 2);
+        }
+        TestEqual(
+            TEXT("One-player layout begins with Head"),
+            InitialPresentations[0]->GetVisualRole(),
+            ECMChimeraSegmentVisualRole::Head);
+        TestEqual(
+            TEXT("One-player layout ends with Tail"),
+            InitialPresentations[1]->GetVisualRole(),
+            ECMChimeraSegmentVisualRole::Tail);
+
+        Chimera->SetActiveSegmentCountForPlayers(2);
+        TestEqual(
+            TEXT("Two players reactivate four segments"),
+            Chimera->GetActiveSegmentCount(),
+            4);
+        TestEqual(
+            TEXT("Previous Tail changes to Body without replacement"),
+            InitialPresentations[1]->GetVisualRole(),
+            ECMChimeraSegmentVisualRole::Body);
+        TestEqual(
+            TEXT("Reactivated final segment becomes Tail"),
+            InitialPresentations[3]->GetVisualRole(),
+            ECMChimeraSegmentVisualRole::Tail);
+    }
+
     World->DestroyWorld(false);
+    GEngine->DestroyWorldContext(World);
     return true;
 }
 
