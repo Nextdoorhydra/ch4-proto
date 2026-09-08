@@ -91,5 +91,8 @@ private:
     UPROPERTY(ReplicatedUsing = OnRep_PlayerImpactActive)
     bool bPlayerImpactActive = false;
 
+    bool bHasObservedActiveState = false;
+    bool bLastObservedActiveState = false;
+
     FTimerHandle RefreshTimerHandle;
 };
