@@ -7,6 +7,8 @@
 #include "GameFramework/GameStateBase.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 
 namespace
@@ -252,6 +254,12 @@ void ACMLegPart::EndProceduralStep()
             ContactSpeed);
     }
 
+    const bool bShouldPlayFootstep = PlantSnapshot.bContactValid
+        && (PlantSnapshot.Trigger == ECMLegPlantTrigger::PlayerInput
+            || PlantSnapshot.Trigger == ECMLegPlantTrigger::ReachRecovery);
+    const FVector_NetQuantize10 FootstepLocation =
+        PlantSnapshot.GroundLocation;
+
     PlantSnapshot.State = PlantSnapshot.bContactValid
         ? ECMLegPlantState::Planted
         : ECMLegPlantState::Free;
@@ -268,6 +276,11 @@ void ACMLegPart::EndProceduralStep()
     StepGroundNormal = PlantSnapshot.GroundNormal;
     BroadcastPlantState();
     ForceNetUpdate();
+
+    if (bShouldPlayFootstep)
+    {
+        MulticastPlayFootstep(FootstepLocation);
+    }
 }
 
 void ACMLegPart::CancelProceduralStep(
@@ -382,6 +395,15 @@ void ACMLegPart::OnRep_PlantSnapshot()
 void ACMLegPart::OnRep_StepState()
 {
     OnRep_PlantSnapshot();
+}
+
+void ACMLegPart::MulticastPlayFootstep_Implementation(
+    const FVector_NetQuantize10 GroundLocation)
+{
+    FCMSoundPlayback::PlaySFXAtLocation(
+        this,
+        GroundLocation,
+        CMSoundTags::Body_Footstep);
 }
 
 float ACMLegPart::GetStepPhase() const
