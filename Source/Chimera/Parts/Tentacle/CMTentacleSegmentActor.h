@@ -14,6 +14,7 @@ class UNiagaraComponent;
 class UNiagaraSystem;
 class UPrimitiveComponent;
 class USceneComponent;
+class USkeletalMeshComponent;
 class USphereComponent;
 class USplineMeshComponent;
 class UStaticMesh;
@@ -51,7 +52,11 @@ public:
     void InitializeForSegment(
         ACMChimera* InChimera,
         int32 InSegmentIndex,
-        UPrimitiveComponent* InBodySegment);
+        UPrimitiveComponent* InBodySegment,
+        bool bAttachToBodySegment = true);
+
+    /** Enables interaction and rendering without changing this Actor's lifetime. */
+    void SetSegmentActive(bool bInActive);
 
     /** Starts pulling the currently tethered dropped Part into an empty slot. */
     bool TryBeginPartAttachment(
@@ -65,6 +70,18 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Tentacle")
     bool HasAttachablePart() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Tentacle")
+    bool IsSegmentActive() const { return bSegmentActive; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Tentacle")
+    UStaticMeshComponent* GetGooBodyComponent() const { return GooBody; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Tentacle")
+    float GetTetheredTentacleWidth() const
+    {
+        return TetheredTentacleWidth;
+    }
 
     static const FName TentacleInteractiveActorTag;
 
@@ -150,6 +167,12 @@ protected:
         meta = (ClampMin = "0.0"))
     float TangentNoise = 80.0f;
 
+    /** Cross-section scale of the tentacle reaching toward a Part. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Visual",
+        meta = (ClampMin = "0.01"))
+    float TetheredTentacleWidth = 1.8f;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Tentacle|Attachment",
         meta = (ClampMin = "0.01"))
@@ -187,6 +210,8 @@ private:
     void UpdateVisual(float DeltaTime);
     void EnsureVisualComponents();
     void DestroyVisualComponents();
+    USkeletalMeshComponent* ResolveTargetPartMesh(AActor* Target) const;
+    FVector ResolveVisualTargetLocation(AActor* Target) const;
 
     UFUNCTION()
     void OnRep_VisualState();
@@ -208,4 +233,5 @@ private:
     FVector LastVisualTargetLocation = FVector::ZeroVector;
     float PullElapsedSeconds = 0.0f;
     float VisualAlpha = 0.0f;
+    bool bSegmentActive = true;
 };

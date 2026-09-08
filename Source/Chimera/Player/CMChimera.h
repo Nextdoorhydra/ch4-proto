@@ -22,6 +22,7 @@ class UCMChimeraAttributeSet;
 class UCMVisionComponent;
 class UCMLineBodyMovementCoordinator;
 class UCMGoreResponseComponent;
+class UCMChimeraTrailComponent;
 class UCMPartSlotComponent;
 class UPrimitiveComponent;
 class UDataTable;
@@ -31,6 +32,8 @@ class ACMArmPart;
 class ACMLegPart;
 class ACMSpringArmPart;
 class ACMTentacleSegmentActor;
+class ACMChimeraBodySegmentActor;
+class UChildActorComponent;
 class AActor;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogChimeraLineBody, Log, All);
@@ -183,11 +186,15 @@ public:
         Category = "Chimera|Health")
     void RestoreForCheckpointRespawn();
 
-    /** Keeps the active body count equal to the 4~8 participating players. */
+    /** Keeps two active body segments for every participating player. */
     void SetActiveSegmentCountForPlayers(int32 PlayerCount);
 
     UFUNCTION(BlueprintPure, Category = "Chimera")
     int32 GetActiveSegmentCount() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Body Segment")
+    ACMChimeraBodySegmentActor* GetBodySegmentPresentation(
+        int32 SegmentIndex) const;
 
     /** Changes only this process's camera component; the value is not replicated. */
     float AdjustLocalCameraDistance(float WheelInput);
@@ -374,6 +381,10 @@ protected:
         Category = "Chimera|Gore")
     TObjectPtr<UCMGoreResponseComponent> GoreResponseComponent;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+        Category = "Chimera|VFX")
+    TObjectPtr<UCMChimeraTrailComponent> TrailComponent;
+
     // ASC가 소유하는 키메라 전체 공용 체력/스태미나 데이터다.
     UPROPERTY()
     TObjectPtr<UCMChimeraAttributeSet> AttributeSet;
@@ -391,7 +402,16 @@ protected:
         Category = "Chimera")
     TArray<TObjectPtr<UBoxComponent>> BodySegments;
 
-    /** One server-spawned tentacle actor for every active BodyMesh_n. */
+    /** Stable presentation ChildActorComponent paired 1:1 with BodyMesh_n. */
+    UPROPERTY(BlueprintReadOnly, Transient,
+        Category = "Chimera|Body Segment")
+    TArray<TObjectPtr<UChildActorComponent>> SegmentPresentationComponents;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Body Segment")
+    TSubclassOf<ACMChimeraBodySegmentActor> BodySegmentPresentationClass;
+
+    /** Cached access to the pre-authored TentacleActor in every presentation. */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
         Category = "Chimera|Tentacle")
     TArray<TObjectPtr<ACMTentacleSegmentActor>> TentacleSegments;
@@ -555,7 +575,7 @@ protected:
 
     UPROPERTY(ReplicatedUsing = OnRep_ActiveSegmentCount,
         EditAnywhere, BlueprintReadOnly, Category = "Chimera",
-        meta = (ClampMin = "1", ClampMax = "8", UIMin = "1", UIMax = "8"))
+        meta = (ClampMin = "1", ClampMax = "16", UIMin = "1", UIMax = "16"))
     int32 ActiveSegmentCount = 4;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera",
@@ -732,6 +752,7 @@ protected:
 private:
     void ConfigureSegments();
     void RefreshTentacleSegments();
+    void RefreshBodySegmentPresentationClasses();
     void ConfigureNetworkPhysics();
     void ConfigureBodyRotationLock(UBoxComponent* SegmentBody);
     bool InitializeFromBodyData();

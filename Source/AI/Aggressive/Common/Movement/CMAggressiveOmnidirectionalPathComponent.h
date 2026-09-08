@@ -67,6 +67,9 @@ public:
     /** 지정한 시작점에서 목적지까지 완전한 NavMesh 경로 길이를 계산한다. */
     bool CalculateNavigationPathLength(FVector StartLocation, FVector WorldGoal, float& OutPathLength);
 
+    /** 이 AI에 지정된 전용 NavMesh에서 도달 가능한 임의 위치를 찾는다. */
+    bool FindRandomReachableLocation(FVector Origin, float Radius, FVector& OutLocation) const;
+
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Path Movement")
     void SetPolicyControlEnabled(bool bEnabled);
 

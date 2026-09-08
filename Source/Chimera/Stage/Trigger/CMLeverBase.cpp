@@ -96,11 +96,21 @@ void ACMLeverBase::UpdateArmHold()
         StopArmHold();
         return;
     }
+    if (IsHoldDistanceExceeded(*Arm))
+    {
+        StopArmHold();
+        return;
+    }
     const FVector Axis = GetActorTransform().TransformVectorNoScale(LocalPullAxis).GetSafeNormal();
     const float Distance = FVector::DotProduct(Arm->GetActorLocation() - GrabStartArmLocation, Axis);
     LeverAlpha = FMath::Clamp(GrabStartAlpha + 2.0f * Distance / FMath::Max(FullTravelDistance, 1.0f), -1.0f, 1.0f);
     const float Threshold = FMath::Clamp(SwitchThreshold, 0.01f, 1.0f);
-    if (LeverAlpha >= Threshold)
+    if (bRequiresHoldToStayActivated)
+    {
+        TGuardValue<bool> HoldUpdateGuard(bUpdatingFromHold, true);
+        SetLeverPressed(LeverAlpha >= Threshold, Arm);
+    }
+    else if (LeverAlpha >= Threshold)
     {
         TGuardValue<bool> HoldUpdateGuard(bUpdatingFromHold, true);
         SetLeverPressed(true, Arm);
@@ -144,9 +154,21 @@ void ACMLeverBase::StopArmHold()
     {
         Arm->EndGroundAnchor();
     }
+    if (bRequiresHoldToStayActivated && ActivationTrigger->IsTriggered())
+    {
+        TGuardValue<bool> HoldUpdateGuard(bUpdatingFromHold, true);
+        ReleaseButton(Arm);
+    }
     LeverAlpha = ActivationTrigger->IsTriggered() ? 1.0f : -1.0f;
     NotifyLeverTargetChanged();
     ForceNetUpdate();
+}
+
+bool ACMLeverBase::IsHoldDistanceExceeded(const ACMArmPart& ArmPart) const
+{
+    return MaximumHoldDistance > 0.0f
+        && FVector::DistSquared(ArmPart.GetActorLocation(), ArmHoldVolume->GetComponentLocation())
+            > FMath::Square(MaximumHoldDistance);
 }
 
 void ACMLeverBase::HandleLeverTriggerChanged(AActor* TriggeringActor)
@@ -304,6 +326,7 @@ bool ACMLeverBase::TryHandlePull_Implementation(
 
     LastPullResult = ECMGrabPullResult::HandledNoChange;
     if (!IsElementActive() || HoldingArm.IsValid()
+        || bRequiresHoldToStayActivated
         || !FMath::IsFinite(PullStrength) || PullStrength < RequiredPullStrength
         || PullOrigin.ContainsNaN())
     {

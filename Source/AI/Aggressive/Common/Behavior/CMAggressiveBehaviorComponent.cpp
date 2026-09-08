@@ -6,6 +6,7 @@
 #include "Aggressive/Common/Core/CMAggressivePawnBase.h"
 #include "Aggressive/Common/Movement/CMAggressiveAccelerationMovementComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveKnockbackComponent.h"
+#include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "Aggressive/Ripper/CMRipperPawn.h"
 #include "Aggressive/Ripper/Learning/CMRipperLearningInferenceCoordinator.h"
@@ -17,7 +18,6 @@
 #include "GameMode/CMGameState.h"
 #include "Gore/CMDismemberableTarget.h"
 #include "HAL/IConsoleManager.h"
-#include "NavigationSystem.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlTypes.h"
@@ -51,6 +51,7 @@ namespace CMAggressiveBehavior
     constexpr float StuckMovementDistance = 15.0f;
     constexpr float StuckReverseDuration = 0.75f;
     constexpr float StuckReverseSpeed = 250.0f;
+    constexpr float FailedMoveRetryInterval = 1.0f;
 
 #if !UE_BUILD_SHIPPING
     bool bDrawWanderGoalDebug = false;
@@ -235,7 +236,7 @@ void UCMAggressiveBehaviorComponent::InitializeRuntimeBehavior()
     SetBehaviorEnabled(true);
 }
 
-// 정체 복구를 우선 처리한 뒤 현재 상태에 맞는 탐색·추격·공격 행동을 갱신한다.
+// 새 타깃 감지를 우선 처리한 뒤 정체 복구와 현재 탐색·추격·공격 행동을 갱신한다.
 void UCMAggressiveBehaviorComponent::UpdateBehavior()
 {
     UWorld* World = GetWorld();
@@ -245,12 +246,24 @@ void UCMAggressiveBehaviorComponent::UpdateBehavior()
     }
 
     const double CurrentTime = World->GetTimeSeconds();
+    UpdateTetraSightScan(CurrentTime);
+    // 정체 복구 중에도 새 타깃 감지는 우선 처리해 눈앞의 희생양을 놓치지 않는다.
+    if (State == ECMAggressiveAIState::Searching)
+    {
+        if (AActor* SeenTarget = FindVisibleTarget())
+        {
+            bReversingFromStuck = false;
+            bCompletingStuckRecoveryMove = false;
+            StopMove();
+            BeginChasing(SeenTarget);
+            return;
+        }
+    }
     // 복구 동작 중에는 일반 상태 머신이 새 이동 명령으로 복구를 덮어쓰지 않게 한다.
     if (UpdateStuckRecovery(CurrentTime) || UpdateStuckDetection(CurrentTime))
     {
         return;
     }
-    UpdateTetraSightScan(CurrentTime);
     switch (State)
     {
     case ECMAggressiveAIState::Searching:
@@ -499,7 +512,22 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
 
     if (!IsMoveRunning())
     {
+        const double CurrentTime = GetWorld()->GetTimeSeconds();
+        if (bMoveIssued)
+        {
+            bMoveIssued = false;
+            NextActionTime = CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
+            return;
+        }
+        if (CurrentTime < NextActionTime)
+        {
+            return;
+        }
         bMoveIssued = StartMove(TargetLocation, AttackDistance);
+        if (!bMoveIssued)
+        {
+            NextActionTime = CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
+        }
     }
     else if (FVector::DistSquared2D(TargetLocation, LastMoveGoal) >= FMath::Square(CMAggressiveBehavior::RepathDistance))
     {
@@ -595,6 +623,10 @@ void UCMAggressiveBehaviorComponent::BeginChasing(AActor* NewTarget)
     State = ECMAggressiveAIState::Chasing;
     bReturningHome = false;
     bMoveIssued = StartMove(CurrentTarget->GetActorLocation(), GetAttackDistance());
+    if (!bMoveIssued)
+    {
+        NextActionTime = GetWorld()->GetTimeSeconds() + CMAggressiveBehavior::FailedMoveRetryInterval;
+    }
 }
 
 // 현재 교전을 해제하고 탐색 상태에서 생성 위치로 돌아가도록 전환한다.
@@ -618,9 +650,8 @@ void UCMAggressiveBehaviorComponent::BeginWaiting(const float Seconds)
 // 생성 위치 주변에서 충분히 떨어진 도달 가능 지점을 골라 배회 이동을 시작한다.
 bool UCMAggressiveBehaviorComponent::BeginRandomMove()
 {
-    UWorld* World = GetWorld();
-    UNavigationSystemV1* NavigationSystem = World ? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World) : nullptr;
-    if (!NavigationSystem)
+    const UCMAggressiveOmnidirectionalPathComponent* PathMovement = OwnerPawn ? OwnerPawn->FindComponentByClass<UCMAggressiveOmnidirectionalPathComponent>() : nullptr;
+    if (!PathMovement)
     {
         return false;
     }
@@ -629,11 +660,11 @@ bool UCMAggressiveBehaviorComponent::BeginRandomMove()
 
     const FVector CurrentLocation = GetNavigationLocation();
     const float MinimumGoalDistance = CMAggressiveBehavior::MinimumWanderTravelDistance + CMAggressiveBehavior::WanderAcceptanceRadius;
-    FNavLocation RandomLocation;
+    FVector RandomLocation = FVector::ZeroVector;
     bool bFoundGoal = false;
     for (int32 Attempt = 0; Attempt < CMAggressiveBehavior::WanderGoalSampleAttempts; ++Attempt)
     {
-        if (NavigationSystem->GetRandomReachablePointInRadius(SpawnLocation, Radius, RandomLocation) && FVector::DistSquared2D(CurrentLocation, RandomLocation.Location) >= FMath::Square(MinimumGoalDistance))
+        if (PathMovement->FindRandomReachableLocation(SpawnLocation, Radius, RandomLocation) && FVector::DistSquared2D(CurrentLocation, RandomLocation) >= FMath::Square(MinimumGoalDistance))
         {
             bFoundGoal = true;
             break;
@@ -643,11 +674,11 @@ bool UCMAggressiveBehaviorComponent::BeginRandomMove()
     {
         return false;
     }
-    LastWanderGoal = RandomLocation.Location;
+    LastWanderGoal = RandomLocation;
     bHasWanderGoal = true;
     OwnerPawn->ForceNetUpdate();
 
-    return StartMove(RandomLocation.Location, CMAggressiveBehavior::WanderAcceptanceRadius);
+    return StartMove(RandomLocation, CMAggressiveBehavior::WanderAcceptanceRadius);
 }
 
 void UCMAggressiveBehaviorComponent::DrawWanderGoalDebug() const
