@@ -33,6 +33,14 @@ void CMAIFixedLegActuation::CalculateGroundSweepSegment(const FVector& ContactLo
     OutEnd = OutStart - FVector::UpVector * SafeDistance;
 }
 
+float CMAIFixedLegActuation::CalculateRequiredGroundLift(float ContactHeight, float GroundHeight, float MaximumLift, float PenetrationTolerance)
+{
+    const float RequiredLift = GroundHeight - ContactHeight;
+    const float SafeMaximumLift = FMath::Max(MaximumLift, 0.0f);
+    const float SafeTolerance = FMath::Max(PenetrationTolerance, 0.0f);
+    return RequiredLift > SafeTolerance && RequiredLift <= SafeMaximumLift ? RequiredLift : 0.0f;
+}
+
 // Tick을 사용하지 않는 고정 다리 구동 컴포넌트를 생성한다.
 UCMAIFixedLegActuatorComponent::UCMAIFixedLegActuatorComponent()
 {
@@ -109,6 +117,49 @@ void UCMAIFixedLegActuatorComponent::LimitPlanarSpeed(UPrimitiveComponent* Body,
     Velocity.X = LimitedPlanarVelocity.X;
     Velocity.Y = LimitedPlanarVelocity.Y;
     Body->SetPhysicsLinearVelocity(Velocity);
+}
+
+// 각 접지점 위에서 지면을 찾고 가장 깊은 관통량만큼 액터 전체를 위로 이동한다.
+bool UCMAIFixedLegActuatorComponent::ResolveInitialGroundPenetration(UPrimitiveComponent* ReferenceBody, const TArray<TObjectPtr<USceneComponent>>& ContactPoints, const FCMAIFixedLegActuationSettings& Settings, float MaximumLift, float PenetrationTolerance) const
+{
+    AActor* Owner = GetOwner();
+    const UWorld* World = GetWorld();
+    if (!Owner || !Owner->HasAuthority() || !World
+        || !ReferenceBody || ContactPoints.IsEmpty() || MaximumLift <= 0.0f)
+    {
+        return false;
+    }
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CMAIFixedLegInitialGround), false, Owner);
+    float RequiredLift = 0.0f;
+    const float TraceTop = ReferenceBody->Bounds.Origin.Z + ReferenceBody->Bounds.BoxExtent.Z + FMath::Max(Settings.GroundCheckRadius, 0.0f);
+    const float TraceDepth = FMath::Max(Settings.GroundContactDistance, 1.0f);
+    for (const USceneComponent* ContactPoint : ContactPoints)
+    {
+        if (!ContactPoint)
+        {
+            continue;
+        }
+
+        const FVector ContactLocation = ContactPoint->GetComponentLocation();
+        const FVector TraceStart(ContactLocation.X, ContactLocation.Y, FMath::Max(TraceTop, ContactLocation.Z + 1.0f));
+        const FVector TraceEnd(ContactLocation.X, ContactLocation.Y, ContactLocation.Z - TraceDepth);
+        FHitResult GroundHit;
+        if (!World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, Settings.GroundTraceChannel, QueryParams) || GroundHit.ImpactNormal.Z < Settings.MinimumGroundNormalZ)
+        {
+            continue;
+        }
+
+        RequiredLift = FMath::Max(RequiredLift, CMAIFixedLegActuation::CalculateRequiredGroundLift(ContactLocation.Z, GroundHit.ImpactPoint.Z, MaximumLift, PenetrationTolerance));
+    }
+
+    if (RequiredLift <= 0.0f)
+    {
+        return false;
+    }
+
+    Owner->AddActorWorldOffset(FVector(0.0f, 0.0f, RequiredLift), false, nullptr, ETeleportType::TeleportPhysics);
+    return true;
 }
 
 // 다리 접지점 아래에서 유효한 지면 접촉을 찾는다.

@@ -24,17 +24,21 @@ class ACMPartActorBase;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FCMSacrificeHitAcceptedSignature, AActor*, Attacker, AActor*, SourcePart, FVector, ImpactDirection);
 
-/** One guaranteed collectible configured on a placed Sacrifice instance. */
+/** Per-body-part rule that only controls whether the detached part is collectible. */
 USTRUCT(BlueprintType)
-struct AI_API FCMSacrificeRewardPart
+struct AI_API FCMSacrificeAttackPartRule
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Reward")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dismemberment")
     ECMBodyPart BodyPart = ECMBodyPart::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Reward")
-    TSubclassOf<ACMPartActorBase> PartClass;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dismemberment")
+    bool bPlayerCanAcquire = false;
+
+    /** Optional override; when empty, the native Head/Arm/Leg part class is used. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dismemberment", meta = (EditCondition = "bPlayerCanAcquire", EditConditionHides))
+    TSubclassOf<ACMPartActorBase> PartClassOverride;
 };
 
 /** Character foundation for the Sacrifice AI; contains no AI behavior. */
@@ -64,9 +68,14 @@ public:
         return DismembermentComponent;
     }
 
-    const TArray<FCMSacrificeRewardPart>& GetRewardParts() const
+    const TArray<FCMSacrificeAttackPartRule>& GetAttackPartRules() const
     {
-        return RewardParts;
+        return AttackPartRules;
+    }
+
+    float GetDismembermentImpulse() const
+    {
+        return DismembermentImpulse;
     }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Sacrifice|AI")
@@ -168,9 +177,12 @@ protected:
     float CalculateMovementSpeed() const;
     void RefreshMovementSpeed();
 
-    /** Rewards authored per placed victim; duplicate body parts are ignored. */
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Sacrifice|Rewards", meta = (TitleProperty = "BodyPart"))
-    TArray<FCMSacrificeRewardPart> RewardParts;
+    /** Optional per-part collectible settings; these rules never restrict which attached part can be severed. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Dismemberment", meta = (TitleProperty = "BodyPart", DisplayName = "Attack Part Rules"))
+    TArray<FCMSacrificeAttackPartRule> AttackPartRules;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Dismemberment", meta = (ClampMin = "0.0"))
+    float DismembermentImpulse = 1200.0f;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMDismembermentComponent> DismembermentComponent;

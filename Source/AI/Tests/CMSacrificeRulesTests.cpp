@@ -1,6 +1,9 @@
 #include "Misc/AutomationTest.h"
 
+#include "Sacrifice/CMSacrificeCharacter.h"
 #include "Sacrifice/CMSacrificeRules.h"
+#include "Sacrifice/CMSacrificeStateComponent.h"
+#include "UObject/UnrealType.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -35,6 +38,26 @@ bool FCMSacrificeRulesTest::RunTest(const FString& Parameters)
 
     FRandomStream EmptyRandomStream(42);
     TestEqual(TEXT("No attached parts produces no selection"), FCMSacrificeRules::SelectRandomPart({}, EmptyRandomStream), ECMBodyPart::None);
+
+    FCMSacrificeAttackPartRule HeadRule;
+    HeadRule.BodyPart = ECMBodyPart::Head;
+    HeadRule.bPlayerCanAcquire = true;
+    TestTrue(TEXT("Attack part rules can enable player acquisition"), HeadRule.bPlayerCanAcquire);
+    TestFalse(TEXT("Player acquisition is disabled by default"), FCMSacrificeAttackPartRule().bPlayerCanAcquire);
+
+    int32 AttackPartRulesPropertyCount = 0;
+    int32 DismembermentImpulsePropertyCount = 0;
+    int32 RewardPartsPropertyCount = 0;
+    for (TFieldIterator<FProperty> It(ACMSacrificeCharacter::StaticClass(), EFieldIterationFlags::IncludeSuper); It; ++It)
+    {
+        AttackPartRulesPropertyCount += It->GetFName() == TEXT("AttackPartRules") ? 1 : 0;
+        DismembermentImpulsePropertyCount += It->GetFName() == TEXT("DismembermentImpulse") ? 1 : 0;
+        RewardPartsPropertyCount += It->GetFName() == TEXT("RewardParts") ? 1 : 0;
+    }
+    TestEqual(TEXT("Attack Part Rules is exposed once on the Sacrifice character"), AttackPartRulesPropertyCount, 1);
+    TestEqual(TEXT("Dismemberment Impulse is exposed once on the Sacrifice character"), DismembermentImpulsePropertyCount, 1);
+    TestEqual(TEXT("Reward Parts is no longer exposed on the Sacrifice character"), RewardPartsPropertyCount, 0);
+    TestNull(TEXT("Sacrifice state component no longer exposes a duplicate Dismemberment Impulse"), FindFProperty<FProperty>(UCMSacrificeStateComponent::StaticClass(), TEXT("DismembermentImpulse")));
 
     return true;
 }
