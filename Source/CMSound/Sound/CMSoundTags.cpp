@@ -23,6 +23,8 @@ namespace CMSoundTags
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Obstacle_Laser_On, "Chimera.Sound.Stage.Obstacle.Laser.On", "레이저 켜짐");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Obstacle_Laser_Off, "Chimera.Sound.Stage.Obstacle.Laser.Off", "레이저 꺼짐");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Obstacle_Laser_ActiveLoop, "Chimera.Sound.Stage.Obstacle.Laser.ActiveLoop", "레이저 활성 험 루프");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Lever_MoveLoop, "Chimera.Sound.Stage.Lever.MoveLoop", "레버 이동 루프");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Lever_Settle, "Chimera.Sound.Stage.Lever.Settle", "레버 끝 위치 정착");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Open, "Chimera.Sound.Stage.Door.Open", "스테이지 문 열림");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Close, "Chimera.Sound.Stage.Door.Close", "스테이지 문 닫힘");
 
