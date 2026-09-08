@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameMode/CMGameFlowTypes.h"
 #include "GameMode/CMGameState.h"
+#include "GameFramework/GameplayMessageSubsystem.h"
 
 #include "CMPlayGameState.generated.h"
 
@@ -92,6 +93,9 @@ class CHIMERA_API ACMPlayGameState : public ACMGameState
     GENERATED_BODY()
 
 public:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
@@ -100,7 +104,7 @@ public:
     void SetPlayPhase(ECMPlayPhase NewPhase, float NewDuration = 0.0f);
 
     // 현재 인덱스·전체 스테이지 수 설정 처리
-    void SetStageProgress(int32 NewStageIndex, int32 NewStageCount);
+    void SetStageProgress(int32 NewStageIndex, int32 NewStageCount, FGameplayTag NewStageBGMTag);
     void SetStagePresentationState(ECMStagePresentationState NewState);
 
     // 서버가 모든 클라이언트에서 실행할 스테이지 로드 요청을 갱신
@@ -169,6 +173,10 @@ public:
     FChimeraPlayStateChanged OnStagePresentationChanged;
 
 private:
+    void BroadcastPlayState() const;
+    void HandlePlayStateRequest(FGameplayTag Channel, const struct FCMPlayStateRequest& Request);
+    FGameplayMessageListenerHandle PlayStateRequestHandle;
+
     UFUNCTION()
     void OnRep_PlayState();
 
@@ -184,6 +192,10 @@ private:
 
     UPROPERTY(ReplicatedUsing = OnRep_StagePresentationState)
     ECMStagePresentationState StagePresentationState = ECMStagePresentationState::None;
+
+    // 서버가 선택한 스테이지 음악. 클라이언트는 로컬 Route 없이 이 태그를 사용한다.
+    UPROPERTY(ReplicatedUsing = OnRep_PlayState)
+    FGameplayTag CurrentStageBGMTag;
 
     // 현재 전역 플레이 Phase
     UPROPERTY(ReplicatedUsing = OnRep_PlayState)

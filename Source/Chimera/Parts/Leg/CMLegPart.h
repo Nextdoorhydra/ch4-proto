@@ -229,6 +229,9 @@ private:
     UFUNCTION()
     void OnRep_PlantSnapshot();
 
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayFootstep(FVector_NetQuantize10 GroundLocation);
+
     void BeginPlantTransition(
         ECMLegStepDirection NewStepDirection,
         ECMLegPlantTrigger Trigger,

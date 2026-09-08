@@ -13,6 +13,7 @@ public class ChimeraEditorTarget : TargetRules
 		ExtraModuleNames.AddRange(new[]
 		{
 			"Chimera",
+			"CMSound",
 			"Shared",
 			"AI",
 			"UI",

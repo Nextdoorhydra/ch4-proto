@@ -39,6 +39,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void HandleElementActivationRequested() override;
     virtual void HandleElementActiveChanged_Implementation(bool bIsActive) override;
     virtual void HandleElementReset_Implementation() override;
@@ -57,8 +58,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<UNiagaraComponent> PrimaryEffect;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
-    TObjectPtr<UAudioComponent> LoopAudio;
+    // 지정된 장애물만 CMSound 카탈로그의 활성 루프를 사용한다.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Obstacle|Sound")
+    FGameplayTag ActiveLoopSoundTag;
 
     // 접촉한 팔과 다리에 코드로 적용할 내구도 및 상태 설정
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
@@ -84,9 +86,15 @@ private:
     void ResolveBalance();
     void ApplyResolvedBalance();
     void ApplyComponentActiveState(bool bIsActive);
+    void HandleSoundCatalogsRebuilt();
+    void TryStartActiveLoopSound();
+    void StopActiveLoopSound();
     void ConfigureDirectEffects();
     void ResetMotionComponents();
 
     UPROPERTY(Transient)
     FCMResolvedObstacleBalance ResolvedObstacleBalance;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> ActiveLoopSoundComponent;
 };

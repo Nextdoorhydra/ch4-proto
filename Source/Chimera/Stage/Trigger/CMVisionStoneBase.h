@@ -6,6 +6,7 @@
 #include "CMVisionStoneBase.generated.h"
 
 class USceneComponent;
+class UAudioComponent;
 
 UENUM(BlueprintType)
 enum class ECMVisionStoneMode : uint8
@@ -100,9 +101,18 @@ private:
 
     void EvaluateVisionCondition();
     void RefreshVisionPresentationState(bool bConditionMet);
+    void HandleSoundCatalogsRebuilt();
+    void RefreshVisionLoopSound();
+    void StopVisionLoopSound();
 
     UPROPERTY(ReplicatedUsing = OnRep_VisionPresentationState)
     FCMVisionStonePresentationState VisionPresentationState;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> VisionLoopSoundComponent;
+
+    bool bHasPlayingLoopState = false;
+    bool bPlayingLoopConditionMet = false;
 
     FTimerHandle EvaluationTimerHandle;
 };
