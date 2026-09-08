@@ -21,6 +21,11 @@ namespace
 {
 const FName WireColorParameter(TEXT("Color"));
 constexpr float CaptureDistance = 2000.0f;
+
+FRotator MakeTopDownRotation(const float Yaw)
+{
+    return FRotator(-90.0f, Yaw, 0.0f);
+}
 }
 
 ACMWireframeHUDCaptureActor::ACMWireframeHUDCaptureActor()
@@ -68,7 +73,7 @@ void ACMWireframeHUDCaptureActor::Initialize(
 {
     Chimera = InChimera;
     HealthColorCurve = InHealthColorCurve;
-    CaptureRotation = InCaptureRotation;
+    CaptureRotation = MakeTopDownRotation(InCaptureRotation.Yaw);
 
     const int32 ClampedSize = FMath::Clamp(RenderTargetSize, 128, 1024);
     RenderTarget = NewObject<UTextureRenderTarget2D>(this);
@@ -119,7 +124,7 @@ void ACMWireframeHUDCaptureActor::SetCameraView(
     float InZoom
 )
 {
-    CaptureRotation = InRotation;
+    CaptureRotation = MakeTopDownRotation(InRotation.Yaw);
     CaptureZoom = FMath::Max(InZoom, 0.01f);
 }
 

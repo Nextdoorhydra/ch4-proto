@@ -325,6 +325,12 @@ bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
         return false;
     }
 
+    ACMPartActorBase* NativePart = Cast<ACMPartActorBase>(PartActor);
+    if (NativePart)
+    {
+        NativePart->PrepareForPartSlotAttachment();
+    }
+
     AttachedPart = PartActor;
     PartActor->OnDestroyed.AddDynamic(
         this,
@@ -362,7 +368,7 @@ bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
     }
 
     ICMPartInterface::Execute_OnAttachedToPartSlot(PartActor, this);
-    if (ACMPartActorBase* NativePart = Cast<ACMPartActorBase>(PartActor))
+    if (NativePart)
     {
         NativePart->SynchronizeAttachedPartSlot(this);
     }
@@ -559,6 +565,11 @@ void UCMPartSlotComponent::OnRep_AttachedPart(AActor* PreviousPart)
 
     if (IsValid(AttachedPart))
     {
+        if (ACMPartActorBase* NativePart =
+            Cast<ACMPartActorBase>(AttachedPart))
+        {
+            NativePart->PrepareForPartSlotAttachment();
+        }
         AttachedPart->AttachToComponent(
             this,
             FAttachmentTransformRules::SnapToTargetNotIncludingScale
