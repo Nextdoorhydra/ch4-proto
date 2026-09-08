@@ -6,6 +6,7 @@
 #include "CMChimeraTrailComponent.generated.h"
 
 class UDecalComponent;
+class UAudioComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UTexture;
@@ -127,6 +128,14 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Trail")
     TEnumAsByte<ECollisionChannel> TraceChannel = ECC_Visibility;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Trail|Sound",
+        meta = (ClampMin = "0.0", Units = "cm/s"))
+    float DragSoundMinimumSpeed = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Trail|Sound",
+        meta = (ClampMin = "0.0", Units = "s"))
+    float DragSoundStopDelay = 0.15f;
+
 private:
     friend class FCMChimeraTrailRuntimeTest;
 
@@ -153,6 +162,8 @@ private:
         const FVector& SampleLocation,
         const FVector& MovementDirection,
         float WorldTime);
+    void UpdateDragLoopSound(bool bAnySourceMoving, float WorldTime);
+    void StopDragLoopSound();
 
     UPROPERTY(Transient)
     TArray<TObjectPtr<UDecalComponent>> DecalPool;
@@ -160,7 +171,11 @@ private:
     UPROPERTY(Transient)
     TArray<TObjectPtr<UMaterialInstanceDynamic>> DecalMaterials;
 
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> DragLoopSoundComponent;
+
     TArray<float> ExpirationTimes;
     TArray<FSourceState> SourceStates;
     int32 NextPoolIndex = 0;
+    float LastDragMovementTime = -1.0f;
 };

@@ -6,12 +6,16 @@
 #include "Net/UnrealNetwork.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMChimera.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Stage/Obstacle/Component/CMHazardComponent.h"
 #include "Stage/Obstacle/Component/CMLaserBeamComponent.h"
 #include "TimerManager.h"
 
 ACMLaserObstacleBase::ACMLaserObstacleBase()
 {
+    ActiveLoopSoundTag = CMSoundTags::Stage_Obstacle_Laser_ActiveLoop;
+
     // 레이저 PrimaryMesh는 고체 장치가 아니라 빔 표현이므로 통과 가능해야 한다.
     PrimaryMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
@@ -94,6 +98,20 @@ void ACMLaserObstacleBase::RefreshLaser()
 // 부모의 복제 활성 상태에 맞춰 표현, 서버 Collision, 재계산 Timer 통일
 void ACMLaserObstacleBase::HandleObstacleActiveStateChanged(bool bIsActive)
 {
+    const bool bStateChanged = bHasObservedActiveState
+        && bLastObservedActiveState != bIsActive;
+    bLastObservedActiveState = bIsActive;
+    bHasObservedActiveState = true;
+
+    if (bStateChanged)
+    {
+        FCMSoundPlayback::PlaySFXAtActor(
+            this,
+            bIsActive
+                ? CMSoundTags::Stage_Obstacle_Laser_On
+                : CMSoundTags::Stage_Obstacle_Laser_Off);
+    }
+
     if (!BeamPresentation || !BeamCollision)
     {
         return;

@@ -1,8 +1,17 @@
 #include "Stage/Trigger/CMLeverBase.h"
+#include "Components/AudioComponent.h"
 #include "Components/SphereComponent.h"
 #include "Parts/Arm/CMArmPart.h"
 #include "Net/UnrealNetwork.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
+#include "TimerManager.h"
+
+namespace
+{
+    constexpr float LeverMoveSoundIdleDelay = 0.12f;
+}
 
 ACMLeverBase::ACMLeverBase()
 {
@@ -192,17 +201,70 @@ void ACMLeverBase::UpdateVisualRotation(float DeltaSeconds)
         ? FMath::FInterpConstantTo(VisualLeverAlpha, LeverAlpha, DeltaSeconds, 2.0f / RotationTransitionDuration)
         : LeverAlpha;
     const bool bAtTarget = FMath::IsNearlyEqual(VisualLeverAlpha, LeverAlpha);
+    const bool bVisualMoved = !FMath::IsNearlyEqual(
+        PreviousVisualAlpha,
+        VisualLeverAlpha);
     if (bAtTarget)
     {
         VisualLeverAlpha = LeverAlpha;
     }
     const FVector Axis = LocalRotationAxis.GetSafeNormal(SMALL_NUMBER, FVector::RightVector);
     LeverPivot->SetRelativeRotation(InitialPivotRotation * FQuat(Axis, FMath::DegreesToRadians(VisualLeverAlpha * RotationHalfAngle)));
-    if (PreviousVisualAlpha != VisualLeverAlpha)
+    if (bVisualMoved)
     {
+        StartLeverMoveSound();
         OnLeverVisualAlphaChanged(VisualLeverAlpha);
     }
+    if (bLeverMovementSoundActive && bAtTarget
+        && FMath::IsNearlyEqual(FMath::Abs(VisualLeverAlpha), 1.0f))
+    {
+        StopLeverMoveSound();
+        PlayLeverSettleSound();
+    }
     SetActorTickEnabled((HasAuthority() && bTrackingArmHold) || !bAtTarget);
+}
+
+void ACMLeverBase::StartLeverMoveSound()
+{
+    GetWorldTimerManager().SetTimer(
+        LeverMoveSoundStopTimerHandle,
+        this,
+        &ThisClass::HandleLeverMoveSoundIdle,
+        LeverMoveSoundIdleDelay,
+        false);
+
+    if (bLeverMovementSoundActive)
+    {
+        return;
+    }
+
+    bLeverMovementSoundActive = true;
+    LeverMoveLoopComponent = FCMSoundPlayback::PlayAttachedSFX(
+        LeverPivot,
+        CMSoundTags::Stage_Lever_MoveLoop);
+}
+
+void ACMLeverBase::HandleLeverMoveSoundIdle()
+{
+    StopLeverMoveSound();
+}
+
+void ACMLeverBase::StopLeverMoveSound()
+{
+    GetWorldTimerManager().ClearTimer(LeverMoveSoundStopTimerHandle);
+    bLeverMovementSoundActive = false;
+    if (IsValid(LeverMoveLoopComponent))
+    {
+        LeverMoveLoopComponent->Stop();
+        LeverMoveLoopComponent = nullptr;
+    }
+}
+
+void ACMLeverBase::PlayLeverSettleSound()
+{
+    FCMSoundPlayback::PlaySFXAtActor(
+        this,
+        CMSoundTags::Stage_Lever_Settle);
 }
 
 void ACMLeverBase::OnRep_LeverAlpha()
@@ -222,6 +284,7 @@ void ACMLeverBase::HandleElementActiveChanged_Implementation(bool bIsActive)
 void ACMLeverBase::HandleElementReset_Implementation()
 {
     Super::HandleElementReset_Implementation();
+    StopLeverMoveSound();
     StopArmHold();
     VisualLeverAlpha = LeverAlpha;
     UpdateVisualRotation(0.0f);
@@ -235,6 +298,7 @@ void ACMLeverBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
     {
         StopArmHold();
     }
+    StopLeverMoveSound();
     SetActorTickEnabled(false);
     Super::EndPlay(EndPlayReason);
 }
