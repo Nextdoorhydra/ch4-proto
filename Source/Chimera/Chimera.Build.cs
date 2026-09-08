@@ -22,7 +22,7 @@ public class Chimera : ModuleRules
 			"GameplayTags",
 			"GameplayTasks",
 			"Niagara",
-			"NKMSoundRuntime",
+			"Shared",
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils"
 		});

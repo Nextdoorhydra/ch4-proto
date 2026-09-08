@@ -11,7 +11,7 @@ struct FAsyncLoadCompleteMessage;
 
 UCLASS()
 // AsyncPDALoader의 현재 캐시를 태그 기반 사운드 조회표로 변환
-class CHIMERA_API UCMGameSoundBridgeSubsystem : public UGameInstanceSubsystem
+class CMSOUND_API UCMGameSoundBridgeSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 

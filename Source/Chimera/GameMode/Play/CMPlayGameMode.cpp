@@ -413,7 +413,11 @@ void ACMPlayGameMode::InitializeStageProgress(
 {
     if (ACMPlayGameState* PlayState = CachedPlayGameState)
     {
-        PlayState->SetStageProgress(StageIndex, StageCount);
+        const UCMStageRouteSubsystem* Route = GetGameInstance()
+            ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
+        const UCMStageRouteDefinition* Definition = Route ? Route->GetStageRouteDefinition() : nullptr;
+        const FCMStageRouteEntry* Stage = Definition ? Definition->GetStage(StageIndex) : nullptr;
+        PlayState->SetStageProgress(StageIndex, StageCount, Stage ? Stage->StageBGMTag : FGameplayTag());
     }
 }
 

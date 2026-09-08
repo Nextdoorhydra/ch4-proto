@@ -7,7 +7,7 @@
 #include "CMGameSoundDataAsset.generated.h"
 
 UCLASS(BlueprintType)
-class CHIMERA_API UCMGameSoundDataAsset
+class CMSOUND_API UCMGameSoundDataAsset
     : public UPrimaryDataAssetBase
     , public INKMSoundCatalogProvider
 {
