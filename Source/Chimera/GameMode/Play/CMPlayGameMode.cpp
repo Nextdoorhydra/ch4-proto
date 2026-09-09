@@ -1090,7 +1090,7 @@ bool ACMPlayGameMode::RespawnAtActiveCheckpoint()
     SharedChimera->RestoreForCheckpointRespawn();
     const bool bRoomReset = !RoomController
         || RoomController->ResetActiveCheckpointRoom();
-    const bool bTeleported = SharedChimera->TeleportAssembly(CheckpointTransform);
+    const bool bTeleported = SharedChimera->TeleportAssemblyForCheckpointRespawn(CheckpointTransform);
     const bool bPartsRestored = RestoreCheckpointParts(SharedChimera);
     bCheckpointRestartInProgress = false;
     UE_LOG(LogChimeraStageLoad, Display,
