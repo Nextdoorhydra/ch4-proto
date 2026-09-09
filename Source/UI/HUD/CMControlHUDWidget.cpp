@@ -1194,7 +1194,7 @@ void UCMControlHUDWidget::RefreshRetryVoteHUD()
         NumberFormat.SetMinimumFractionalDigits(1);
         NumberFormat.SetMaximumFractionalDigits(1);
         RetryVoteStatusText->SetText(FText::Format(
-            LOCTEXT("RetryVoteHoldingStatus", "우클릭 유지  {0} / 3.0초"),
+            LOCTEXT("RetryVoteHoldingStatus", "X키 누르는 중  {0} / 3.0초"),
             FText::AsNumber(Progress * 3.0f, &NumberFormat)));
         RetryVoteHoldProgressBar->SetPercent(Progress);
         RetryVoteHoldProgressBar->SetVisibility(
@@ -1208,14 +1208,14 @@ void UCMControlHUDWidget::RefreshRetryVoteHUD()
         RetryVoteStatusText->SetText(FText::Format(
             bHasVoted
                 ? LOCTEXT("RetryVoteCompleteStatus", "{0} / {1}표 · 투표 완료")
-                : LOCTEXT("RetryVoteActiveStatus", "{0} / {1}표 · 우클릭 길게 누르기"),
+                : LOCTEXT("RetryVoteActiveStatus", "{0} / {1}표 · X키를 길게 누르기"),
             FText::AsNumber(Vote.VoteCount),
             FText::AsNumber(Vote.RequiredVoteCount)));
     }
     else
     {
         RetryVoteStatusText->SetText(
-            LOCTEXT("RetryVoteIdleStatus", "우클릭 3초 길게 누르기"));
+            LOCTEXT("RetryVoteIdleStatus", "X키를 3초 동안 길게 누르기"));
     }
 }
 
