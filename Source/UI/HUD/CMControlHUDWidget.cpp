@@ -2,6 +2,7 @@
 
 #include "Ability/CMChimeraAttributeSet.h"
 #include "GameMode/CMGameState.h"
+#include "GameMode/Play/CMPlayGameState.h"
 #include "HUD/Wireframe/CMWireframeHUDCaptureActor.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Core/CMPartStatusComponent.h"
@@ -10,6 +11,7 @@
 #include "Player/CMControlBody.h"
 #include "Player/CMPartInterface.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
 #include "AbilitySystemComponent.h"
 #include "Blueprint/WidgetTree.h"
@@ -22,7 +24,10 @@
 #include "Components/OverlaySlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Components/Widget.h"
 #include "Curves/CurveLinearColor.h"
 #include "Engine/Texture2D.h"
@@ -153,6 +158,8 @@ void UCMControlHUDWidget::NativeOnInitialized()
     SetVisibility(ESlateVisibility::HitTestInvisible);
     RuntimeWireframeZoom = 1.0f;
     InitializeWireframeHUD();
+    InitializeRetryVoteHUD();
+    InitializeApmHUD();
 }
 
 void UCMControlHUDWidget::NativeDestruct()
@@ -170,6 +177,13 @@ void UCMControlHUDWidget::NativeTick(
     UpdateWireframeCameraInput();
     UpdateWireframePanelLayout(MyGeometry);
     RefreshWireframeCallouts(MyGeometry, InDeltaTime);
+    RefreshRetryVoteHUD();
+    ApmRefreshElapsed += InDeltaTime;
+    if (ApmRefreshElapsed >= 0.25f)
+    {
+        ApmRefreshElapsed = 0.0f;
+        RefreshApmHUD();
+    }
 }
 
 int32 UCMControlHUDWidget::NativePaint(
@@ -1065,6 +1079,216 @@ void UCMControlHUDWidget::UpdateWireframeCameraInput()
     WireframeCaptureActor->SetCameraView(
         FRotator(-90.0f, PlayerScreenYaw, 0.0f),
         RuntimeWireframeZoom);
+}
+
+void UCMControlHUDWidget::InitializeRetryVoteHUD()
+{
+    if (RetryVotePanelRoot)
+    {
+        return;
+    }
+
+    UOverlay* RootOverlay = Cast<UOverlay>(
++        WidgetTree->FindWidget(TEXT("RootCanvas")));
+    if (!RootOverlay)
+    {
+        RootOverlay = Cast<UOverlay>(WidgetTree->RootWidget);
+    }
+    if (!RootOverlay)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("Retry vote HUD requires the Control HUD Overlay root."));
+        return;
+    }
+
+    USizeBox* PanelSize = WidgetTree->ConstructWidget<USizeBox>(
+        USizeBox::StaticClass(), TEXT("RetryVotePanelRoot"));
+    PanelSize->SetWidthOverride(270.0f);
+    UOverlaySlot* PanelSlot = RootOverlay->AddChildToOverlay(PanelSize);
+    PanelSlot->SetHorizontalAlignment(HAlign_Right);
+    PanelSlot->SetVerticalAlignment(VAlign_Top);
+    PanelSlot->SetPadding(FMargin(0.0f, 32.0f, 32.0f, 0.0f));
+
+    UBorder* PanelBorder = WidgetTree->ConstructWidget<UBorder>(
+        UBorder::StaticClass(), TEXT("RetryVotePanel"));
+    PanelBorder->SetBrushColor(FLinearColor::Transparent);
+    PanelBorder->SetPadding(FMargin(14.0f, 10.0f));
+    PanelSize->SetContent(PanelBorder);
+
+    UVerticalBox* PanelContent = WidgetTree->ConstructWidget<UVerticalBox>(
+        UVerticalBox::StaticClass(), TEXT("RetryVotePanelContent"));
+    PanelBorder->SetContent(PanelContent);
+
+    RetryVoteTitleText = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("RetryVoteTitleText"));
+    RetryVoteTitleText->SetFont(
+        FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16));
+    RetryVoteTitleText->SetColorAndOpacity(
+        FSlateColor(FLinearColor(1.0f, 0.34f, 0.12f)));
+    RetryVoteTitleText->SetJustification(ETextJustify::Right);
+    PanelContent->AddChildToVerticalBox(RetryVoteTitleText);
+
+    RetryVoteStatusText = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("RetryVoteStatusText"));
+    RetryVoteStatusText->SetFont(
+        FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 13));
+    RetryVoteStatusText->SetColorAndOpacity(
+        FSlateColor(FLinearColor(0.9f, 0.92f, 0.95f, 1.0f)));
+    RetryVoteStatusText->SetJustification(ETextJustify::Right);
+    if (UVerticalBoxSlot* StatusSlot =
+        PanelContent->AddChildToVerticalBox(RetryVoteStatusText))
+    {
+        StatusSlot->SetPadding(FMargin(0.0f, 3.0f, 0.0f, 0.0f));
+    }
+
+    RetryVoteHoldProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
+        UProgressBar::StaticClass(), TEXT("RetryVoteHoldProgressBar"));
+    RetryVoteHoldProgressBar->SetFillColorAndOpacity(
+        FLinearColor(1.0f, 0.22f, 0.05f));
+    if (UVerticalBoxSlot* ProgressSlot =
+        PanelContent->AddChildToVerticalBox(RetryVoteHoldProgressBar))
+    {
+        ProgressSlot->SetPadding(FMargin(0.0f, 7.0f, 0.0f, 0.0f));
+    }
+
+    RetryVotePanelRoot = PanelSize;
+    RefreshRetryVoteHUD();
+}
+
+void UCMControlHUDWidget::RefreshRetryVoteHUD()
+{
+    if (!RetryVotePanelRoot || !RetryVoteTitleText
+        || !RetryVoteStatusText || !RetryVoteHoldProgressBar)
+    {
+        return;
+    }
+
+    const ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+    const ACMPlayerController* PlayerController = Cast<ACMPlayerController>(
+        GetOwningPlayer());
+    if (!PlayState || !PlayerController
+        || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    {
+        RetryVotePanelRoot->SetVisibility(ESlateVisibility::Collapsed);
+        return;
+    }
+
+    RetryVotePanelRoot->SetVisibility(ESlateVisibility::HitTestInvisible);
+    const FCMRetryVoteSnapshot& Vote =
+        PlayState->GetRetryVoteSnapshot();
+    const APlayerState* LocalPlayerState = PlayerController->PlayerState;
+    const bool bHasVoted = LocalPlayerState
+        && Vote.VotedPlayerIds.Contains(LocalPlayerState->GetPlayerId());
+    const bool bHolding = PlayerController->IsRetryVoteHoldActive();
+
+    RetryVoteTitleText->SetText(bHolding
+        ? LOCTEXT("RetryVoteHoldingTitle", "재시작 요청")
+        : LOCTEXT("RetryVoteTitle", "재시작 투표"));
+
+    if (bHolding)
+    {
+        const float Progress =
+            PlayerController->GetRetryVoteHoldProgress();
+        FNumberFormattingOptions NumberFormat;
+        NumberFormat.SetMinimumFractionalDigits(1);
+        NumberFormat.SetMaximumFractionalDigits(1);
+        RetryVoteStatusText->SetText(FText::Format(
+            LOCTEXT("RetryVoteHoldingStatus", "우클릭 유지  {0} / 3.0초"),
+            FText::AsNumber(Progress * 3.0f, &NumberFormat)));
+        RetryVoteHoldProgressBar->SetPercent(Progress);
+        RetryVoteHoldProgressBar->SetVisibility(
+            ESlateVisibility::HitTestInvisible);
+        return;
+    }
+
+    RetryVoteHoldProgressBar->SetVisibility(ESlateVisibility::Collapsed);
+    if (Vote.bActive)
+    {
+        RetryVoteStatusText->SetText(FText::Format(
+            bHasVoted
+                ? LOCTEXT("RetryVoteCompleteStatus", "{0} / {1}표 · 투표 완료")
+                : LOCTEXT("RetryVoteActiveStatus", "{0} / {1}표 · 우클릭 길게 누르기"),
+            FText::AsNumber(Vote.VoteCount),
+            FText::AsNumber(Vote.RequiredVoteCount)));
+    }
+    else
+    {
+        RetryVoteStatusText->SetText(
+            LOCTEXT("RetryVoteIdleStatus", "우클릭 3초 길게 누르기"));
+    }
+}
+
+void UCMControlHUDWidget::InitializeApmHUD()
+{
+    if (ApmPanelRoot)
+    {
+        return;
+    }
+
+    UOverlay* RootOverlay = Cast<UOverlay>(
+        WidgetTree->FindWidget(TEXT("RootCanvas")));
+    if (!RootOverlay)
+    {
+        RootOverlay = Cast<UOverlay>(WidgetTree->RootWidget);
+    }
+    if (!RootOverlay)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("APM HUD requires the Control HUD Overlay root."));
+        return;
+    }
+
+    USizeBox* PanelSize = WidgetTree->ConstructWidget<USizeBox>(
+        USizeBox::StaticClass(), TEXT("ApmPanelRoot"));
+    PanelSize->SetWidthOverride(270.0f);
+    UOverlaySlot* PanelSlot = RootOverlay->AddChildToOverlay(PanelSize);
+    PanelSlot->SetHorizontalAlignment(HAlign_Right);
+    PanelSlot->SetVerticalAlignment(VAlign_Top);
+    PanelSlot->SetPadding(FMargin(0.0f, 150.0f, 32.0f, 0.0f));
+
+    UBorder* PanelBorder = WidgetTree->ConstructWidget<UBorder>(
+        UBorder::StaticClass(), TEXT("ApmPanel"));
+    PanelBorder->SetBrushColor(FLinearColor::Transparent);
+    PanelBorder->SetPadding(FMargin(14.0f, 9.0f));
+    PanelSize->SetContent(PanelBorder);
+
+    ApmText = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("ApmText"));
+    ApmText->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 18));
+    ApmText->SetColorAndOpacity(
+        FSlateColor(FLinearColor(0.025f, 1.0f, 0.06f, 1.0f)));
+    ApmText->SetJustification(ETextJustify::Right);
+    PanelBorder->SetContent(ApmText);
+
+    ApmPanelRoot = PanelSize;
+    ApmRefreshElapsed = 0.25f;
+    RefreshApmHUD();
+}
+
+void UCMControlHUDWidget::RefreshApmHUD()
+{
+    if (!ApmPanelRoot || !ApmText)
+    {
+        return;
+    }
+
+    const ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>()
+        : nullptr;
+    ACMPlayerController* PlayerController = Cast<ACMPlayerController>(
+        GetOwningPlayer());
+    if (!PlayState || !PlayerController
+        || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    {
+        ApmPanelRoot->SetVisibility(ESlateVisibility::Collapsed);
+        return;
+    }
+
+    ApmPanelRoot->SetVisibility(ESlateVisibility::HitTestInvisible);
+    ApmText->SetText(FText::Format(
+        LOCTEXT("ApmFormat", "APM {0}"),
+        FText::AsNumber(PlayerController->GetCurrentApm())));
 }
 
 void UCMControlHUDWidget::RefreshWireframeCallouts(

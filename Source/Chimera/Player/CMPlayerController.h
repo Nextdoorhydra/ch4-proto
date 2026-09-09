@@ -8,6 +8,7 @@
 #include "CMPlayerController.generated.h"
 
 class ACMChimera;
+class ACMPlayGameState;
 class ACMTestAreaManager;
 class UCMVisionInputComponent;
 class UInputAction;
@@ -29,6 +30,15 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
     void RequestRetryGame();
 
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
+    void CancelRetryGameRequest();
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Game")
+    bool IsRetryVoteHoldActive() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Game")
+    float GetRetryVoteHoldProgress() const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Game")
     bool CanControlStageResult() const;
 
@@ -47,6 +57,13 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Lobby")
     void RequestSetReady(bool bReady);
+
+    /** Records one local button press for the real-time APM display. */
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Input")
+    void RecordApmAction();
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Input")
+    int32 GetCurrentApm();
 
     // 로컬 로드 컴포넌트의 결과를 서버 RPC로 전달
     void ReportLocalStageLoadComplete(FGuid RequestId, bool bSucceeded);
@@ -129,6 +146,9 @@ protected:
     /** Local-only mouse-wheel input that changes the shared-body view distance. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputAction> CameraDistanceAction;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    TObjectPtr<UInputAction> RetryVoteAction;
 
 private:
     void FirstControlKeyPressed();
@@ -157,9 +177,13 @@ private:
     void DebugTurnLeftReleased();
     void DebugTurnRightPressed();
     void DebugTurnRightReleased();
+    void RetryVotePressed();
+    void RetryVoteReleased();
 
     ACMChimera* GetSharedChimera() const;
     ACMTestAreaManager* FindTestAreaManager() const;
+    bool PrepareApmForCurrentStage(double CurrentTime);
+    void PruneRecentApmActions(double CurrentTime);
 
     /** SharedChimera가 복제된 순간에만 로컬 ViewTarget을 연결한다. */
     UFUNCTION()
@@ -167,6 +191,9 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerRequestRetryGame();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCancelRetryGameRequest();
 
     UFUNCTION(Server, Reliable)
     void ServerRequestRestartCompletedStage();
@@ -257,7 +284,19 @@ private:
     bool bDebugMoveBackwardHeld = false;
     bool bDebugTurnLeftHeld = false;
     bool bDebugTurnRightHeld = false;
+    bool bRetryVoteHoldActive = false;
+    double RetryVoteHoldStartTime = 0.0;
+
+    TWeakObjectPtr<ACMPlayGameState> ApmTrackedPlayState;
+    TArray<double> RecentApmActionTimes;
+    double ApmMeasurementStartTime = 0.0;
+    int32 ApmTrackedStageIndex = INDEX_NONE;
+
+    static constexpr float RetryVoteHoldDuration = 3.0f;
+    static constexpr double ApmWindowSeconds = 60.0;
 
     FCMPartSlotAddress SoloPressedPartSlots[CMControl::SoloTestKeyCount];
+    double SoloControlKeyStartTimes[CMControl::SoloTestKeyCount] = {};
+    bool bSoloControlKeyReverseMovement[CMControl::SoloTestKeyCount] = {};
 
 };

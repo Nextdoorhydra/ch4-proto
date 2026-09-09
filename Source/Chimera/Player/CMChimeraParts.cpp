@@ -19,6 +19,21 @@ void ACMChimera::ActivatePartSlot(
     bool bReverseMovement
 )
 {
+    ActivatePartSlotWithLegStrength(
+        PartSlotAddress,
+        ContributingPlayerState,
+        bReverseMovement,
+        1.0f
+    );
+}
+
+void ACMChimera::ActivatePartSlotWithLegStrength(
+    const FCMPartSlotAddress& PartSlotAddress,
+    ACMPlayerState* ContributingPlayerState,
+    bool bReverseMovement,
+    float LegStrengthMultiplier
+)
+{
     if (!HasAuthority()
         || !CMControl::IsValidPartSlot(
             PartSlotAddress,
@@ -44,6 +59,8 @@ void ACMChimera::ActivatePartSlot(
         if (LegPart)
         {
             LegPart->SetPendingReverseMovement(bReverseMovement);
+            LegPart->SetPendingInputStrengthMultiplier(
+                LegStrengthMultiplier);
         }
 
         const bool bActivated = PartSlot->TryActivateGrantedAbility();
@@ -54,6 +71,7 @@ void ACMChimera::ActivatePartSlot(
         if (LegPart && !bActivated)
         {
             LegPart->ConsumePendingReverseMovement();
+            LegPart->ConsumePendingInputStrengthMultiplier();
         }
         UE_LOG(LogChimeraLineBody, Log,
             TEXT("[Attached Part Input] Slot=(%d,%d) Part=%s Activated=%s"),
@@ -70,10 +88,58 @@ void ACMChimera::ActivatePartSlot(
         PartSlotAddress.PartSlotIndex);
 }
 
+float ACMChimera::GetLegInputStrengthMultiplier(
+    const float HoldSeconds
+) const
+{
+    const float MinimumStrength = FMath::Clamp(
+        LegInputMinimumStrength,
+        0.0f,
+        1.0f
+    );
+    const float TapHoldSeconds = FMath::Max(
+        LegInputTapHoldSeconds,
+        0.0f
+    );
+    const float FullStrengthHoldSeconds = FMath::Max(
+        LegInputFullStrengthHoldSeconds,
+        TapHoldSeconds + UE_SMALL_NUMBER
+    );
+    const float HoldAlpha = FMath::Clamp(
+        (FMath::Max(HoldSeconds, 0.0f) - TapHoldSeconds)
+            / (FullStrengthHoldSeconds - TapHoldSeconds),
+        0.0f,
+        1.0f
+    );
+    return FMath::Lerp(
+        MinimumStrength,
+        1.0f,
+        FMath::Pow(
+            HoldAlpha,
+            FMath::Max(LegInputStrengthExponent, UE_SMALL_NUMBER)
+        )
+    );
+}
+
 bool ACMChimera::TryActivateLegPart(
     const FCMPartSlotAddress& PartSlotAddress,
     ACMPlayerState* ContributingPlayerState,
     bool bReverseMovement
+)
+{
+    return TryActivateLegPartWithStrength(
+        PartSlotAddress,
+        ContributingPlayerState,
+        bReverseMovement,
+        1.0f
+    );
+}
+
+bool ACMChimera::TryActivateLegPartWithStrength(
+    const FCMPartSlotAddress& PartSlotAddress,
+    ACMPlayerState* ContributingPlayerState,
+    bool bReverseMovement,
+    float StrengthMultiplier
 )
 {
     if (!HasAuthority()
@@ -99,7 +165,8 @@ bool ACMChimera::TryActivateLegPart(
             *this,
             *LegPart,
             ContributingPlayerState,
-            LegPart->GetMovementImpulse(),
+            LegPart->GetMovementImpulse()
+                * FMath::Clamp(StrengthMultiplier, 0.0f, 1.0f),
             bReverseMovement
         );
 }

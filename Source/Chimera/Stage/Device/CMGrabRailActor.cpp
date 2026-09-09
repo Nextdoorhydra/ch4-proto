@@ -78,6 +78,11 @@ void ACMGrabRailActor::EndArmHold_Implementation(ACMArmPart* Arm)
     RefreshInteractionHighlight();
 }
 
+void ACMGrabRailActor::ResetForCheckpoint()
+{
+    ResetElement();
+}
+
 void ACMGrabRailActor::HandleElementActiveChanged_Implementation(bool bIsActive)
 {
     Super::HandleElementActiveChanged_Implementation(bIsActive);

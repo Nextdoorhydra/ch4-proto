@@ -66,6 +66,12 @@ bool FCMPlayStateEventTest::RunTest(const FString& Parameters)
     GameState->SetStageProgress(1, 2, FGameplayTag());
     TestEqual(TEXT("Tag-only change broadcasts"), ReceivedCount, CountBeforeTagChange + 1);
     TestFalse(TEXT("Cleared snapshot does not retain old tag"), LastMessage.StageBGMTag.IsValid());
+    GameState->SetRetryVoteState(true, { 1, 3 }, 3, 2);
+    const FCMRetryVoteSnapshot& RetryVote = GameState->GetRetryVoteSnapshot();
+    TestTrue(TEXT("Retry vote snapshot is active"), RetryVote.bActive);
+    TestEqual(TEXT("Retry vote snapshot counts votes"), RetryVote.VoteCount, 2);
+    TestEqual(TEXT("Retry vote snapshot preserves eligible players"), RetryVote.EligiblePlayerCount, 3);
+    TestEqual(TEXT("Retry vote snapshot preserves majority"), RetryVote.RequiredVoteCount, 2);
     const int32 CountBeforeForeignRequest = ReceivedCount;
     FCMPlayStateRequest ForeignRequest;
     Messages.BroadcastMessage(CMPlayStateMessages::RequestCurrentState, ForeignRequest);

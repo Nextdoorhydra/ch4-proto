@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Parts/Arm/CMArmHoldTarget.h"
+#include "Stage/Checkpoint/CMCheckpointResettable.h"
 #include "Stage/Device/CMStageDeviceBase.h"
 #include "CMGrabRailActor.generated.h"
 
@@ -14,7 +15,10 @@ class UCMInteractionHighlightComponent;
 
 // Generic grab-and-slide prop. Its rail/root stays still; only RailBody and its children move.
 UCLASS(Blueprintable)
-class CHIMERA_API ACMGrabRailActor : public ACMStageDeviceBase, public ICMArmHoldTarget
+class CHIMERA_API ACMGrabRailActor
+    : public ACMStageDeviceBase
+    , public ICMArmHoldTarget
+    , public ICMCheckpointResettable
 {
     GENERATED_BODY()
 public:
@@ -23,6 +27,7 @@ public:
     virtual bool QueryArmHold_Implementation(ACMArmPart* Arm, FCMArmHoldSpec& OutSpec) const override;
     virtual bool BeginArmHold_Implementation(ACMArmPart* Arm) override;
     virtual void EndArmHold_Implementation(ACMArmPart* Arm) override;
+    virtual void ResetForCheckpoint() override;
 
 protected:
     virtual void BeginPlay() override;
