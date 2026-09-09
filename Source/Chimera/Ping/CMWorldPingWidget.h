@@ -9,6 +9,7 @@
 
 class SImage;
 class STextBlock;
+class UTexture2D;
 
 /** Native world-space marker used by replicated ping actors. */
 UCLASS()
@@ -27,12 +28,16 @@ protected:
 
 private:
     void ApplyPresentation();
-    UObject* LoadIcon() const;
+    UTexture2D* LoadIcon() const;
 
     ECMPingType PingType = ECMPingType::GoHere;
     FString PingingPlayerName;
     FLinearColor PingingPlayerColor = FLinearColor::White;
     FSlateBrush IconBrush;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTexture2D> IconTexture;
+
     TSharedPtr<SImage> IconImage;
     TSharedPtr<STextBlock> PlayerNameText;
 };

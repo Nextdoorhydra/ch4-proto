@@ -189,9 +189,10 @@ TSharedRef<SWidget> UCMPingSelectorWidget::RebuildWidget()
         Brush.ImageSize = FVector2D(54.0f, 54.0f);
         Brush.SetResourceObject(Resource);
     };
-    ConfigureBrush(GoHereBrush, LoadIcon(ECMPingType::GoHere));
-    ConfigureBrush(LookHereBrush, LoadIcon(ECMPingType::LookHere));
-    ConfigureBrush(SwapPartsBrush, LoadIcon(ECMPingType::SwapParts));
+    LoadIconTextures();
+    ConfigureBrush(GoHereBrush, GoHereTexture);
+    ConfigureBrush(LookHereBrush, LookHereTexture);
+    ConfigureBrush(SwapPartsBrush, SwapPartsTexture);
 
     TSharedRef<SWidget> Root =
         SAssignNew(RadialPanel, SCMPingRadialPanel)
@@ -243,7 +244,28 @@ void UCMPingSelectorWidget::RefreshSelection()
     }
 }
 
-UObject* UCMPingSelectorWidget::LoadIcon(ECMPingType Type)
+#if WITH_DEV_AUTOMATION_TESTS
+void UCMPingSelectorWidget::LoadIconTexturesForTest()
+{
+    LoadIconTextures();
+}
+
+bool UCMPingSelectorWidget::HasValidIconTextures() const
+{
+    return IsValid(GoHereTexture)
+        && IsValid(LookHereTexture)
+        && IsValid(SwapPartsTexture);
+}
+#endif
+
+void UCMPingSelectorWidget::LoadIconTextures()
+{
+    GoHereTexture = LoadIcon(ECMPingType::GoHere);
+    LookHereTexture = LoadIcon(ECMPingType::LookHere);
+    SwapPartsTexture = LoadIcon(ECMPingType::SwapParts);
+}
+
+UTexture2D* UCMPingSelectorWidget::LoadIcon(ECMPingType Type)
 {
     const TCHAR* AssetPath = nullptr;
     switch (Type)

@@ -53,7 +53,8 @@ void UCMWorldPingWidget::SetPresentation(
 
 void UCMWorldPingWidget::ApplyPresentation()
 {
-    IconBrush.SetResourceObject(LoadIcon());
+    IconTexture = LoadIcon();
+    IconBrush.SetResourceObject(IconTexture);
     if (IconImage)
     {
         IconImage->SetImage(&IconBrush);
@@ -65,7 +66,7 @@ void UCMWorldPingWidget::ApplyPresentation()
     }
 }
 
-UObject* UCMWorldPingWidget::LoadIcon() const
+UTexture2D* UCMWorldPingWidget::LoadIcon() const
 {
     const TCHAR* AssetPath = nullptr;
     switch (PingType)

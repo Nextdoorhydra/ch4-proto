@@ -2,8 +2,11 @@
 
 #include "Misc/AutomationTest.h"
 #include "Engine/Texture2D.h"
+#include "Ping/CMPingSelectorWidget.h"
 #include "Ping/CMPingTypes.h"
 #include "Ping/CMWorldPing.h"
+#include "UObject/GarbageCollection.h"
+#include "UObject/StrongObjectPtr.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCMPingDragSelectionTest,
@@ -54,6 +57,25 @@ bool FCMPingLifetimePolicyTest::RunTest(const FString& Parameters)
         TestNotNull(FString::Printf(TEXT("Ping icon exists: %s"), IconPath),
             LoadObject<UTexture2D>(nullptr, IconPath));
     }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCMPingSelectorIconLifetimeTest,
+    "Chimera.Multiplayer.Ping.SelectorIconLifetime",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCMPingSelectorIconLifetimeTest::RunTest(const FString& Parameters)
+{
+    TStrongObjectPtr<UCMPingSelectorWidget> Selector(
+        NewObject<UCMPingSelectorWidget>());
+    Selector->LoadIconTexturesForTest();
+    TestTrue(TEXT("Selector loads all icon textures"),
+        Selector->HasValidIconTextures());
+
+    CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+    TestTrue(TEXT("Selector retains icon textures across garbage collection"),
+        Selector->HasValidIconTextures());
     return true;
 }
 
