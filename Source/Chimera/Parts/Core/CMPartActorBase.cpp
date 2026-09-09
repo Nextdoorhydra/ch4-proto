@@ -14,6 +14,7 @@
 #include "Parts/Combat/CMBattleComponent.h"
 #include "Parts/Core/CMPartStatusComponent.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Stage/Device/Component/CMInteractionHighlightComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPart, Log, All);
 
@@ -66,6 +67,9 @@ ACMPartActorBase::ACMPartActorBase()
     );
     GoreResponseComponent = CreateDefaultSubobject<UCMGoreResponseComponent>(
         TEXT("GoreResponseComponent")
+    );
+    InteractionHighlight = CreateDefaultSubobject<UCMInteractionHighlightComponent>(
+        TEXT("InteractionHighlight")
     );
 
     PartDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(
@@ -124,6 +128,7 @@ void ACMPartActorBase::BeginPlay()
 {
     Super::BeginPlay();
 
+    InteractionHighlight->AddHighlightTarget(PartMesh);
     InitializeFromPartData();
     CaptureMountedPhysicsState();
 
@@ -136,6 +141,7 @@ void ACMPartActorBase::BeginPlay()
         ForceNetUpdate();
     }
     ApplyAttachmentPhysicsState();
+    RefreshPickupHighlight();
 }
 
 void ACMPartActorBase::Tick(const float DeltaSeconds)
@@ -233,6 +239,7 @@ void ACMPartActorBase::SynchronizeAttachedPartSlot(
     bTentaclePullActive = false;
     TentacleReservationOwner.Reset();
     ApplyAttachmentPhysicsState();
+    RefreshPickupHighlight();
     ForceNetUpdate();
 }
 
@@ -334,6 +341,13 @@ UCMBattleComponent* ACMPartActorBase::GetBattleComponent() const
 UCMPartStatusComponent* ACMPartActorBase::GetPartStatusComponent() const
 {
     return PartStatusComponent;
+}
+
+UMaterialInterface* ACMPartActorBase::GetPickupHighlightMaterial() const
+{
+    return InteractionHighlight
+        ? InteractionHighlight->HighlightMaterial.Get()
+        : nullptr;
 }
 
 FVector ACMPartActorBase::GetAuthoritativePickupLocation() const
@@ -601,6 +615,7 @@ bool ACMPartActorBase::ApplyPartDamageAtHit(
 
 void ACMPartActorBase::ApplyDestroyedState()
 {
+    RefreshPickupHighlight();
     SetActorTickEnabled(false);
     if (PartMesh)
     {
@@ -613,6 +628,22 @@ void ACMPartActorBase::ApplyDestroyedState()
     {
         DamageHurtbox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     }
+}
+
+void ACMPartActorBase::RefreshPickupHighlight()
+{
+    if (!HasAuthority() || !InteractionHighlight)
+    {
+        return;
+    }
+
+    const bool bIsPickupPart = PartType == ECMPartSlotType::Arm
+        || PartType == ECMPartSlotType::Leg;
+    InteractionHighlight->SetHighlighted(
+        bIsPickupPart
+        && !bDead
+        && !bTentaclePullActive
+        && !CMControl::IsValidPartSlot(AttachedSlotAddress));
 }
 
 void ACMPartActorBase::CaptureMountedPhysicsState()
@@ -813,6 +844,7 @@ bool ACMPartActorBase::TryReserveForTentacle(AActor* Requester)
     UpdateReplicatedLoosePartLocation();
     bTentaclePullActive = true;
     ApplyAttachmentPhysicsState();
+    RefreshPickupHighlight();
     SetActorLocation(
         ReplicatedLoosePartLocation,
         false,
@@ -830,6 +862,7 @@ void ACMPartActorBase::ReleaseTentacleReservation(AActor* Requester)
         ReplicatedLoosePartLocation = GetActorLocation();
         bTentaclePullActive = false;
         ApplyAttachmentPhysicsState();
+        RefreshPickupHighlight();
         ForceNetUpdate();
     }
 }
