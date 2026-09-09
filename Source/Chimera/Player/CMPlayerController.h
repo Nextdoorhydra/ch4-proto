@@ -11,10 +11,12 @@ class ACMChimera;
 class ACMPlayGameState;
 class ACMTestAreaManager;
 class UCMVisionInputComponent;
+class UCMPingSelectorWidget;
 class UInputAction;
 class UInputMappingContext;
 class UCMClientStageLoadComponent;
 struct FInputActionValue;
+enum class ECMPingType : uint8;
 
 UCLASS()
 class CHIMERA_API ACMPlayerController : public APlayerController
@@ -179,6 +181,12 @@ private:
     void DebugTurnRightReleased();
     void RetryVotePressed();
     void RetryVoteReleased();
+    void PingModifierPressed();
+    void PingModifierReleased();
+    void PingMousePressed();
+    void PingMouseReleased();
+    void CancelPingSelection();
+    bool CapturePingTrace(FVector& OutOrigin, FVector& OutDirection) const;
 
     ACMChimera* GetSharedChimera() const;
     ACMTestAreaManager* FindTestAreaManager() const;
@@ -271,11 +279,20 @@ private:
     UFUNCTION(Server, Reliable)
     void ServerRequestTeleportToTestArea(FName AreaId);
 
+    UFUNCTION(Server, Reliable)
+    void ServerRequestPing(
+        ECMPingType Type,
+        FVector_NetQuantize TraceOrigin,
+        FVector_NetQuantizeNormal TraceDirection);
+
     UPROPERTY(Transient)
     TObjectPtr<ACMChimera> CachedSharedChimera;
 
     UPROPERTY(Transient)
     TObjectPtr<UCMClientStageLoadComponent> ClientStageLoadComponent;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCMPingSelectorWidget> PingSelectorWidget;
 
     bool bDetachModifierHeld = false;
     bool bReverseModifierHeld = false;
@@ -285,7 +302,12 @@ private:
     bool bDebugTurnLeftHeld = false;
     bool bDebugTurnRightHeld = false;
     bool bRetryVoteHoldActive = false;
+    bool bPingModifierHeld = false;
+    bool bPingSelecting = false;
     double RetryVoteHoldStartTime = 0.0;
+    FVector2D PingDragStart = FVector2D::ZeroVector;
+    FVector PingTraceOrigin = FVector::ZeroVector;
+    FVector PingTraceDirection = FVector::ForwardVector;
 
     TWeakObjectPtr<ACMPlayGameState> ApmTrackedPlayState;
     TArray<double> RecentApmActionTimes;
