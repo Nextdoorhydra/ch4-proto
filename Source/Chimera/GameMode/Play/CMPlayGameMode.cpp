@@ -755,12 +755,21 @@ bool ACMPlayGameMode::TryRetryGame(APlayerController* RequestingPlayer)
 {
     ACMPlayerController* ChimeraPlayer =
         Cast<ACMPlayerController>(RequestingPlayer);
-    if (!IsEligibleRetryVoter(RequestingPlayer)
-        || !ChimeraPlayer
-        || RetryVoters.Contains(
-            RequestingPlayer->GetPlayerState<APlayerState>())
-        || RetryVoteHoldTimers.Contains(ChimeraPlayer))
+    APlayerState* RequestingPlayerState = RequestingPlayer
+        ? RequestingPlayer->GetPlayerState<APlayerState>() : nullptr;
+    const bool bEligible = IsEligibleRetryVoter(RequestingPlayer);
+    const bool bAlreadyVoted = RequestingPlayerState
+        && RetryVoters.Contains(RequestingPlayerState);
+    const bool bHoldPending = ChimeraPlayer
+        && RetryVoteHoldTimers.Contains(ChimeraPlayer);
+    if (!bEligible || !ChimeraPlayer || bAlreadyVoted || bHoldPending)
     {
+        UE_LOG(LogChimeraStageLoad, Warning,
+            TEXT("[RetryVote][Server] Hold rejected Controller=%s PlayerId=%d Eligible=%d AlreadyVoted=%d HoldPending=%d"),
+            *GetNameSafe(RequestingPlayer),
+            RequestingPlayerState
+                ? RequestingPlayerState->GetPlayerId() : INDEX_NONE,
+            bEligible, bAlreadyVoted, bHoldPending);
         return false;
     }
 
@@ -775,6 +784,10 @@ bool ACMPlayGameMode::TryRetryGame(APlayerController* RequestingPlayer)
         HoldDelegate,
         FMath::Max(RetryVoteHoldDuration, 0.1f),
         false);
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("[RetryVote][Server] Hold timer started Controller=%s PlayerId=%d Duration=%.2f"),
+        *GetNameSafe(ChimeraPlayer), RequestingPlayerState->GetPlayerId(),
+        FMath::Max(RetryVoteHoldDuration, 0.1f));
     return true;
 }
 
@@ -795,6 +808,11 @@ void ACMPlayGameMode::CancelRetryVoteHold(APlayerController* RequestingPlayer)
     {
         GetWorldTimerManager().ClearTimer(*HoldTimer);
         RetryVoteHoldTimers.Remove(ChimeraPlayer);
+        UE_LOG(LogChimeraStageLoad, Display,
+            TEXT("[RetryVote][Server] Hold timer cancelled Controller=%s PlayerId=%d"),
+            *GetNameSafe(ChimeraPlayer),
+            ChimeraPlayer->PlayerState
+                ? ChimeraPlayer->PlayerState->GetPlayerId() : INDEX_NONE);
     }
 }
 
@@ -828,6 +846,11 @@ void ACMPlayGameMode::CompleteRetryVoteHold(
 
     const FCMRetryVoteSnapshot& Vote =
         CachedPlayGameState->GetRetryVoteSnapshot();
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("[RetryVote][Server] Vote registered Controller=%s PlayerId=%d Votes=%d Required=%d Eligible=%d"),
+        *GetNameSafe(Player),
+        Player->PlayerState ? Player->PlayerState->GetPlayerId() : INDEX_NONE,
+        Vote.VoteCount, Vote.RequiredVoteCount, Vote.EligiblePlayerCount);
     if (Vote.VoteCount >= Vote.RequiredVoteCount
         && Vote.RequiredVoteCount > 0)
     {

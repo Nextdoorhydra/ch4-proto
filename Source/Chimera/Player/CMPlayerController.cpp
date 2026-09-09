@@ -76,25 +76,78 @@ bool ACMPlayerController::CanRequestRetryGame() const
         && PlayState
         && PlayState->GetPlayPhase() == ECMPlayPhase::Playing
         && IsValid(LocalPlayerState)
-        && !LocalPlayerState->IsOnlyASpectator();
+        && !LocalPlayerState->IsOnlyASpectator()
+        && !PlayState->GetRetryVoteSnapshot().VotedPlayerIds.Contains(
+            LocalPlayerState->GetPlayerId());
 }
 
 void ACMPlayerController::RequestRetryGame()
 {
     if (!CanRequestRetryGame())
     {
+        const ACMPlayGameState* PlayState = GetWorld()
+            ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+        const APlayerState* LocalPlayerState = PlayerState;
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[RetryVote][LocalRequest] Rejected Controller=%s NetMode=%d Phase=%d PlayerState=%d PlayerId=%d Spectator=%d AlreadyVoted=%d"),
+            *GetName(), static_cast<int32>(GetNetMode()),
+            PlayState ? static_cast<int32>(PlayState->GetPlayPhase()) : INDEX_NONE,
+            IsValid(LocalPlayerState),
+            LocalPlayerState ? LocalPlayerState->GetPlayerId() : INDEX_NONE,
+            LocalPlayerState && LocalPlayerState->IsOnlyASpectator(),
+            PlayState && LocalPlayerState
+                && PlayState->GetRetryVoteSnapshot().VotedPlayerIds.Contains(
+                    LocalPlayerState->GetPlayerId()));
         return;
     }
 
+    bRetryVoteHoldActive = true;
+    RetryVoteHoldStartTime = GetWorld()
+        ? GetWorld()->GetTimeSeconds() : 0.0;
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][LocalRequest] Hold started Controller=%s NetMode=%d PlayerId=%d StartTime=%.3f"),
+        *GetName(), static_cast<int32>(GetNetMode()),
+        PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        RetryVoteHoldStartTime);
     ServerRequestRetryGame();
 }
 
 void ACMPlayerController::CancelRetryGameRequest()
 {
+    const bool bWasHolding = bRetryVoteHoldActive;
+    const float ReleasedProgress = GetRetryVoteHoldProgress();
+    bRetryVoteHoldActive = false;
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][LocalRequest] Hold released Controller=%s NetMode=%d PlayerId=%d WasHolding=%d Progress=%.2f"),
+        *GetName(), static_cast<int32>(GetNetMode()),
+        PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        bWasHolding, ReleasedProgress);
     if (IsLocalController())
     {
         ServerCancelRetryGameRequest();
     }
+}
+
+bool ACMPlayerController::IsRetryVoteHoldActive() const
+{
+    return bRetryVoteHoldActive
+        && CanRequestRetryGame()
+        && GetRetryVoteHoldProgress() < 1.0f;
+}
+
+float ACMPlayerController::GetRetryVoteHoldProgress() const
+{
+    const UWorld* World = GetWorld();
+    if (!bRetryVoteHoldActive || !World)
+    {
+        return 0.0f;
+    }
+    return FMath::Clamp(
+        static_cast<float>(
+            (World->GetTimeSeconds() - RetryVoteHoldStartTime)
+            / RetryVoteHoldDuration),
+        0.0f,
+        1.0f);
 }
 
 bool ACMPlayerController::CanControlStageResult() const
@@ -383,14 +436,18 @@ void ACMPlayerController::ServerRequestRetryGame_Implementation()
     ACMGameMode* GameMode = GetWorld()
         ? GetWorld()->GetAuthGameMode<ACMGameMode>()
         : nullptr;
-    if (GameMode)
-    {
-        GameMode->TryRetryGame(this);
-    }
+    const bool bAccepted = GameMode && GameMode->TryRetryGame(this);
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][ServerRPC] Hold request Controller=%s PlayerId=%d GameMode=%s Accepted=%d"),
+        *GetName(), PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        *GetNameSafe(GameMode), bAccepted);
 }
 
 void ACMPlayerController::ServerCancelRetryGameRequest_Implementation()
 {
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][ServerRPC] Hold cancel Controller=%s PlayerId=%d"),
+        *GetName(), PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE);
     if (ACMPlayGameMode* GameMode = GetWorld()
         ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>() : nullptr)
     {
@@ -800,17 +857,6 @@ void ACMPlayerController::SetupInputComponent()
         &ACMPlayerController::FourthControlKeyPressed,
         &ACMPlayerController::FourthControlKeyReleased);
 
-    InputComponent->BindKey(
-        EKeys::RightMouseButton,
-        IE_Pressed,
-        this,
-        &ThisClass::RequestRetryGame);
-    InputComponent->BindKey(
-        EKeys::RightMouseButton,
-        IE_Released,
-        this,
-        &ThisClass::CancelRetryGameRequest);
-
     for (const FKey Key : SoloTestControlKeys)
     {
         InputComponent->BindKey(
@@ -896,6 +942,30 @@ void ACMPlayerController::SetupInputComponent()
             TEXT("CameraDistanceAction is not assigned on %s."),
             *GetName());
     }
+    
+    if (RetryVoteAction)
+    {
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Started,
+            this,
+            &ThisClass::RetryVotePressed
+        );
+
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Completed,
+            this,
+            &ThisClass::RetryVoteReleased
+        );
+
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Canceled,
+            this,
+            &ThisClass::RetryVoteReleased
+        );
+    }
 
     // 기존 Q/W/E/R Mapping Context와 분리된 개발 전용 화살표 입력
     InputComponent->BindKey(EKeys::Up, IE_Pressed,
@@ -916,12 +986,27 @@ void ACMPlayerController::SetupInputComponent()
         this, &ThisClass::DebugTurnRightReleased);
 }
 
+void ACMPlayerController::RetryVotePressed()
+{
+    RequestRetryGame();
+}
+
+void ACMPlayerController::RetryVoteReleased()
+{
+    CancelRetryGameRequest();
+}
+
 // 활성화된 로컬 화살표 상태를 서버에 낮은 신뢰도의 연속 입력으로 전달
 void ACMPlayerController::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
 
-    if (!IsLocalController() || !bCheatDebugMovementEnabled)
+    if (!IsLocalController())
+    {
+        return;
+    }
+
+    if (!bCheatDebugMovementEnabled)
     {
         return;
     }
