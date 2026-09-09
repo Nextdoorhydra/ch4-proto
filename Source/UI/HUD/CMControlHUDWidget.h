@@ -155,6 +155,8 @@ private:
     void UpdateWireframeCameraInput();
     void InitializeRetryVoteHUD();
     void RefreshRetryVoteHUD();
+    void InitializeApmHUD();
+    void RefreshApmHUD();
     void RefreshWireframeCallouts(
         const FGeometry& MyGeometry,
         float InDeltaTime
@@ -219,6 +221,12 @@ private:
     TObjectPtr<UProgressBar> RetryVoteHoldProgressBar;
 
     UPROPERTY(Transient)
+    TObjectPtr<UWidget> ApmPanelRoot;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> ApmText;
+
+    UPROPERTY(Transient)
     TObjectPtr<UCanvasPanel> WireframeCanvas;
 
     UPROPERTY(Transient)
@@ -235,6 +243,7 @@ private:
     FVector2D WireframeImageTopLeft = FVector2D::ZeroVector;
     FVector2D WireframeImageSize = FVector2D::ZeroVector;
     float RuntimeWireframeZoom = 1.0f;
+    float ApmRefreshElapsed = 0.0f;
     TArray<TWeakObjectPtr<UCMPartSlotComponent>> ObservedPartSlots;
     TArray<TWeakObjectPtr<ACMPartActorBase>> ObservedParts;
     FDelegateHandle StaminaChangedHandle;

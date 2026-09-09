@@ -19,6 +19,7 @@
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "EngineUtils.h"
+#include "HAL/PlatformTime.h"
 #include "Stage/Test/CMTestAreaManager.h"
 #include "Vision/CMVisionInputComponent.h"
 
@@ -988,6 +989,7 @@ void ACMPlayerController::SetupInputComponent()
 
 void ACMPlayerController::RetryVotePressed()
 {
+    RecordApmAction();
     RequestRetryGame();
 }
 
@@ -1169,6 +1171,7 @@ void ACMPlayerController::FourthControlKeyReleased()
 
 void ACMPlayerController::DetachModifierPressed()
 {
+    RecordApmAction();
     bDetachModifierHeld = true;
 }
 
@@ -1179,6 +1182,7 @@ void ACMPlayerController::DetachModifierReleased()
 
 void ACMPlayerController::ReverseModifierPressed()
 {
+    RecordApmAction();
     bReverseModifierHeld = true;
 }
 
@@ -1265,6 +1269,11 @@ void ACMPlayerController::SetControlSlotPressed(
         return;
     }
 
+    if (bPressed)
+    {
+        RecordApmAction();
+    }
+
     // Controller는 어떤 파츠가 배정됐는지 알지 않는다.
     // Possess 중인 ControlBody에 SlotIndex와 Press/Release만 전달한다.
     if (ACMControlBody* ControlBody = GetPawn<ACMControlBody>())
@@ -1325,6 +1334,11 @@ void ACMPlayerController::SetSoloControlKeyPressed(
         return;
     }
 
+    if (bPressed)
+    {
+        RecordApmAction();
+    }
+
     if (bPressed && KeyIndex < CMControl::MaxKeysPerPlayer
         && VisionInputComponent)
     {
@@ -1336,6 +1350,78 @@ void ACMPlayerController::SetSoloControlKeyPressed(
         bPressed,
         bPressed && bReverseModifierHeld,
         bPressed && bDetachModifierHeld);
+}
+
+void ACMPlayerController::RecordApmAction()
+{
+    const double CurrentTime = FPlatformTime::Seconds();
+    if (!PrepareApmForCurrentStage(CurrentTime))
+    {
+        return;
+    }
+
+    PruneRecentApmActions(CurrentTime);
+    RecentApmActionTimes.Add(CurrentTime);
+}
+
+int32 ACMPlayerController::GetCurrentApm()
+{
+    const double CurrentTime = FPlatformTime::Seconds();
+    if (!PrepareApmForCurrentStage(CurrentTime))
+    {
+        return 0;
+    }
+
+    PruneRecentApmActions(CurrentTime);
+    const double MeasurementSeconds = FMath::Clamp(
+        CurrentTime - ApmMeasurementStartTime,
+        1.0,
+        ApmWindowSeconds);
+    return FMath::RoundToInt(
+        RecentApmActionTimes.Num() * 60.0 / MeasurementSeconds);
+}
+
+bool ACMPlayerController::PrepareApmForCurrentStage(double CurrentTime)
+{
+    ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>()
+        : nullptr;
+    if (!IsLocalController()
+        || !PlayState
+        || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    {
+        ApmTrackedPlayState.Reset();
+        RecentApmActionTimes.Reset();
+        ApmMeasurementStartTime = 0.0;
+        ApmTrackedStageIndex = INDEX_NONE;
+        return false;
+    }
+
+    if (ApmTrackedPlayState.Get() != PlayState
+        || ApmTrackedStageIndex != PlayState->GetCurrentStageIndex())
+    {
+        ApmTrackedPlayState = PlayState;
+        RecentApmActionTimes.Reset();
+        ApmMeasurementStartTime = CurrentTime;
+        ApmTrackedStageIndex = PlayState->GetCurrentStageIndex();
+    }
+    return true;
+}
+
+void ACMPlayerController::PruneRecentApmActions(double CurrentTime)
+{
+    const double OldestAllowedTime = CurrentTime - ApmWindowSeconds;
+    int32 ExpiredCount = 0;
+    while (ExpiredCount < RecentApmActionTimes.Num()
+        && RecentApmActionTimes[ExpiredCount] < OldestAllowedTime)
+    {
+        ++ExpiredCount;
+    }
+    if (ExpiredCount > 0)
+    {
+        RecentApmActionTimes.RemoveAt(
+            0, ExpiredCount, EAllowShrinking::No);
+    }
 }
 
 void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
