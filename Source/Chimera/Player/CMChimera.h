@@ -192,6 +192,11 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Health")
     bool AreAllSegmentsDead() const;
 
+    // 체크포인트 도달 시 죽은 몸통만 최대 체력으로 부활시키고 해당 조작 슬롯 복구
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+        Category = "Chimera|Health")
+    int32 ReviveDeadSegments();
+
     // 체크포인트 리스폰을 위해 몸통 체력과 플레이어 입력 사망 상태 복구
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Health")
