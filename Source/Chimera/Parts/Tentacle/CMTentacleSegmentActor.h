@@ -8,6 +8,7 @@
 
 class ACMDroppedPartActor;
 class ACMChimera;
+class UAudioComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UNiagaraComponent;
@@ -207,6 +208,8 @@ private:
     void SetTetheredActor(AActor* NewTarget);
     void UpdatePull(float DeltaTime);
     void AbortPull();
+    void RefreshPullLoopSound();
+    void StopPullLoopSound();
     void UpdateVisual(float DeltaTime);
     void EnsureVisualComponents();
     void DestroyVisualComponents();
@@ -228,6 +231,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UNiagaraComponent> TargetEffect;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> PullLoopSoundComponent;
 
     FCMPartSlotAddress PendingPartSlot;
     FTransform PullStartTransform;

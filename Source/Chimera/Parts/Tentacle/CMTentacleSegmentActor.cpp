@@ -1,6 +1,7 @@
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 
 #include "Collision/CMCollisionChannels.h"
+#include "Components/AudioComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
@@ -16,6 +17,8 @@
 #include "Player/CMChimera.h"
 #include "Player/CMChimeraBodySegmentActor.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraTentacle, Log, All);
 
@@ -125,6 +128,7 @@ void ACMTentacleSegmentActor::EndPlay(
     {
         AbortPull();
     }
+    StopPullLoopSound();
     DestroyVisualComponents();
     Super::EndPlay(EndPlayReason);
 }
@@ -287,6 +291,7 @@ bool ACMTentacleSegmentActor::TryBeginPartAttachment(
     PullElapsedSeconds = 0.0f;
     TentacleState = ECMTentacleState::Pulling;
     ForceNetUpdate();
+    RefreshPullLoopSound();
 
     UE_LOG(LogChimeraTentacle, Log,
         TEXT("[Tentacle Pull Started] Segment=%d Slot=%d Part=%s"),
@@ -468,8 +473,35 @@ void ACMTentacleSegmentActor::AbortPull()
     PendingPartSlot = FCMPartSlotAddress();
 }
 
+void ACMTentacleSegmentActor::RefreshPullLoopSound()
+{
+    if (TentacleState != ECMTentacleState::Pulling || !IsValid(TetheredActor))
+    {
+        StopPullLoopSound();
+        return;
+    }
+    if (IsValid(PullLoopSoundComponent) && PullLoopSoundComponent->IsPlaying())
+    {
+        return;
+    }
+
+    PullLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        TetheredActor->GetRootComponent(),
+        CMSoundTags::Part_AttachPullLoop);
+}
+
+void ACMTentacleSegmentActor::StopPullLoopSound()
+{
+    if (IsValid(PullLoopSoundComponent))
+    {
+        PullLoopSoundComponent->Stop();
+        PullLoopSoundComponent = nullptr;
+    }
+}
+
 void ACMTentacleSegmentActor::OnRep_VisualState()
 {
+    RefreshPullLoopSound();
     if (TetheredActor)
     {
         LastVisualTargetLocation = ResolveVisualTargetLocation(

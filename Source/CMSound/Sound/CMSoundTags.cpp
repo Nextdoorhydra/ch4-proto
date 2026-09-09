@@ -16,6 +16,7 @@ namespace CMSoundTags
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Pickup, "Chimera.Sound.Part.Pickup", "부위 획득");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Attach, "Chimera.Sound.Part.Attach", "부위 장착");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Detach, "Chimera.Sound.Part.Detach", "부위 탈착");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_AttachPullLoop, "Chimera.Sound.Part.AttachPullLoop", "부위 장착 당김 루프");
 
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Aggressive_TargetSpotted, "Chimera.Sound.AI.Aggressive.TargetSpotted", "공격형 AI 타깃 최초 발견");
 
