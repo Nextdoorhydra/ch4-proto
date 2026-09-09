@@ -24,6 +24,7 @@
 #include "Player/CMChimeraIdleTentacleComponent.h"
 #include "Player/CMRuntimeChildActorComponent.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Stage/Device/Component/CMInteractionHighlightComponent.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCMTentacleAttachmentDefaultsTest,
@@ -58,6 +59,11 @@ bool FCMTentacleAttachmentDefaultsTest::RunTest(
 
     const ACMDroppedPartActor* DroppedPartDefaults =
         GetDefault<ACMDroppedPartActor>();
+    const UCMInteractionHighlightComponent* DroppedHighlight =
+        DroppedPartDefaults
+            ? DroppedPartDefaults->FindComponentByClass<
+                UCMInteractionHighlightComponent>()
+            : nullptr;
     TestTrue(
         TEXT("Every dropped victim Part is tentacle-interactive"),
         DroppedPartDefaults
@@ -80,6 +86,8 @@ bool FCMTentacleAttachmentDefaultsTest::RunTest(
             && DroppedPartDefaults->GetPartMesh()
             && DroppedPartDefaults->GetPartMesh()
                 ->GetGenerateOverlapEvents());
+    TestNotNull(TEXT("Dropped Part has an interaction highlight"),
+        DroppedHighlight);
     return true;
 }
 
@@ -876,6 +884,8 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                 RuntimeTargetMesh->GetPhysicsAsset(),
                 TEXT("Ragdoll"),
                 FVector::ZeroVector);
+            TestTrue(TEXT("Dropped arm is always highlighted"),
+                RuntimeDrop->InteractionHighlight->IsHighlighted());
             RuntimeDrop->SetRole(ROLE_SimulatedProxy);
             RuntimeDrop->OnRep_VisualDefinition();
             const FVector ReplicatedDropCenter(-225.0f, 410.0f, 90.0f);

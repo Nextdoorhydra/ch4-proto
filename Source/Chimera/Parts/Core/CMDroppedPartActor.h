@@ -12,6 +12,7 @@ class ACMChimera;
 class UPhysicsAsset;
 class USkeletalMesh;
 class USkeletalMeshComponent;
+class UCMInteractionHighlightComponent;
 
 /** Physical world pickup created by severing a harvestable body part. */
 UCLASS(Blueprintable)
@@ -70,6 +71,9 @@ public:
         ACMChimera* Chimera,
         const FCMPartSlotAddress& PartSlotAddress);
 
+protected:
+    virtual void BeginPlay() override;
+
 private:
     UFUNCTION()
     void OnRep_VisualDefinition();
@@ -81,12 +85,18 @@ private:
     void OnRep_AuthoritativePickupLocation();
 
     void ApplyVisualDefinition();
+    void ApplyPickupHighlightMaterial();
+    void RefreshPickupHighlight();
     void UpdateAuthoritativePickupLocation();
     void ApplyAuthoritativePickupLocation();
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
         meta = (AllowPrivateAccess = "true"))
     TObjectPtr<USkeletalMeshComponent> PartMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+        meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UCMInteractionHighlightComponent> InteractionHighlight;
 
     UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Part Drop",

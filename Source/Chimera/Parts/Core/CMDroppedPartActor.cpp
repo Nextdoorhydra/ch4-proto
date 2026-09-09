@@ -6,6 +6,7 @@
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Stage/Device/Component/CMInteractionHighlightComponent.h"
 
 ACMDroppedPartActor::ACMDroppedPartActor()
 {
@@ -21,8 +22,18 @@ ACMDroppedPartActor::ACMDroppedPartActor()
     SetRootComponent(PartMesh);
     PartMesh->SetIsReplicated(true);
     PartMesh->SetGenerateOverlapEvents(true);
+    InteractionHighlight = CreateDefaultSubobject<UCMInteractionHighlightComponent>(
+        TEXT("InteractionHighlight"));
     Tags.AddUnique(
         ACMTentacleSegmentActor::TentacleInteractiveActorTag);
+}
+
+void ACMDroppedPartActor::BeginPlay()
+{
+    Super::BeginPlay();
+    InteractionHighlight->AddHighlightTarget(PartMesh);
+    ApplyPickupHighlightMaterial();
+    RefreshPickupHighlight();
 }
 
 void ACMDroppedPartActor::Tick(const float DeltaSeconds)
@@ -72,7 +83,9 @@ void ACMDroppedPartActor::InitializeDroppedPart(
     DroppedMesh = InMesh;
     DroppedPhysicsAsset = InPhysicsAsset;
     DroppedCollisionProfile = CollisionProfile;
+    ApplyPickupHighlightMaterial();
     ApplyVisualDefinition();
+    RefreshPickupHighlight();
     if (!Impulse.IsNearlyZero())
     {
         PartMesh->AddImpulse(Impulse);
@@ -81,8 +94,38 @@ void ACMDroppedPartActor::InitializeDroppedPart(
     ForceNetUpdate();
 }
 
+void ACMDroppedPartActor::ApplyPickupHighlightMaterial()
+{
+    if (!InteractionHighlight || !UsablePartClass)
+    {
+        return;
+    }
+
+    if (const ACMPartActorBase* PartDefaults =
+            UsablePartClass->GetDefaultObject<ACMPartActorBase>())
+    {
+        InteractionHighlight->HighlightMaterial =
+            PartDefaults->GetPickupHighlightMaterial();
+    }
+}
+
+void ACMDroppedPartActor::RefreshPickupHighlight()
+{
+    if (!HasAuthority() || !InteractionHighlight)
+    {
+        return;
+    }
+
+    const bool bIsArmOrLeg = BodyPart == ECMBodyPart::ArmLeft
+        || BodyPart == ECMBodyPart::ArmRight
+        || BodyPart == ECMBodyPart::LegLeft
+        || BodyPart == ECMBodyPart::LegRight;
+    InteractionHighlight->SetHighlighted(!bConsumed && bIsArmOrLeg);
+}
+
 void ACMDroppedPartActor::OnRep_VisualDefinition()
 {
+    ApplyPickupHighlightMaterial();
     ApplyVisualDefinition();
 }
 

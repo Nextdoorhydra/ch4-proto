@@ -11,7 +11,9 @@
 class UGameplayAbility;
 class UCMBattleComponent;
 class UCMGoreResponseComponent;
+class UCMInteractionHighlightComponent;
 class UCMPartStatusComponent;
+class UMaterialInterface;
 class UBoxComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
@@ -105,6 +107,8 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     USkeletalMeshComponent* GetPartMesh() const { return PartMesh; }
+
+    UMaterialInterface* GetPickupHighlightMaterial() const;
 
     /** Server-authored world point shared by gameplay and client presentation. */
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
@@ -222,6 +226,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMGoreResponseComponent> GoreResponseComponent;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UCMInteractionHighlightComponent> InteractionHighlight;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Part")
     ECMPartSlotType PartType = ECMPartSlotType::Any;
 
@@ -284,6 +291,7 @@ private:
     void CaptureMountedPhysicsState();
     void ResetMeshFromRagdoll();
     void ApplyAttachmentPhysicsState();
+    void RefreshPickupHighlight();
     void UpdateReplicatedLoosePartLocation();
     void ApplyReplicatedLoosePartLocation();
 

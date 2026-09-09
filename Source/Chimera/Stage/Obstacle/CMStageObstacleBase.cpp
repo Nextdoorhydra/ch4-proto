@@ -122,7 +122,9 @@ void ACMStageObstacleBase::ResolveBalance()
 
 void ACMStageObstacleBase::ApplyResolvedBalance()
 {
-    PartEffect.bEnabled = ResolvedObstacleBalance.Damage > 0.0f
+    PartEffect.bEnabled = PartEffect.ApplicationPolicy
+            == ECMObstacleEffectApplicationPolicy::KillOnEnter
+        || ResolvedObstacleBalance.Damage > 0.0f
         || PartEffect.StatusEffect != ECMPartObstacleStatusEffect::None;
     PartEffect.DamagePerApplication = ResolvedObstacleBalance.bValid
         ? ResolvedObstacleBalance.Damage : 0.0f;
