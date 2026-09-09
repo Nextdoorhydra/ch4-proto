@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Parts/Arm/CMArmHoldTarget.h"
+#include "Stage/Checkpoint/CMCheckpointResettable.h"
 
 #include "CMArmHoldableBox.generated.h"
 
@@ -14,6 +15,7 @@ UCLASS(Blueprintable)
 class CHIMERA_API ACMArmHoldableBox
     : public AActor
     , public ICMArmHoldTarget
+    , public ICMCheckpointResettable
 {
     GENERATED_BODY()
 
@@ -37,6 +39,8 @@ public:
         ACMArmPart* ArmPart
     ) override;
 
+    virtual void ResetForCheckpoint() override;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Arm Holdable Box")
     bool IsHeld() const { return HoldingArm != nullptr; }
 
@@ -59,4 +63,6 @@ protected:
 private:
     UPROPERTY(Replicated, VisibleInstanceOnly)
     TObjectPtr<ACMArmPart> HoldingArm;
+
+    FTransform InitialTransform;
 };

@@ -32,10 +32,34 @@ ACMArmHoldableBox::ACMArmHoldableBox()
 void ACMArmHoldableBox::BeginPlay()
 {
     Super::BeginPlay();
+    InitialTransform = GetActorTransform();
     BoxMesh->SetMassOverrideInKg(
         NAME_None,
         FMath::Max(MassInKg, 1.0f),
         true);
+}
+
+void ACMArmHoldableBox::ResetForCheckpoint()
+{
+    if (!HasAuthority() || !BoxMesh)
+    {
+        return;
+    }
+
+    if (IsValid(HoldingArm))
+    {
+        HoldingArm->EndGroundAnchor();
+    }
+    HoldingArm = nullptr;
+    BoxMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    BoxMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+    SetActorTransform(
+        InitialTransform,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    BoxMesh->WakeAllRigidBodies();
+    ForceNetUpdate();
 }
 
 void ACMArmHoldableBox::GetLifetimeReplicatedProps(

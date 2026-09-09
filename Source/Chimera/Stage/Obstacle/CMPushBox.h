@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Combat/CMCombatHitTarget.h"
 #include "GameFramework/Actor.h"
+#include "Stage/Checkpoint/CMCheckpointResettable.h"
 
 #include "CMPushBox.generated.h"
 
@@ -13,7 +14,10 @@ class UStaticMeshComponent;
 
 /** 플레이어의 몸통 충돌과 기본 팔 공격으로만 이동하는 키네마틱 상자다. */
 UCLASS(Blueprintable)
-class CHIMERA_API ACMPushBox : public AActor, public ICMCombatHitTarget
+class CHIMERA_API ACMPushBox
+    : public AActor
+    , public ICMCombatHitTarget
+    , public ICMCheckpointResettable
 {
     GENERATED_BODY()
 
@@ -24,6 +28,7 @@ public:
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual bool ReceiveCombatHit_Implementation(const FCMCombatHitRequest& Request) override;
+    virtual void ResetForCheckpoint() override;
 
 protected:
     virtual void BeginPlay() override;
@@ -75,4 +80,5 @@ private:
     FVector PushDirection = FVector::ZeroVector;
     float RemainingPushDistance = 0.0f;
     FGuid LastAcceptedAttackId;
+    FTransform InitialTransform;
 };

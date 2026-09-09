@@ -29,6 +29,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
     void RequestRetryGame();
 
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
+    void CancelRetryGameRequest();
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Game")
     bool CanControlStageResult() const;
 
@@ -167,6 +170,9 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerRequestRetryGame();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCancelRetryGameRequest();
 
     UFUNCTION(Server, Reliable)
     void ServerRequestRestartCompletedStage();
