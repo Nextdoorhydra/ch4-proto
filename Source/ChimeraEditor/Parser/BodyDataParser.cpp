@@ -26,6 +26,8 @@ namespace BodyColumns
     const FString MaxVelocity = TEXT("MaxVelocity");
     const FString PlayerCountForceMultiplier =
         TEXT("PlayerCountForceMultiplier");
+    const FString LegYawMultiplier = TEXT("LegYawMultiplier");
+    const FString LegForwardMultiplier = TEXT("LegForwardMultiplier");
 
     const TArray<FString> RequiredHeaders =
     {
@@ -41,6 +43,8 @@ namespace BodyColumns
         AngularDamping,
         MaxVelocity,
         PlayerCountForceMultiplier,
+        LegYawMultiplier,
+        LegForwardMultiplier,
     };
 
     bool ReadRequiredFloat(
@@ -149,6 +153,20 @@ bool UBodyDataParser::OnParseComplete(FString& OutError)
             Index,
             ParsedRowName,
             true);
+        bHasValidNumbers &= BodyColumns::ReadRequiredFloat(
+            Row,
+            BodyColumns::LegYawMultiplier,
+            NewRow.LegYawMultiplier,
+            Report,
+            Index,
+            ParsedRowName);
+        bHasValidNumbers &= BodyColumns::ReadRequiredFloat(
+            Row,
+            BodyColumns::LegForwardMultiplier,
+            NewRow.LegForwardMultiplier,
+            Report,
+            Index,
+            ParsedRowName);
 
         if (!Row.IsValid() || !bHasValidNumbers)
         {

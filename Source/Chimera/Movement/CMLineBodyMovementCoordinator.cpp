@@ -14,6 +14,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/EngineTypes.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
@@ -147,11 +148,14 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
         );
     const float PlayerCountForceMultiplier =
         GetPlayerCountForceMultiplier(Chimera);
-    const float PushForceMagnitude =
+    const float BaseLegImpulse =
         MovementImpulse
         * DirectionalChainMassMultiplier
         * PlayerCountForceMultiplier
-        * FMath::Max(Chimera.LegStepForceScale, 0.0f)
+        * FMath::Max(Chimera.LegStepForceScale, 0.0f);
+    const float PushForceMagnitude =
+        BaseLegImpulse
+        * FMath::Max(Chimera.LegYawMultiplier, 0.0f)
         / PushDuration;
     if (PushDirection.IsNearlyZero()
         || PushForceMagnitude <= UE_SMALL_NUMBER)
@@ -192,13 +196,13 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     FVector SegmentForwardDirection = SegmentBody->GetForwardVector();
     SegmentForwardDirection.Z = 0.0f;
     const float IndividualForwardImpulseMagnitude =
-        PushForceMagnitude
-        * PushDuration
+        BaseLegImpulse
         * FMath::Clamp(
             Chimera.IndividualLegForwardImpulseFraction,
             0.0f,
             1.0f
-        );
+        )
+        * FMath::Max(Chimera.LegForwardMultiplier, 0.0f);
     if (SegmentForwardDirection.Normalize()
         && IndividualForwardImpulseMagnitude > UE_SMALL_NUMBER)
     {
@@ -563,26 +567,36 @@ bool UCMLineBodyMovementCoordinator::TryBeginArmAnchor(
         }
         HoldDirection = HoldDirection.GetSafeNormal();
 
-        TArray<FHitResult> InteractionHits;
+        const float HoldRange = FMath::Max(ArmPart.GetHoldRange(), 0.0f);
+        const float HoldRadius = FMath::Max(ArmPart.GetHoldRadius(), 0.0f);
+        const FVector HoldBoxCenter = Start
+            + HoldDirection * HoldRange * 0.5f;
+        const FVector HoldBoxExtent(
+            HoldRange * 0.5f + HoldRadius,
+            HoldRadius,
+            HoldRadius);
+        const FQuat HoldBoxRotation = FRotationMatrix::MakeFromX(
+            HoldDirection).ToQuat();
+
+        TArray<FOverlapResult> InteractionOverlaps;
         FCollisionQueryParams QueryParams(
             SCENE_QUERY_STAT(CMArmHoldTargets),
             false,
             &Chimera);
         QueryParams.AddIgnoredActor(&ArmPart);
-        World->SweepMultiByObjectType(
-            InteractionHits,
-            Start,
-            Start + HoldDirection * ArmPart.GetHoldRange(),
-            FQuat::Identity,
+        World->OverlapMultiByObjectType(
+            InteractionOverlaps,
+            HoldBoxCenter,
+            HoldBoxRotation,
             FCollisionObjectQueryParams(
                 FCollisionObjectQueryParams::AllObjects),
-            FCollisionShape::MakeSphere(ArmPart.GetHoldRadius()),
+            FCollisionShape::MakeBox(HoldBoxExtent),
             QueryParams);
 
         TSet<AActor*> QueriedActors;
-        for (const FHitResult& Hit : InteractionHits)
+        for (const FOverlapResult& Overlap : InteractionOverlaps)
         {
-            AActor* TargetActor = Hit.GetActor();
+            AActor* TargetActor = Overlap.GetActor();
             if (!TargetActor || QueriedActors.Contains(TargetActor)
                 || !TargetActor->Implements<UCMArmHoldTarget>())
             {

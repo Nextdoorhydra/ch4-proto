@@ -21,6 +21,7 @@ void ACMPlayerState::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPlayerState, PlayerSlotId);
     DOREPLIFETIME(ACMPlayerState, ParticipationState);
     DOREPLIFETIME(ACMPlayerState, bVisionSystemEnabled);
+    DOREPLIFETIME(ACMPlayerState, CurrentApm);
 }
 
 // PlayerState가 교체되는 Travel·재접속 경계에서 플레이어 고유 상태 보존
@@ -147,6 +148,17 @@ void ACMPlayerState::SetParticipationState(
 
     ParticipationState = NewState;
     OnRep_ParticipationState();
+    ForceNetUpdate();
+}
+
+void ACMPlayerState::SetCurrentApm(int32 NewCurrentApm)
+{
+    if (!HasAuthority() || CurrentApm == NewCurrentApm)
+    {
+        return;
+    }
+
+    CurrentApm = NewCurrentApm;
     ForceNetUpdate();
 }
 

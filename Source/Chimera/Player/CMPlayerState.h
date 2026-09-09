@@ -42,6 +42,7 @@ public:
     void SetReady(bool bNewReady);
     void SetPlayerSlotId(int32 NewPlayerSlotId);
     void SetParticipationState(ECMPlayerParticipationState NewState);
+    void SetCurrentApm(int32 NewCurrentApm);
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Vision")
     void SetVisionSystemEnabled(bool bEnabled);
@@ -60,6 +61,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Player")
     int32 GetPlayerSlotId() const { return PlayerSlotId; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Player")
+    int32 GetCurrentApm() const { return CurrentApm; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Player")
     ECMPlayerParticipationState GetParticipationState() const
@@ -111,4 +115,7 @@ private:
 
     UPROPERTY(ReplicatedUsing = OnRep_VisionSystemEnabled)
     bool bVisionSystemEnabled = true;
+
+    UPROPERTY(Replicated)
+    int32 CurrentApm = 0;
 };

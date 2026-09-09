@@ -1028,6 +1028,13 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
         return;
     }
 
+    ApmReportElapsed += DeltaTime;
+    if (ApmReportElapsed >= ApmReportInterval)
+    {
+        ApmReportElapsed = 0.0f;
+        ServerReportCurrentApm(GetCurrentApm());
+    }
+
     if (bPingSelecting && PingSelectorWidget)
     {
         float MouseX = 0.0f;
@@ -1564,6 +1571,15 @@ int32 ACMPlayerController::GetCurrentApm()
         ApmWindowSeconds);
     return FMath::RoundToInt(
         RecentApmActionTimes.Num() * 60.0 / MeasurementSeconds);
+}
+
+void ACMPlayerController::ServerReportCurrentApm_Implementation(
+    int32 NewCurrentApm)
+{
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetCurrentApm(FMath::Clamp(NewCurrentApm, 0, 9999));
+    }
 }
 
 bool ACMPlayerController::PrepareApmForCurrentStage(double CurrentTime)
