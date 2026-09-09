@@ -31,6 +31,12 @@ ACMPowerCableActor::ACMPowerCableActor()
     CablePhysics->bEnableCollision = true;
     CablePhysics->CollisionFriction = 0.05f;
     CablePhysics->bUseSubstepping = true;
+    // UE 5.7 reinitializes every particle along a straight line when an
+    // endpoint moves farther than this threshold. A grabbed cable must keep
+    // its settled shape and let the solver pull only the held endpoint.
+    CablePhysics->TeleportDistanceThreshold = 0.0f;
+    CablePhysics->TeleportRotationThreshold = 0.0f;
+    CablePhysics->bTeleportAfterReattach = false;
     CablePhysics->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     CablePhysics->SetCollisionResponseToAllChannels(ECR_Ignore);
     CablePhysics->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
@@ -45,6 +51,8 @@ ACMPowerCableActor::ACMPowerCableActor()
     GrabVolume->SetBoxExtent(FVector(50.0f, 15.0f, 15.0f));
     bReplicates = true;
     SetReplicateMovement(true);
+    SetNetUpdateFrequency(30.0f);
+    SetMinNetUpdateFrequency(10.0f);
 }
 
 void ACMPowerCableActor::BeginPlay()
@@ -139,7 +147,11 @@ void ACMPowerCableActor::BeginPlay()
         }
     }
     InitializeRope();
-    UpdateCablePhysics();
+    CablePhysics->SetComponentTickEnabled(HasAuthority());
+    if (HasAuthority())
+    {
+        UpdateCablePhysics();
+    }
 
     if (UGameInstance* GameInstance = GetWorld()
         ? GetWorld()->GetGameInstance() : nullptr)
@@ -192,9 +204,9 @@ void ACMPowerCableActor::Tick(float DeltaSeconds)
         bHasCachedVisualEndpoint = false;
     }
 
-    UpdateCablePhysics();
-    if (CablePhysics)
+    if (HasAuthority() && CablePhysics)
     {
+        UpdateCablePhysics();
         TArray<FVector> ParticleLocations;
         CablePhysics->GetCableParticleLocations(ParticleLocations);
         if (ParticleLocations.Num() >= 2)
@@ -202,6 +214,7 @@ void ACMPowerCableActor::Tick(float DeltaSeconds)
             RopePositions = MoveTemp(ParticleLocations);
             RopePreviousPositions = RopePositions;
             bRopeInitialized = true;
+            CaptureAuthoritativeRopePositions();
         }
     }
     UpdateCableVisual();
@@ -617,6 +630,20 @@ void ACMPowerCableActor::UpdateCablePhysics()
             CablePhysics->SetAttachEndToComponent(nullptr);
             CablePhysics->bAttachEnd = false;
         }
+    }
+}
+
+void ACMPowerCableActor::CaptureAuthoritativeRopePositions()
+{
+    if (!HasAuthority() || RopePositions.Num() < 2)
+    {
+        return;
+    }
+
+    ReplicatedRopePositions.Reset(RopePositions.Num());
+    for (const FVector& Position : RopePositions)
+    {
+        ReplicatedRopePositions.Add(Position);
     }
 }
 
@@ -1681,6 +1708,24 @@ void ACMPowerCableActor::OnRep_CableStartLocation()
     UpdateCableVisual();
 }
 
+void ACMPowerCableActor::OnRep_ReplicatedRopePositions()
+{
+    if (ReplicatedRopePositions.Num() < 2)
+    {
+        return;
+    }
+
+    RopePositions.Reset(ReplicatedRopePositions.Num());
+    for (const FVector_NetQuantize10& Position : ReplicatedRopePositions)
+    {
+        RopePositions.Add(Position);
+    }
+    RopePreviousPositions = RopePositions;
+    bRopeInitialized = true;
+    UpdateCableVisual();
+    UpdateGrabVolume();
+}
+
 void ACMPowerCableActor::HandleLoadGroupFinished(
     FName FinishedLoadGroupId,
     EAsyncLoadResult Result,
@@ -1773,7 +1818,8 @@ bool ACMPowerCableActor::TryBuildCableVisual()
     }
 
     bCableVisualReady = true;
-    if (!IsGrabbed() && !HasAnyEndpointConnected())
+    if (!IsGrabbed() && !HasAnyEndpointConnected()
+        && (HasAuthority() || ReplicatedRopePositions.Num() < 2))
     {
         bRopeInitialized = false;
         RopePositions.Reset();
@@ -1939,4 +1985,5 @@ void ACMPowerCableActor::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPowerCableActor, bSocketAtStart);
     DOREPLIFETIME(ACMPowerCableActor, bSourceAtStart);
     DOREPLIFETIME(ACMPowerCableActor, CableStartLocation);
+    DOREPLIFETIME(ACMPowerCableActor, ReplicatedRopePositions);
 }
