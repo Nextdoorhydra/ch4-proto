@@ -74,6 +74,24 @@ bool ACMLegPart::ConsumePendingReverseMovement()
     return bWasReverse;
 }
 
+void ACMLegPart::SetPendingInputStrengthMultiplier(
+    const float StrengthMultiplier
+)
+{
+    PendingInputStrengthMultiplier = FMath::Clamp(
+        StrengthMultiplier,
+        0.0f,
+        1.0f
+    );
+}
+
+float ACMLegPart::ConsumePendingInputStrengthMultiplier()
+{
+    const float StrengthMultiplier = PendingInputStrengthMultiplier;
+    PendingInputStrengthMultiplier = 1.0f;
+    return StrengthMultiplier;
+}
+
 void ACMLegPart::BeginProceduralStep(
     const bool bReverseMovement,
     const FVector GroundLocation,

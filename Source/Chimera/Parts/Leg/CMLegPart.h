@@ -117,6 +117,12 @@ public:
     /** Consumed once by the granted Leg ability when its Step begins. */
     bool ConsumePendingReverseMovement();
 
+    /** Stores the strength calculated when the control key is released. */
+    void SetPendingInputStrengthMultiplier(float StrengthMultiplier);
+
+    /** Consumed once by the granted Leg ability when its Step begins. */
+    float ConsumePendingInputStrengthMultiplier();
+
     void BeginProceduralStep(
         bool bReverseMovement,
         FVector GroundLocation,
@@ -245,6 +251,7 @@ private:
     FVector GetCurrentPlantStartLocation() const;
 
     bool bPendingReverseMovement = false;
+    float PendingInputStrengthMultiplier = 1.0f;
 
     // Legacy fields remain as transient compatibility mirrors for existing
     // native/Blueprint callers. Authority state is replicated atomically via

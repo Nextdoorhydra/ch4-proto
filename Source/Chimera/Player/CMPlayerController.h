@@ -259,5 +259,7 @@ private:
     bool bDebugTurnRightHeld = false;
 
     FCMPartSlotAddress SoloPressedPartSlots[CMControl::SoloTestKeyCount];
+    double SoloControlKeyStartTimes[CMControl::SoloTestKeyCount] = {};
+    bool bSoloControlKeyReverseMovement[CMControl::SoloTestKeyCount] = {};
 
 };

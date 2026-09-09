@@ -211,6 +211,8 @@ protected:
 private:
     /** 눌렀을 때 배정됐던 파츠를 기억해 Release와 재할당을 안전하게 처리한다. */
     FCMPartSlotAddress PressedPartSlots[CMControl::MaxKeysPerPlayer];
+    double PressedControlSlotStartTimes[CMControl::MaxKeysPerPlayer] = {};
+    bool bPressedControlSlotReverseMovement[CMControl::MaxKeysPerPlayer] = {};
 
     TMap<TWeakObjectPtr<UObject>, FTimerHandle> ConfusionSources;
     TMap<TWeakObjectPtr<UObject>, FTimerHandle> DeliriumSources;
