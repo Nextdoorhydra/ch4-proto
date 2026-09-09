@@ -10,6 +10,7 @@
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Parts/Core/CMPartActorBase.h"
+#include "Parts/Leg/CMLegPart.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputCoreTypes.h"
@@ -1251,19 +1252,37 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
             CMControl::SoloTestSegmentCount))
         {
             const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
-            const bool bActivateOnRelease =
+            UCMPartSlotComponent* ReleasedSlot =
+                SharedChimera->GetPartSlotComponent(ReleasedPartSlot);
+            const bool bIsLeg = ReleasedSlot
+                && Cast<ACMLegPart>(ReleasedSlot->GetAttachedPart());
+            const bool bActivateOnRelease = bIsLeg ||
                 SharedChimera->ShouldActivateBasicArmOnRelease(
                     ReleasedPartSlot);
             SharedChimera->SetPartSlotPressed(ReleasedPartSlot, false);
             if (bActivateOnRelease)
             {
-                SharedChimera->ActivatePartSlot(
+                const double CurrentTime = GetWorld()
+                    ? GetWorld()->GetTimeSeconds()
+                    : SoloControlKeyStartTimes[KeyIndex];
+                const float HoldSeconds = static_cast<float>(FMath::Max(
+                    CurrentTime - SoloControlKeyStartTimes[KeyIndex],
+                    0.0
+                ));
+                const float LegStrengthMultiplier = bIsLeg
+                    ? SharedChimera->GetLegInputStrengthMultiplier(
+                        HoldSeconds)
+                    : 1.0f;
+                SharedChimera->ActivatePartSlotWithLegStrength(
                     ReleasedPartSlot,
                     CMPlayerState,
-                    false);
+                    bSoloControlKeyReverseMovement[KeyIndex],
+                    LegStrengthMultiplier);
             }
         }
         PressedPartSlot = FCMPartSlotAddress();
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         return;
     }
 
@@ -1276,6 +1295,8 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
             SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
             PressedPartSlot = FCMPartSlotAddress();
         }
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         SharedChimera->DetachPartFromSlot(PartSlotAddress);
         return;
     }
@@ -1293,6 +1314,8 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
                 PressedPartSlot, false);
         }
         PressedPartSlot = FCMPartSlotAddress();
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         return;
     }
 
@@ -1303,8 +1326,15 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
     }
 
     PressedPartSlot = PartSlotAddress;
+    SoloControlKeyStartTimes[KeyIndex] = GetWorld()
+        ? GetWorld()->GetTimeSeconds()
+        : 0.0;
+    bSoloControlKeyReverseMovement[KeyIndex] = bReverseMovement;
     SharedChimera->SetPartSlotPressed(PartSlotAddress, true);
-    if (!SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
+    const bool bIsLeg = PartSlot
+        && Cast<ACMLegPart>(PartSlot->GetAttachedPart());
+    if (!bIsLeg
+        && !SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
     {
         SharedChimera->ActivatePartSlot(
             PartSlotAddress,
