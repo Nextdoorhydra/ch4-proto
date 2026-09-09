@@ -226,6 +226,14 @@ void ACMPlayerController::RequestCheatDamagePart(
     }
 }
 
+void ACMPlayerController::RequestCheatSetInvincible(bool bEnabled)
+{
+    if (IsLocalController())
+    {
+        ServerCheatSetInvincible(bEnabled);
+    }
+}
+
 void ACMPlayerController::RequestCheatSpawnRandomParts()
 {
     if (IsLocalController())
@@ -693,6 +701,25 @@ void ACMPlayerController::ServerCheatDamagePart_Implementation(
         OneBasedSlotIndex,
         *Part->GetName(),
         Damage,
+        *GetName());
+}
+
+void ACMPlayerController::ServerCheatSetInvincible_Implementation(
+    bool bEnabled)
+{
+    ACMChimera* SharedChimera = GetSharedChimera();
+    if (!SharedChimera)
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.God: shared Chimera is unavailable."));
+        return;
+    }
+
+    SharedChimera->SetCanBeDamaged(!bEnabled);
+    SharedChimera->ForceNetUpdate();
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] CM.God %d requested by %s."),
+        bEnabled ? 1 : 0,
         *GetName());
 }
 

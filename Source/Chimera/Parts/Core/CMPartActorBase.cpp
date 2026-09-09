@@ -479,7 +479,14 @@ bool ACMPartActorBase::ApplyPartDamageAtHit(
     const FVector SurfaceNormal,
     const FVector BloodDirection)
 {
-    if (!HasAuthority() || !IsAlive() || Damage <= 0.0f)
+    const UCMPartSlotComponent* AttachedSlot = GetAttachedPartSlot();
+    const AActor* PartSlotOwner = AttachedSlot
+        ? AttachedSlot->GetOwner()
+        : nullptr;
+    if (!HasAuthority()
+        || (PartSlotOwner && !PartSlotOwner->CanBeDamaged())
+        || !IsAlive()
+        || Damage <= 0.0f)
     {
         return false;
     }

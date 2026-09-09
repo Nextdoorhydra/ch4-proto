@@ -104,6 +104,21 @@ void DamagePart(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+void SetInvincible(const TArray<FString>& Args, UWorld* World)
+{
+    if (Args.Num() != 1 || (Args[0] != TEXT("0") && Args[0] != TEXT("1")))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[Cheat Usage] CM.God 1|0"));
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatSetInvincible(Args[0] == TEXT("1"));
+    }
+}
+
 void SpawnRandomParts(const TArray<FString>& Args, UWorld* World)
 {
     if (ACMPlayerController* Controller = FindLocalController(World))
@@ -301,6 +316,12 @@ FAutoConsoleCommandWithWorldAndArgs DamagePartCommand(
     TEXT("CM.DamagePart"),
     TEXT("Damages the Part attached to a one-based global Chimera slot. Usage: CM.DamagePart <SlotNumber> <Damage>"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&DamagePart)
+);
+
+FAutoConsoleCommandWithWorldAndArgs InvincibleCommand(
+    TEXT("CM.God"),
+    TEXT("Enables or disables all damage to the shared Chimera and its attached Parts. Usage: CM.God 1|0"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetInvincible)
 );
 
 FAutoConsoleCommandWithWorldAndArgs SpawnRandomPartsCommand(

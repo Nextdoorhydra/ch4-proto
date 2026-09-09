@@ -68,6 +68,7 @@ public:
 
     void RequestCheatDamageSegment(int32 SegmentIndex, float Damage);
     void RequestCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+    void RequestCheatSetInvincible(bool bEnabled);
 
     void RequestCheatSpawnRandomParts();
     void RequestCheatAttachPart(int32 OneBasedSlotIndex, FName PartName);
@@ -208,6 +209,9 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatSetInvincible(bool bEnabled);
 
     UFUNCTION(Server, Reliable)
     void ServerCheatSpawnRandomParts();
