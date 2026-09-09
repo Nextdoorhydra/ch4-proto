@@ -211,6 +211,7 @@ private:
     void EnsureVisualComponents();
     void DestroyVisualComponents();
     USkeletalMeshComponent* ResolveTargetPartMesh(AActor* Target) const;
+    FVector ResolveAuthoritativePickupLocation(AActor* Target) const;
     FVector ResolveVisualTargetLocation(AActor* Target) const;
 
     UFUNCTION()

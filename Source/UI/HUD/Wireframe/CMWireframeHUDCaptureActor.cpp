@@ -315,6 +315,12 @@ void ACMWireframeHUDCaptureActor::SynchronizePartProxies()
             SceneCapture->ShowOnlyComponent(Proxy.Mesh);
         }
 
+        // A Part can leave and return to the same slot between capture ticks.
+        // Force-refresh the leader map so a previous ragdoll pose cannot stay
+        // cached in the HUD-only follower mesh.
+        Proxy.Mesh->SetLeaderPoseComponent(SourceMesh, true, false);
+        Proxy.Mesh->RefreshBoneTransforms();
+        Proxy.Mesh->UpdateBounds();
         Proxy.Mesh->SetVisibility(true);
         Proxy.Mesh->SetWorldTransform(SourceMesh->GetComponentTransform());
         if (Proxy.Material)
