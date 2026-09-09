@@ -269,6 +269,9 @@ private:
     UFUNCTION(Server, Unreliable)
     void ServerApplyCheatDebugMovement(float ForwardInput, float TurnInput);
 
+    UFUNCTION(Server, Unreliable)
+    void ServerReportCurrentApm(int32 NewCurrentApm);
+
     UFUNCTION(Server, Reliable)
     void ServerSetSoloControlKeyPressed(
         int32 KeyIndex,
@@ -313,8 +316,10 @@ private:
     TArray<double> RecentApmActionTimes;
     double ApmMeasurementStartTime = 0.0;
     int32 ApmTrackedStageIndex = INDEX_NONE;
+    float ApmReportElapsed = 0.0f;
 
     static constexpr float RetryVoteHoldDuration = 3.0f;
+    static constexpr float ApmReportInterval = 0.5f;
     static constexpr double ApmWindowSeconds = 60.0;
 
     FCMPartSlotAddress SoloPressedPartSlots[CMControl::SoloTestKeyCount];
