@@ -21,6 +21,11 @@
 #include "EngineUtils.h"
 #include "Stage/Test/CMTestAreaManager.h"
 #include "Vision/CMVisionInputComponent.h"
+#include "Ping/CMPingSelectorWidget.h"
+#include "Ping/CMWorldPing.h"
+#include "Ping/CMPingTypes.h"
+#include "Engine/World.h"
+#include "Engine/EngineTypes.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPlayerController, Log, All);
 
@@ -703,6 +708,8 @@ void ACMPlayerController::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
+    CancelPingSelection();
+
     if (ACMGameState* GameState = GetWorld()
         ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr)
@@ -984,6 +991,19 @@ void ACMPlayerController::SetupInputComponent()
         this, &ThisClass::DebugTurnRightPressed);
     InputComponent->BindKey(EKeys::Right, IE_Released,
         this, &ThisClass::DebugTurnRightReleased);
+
+    InputComponent->BindKey(EKeys::LeftAlt, IE_Pressed,
+        this, &ThisClass::PingModifierPressed);
+    InputComponent->BindKey(EKeys::LeftAlt, IE_Released,
+        this, &ThisClass::PingModifierReleased);
+    InputComponent->BindKey(EKeys::RightAlt, IE_Pressed,
+        this, &ThisClass::PingModifierPressed);
+    InputComponent->BindKey(EKeys::RightAlt, IE_Released,
+        this, &ThisClass::PingModifierReleased);
+    InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed,
+        this, &ThisClass::PingMousePressed);
+    InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released,
+        this, &ThisClass::PingMouseReleased);
 }
 
 void ACMPlayerController::RetryVotePressed()
@@ -1006,6 +1026,17 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
         return;
     }
 
+    if (bPingSelecting && PingSelectorWidget)
+    {
+        float MouseX = 0.0f;
+        float MouseY = 0.0f;
+        if (GetMousePosition(MouseX, MouseY))
+        {
+            PingSelectorWidget->UpdateSelection(
+                FVector2D(MouseX, MouseY) - PingDragStart);
+        }
+    }
+
     if (!bCheatDebugMovementEnabled)
     {
         return;
@@ -1022,6 +1053,160 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
     {
         ServerApplyCheatDebugMovement(ForwardInput, TurnInput);
     }
+}
+
+void ACMPlayerController::PingModifierPressed()
+{
+    bPingModifierHeld = IsLocalController();
+}
+
+void ACMPlayerController::PingModifierReleased()
+{
+    bPingModifierHeld = IsInputKeyDown(EKeys::LeftAlt)
+        || IsInputKeyDown(EKeys::RightAlt);
+    if (!bPingModifierHeld)
+    {
+        CancelPingSelection();
+    }
+}
+
+void ACMPlayerController::PingMousePressed()
+{
+    const ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>();
+    if (!bPingModifierHeld || bPingSelecting || !IsLocalController()
+        || !CMPlayerState || CMPlayerState->IsOnlyASpectator()
+        || CMPlayerState->GetParticipationState()
+            != ECMPlayerParticipationState::Active)
+    {
+        return;
+    }
+
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    if (!GetMousePosition(MouseX, MouseY)
+        || !CapturePingTrace(PingTraceOrigin, PingTraceDirection))
+    {
+        return;
+    }
+
+    PingDragStart = FVector2D(MouseX, MouseY);
+    PingSelectorWidget = CreateWidget<UCMPingSelectorWidget>(this);
+    if (!PingSelectorWidget)
+    {
+        return;
+    }
+
+    bPingSelecting = true;
+    PingSelectorWidget->AddToViewport(1000);
+    PingSelectorWidget->BeginSelection(PingDragStart);
+}
+
+void ACMPlayerController::PingMouseReleased()
+{
+    if (!bPingSelecting)
+    {
+        return;
+    }
+
+    ECMPingType SelectedType = ECMPingType::GoHere;
+    const bool bShouldPing = PingSelectorWidget
+        && PingSelectorWidget->GetSelectedType(SelectedType);
+    CancelPingSelection();
+    if (bShouldPing)
+    {
+        ServerRequestPing(
+            SelectedType, PingTraceOrigin, PingTraceDirection);
+    }
+}
+
+void ACMPlayerController::CancelPingSelection()
+{
+    bPingSelecting = false;
+    if (PingSelectorWidget)
+    {
+        PingSelectorWidget->RemoveFromParent();
+        PingSelectorWidget = nullptr;
+    }
+}
+
+bool ACMPlayerController::CapturePingTrace(
+    FVector& OutOrigin,
+    FVector& OutDirection) const
+{
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    return GetMousePosition(MouseX, MouseY)
+        && DeprojectScreenPositionToWorld(
+            MouseX, MouseY, OutOrigin, OutDirection);
+}
+
+void ACMPlayerController::ServerRequestPing_Implementation(
+    ECMPingType Type,
+    FVector_NetQuantize TraceOrigin,
+    FVector_NetQuantizeNormal TraceDirection)
+{
+    ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>();
+    ACMChimera* SharedChimera = GetSharedChimera();
+    const uint8 TypeValue = static_cast<uint8>(Type);
+    const FVector Direction = FVector(TraceDirection).GetSafeNormal();
+    if (!CMPlayerState || !SharedChimera
+        || CMPlayerState->IsOnlyASpectator()
+        || CMPlayerState->GetParticipationState()
+            != ECMPlayerParticipationState::Active
+        || TypeValue > static_cast<uint8>(ECMPingType::SwapParts)
+        || FVector(TraceOrigin).ContainsNaN()
+        || !Direction.IsNormalized()
+        || FVector::DistSquared(TraceOrigin, SharedChimera->GetActorLocation())
+            > FMath::Square(CMPing::MaxTraceOriginDistanceFromChimera))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Ping][Server] Rejected request from %s."),
+            *GetNameSafe(CMPlayerState));
+        return;
+    }
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CMWorldPing), true);
+    QueryParams.AddIgnoredActor(GetPawn());
+    QueryParams.AddIgnoredActor(SharedChimera);
+    FHitResult Hit;
+    const FVector TraceEnd = FVector(TraceOrigin)
+        + Direction * CMPing::MaxTraceDistance;
+    if (!GetWorld()->LineTraceSingleByChannel(
+            Hit, TraceOrigin, TraceEnd, ECC_Visibility, QueryParams))
+    {
+        return;
+    }
+
+    ACMWorldPing::EnforceServerLimit(*GetWorld());
+    const FVector SurfaceNormal = Hit.ImpactNormal.GetSafeNormal();
+    const FVector PingLocation = Hit.ImpactPoint + SurfaceNormal * 2.0f;
+    const FRotator SurfaceRotation = FRotationMatrix::MakeFromZ(
+        SurfaceNormal).Rotator();
+    FTransform SpawnTransform(SurfaceRotation, PingLocation);
+    ACMWorldPing* Ping = GetWorld()->SpawnActorDeferred<ACMWorldPing>(
+        ACMWorldPing::StaticClass(),
+        SpawnTransform,
+        nullptr,
+        nullptr,
+        ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+    if (!Ping)
+    {
+        return;
+    }
+
+    Ping->InitializePing(
+        Type,
+        CMPlayerState->GetPlayerName(),
+        CMPlayerState->GetPlayerColor());
+    Ping->FinishSpawning(SpawnTransform);
+    Ping->ForceNetUpdate();
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[Ping][Server] Spawned Type=%d Player=%s Location=%s Lifetime=%.1f ActiveLimit=%d"),
+        TypeValue,
+        *CMPlayerState->GetPlayerName(),
+        *PingLocation.ToCompactString(),
+        CMPing::DisplayDuration,
+        CMPing::MaxActivePings);
 }
 
 void ACMPlayerController::HandleSharedChimeraChanged()
