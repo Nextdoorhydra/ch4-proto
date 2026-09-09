@@ -246,6 +246,14 @@ FAutoConsoleCommandWithWorldAndArgs RespawnAtLatestCheckpointCommand(
     )
 );
 
+FAutoConsoleCommandWithWorldAndArgs RestartCommand(
+    TEXT("CM.Restart"),
+    TEXT("Restarts from the latest checkpoint and restores checkpoint state."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &RespawnAtLatestCheckpoint
+    )
+);
+
 #if !UE_BUILD_SHIPPING
 FAutoConsoleCommandWithWorldAndArgs GoToCheckpointCommand(
     TEXT("CM.GoToCheckpoint"),

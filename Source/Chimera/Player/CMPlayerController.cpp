@@ -4,6 +4,7 @@
 #include "GameMode/CMGameState.h"
 #include "GameMode/CMGameMode.h"
 #include "GameMode/Play/CMPlayGameMode.h"
+#include "GameMode/Play/CMPlayGameState.h"
 #include "GameMode/Lobby/CMLobbyGameMode.h"
 #include "AsyncLoad/CMClientStageLoadComponent.h"
 #include "Player/CMControlBody.h"
@@ -67,20 +68,32 @@ ACMPlayerController::ACMPlayerController()
 
 bool ACMPlayerController::CanRequestRetryGame() const
 {
+    const ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+    const APlayerState* LocalPlayerState = PlayerState;
     return IsLocalController()
-        && HasAuthority()
-        && GetNetMode() == NM_ListenServer
-        && IsValid(GetSharedChimera());
+        && PlayState
+        && PlayState->GetPlayPhase() == ECMPlayPhase::Playing
+        && IsValid(LocalPlayerState)
+        && !LocalPlayerState->IsOnlyASpectator();
 }
 
 void ACMPlayerController::RequestRetryGame()
 {
-    if (!IsLocalController())
+    if (!CanRequestRetryGame())
     {
         return;
     }
 
     ServerRequestRetryGame();
+}
+
+void ACMPlayerController::CancelRetryGameRequest()
+{
+    if (IsLocalController())
+    {
+        ServerCancelRetryGameRequest();
+    }
 }
 
 bool ACMPlayerController::CanControlStageResult() const
@@ -372,6 +385,15 @@ void ACMPlayerController::ServerRequestRetryGame_Implementation()
     if (GameMode)
     {
         GameMode->TryRetryGame(this);
+    }
+}
+
+void ACMPlayerController::ServerCancelRetryGameRequest_Implementation()
+{
+    if (ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>() : nullptr)
+    {
+        GameMode->CancelRetryVoteHold(this);
     }
 }
 
@@ -776,6 +798,17 @@ void ACMPlayerController::SetupInputComponent()
     BindControlAction(FourthControlAction,
         &ACMPlayerController::FourthControlKeyPressed,
         &ACMPlayerController::FourthControlKeyReleased);
+
+    InputComponent->BindKey(
+        EKeys::RightMouseButton,
+        IE_Pressed,
+        this,
+        &ThisClass::RequestRetryGame);
+    InputComponent->BindKey(
+        EKeys::RightMouseButton,
+        IE_Released,
+        this,
+        &ThisClass::CancelRetryGameRequest);
 
     for (const FKey Key : SoloTestControlKeys)
     {

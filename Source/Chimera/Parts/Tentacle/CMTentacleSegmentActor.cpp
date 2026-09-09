@@ -512,13 +512,13 @@ FVector ACMTentacleSegmentActor::ResolveAuthoritativePickupLocation(
 FVector ACMTentacleSegmentActor::ResolveVisualTargetLocation(
     AActor* Target) const
 {
-    if (!Target)
+    if (!IsValid(Target))
     {
         return LastVisualTargetLocation;
     }
 
     USkeletalMeshComponent* TargetMesh = ResolveTargetPartMesh(Target);
-    if (!TargetMesh)
+    if (!IsValid(TargetMesh))
     {
         return Target->GetActorLocation();
     }

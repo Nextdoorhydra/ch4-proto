@@ -139,6 +139,9 @@ public:
     FName GetTierRowName() const { return TierRowName; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    FName GetPartRowName() const { return PartRowName; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     bool IsAlive() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")

@@ -894,6 +894,24 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         }
     }
 
+    if (RuntimeTentacle && RuntimeArmClass)
+    {
+        ACMArmPart* DestroyedTarget = World->SpawnActor<ACMArmPart>(
+            RuntimeArmClass,
+            RuntimeTentacle->GetActorLocation() + FVector(250.0f, 0.0f, 0.0f),
+            FRotator::ZeroRotator);
+        TestNotNull(TEXT("Disposable tentacle target spawns"), DestroyedTarget);
+        if (DestroyedTarget)
+        {
+            RuntimeTentacle->SetTetheredActor(DestroyedTarget);
+            TestTrue(TEXT("Tethered target enters pending destruction"),
+                DestroyedTarget->Destroy());
+            RuntimeTentacle->SetTetheredActor(nullptr);
+            TestNull(TEXT("Destroyed target can be cleared safely"),
+                RuntimeTentacle->GetTetheredActor());
+        }
+    }
+
     if (Chimera
         && InitialPresentations.Num() == CMControl::MaxSegments
         && !InitialPresentations.Contains(nullptr))
