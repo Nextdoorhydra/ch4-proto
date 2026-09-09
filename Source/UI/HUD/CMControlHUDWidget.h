@@ -153,6 +153,8 @@ private:
     void TeardownWireframeHUD();
     void UpdateWireframePanelLayout(const FGeometry& MyGeometry);
     void UpdateWireframeCameraInput();
+    void InitializeRetryVoteHUD();
+    void RefreshRetryVoteHUD();
     void RefreshWireframeCallouts(
         const FGeometry& MyGeometry,
         float InDeltaTime
@@ -203,6 +205,18 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UImage> WireframeRenderImage;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UWidget> RetryVotePanelRoot;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> RetryVoteTitleText;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> RetryVoteStatusText;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UProgressBar> RetryVoteHoldProgressBar;
 
     UPROPERTY(Transient)
     TObjectPtr<UCanvasPanel> WireframeCanvas;

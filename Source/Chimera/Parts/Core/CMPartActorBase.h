@@ -53,6 +53,8 @@ class CHIMERA_API ACMPartActorBase
 public:
     ACMPartActorBase();
 
+    virtual void Tick(float DeltaSeconds) override;
+
     /** Spawns one shared Part class and applies both data rows before BeginPlay. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Part",
@@ -104,6 +106,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     USkeletalMeshComponent* GetPartMesh() const { return PartMesh; }
 
+    /** Server-authored world point shared by gameplay and client presentation. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    FVector GetAuthoritativePickupLocation() const;
+
     /** Simple query-only collision used to identify this Part without bone lookup. */
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     UBoxComponent* GetDamageHurtbox() const { return DamageHurtbox; }
@@ -131,6 +137,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     FName GetTierRowName() const { return TierRowName; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    FName GetPartRowName() const { return PartRowName; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     bool IsAlive() const;
@@ -273,7 +282,10 @@ private:
     bool InitializeFromPartData();
     void ApplyDestroyedState();
     void CaptureMountedPhysicsState();
+    void ResetMeshFromRagdoll();
     void ApplyAttachmentPhysicsState();
+    void UpdateReplicatedLoosePartLocation();
+    void ApplyReplicatedLoosePartLocation();
 
     UFUNCTION()
     void OnRep_MaxHealth();
@@ -290,6 +302,9 @@ private:
     UFUNCTION()
     void OnRep_AttachmentPhysicsState();
 
+    UFUNCTION()
+    void OnRep_ReplicatedLoosePartLocation();
+
     UPROPERTY(ReplicatedUsing = OnRep_AttachmentPhysicsState,
         VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Part",
@@ -298,6 +313,10 @@ private:
 
     UPROPERTY(ReplicatedUsing = OnRep_AttachmentPhysicsState)
     bool bTentaclePullActive = false;
+
+    /** Server ragdoll center used by non-simulating client presentation. */
+    UPROPERTY(ReplicatedUsing = OnRep_ReplicatedLoosePartLocation)
+    FVector_NetQuantize10 ReplicatedLoosePartLocation;
 
     UPROPERTY(ReplicatedUsing = OnRep_Health,
         VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Part",
@@ -326,4 +345,6 @@ private:
     bool bMountedMeshGenerateOverlapEvents = false;
     bool bMountedPhysicsStateCaptured = false;
     FTransform MountedMeshRelativeTransform = FTransform::Identity;
+
+    friend class FCMTentacleBlueprintIntegrationTest;
 };

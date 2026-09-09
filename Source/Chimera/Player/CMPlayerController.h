@@ -29,6 +29,15 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
     void RequestRetryGame();
 
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
+    void CancelRetryGameRequest();
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Game")
+    bool IsRetryVoteHoldActive() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Game")
+    float GetRetryVoteHoldProgress() const;
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Game")
     bool CanControlStageResult() const;
 
@@ -68,6 +77,7 @@ public:
 
     void RequestCheatDamageSegment(int32 SegmentIndex, float Damage);
     void RequestCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+    void RequestCheatSetInvincible(bool bEnabled);
 
     void RequestCheatSpawnRandomParts();
     void RequestCheatAttachPart(int32 OneBasedSlotIndex, FName PartName);
@@ -128,6 +138,9 @@ protected:
     /** Local-only mouse-wheel input that changes the shared-body view distance. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputAction> CameraDistanceAction;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    TObjectPtr<UInputAction> RetryVoteAction;
 
 private:
     void FirstControlKeyPressed();
@@ -156,6 +169,8 @@ private:
     void DebugTurnLeftReleased();
     void DebugTurnRightPressed();
     void DebugTurnRightReleased();
+    void RetryVotePressed();
+    void RetryVoteReleased();
 
     ACMChimera* GetSharedChimera() const;
     ACMTestAreaManager* FindTestAreaManager() const;
@@ -166,6 +181,9 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerRequestRetryGame();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCancelRetryGameRequest();
 
     UFUNCTION(Server, Reliable)
     void ServerRequestRestartCompletedStage();
@@ -208,6 +226,9 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatSetInvincible(bool bEnabled);
 
     UFUNCTION(Server, Reliable)
     void ServerCheatSpawnRandomParts();
@@ -253,7 +274,13 @@ private:
     bool bDebugMoveBackwardHeld = false;
     bool bDebugTurnLeftHeld = false;
     bool bDebugTurnRightHeld = false;
+    bool bRetryVoteHoldActive = false;
+    double RetryVoteHoldStartTime = 0.0;
+
+    static constexpr float RetryVoteHoldDuration = 3.0f;
 
     FCMPartSlotAddress SoloPressedPartSlots[CMControl::SoloTestKeyCount];
+    double SoloControlKeyStartTimes[CMControl::SoloTestKeyCount] = {};
+    bool bSoloControlKeyReverseMovement[CMControl::SoloTestKeyCount] = {};
 
 };

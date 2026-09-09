@@ -282,6 +282,8 @@ bool ACMTentacleSegmentActor::TryBeginPartAttachment(
 
     PendingPartSlot = PartSlotAddress;
     PullStartTransform = TetheredActor->GetActorTransform();
+    PullStartTransform.SetLocation(
+        ResolveAuthoritativePickupLocation(TetheredActor));
     PullElapsedSeconds = 0.0f;
     TentacleState = ECMTentacleState::Pulling;
     ForceNetUpdate();
@@ -338,7 +340,11 @@ void ACMTentacleSegmentActor::RefreshOverlapTarget()
 
         const float DistanceSquared = FVector::DistSquared(
             SourceLocation,
-            ResolveVisualTargetLocation(Candidate));
+            ResolveAuthoritativePickupLocation(Candidate));
+        if (DistanceSquared > FMath::Square(DetectionRadius))
+        {
+            continue;
+        }
         if (DistanceSquared < NearestDistanceSquared)
         {
             NearestDistanceSquared = DistanceSquared;
@@ -487,16 +493,32 @@ USkeletalMeshComponent* ACMTentacleSegmentActor::ResolveTargetPartMesh(
     return nullptr;
 }
 
+FVector ACMTentacleSegmentActor::ResolveAuthoritativePickupLocation(
+    AActor* Target) const
+{
+    if (const ACMDroppedPartActor* DroppedPart =
+        Cast<ACMDroppedPartActor>(Target))
+    {
+        return DroppedPart->GetAuthoritativePickupLocation();
+    }
+    if (const ACMPartActorBase* UsablePart =
+        Cast<ACMPartActorBase>(Target))
+    {
+        return UsablePart->GetAuthoritativePickupLocation();
+    }
+    return Target ? Target->GetActorLocation() : FVector::ZeroVector;
+}
+
 FVector ACMTentacleSegmentActor::ResolveVisualTargetLocation(
     AActor* Target) const
 {
-    if (!Target)
+    if (!IsValid(Target))
     {
         return LastVisualTargetLocation;
     }
 
     USkeletalMeshComponent* TargetMesh = ResolveTargetPartMesh(Target);
-    if (!TargetMesh)
+    if (!IsValid(TargetMesh))
     {
         return Target->GetActorLocation();
     }
@@ -578,9 +600,9 @@ void ACMTentacleSegmentActor::EnsureVisualComponents()
             TargetNiagaraSystem,
             TargetRoot,
             NAME_None,
-            FVector::ZeroVector,
+            LastVisualTargetLocation,
             FRotator::ZeroRotator,
-            EAttachLocation::KeepRelativeOffset,
+            EAttachLocation::KeepWorldPosition,
             false,
             true,
             ENCPoolMethod::None,
@@ -626,6 +648,10 @@ void ACMTentacleSegmentActor::UpdateVisual(float DeltaTime)
         LastVisualTargetLocation = ResolveVisualTargetLocation(
             TetheredActor);
         EnsureVisualComponents();
+        if (TargetEffect)
+        {
+            TargetEffect->SetWorldLocation(LastVisualTargetLocation);
+        }
     }
     if (!RuntimeSplineMesh)
     {

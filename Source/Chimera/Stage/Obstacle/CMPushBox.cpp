@@ -45,6 +45,8 @@ void ACMPushBox::BeginPlay()
 {
     Super::BeginPlay();
 
+    InitialTransform = GetActorTransform();
+
     if (UGameInstance* GameInstance = GetGameInstance())
     {
         if (UCMGameSoundBridgeSubsystem* SoundBridge = GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
@@ -57,6 +59,23 @@ void ACMPushBox::BeginPlay()
     ApplyEditorSettings();
     BoxMesh->OnComponentHit.AddDynamic(this, &ThisClass::HandleBoxHit);
     UE_LOG(LogChimeraPushBox, Log, TEXT("[PushBox Ready] Box=%s Weight=%.1f GenerateOverlap=%s Location=%s Extent=%s"), *GetName(), MechanismWeight ? MechanismWeight->GetMechanismWeight() : 0.0f, BoxMesh && BoxMesh->GetGenerateOverlapEvents() ? TEXT("true") : TEXT("false"), *GetActorLocation().ToCompactString(), BoxMesh ? *BoxMesh->Bounds.BoxExtent.ToCompactString() : TEXT("None"));
+}
+
+void ACMPushBox::ResetForCheckpoint()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    StopPush();
+    LastAcceptedAttackId.Invalidate();
+    SetActorTransform(
+        InitialTransform,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    ForceNetUpdate();
 }
 
 void ACMPushBox::EndPlay(const EEndPlayReason::Type EndPlayReason)

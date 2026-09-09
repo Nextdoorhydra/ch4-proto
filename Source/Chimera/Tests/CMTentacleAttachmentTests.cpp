@@ -683,6 +683,13 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             nullptr,
             ETeleportType::TeleportPhysics);
         RuntimeTargetMesh->UpdateBounds();
+        RuntimeTarget->UpdateReplicatedLoosePartLocation();
+        TestTrue(
+            TEXT("Gameplay resolves the server-authored loose Part center"),
+            RuntimeTentacle->ResolveAuthoritativePickupLocation(
+                RuntimeTarget).Equals(
+                    RuntimeTargetMesh->Bounds.Origin,
+                    1.0f));
         const FVector ResolvedMeshTarget =
             RuntimeTentacle->ResolveVisualTargetLocation(RuntimeTarget);
         TestTrue(
@@ -694,8 +701,26 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                 TargetActorOrigin,
                 RuntimeTargetMesh->Bounds.Origin));
 
+        RuntimeTentacle->TargetEffect = NewObject<UNiagaraComponent>(
+            RuntimeTentacle,
+            TEXT("TestTargetContactEffect"));
+        RuntimeTentacle->TargetEffect->SetupAttachment(RuntimeTargetMesh);
+        RuntimeTentacle->AddInstanceComponent(
+            RuntimeTentacle->TargetEffect);
+        RuntimeTentacle->TargetEffect->RegisterComponent();
         RuntimeTentacle->SetTetheredActor(RuntimeTarget);
         RuntimeTentacle->UpdateVisual(1.0f);
+        TestNotNull(
+            TEXT("Tethered Part creates its contact Niagara effect"),
+            RuntimeTentacle->TargetEffect.Get());
+        if (RuntimeTentacle->TargetEffect)
+        {
+            TestTrue(
+                TEXT("Contact Niagara stays on the skeletal-mesh contact point"),
+                RuntimeTentacle->TargetEffect->GetComponentLocation().Equals(
+                    ResolvedMeshTarget,
+                    1.0f));
+        }
 
         const USplineMeshComponent* RuntimeSpline =
             RuntimeTentacle->RuntimeSplineMesh;
@@ -739,6 +764,9 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         FCMPartSlotAddress PullSlotAddress;
         PullSlotAddress.SegmentIndex = RuntimeTentacle->GetSegmentIndex();
         PullSlotAddress.PartSlotIndex = 0;
+        RuntimeTargetMesh->UpdateBounds();
+        const FVector AuthoritativeRagdollCenter =
+            RuntimeTargetMesh->Bounds.Origin;
         UCMPartSlotComponent* PullSlot =
             Chimera->GetPartSlotComponent(PullSlotAddress);
         TestNotNull(TEXT("Pull destination slot exists"), PullSlot);
@@ -751,6 +779,15 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         TestFalse(
             TEXT("Tentacle pull temporarily stops loose Part ragdoll"),
             RuntimeTarget->GetPartMesh()->IsSimulatingPhysics());
+        TestEqual(
+            TEXT("Tentacle pull disables Physics Asset collision before entering the body"),
+            RuntimeTarget->GetPartMesh()->GetCollisionEnabled(),
+            ECollisionEnabled::NoCollision);
+        TestTrue(
+            TEXT("Tentacle pull starts from the authoritative ragdoll center"),
+            RuntimeTarget->GetActorLocation().Equals(
+                AuthoritativeRagdollCenter,
+                1.0f));
 
         RuntimeTentacle->UpdatePull(RuntimeTentacle->PullDuration);
         TestEqual(
@@ -793,6 +830,86 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             TEXT("Detached Part disables its gameplay hurtbox again"),
             RuntimeTarget->GetDamageHurtbox()->GetCollisionEnabled(),
             ECollisionEnabled::NoCollision);
+
+        RuntimeTarget->SetRole(ROLE_SimulatedProxy);
+        TestFalse(
+            TEXT("Test Part can emulate a client role"),
+            RuntimeTarget->HasAuthority());
+        TestFalse(
+            TEXT("Detached Part has no replicated mount address"),
+            CMControl::IsValidPartSlot(
+                RuntimeTarget->GetAttachedSlotAddress()));
+        RuntimeTarget->OnRep_AttachmentPhysicsState();
+        TestFalse(
+            TEXT("Client presentation never simulates loose Part physics"),
+            RuntimeTarget->GetPartMesh()->IsSimulatingPhysics());
+        TestEqual(
+            TEXT("Client loose Part Physics Asset cannot affect local bodies"),
+            RuntimeTarget->GetPartMesh()->GetCollisionEnabled(),
+            ECollisionEnabled::NoCollision);
+        const FVector ReplicatedServerCenter(375.0f, -125.0f, 240.0f);
+        RuntimeTarget->ReplicatedLoosePartLocation = ReplicatedServerCenter;
+        RuntimeTarget->OnRep_ReplicatedLoosePartLocation();
+        RuntimeTarget->GetPartMesh()->UpdateBounds();
+        TestTrue(
+            TEXT("Client loose Part is centered on the replicated server position"),
+            RuntimeTarget->GetPartMesh()->Bounds.Origin.Equals(
+                ReplicatedServerCenter,
+                1.0f));
+        TestTrue(
+            TEXT("Client gameplay reads the same replicated pickup position"),
+            RuntimeTarget->GetAuthoritativePickupLocation().Equals(
+                ReplicatedServerCenter,
+                0.1f));
+
+        ACMDroppedPartActor* RuntimeDrop =
+            World->SpawnActor<ACMDroppedPartActor>();
+        TestNotNull(
+            TEXT("Runtime severed Part pickup spawns"),
+            RuntimeDrop);
+        if (RuntimeDrop)
+        {
+            RuntimeDrop->InitializeDroppedPart(
+                ECMBodyPart::ArmLeft,
+                RuntimeArmClass,
+                RuntimeTargetMesh->GetSkeletalMeshAsset(),
+                RuntimeTargetMesh->GetPhysicsAsset(),
+                TEXT("Ragdoll"),
+                FVector::ZeroVector);
+            RuntimeDrop->SetRole(ROLE_SimulatedProxy);
+            RuntimeDrop->OnRep_VisualDefinition();
+            const FVector ReplicatedDropCenter(-225.0f, 410.0f, 90.0f);
+            RuntimeDrop->AuthoritativePickupLocation =
+                ReplicatedDropCenter;
+            RuntimeDrop->OnRep_AuthoritativePickupLocation();
+            RuntimeDrop->GetPartMesh()->UpdateBounds();
+            TestFalse(
+                TEXT("Client never simulates severed Part pickup physics"),
+                RuntimeDrop->GetPartMesh()->IsSimulatingPhysics());
+            TestTrue(
+                TEXT("Severed Part visual and gameplay share the server point"),
+                RuntimeDrop->GetPartMesh()->Bounds.Origin.Equals(
+                    RuntimeDrop->GetAuthoritativePickupLocation(),
+                    1.0f));
+        }
+    }
+
+    if (RuntimeTentacle && RuntimeArmClass)
+    {
+        ACMArmPart* DestroyedTarget = World->SpawnActor<ACMArmPart>(
+            RuntimeArmClass,
+            RuntimeTentacle->GetActorLocation() + FVector(250.0f, 0.0f, 0.0f),
+            FRotator::ZeroRotator);
+        TestNotNull(TEXT("Disposable tentacle target spawns"), DestroyedTarget);
+        if (DestroyedTarget)
+        {
+            RuntimeTentacle->SetTetheredActor(DestroyedTarget);
+            TestTrue(TEXT("Tethered target enters pending destruction"),
+                DestroyedTarget->Destroy());
+            RuntimeTentacle->SetTetheredActor(nullptr);
+            TestNull(TEXT("Destroyed target can be cleared safely"),
+                RuntimeTentacle->GetTetheredActor());
+        }
     }
 
     if (Chimera

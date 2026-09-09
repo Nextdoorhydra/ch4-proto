@@ -60,6 +60,28 @@ void ACMPlayGameState::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPlayGameState, CompletedStageTime);
     DOREPLIFETIME(ACMPlayGameState, StageLoadSnapshot);
     DOREPLIFETIME(ACMPlayGameState, StagePresentationState);
+    DOREPLIFETIME(ACMPlayGameState, RetryVoteSnapshot);
+}
+
+void ACMPlayGameState::SetRetryVoteState(
+    bool bActive,
+    const TArray<int32>& VotedPlayerIds,
+    int32 EligiblePlayerCount,
+    int32 RequiredVoteCount)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    RetryVoteSnapshot.bActive = bActive;
+    RetryVoteSnapshot.VotedPlayerIds = VotedPlayerIds;
+    RetryVoteSnapshot.VoteCount = VotedPlayerIds.Num();
+    RetryVoteSnapshot.EligiblePlayerCount = FMath::Max(0, EligiblePlayerCount);
+    RetryVoteSnapshot.RequiredVoteCount = FMath::Max(0, RequiredVoteCount);
+    ++RetryVoteSnapshot.Revision;
+    OnRep_RetryVoteSnapshot();
+    ForceNetUpdate();
 }
 
 // 서버에서 모든 머신이 재생할 스테이지 연출 상태 갱신
@@ -220,4 +242,9 @@ void ACMPlayGameState::OnRep_StageLoadSnapshot()
 void ACMPlayGameState::OnRep_StagePresentationState()
 {
     OnStagePresentationChanged.Broadcast();
+}
+
+void ACMPlayGameState::OnRep_RetryVoteSnapshot()
+{
+    OnRetryVoteChanged.Broadcast();
 }

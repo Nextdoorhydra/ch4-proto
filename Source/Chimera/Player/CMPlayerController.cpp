@@ -4,12 +4,14 @@
 #include "GameMode/CMGameState.h"
 #include "GameMode/CMGameMode.h"
 #include "GameMode/Play/CMPlayGameMode.h"
+#include "GameMode/Play/CMPlayGameState.h"
 #include "GameMode/Lobby/CMLobbyGameMode.h"
 #include "AsyncLoad/CMClientStageLoadComponent.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Parts/Core/CMPartActorBase.h"
+#include "Parts/Leg/CMLegPart.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputCoreTypes.h"
@@ -67,20 +69,85 @@ ACMPlayerController::ACMPlayerController()
 
 bool ACMPlayerController::CanRequestRetryGame() const
 {
+    const ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+    const APlayerState* LocalPlayerState = PlayerState;
     return IsLocalController()
-        && HasAuthority()
-        && GetNetMode() == NM_ListenServer
-        && IsValid(GetSharedChimera());
+        && PlayState
+        && PlayState->GetPlayPhase() == ECMPlayPhase::Playing
+        && IsValid(LocalPlayerState)
+        && !LocalPlayerState->IsOnlyASpectator()
+        && !PlayState->GetRetryVoteSnapshot().VotedPlayerIds.Contains(
+            LocalPlayerState->GetPlayerId());
 }
 
 void ACMPlayerController::RequestRetryGame()
 {
-    if (!IsLocalController())
+    if (!CanRequestRetryGame())
     {
+        const ACMPlayGameState* PlayState = GetWorld()
+            ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+        const APlayerState* LocalPlayerState = PlayerState;
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[RetryVote][LocalRequest] Rejected Controller=%s NetMode=%d Phase=%d PlayerState=%d PlayerId=%d Spectator=%d AlreadyVoted=%d"),
+            *GetName(), static_cast<int32>(GetNetMode()),
+            PlayState ? static_cast<int32>(PlayState->GetPlayPhase()) : INDEX_NONE,
+            IsValid(LocalPlayerState),
+            LocalPlayerState ? LocalPlayerState->GetPlayerId() : INDEX_NONE,
+            LocalPlayerState && LocalPlayerState->IsOnlyASpectator(),
+            PlayState && LocalPlayerState
+                && PlayState->GetRetryVoteSnapshot().VotedPlayerIds.Contains(
+                    LocalPlayerState->GetPlayerId()));
         return;
     }
 
+    bRetryVoteHoldActive = true;
+    RetryVoteHoldStartTime = GetWorld()
+        ? GetWorld()->GetTimeSeconds() : 0.0;
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][LocalRequest] Hold started Controller=%s NetMode=%d PlayerId=%d StartTime=%.3f"),
+        *GetName(), static_cast<int32>(GetNetMode()),
+        PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        RetryVoteHoldStartTime);
     ServerRequestRetryGame();
+}
+
+void ACMPlayerController::CancelRetryGameRequest()
+{
+    const bool bWasHolding = bRetryVoteHoldActive;
+    const float ReleasedProgress = GetRetryVoteHoldProgress();
+    bRetryVoteHoldActive = false;
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][LocalRequest] Hold released Controller=%s NetMode=%d PlayerId=%d WasHolding=%d Progress=%.2f"),
+        *GetName(), static_cast<int32>(GetNetMode()),
+        PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        bWasHolding, ReleasedProgress);
+    if (IsLocalController())
+    {
+        ServerCancelRetryGameRequest();
+    }
+}
+
+bool ACMPlayerController::IsRetryVoteHoldActive() const
+{
+    return bRetryVoteHoldActive
+        && CanRequestRetryGame()
+        && GetRetryVoteHoldProgress() < 1.0f;
+}
+
+float ACMPlayerController::GetRetryVoteHoldProgress() const
+{
+    const UWorld* World = GetWorld();
+    if (!bRetryVoteHoldActive || !World)
+    {
+        return 0.0f;
+    }
+    return FMath::Clamp(
+        static_cast<float>(
+            (World->GetTimeSeconds() - RetryVoteHoldStartTime)
+            / RetryVoteHoldDuration),
+        0.0f,
+        1.0f);
 }
 
 bool ACMPlayerController::CanControlStageResult() const
@@ -226,6 +293,14 @@ void ACMPlayerController::RequestCheatDamagePart(
     }
 }
 
+void ACMPlayerController::RequestCheatSetInvincible(bool bEnabled)
+{
+    if (IsLocalController())
+    {
+        ServerCheatSetInvincible(bEnabled);
+    }
+}
+
 void ACMPlayerController::RequestCheatSpawnRandomParts()
 {
     if (IsLocalController())
@@ -361,9 +436,22 @@ void ACMPlayerController::ServerRequestRetryGame_Implementation()
     ACMGameMode* GameMode = GetWorld()
         ? GetWorld()->GetAuthGameMode<ACMGameMode>()
         : nullptr;
-    if (GameMode)
+    const bool bAccepted = GameMode && GameMode->TryRetryGame(this);
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][ServerRPC] Hold request Controller=%s PlayerId=%d GameMode=%s Accepted=%d"),
+        *GetName(), PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        *GetNameSafe(GameMode), bAccepted);
+}
+
+void ACMPlayerController::ServerCancelRetryGameRequest_Implementation()
+{
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][ServerRPC] Hold cancel Controller=%s PlayerId=%d"),
+        *GetName(), PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE);
+    if (ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>() : nullptr)
     {
-        GameMode->TryRetryGame(this);
+        GameMode->CancelRetryVoteHold(this);
     }
 }
 
@@ -696,6 +784,25 @@ void ACMPlayerController::ServerCheatDamagePart_Implementation(
         *GetName());
 }
 
+void ACMPlayerController::ServerCheatSetInvincible_Implementation(
+    bool bEnabled)
+{
+    ACMChimera* SharedChimera = GetSharedChimera();
+    if (!SharedChimera)
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.God: shared Chimera is unavailable."));
+        return;
+    }
+
+    SharedChimera->SetCanBeDamaged(!bEnabled);
+    SharedChimera->ForceNetUpdate();
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] CM.God %d requested by %s."),
+        bEnabled ? 1 : 0,
+        *GetName());
+}
+
 void ACMPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
@@ -835,6 +942,30 @@ void ACMPlayerController::SetupInputComponent()
             TEXT("CameraDistanceAction is not assigned on %s."),
             *GetName());
     }
+    
+    if (RetryVoteAction)
+    {
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Started,
+            this,
+            &ThisClass::RetryVotePressed
+        );
+
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Completed,
+            this,
+            &ThisClass::RetryVoteReleased
+        );
+
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Canceled,
+            this,
+            &ThisClass::RetryVoteReleased
+        );
+    }
 
     // 기존 Q/W/E/R Mapping Context와 분리된 개발 전용 화살표 입력
     InputComponent->BindKey(EKeys::Up, IE_Pressed,
@@ -855,12 +986,27 @@ void ACMPlayerController::SetupInputComponent()
         this, &ThisClass::DebugTurnRightReleased);
 }
 
+void ACMPlayerController::RetryVotePressed()
+{
+    RequestRetryGame();
+}
+
+void ACMPlayerController::RetryVoteReleased()
+{
+    CancelRetryGameRequest();
+}
+
 // 활성화된 로컬 화살표 상태를 서버에 낮은 신뢰도의 연속 입력으로 전달
 void ACMPlayerController::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
 
-    if (!IsLocalController() || !bCheatDebugMovementEnabled)
+    if (!IsLocalController())
+    {
+        return;
+    }
+
+    if (!bCheatDebugMovementEnabled)
     {
         return;
     }
@@ -1224,19 +1370,37 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
             CMControl::SoloTestSegmentCount))
         {
             const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
-            const bool bActivateOnRelease =
+            UCMPartSlotComponent* ReleasedSlot =
+                SharedChimera->GetPartSlotComponent(ReleasedPartSlot);
+            const bool bIsLeg = ReleasedSlot
+                && Cast<ACMLegPart>(ReleasedSlot->GetAttachedPart());
+            const bool bActivateOnRelease = bIsLeg ||
                 SharedChimera->ShouldActivateBasicArmOnRelease(
                     ReleasedPartSlot);
             SharedChimera->SetPartSlotPressed(ReleasedPartSlot, false);
             if (bActivateOnRelease)
             {
-                SharedChimera->ActivatePartSlot(
+                const double CurrentTime = GetWorld()
+                    ? GetWorld()->GetTimeSeconds()
+                    : SoloControlKeyStartTimes[KeyIndex];
+                const float HoldSeconds = static_cast<float>(FMath::Max(
+                    CurrentTime - SoloControlKeyStartTimes[KeyIndex],
+                    0.0
+                ));
+                const float LegStrengthMultiplier = bIsLeg
+                    ? SharedChimera->GetLegInputStrengthMultiplier(
+                        HoldSeconds)
+                    : 1.0f;
+                SharedChimera->ActivatePartSlotWithLegStrength(
                     ReleasedPartSlot,
                     CMPlayerState,
-                    false);
+                    bSoloControlKeyReverseMovement[KeyIndex],
+                    LegStrengthMultiplier);
             }
         }
         PressedPartSlot = FCMPartSlotAddress();
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         return;
     }
 
@@ -1249,6 +1413,8 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
             SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
             PressedPartSlot = FCMPartSlotAddress();
         }
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         SharedChimera->DetachPartFromSlot(PartSlotAddress);
         return;
     }
@@ -1266,6 +1432,8 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
                 PressedPartSlot, false);
         }
         PressedPartSlot = FCMPartSlotAddress();
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         return;
     }
 
@@ -1276,8 +1444,15 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
     }
 
     PressedPartSlot = PartSlotAddress;
+    SoloControlKeyStartTimes[KeyIndex] = GetWorld()
+        ? GetWorld()->GetTimeSeconds()
+        : 0.0;
+    bSoloControlKeyReverseMovement[KeyIndex] = bReverseMovement;
     SharedChimera->SetPartSlotPressed(PartSlotAddress, true);
-    if (!SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
+    const bool bIsLeg = PartSlot
+        && Cast<ACMLegPart>(PartSlot->GetAttachedPart());
+    if (!bIsLeg
+        && !SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
     {
         SharedChimera->ActivatePartSlot(
             PartSlotAddress,

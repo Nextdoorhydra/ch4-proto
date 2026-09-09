@@ -22,6 +22,8 @@ class CHIMERA_API ACMDroppedPartActor : public AActor
 public:
     ACMDroppedPartActor();
 
+    virtual void Tick(float DeltaSeconds) override;
+
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
@@ -49,6 +51,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Drop")
     USkeletalMeshComponent* GetPartMesh() const { return PartMesh; }
 
+    /** Server-authored world point shared by gameplay and client presentation. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part Drop")
+    FVector GetAuthoritativePickupLocation() const;
+
     /** Server-only reservation used to resolve simultaneous slot presses. */
     bool TryReserveForTentacle(AActor* Requester);
     void ReleaseTentacleReservation(AActor* Requester);
@@ -71,7 +77,12 @@ private:
     UFUNCTION()
     void OnRep_TentaclePulled();
 
+    UFUNCTION()
+    void OnRep_AuthoritativePickupLocation();
+
     void ApplyVisualDefinition();
+    void UpdateAuthoritativePickupLocation();
+    void ApplyAuthoritativePickupLocation();
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
         meta = (AllowPrivateAccess = "true"))
@@ -99,6 +110,11 @@ private:
     UPROPERTY(ReplicatedUsing = OnRep_TentaclePulled)
     bool bTentaclePulled = false;
 
+    UPROPERTY(ReplicatedUsing = OnRep_AuthoritativePickupLocation)
+    FVector_NetQuantize10 AuthoritativePickupLocation;
+
     bool bConsumed = false;
     TWeakObjectPtr<AActor> TentacleReservationOwner;
+
+    friend class FCMTentacleBlueprintIntegrationTest;
 };
