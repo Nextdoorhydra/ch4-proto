@@ -62,9 +62,17 @@ void UCMStageResultWidget::SetResult(
 {
     if (!bHasNextStage)
     {
-        TimeText->SetText(LOCTEXT(
-            "CompleteClearMessage",
-            "CONGRATULATIONS!\n모든 스테이지를 클리어했습니다"));
+        const int32 TotalSeconds = FMath::Max(
+            0, FMath::RoundToInt(ElapsedSeconds));
+        const int32 Minutes = TotalSeconds / 60;
+        const int32 Seconds = TotalSeconds % 60;
+        TimeText->SetText(FText::Format(
+            LOCTEXT(
+                "CompleteClearMessage",
+                "CONGRATULATIONS!\n모든 스테이지를 클리어했습니다\n클리어 시간  {0}:{1}"),
+            FText::AsNumber(
+                Minutes, &FNumberFormattingOptions::DefaultNoGrouping()),
+            FText::FromString(FString::Printf(TEXT("%02d"), Seconds))));
         RestartButton->SetVisibility(ESlateVisibility::Collapsed);
         RestartButton->SetIsEnabled(false);
         NextLevelButton->SetVisibility(ESlateVisibility::Collapsed);
