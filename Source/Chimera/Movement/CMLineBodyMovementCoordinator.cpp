@@ -147,11 +147,14 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
         );
     const float PlayerCountForceMultiplier =
         GetPlayerCountForceMultiplier(Chimera);
-    const float PushForceMagnitude =
+    const float BaseLegImpulse =
         MovementImpulse
         * DirectionalChainMassMultiplier
         * PlayerCountForceMultiplier
-        * FMath::Max(Chimera.LegStepForceScale, 0.0f)
+        * FMath::Max(Chimera.LegStepForceScale, 0.0f);
+    const float PushForceMagnitude =
+        BaseLegImpulse
+        * FMath::Max(Chimera.LegYawMultiplier, 0.0f)
         / PushDuration;
     if (PushDirection.IsNearlyZero()
         || PushForceMagnitude <= UE_SMALL_NUMBER)
@@ -192,13 +195,13 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
     FVector SegmentForwardDirection = SegmentBody->GetForwardVector();
     SegmentForwardDirection.Z = 0.0f;
     const float IndividualForwardImpulseMagnitude =
-        PushForceMagnitude
-        * PushDuration
+        BaseLegImpulse
         * FMath::Clamp(
             Chimera.IndividualLegForwardImpulseFraction,
             0.0f,
             1.0f
-        );
+        )
+        * FMath::Max(Chimera.LegForwardMultiplier, 0.0f);
     if (SegmentForwardDirection.Normalize()
         && IndividualForwardImpulseMagnitude > UE_SMALL_NUMBER)
     {

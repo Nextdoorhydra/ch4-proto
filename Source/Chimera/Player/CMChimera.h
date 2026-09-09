@@ -565,6 +565,14 @@ protected:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Movement")
     float PlayerCountForceMultiplier = 0.3f;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Movement")
+    float LegYawMultiplier = 1.0f;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Movement")
+    float LegForwardMultiplier = 1.0f;
     
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
     Category = "Chimera|Movement|SpringArm",
