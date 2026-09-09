@@ -91,6 +91,9 @@ private:
     UFUNCTION()
     void HandleOwnerHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit);
 
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayTargetSpottedSound();
+
     UPROPERTY(EditAnywhere, Category = "Aggressive AI|Behavior")
     bool bAutoStartBehavior = true;
 
