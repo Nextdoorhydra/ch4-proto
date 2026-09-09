@@ -43,9 +43,13 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
     Grip->SetupAttachment(Body);
     Grip->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Grip->RegisterComponent();
+    UStaticMeshComponent* Visual = NewObject<UStaticMeshComponent>(Owner);
+    Visual->SetupAttachment(Body);
+    Visual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Visual->RegisterComponent();
     UCMRailMovementComponent* Movement = NewObject<UCMRailMovementComponent>(Owner);
     Movement->RegisterComponent();
-    Movement->ConfigureRail(Spline, Body, Grip);
+    Movement->ConfigureRail(Spline, Body, Grip, Visual);
 
     UStaticMeshComponent* HighlightMesh = NewObject<UStaticMeshComponent>(Owner);
     HighlightMesh->SetupAttachment(Root);
@@ -66,6 +70,18 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Forward travel"), Movement->AdvanceDistance(40));
     TestTrue(TEXT("Continuous progress"), FMath::IsNearlyEqual(Movement->GetProgress(), 0.4f));
     TestTrue(TEXT("Body follows rail"), Body->GetComponentLocation().Equals(FVector(40, 0, 100), 0.01f));
+    TestTrue(TEXT("Visual starts smoothing from previous pose"),
+        Visual->GetComponentLocation().Equals(FVector(0, 0, 100), 0.01f));
+    Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+    TestTrue(TEXT("Visual interpolates toward collision body"),
+        Visual->GetComponentLocation().X > 0.0f
+        && Visual->GetComponentLocation().X < Body->GetComponentLocation().X);
+    for (int32 Index = 0; Index < 20; ++Index)
+    {
+        Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
+    }
+    TestTrue(TEXT("Visual smoothing reaches collision body"),
+        Visual->GetComponentLocation().Equals(Body->GetComponentLocation(), 0.1f));
     Movement->bTrackingHold = true;
     Movement->StopMovement();
     TestTrue(TEXT("Release keeps intermediate progress"), FMath::IsNearlyEqual(Movement->GetProgress(), 0.4f));
@@ -91,6 +107,39 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
     Movement->AdvanceDistance(-10);
     TestTrue(TEXT("Can reverse away from obstacle"), Movement->GetProgress() < BlockedProgress);
     Wall->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    UBoxComponent* Floor = NewObject<UBoxComponent>(Obstacle);
+    Floor->SetupAttachment(Wall);
+    Floor->SetBoxExtent(FVector(200, 200, 5));
+    Floor->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+    Floor->RegisterComponent();
+    Floor->SetWorldLocation(FVector(50, 0, 90.5f));
+    Movement->InitialProgress = 0.0f;
+    Movement->ResetRail();
+    TestTrue(TEXT("Floor contact parallel to travel does not block rail"),
+        Movement->AdvanceDistance(10.0f));
+    Floor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    Movement->InitialProgress = 0.0f;
+    Movement->ResetRail();
+    TestFalse(TEXT("Perpendicular collision motion does not push rail"),
+        Movement->TryCollisionPush(Obstacle, FVector(0, 100, 0), 0.1f));
+    TestTrue(TEXT("Collision direction along tangent pushes rail"),
+        Movement->TryCollisionPush(
+            Obstacle,
+            FVector(100, 0, 1000),
+            0.1f));
+    TestTrue(TEXT("Collision push advances expected distance"),
+        FMath::IsNearlyEqual(Movement->GetProgress(), 0.1f));
+    Movement->InitialProgress = 0.0f;
+    Movement->ResetRail();
+    TestTrue(TEXT("Collision push ignores direction magnitude"),
+        Movement->TryCollisionPush(
+            Obstacle,
+            FVector(0.001f, 0, 1000),
+            0.1f));
+    TestTrue(TEXT("Fixed collision push advances expected distance"),
+        FMath::IsNearlyEqual(Movement->GetProgress(), 0.1f));
 
     Movement->MoveToProgress(1.0f);
     for (int32 Index = 0; Index < 20; ++Index) Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
@@ -173,6 +222,61 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
         Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
         TestFalse(TEXT("Cancelled arm releases rail"), Movement->bTrackingHold);
     }
+
+    // Endpoint connections form a graph, including a second junction downstream.
+    Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Spline->SetSplinePoints(
+        {FVector(0, 0, 100), FVector(100, 0, 100)},
+        ESplineCoordinateSpace::Local);
+    USplineComponent* NorthBranch = NewObject<USplineComponent>(Owner);
+    NorthBranch->SetupAttachment(Root);
+    NorthBranch->RegisterComponent();
+    NorthBranch->SetSplinePoints(
+        {FVector(100, 0, 100), FVector(100, 100, 100)},
+        ESplineCoordinateSpace::Local);
+    USplineComponent* SouthBranch = NewObject<USplineComponent>(Owner);
+    SouthBranch->SetupAttachment(Root);
+    SouthBranch->RegisterComponent();
+    SouthBranch->SetSplinePoints(
+        {FVector(100, 0, 100), FVector(100, -100, 100)},
+        ESplineCoordinateSpace::Local);
+    USplineComponent* WestBranch = NewObject<USplineComponent>(Owner);
+    WestBranch->SetupAttachment(Root);
+    WestBranch->RegisterComponent();
+    WestBranch->SetSplinePoints(
+        {FVector(100, 100, 100), FVector(0, 100, 100)},
+        ESplineCoordinateSpace::Local);
+    USplineComponent* EastBranch = NewObject<USplineComponent>(Owner);
+    EastBranch->SetupAttachment(Root);
+    EastBranch->RegisterComponent();
+    EastBranch->SetSplinePoints(
+        {FVector(100, 100, 100), FVector(200, 100, 100)},
+        ESplineCoordinateSpace::Local);
+    Movement->InitialSegmentIndex = 0;
+    Movement->InitialProgress = 0.0f;
+    Movement->ConfigureRailGraph(
+        {Spline, NorthBranch, SouthBranch, WestBranch, EastBranch},
+        Body,
+        Grip);
+    TestTrue(TEXT("Entry reaches branch junction"), Movement->AdvanceDistance(100.0f));
+    TestTrue(TEXT("Entry end is a junction"), Movement->IsAtConnectedJunction());
+    TestTrue(TEXT("North input selects north branch"),
+        Movement->TryCollisionPush(Obstacle, FVector(0, 100, 0), 0.1f));
+    TestEqual(TEXT("North segment index"), Movement->GetActiveSegmentIndex(), 1);
+    TestTrue(TEXT("North branch advances"), FMath::IsNearlyEqual(Movement->GetProgress(), 0.1f));
+    TestTrue(TEXT("North segment reaches second junction"),
+        Movement->TryCollisionPush(Obstacle, FVector(0, 100, 0), 1.0f));
+    TestTrue(TEXT("Second junction is connected"), Movement->IsAtConnectedJunction());
+    TestTrue(TEXT("East input selects downstream east segment"),
+        Movement->TryCollisionPush(Obstacle, FVector(100, 0, 0), 0.1f));
+    TestEqual(TEXT("East segment index"), Movement->GetActiveSegmentIndex(), 4);
+    TestTrue(TEXT("East segment advances"), FMath::IsNearlyEqual(Movement->GetProgress(), 0.1f));
+    TestTrue(TEXT("Reverse input returns to second junction"),
+        Movement->TryCollisionPush(Obstacle, FVector(-100, 0, 0), 1.0f));
+    TestTrue(TEXT("Returned endpoint remains connected"), Movement->IsAtConnectedJunction());
+    TestTrue(TEXT("West input selects alternate downstream segment"),
+        Movement->TryCollisionPush(Obstacle, FVector(-100, 0, 0), 0.1f));
+    TestEqual(TEXT("West segment index"), Movement->GetActiveSegmentIndex(), 3);
 
     World->DestroyWorld(false);
     return true;

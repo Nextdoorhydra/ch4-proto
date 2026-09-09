@@ -8,6 +8,7 @@
 
 class USplineComponent;
 class UBoxComponent;
+class UPrimitiveComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 class UCMRailMovementComponent;
@@ -54,6 +55,16 @@ protected:
 
 private:
     void RefreshInteractionHighlight();
+    void GatherRailSegments(TArray<USplineComponent*>& OutRailSegments) const;
+
+    UFUNCTION()
+    void HandleRailBodyHit(
+        UPrimitiveComponent* HitComponent,
+        AActor* OtherActor,
+        UPrimitiveComponent* OtherComponent,
+        FVector NormalImpulse,
+        const FHitResult& Hit);
 
     FTimerHandle InteractionHintTimerHandle;
+    uint64 LastCollisionPushFrame = MAX_uint64;
 };
