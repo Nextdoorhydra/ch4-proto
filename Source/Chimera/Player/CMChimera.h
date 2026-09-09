@@ -249,6 +249,9 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Chimera|Testing")
     bool TeleportAssembly(const FTransform& DestinationTransform);
 
+    // 체크포인트 주변의 안전한 바닥에 마디 수 기반 원호 자세로 물리 조립체를 재배치
+    bool TeleportAssemblyForCheckpointRespawn(const FTransform& CheckpointTransform);
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
     UCMPartSlotComponent* GetPartSlotComponent(
         const FCMPartSlotAddress& PartSlotAddress
@@ -713,6 +716,30 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint")
     bool bDisableCollisionBetweenSegments = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Checkpoint Respawn", meta = (ClampMin = "0.0", Units = "cm"))
+    float CheckpointRespawnGroundClearance = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Checkpoint Respawn", meta = (ClampMin = "0.0", ClampMax = "45.0", Units = "deg"))
+    float CheckpointRespawnBendSafetyMargin = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Checkpoint Respawn", meta = (ClampMin = "0.0", Units = "cm"))
+    float CheckpointRespawnCollisionPadding = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Checkpoint Respawn", meta = (ClampMin = "1.0", Units = "cm"))
+    float CheckpointRespawnSearchStep = 150.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Checkpoint Respawn", meta = (ClampMin = "0", ClampMax = "8"))
+    int32 CheckpointRespawnSearchRings = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Checkpoint Respawn", meta = (ClampMin = "0.0", Units = "cm"))
+    float CheckpointRespawnGroundTraceHeight = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Checkpoint Respawn", meta = (ClampMin = "0.0", Units = "cm"))
+    float CheckpointRespawnGroundTraceDepth = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Checkpoint Respawn", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CheckpointRespawnMinimumGroundNormalZ = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera",
         meta = (ClampMin = "0.0"))

@@ -1,6 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Engine/World.h"
+#include "Stage/Obstacle/CMStageObstacleBase.h"
 #include "Stage/Obstacle/Data/CMObstacleBalanceTableRow.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCMObstacleBalanceResolveTest,
@@ -36,6 +38,47 @@ bool FCMObstacleBalanceResolveTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Custom-only damage selection is valid"), Result.bValid);
     TestEqual(TEXT("Custom-only damage ignores stage multiplier"),
         Result.Damage, 12.0f);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCMObstacleKillOnEnterTest,
+    "Chimera.Obstacle.Balance.KillOnEnterWithoutDamageBalance",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCMObstacleKillOnEnterTest::RunTest(const FString& Parameters)
+{
+    const UWorld::InitializationValues Init = UWorld::InitializationValues()
+        .AllowAudioPlayback(false).CreatePhysicsScene(false)
+        .CreateNavigation(false).CreateAISystem(false).ShouldSimulatePhysics(false);
+    UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, NAME_None,
+        nullptr, true, ERHIFeatureLevel::Num, &Init);
+    if (!TestNotNull(TEXT("World"), World))
+    {
+        return false;
+    }
+
+    ACMStageObstacleBase* Obstacle = World->SpawnActor<ACMStageObstacleBase>();
+    if (!TestNotNull(TEXT("Obstacle"), Obstacle))
+    {
+        World->DestroyWorld(false);
+        return false;
+    }
+
+    Obstacle->PartEffect.ApplicationPolicy =
+        ECMObstacleEffectApplicationPolicy::KillOnEnter;
+    Obstacle->PartEffect.StatusEffect = ECMPartObstacleStatusEffect::None;
+    Obstacle->ResolveBalance();
+    Obstacle->ApplyResolvedBalance();
+    TestTrue(TEXT("Kill on enter enables hazard without damage balance"),
+        Obstacle->PartEffect.bEnabled);
+
+    Obstacle->PartEffect.ApplicationPolicy =
+        ECMObstacleEffectApplicationPolicy::OnceOnEnter;
+    Obstacle->ApplyResolvedBalance();
+    TestFalse(TEXT("Ordinary empty effect remains disabled"),
+        Obstacle->PartEffect.bEnabled);
+
+    World->DestroyWorld(false);
     return true;
 }
 

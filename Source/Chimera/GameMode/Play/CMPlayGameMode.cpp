@@ -1094,7 +1094,7 @@ bool ACMPlayGameMode::RespawnAtActiveCheckpoint()
     ClearRetryVoteState();
     const bool bRoomReset = !RoomController
         || RoomController->ResetActiveCheckpointRoom();
-    const bool bTeleported = SharedChimera->TeleportAssembly(CheckpointTransform);
+    const bool bTeleported = SharedChimera->TeleportAssemblyForCheckpointRespawn(CheckpointTransform);
     SharedChimera->RestoreForCheckpointRespawn();
     const bool bPartsRestored = RestoreCheckpointParts(SharedChimera);
     bCheckpointRestartInProgress = false;

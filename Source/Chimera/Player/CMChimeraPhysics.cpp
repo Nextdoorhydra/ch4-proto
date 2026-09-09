@@ -1,7 +1,41 @@
 #include "Player/CMChimera.h"
 
 #include "Components/BoxComponent.h"
+#include "Engine/World.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
+
+namespace
+{
+void BuildCurledRespawnPose(int32 SegmentCount, float SegmentSpacing, float BodyHalfLength, float BodyHalfWidth, float SignedBendDegrees, TArray<FTransform>& OutTransforms)
+{
+    OutTransforms.Reset(SegmentCount);
+    FVector SegmentLocation = FVector::ZeroVector;
+    FBox2D PoseBounds(ForceInit);
+
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const FQuat SegmentRotation = FRotator(0.0f, SignedBendDegrees * Index, 0.0f).Quaternion();
+        if (Index > 0)
+        {
+            const FQuat PreviousRotation = OutTransforms[Index - 1].GetRotation();
+            SegmentLocation -= (PreviousRotation.GetForwardVector() + SegmentRotation.GetForwardVector()) * SegmentSpacing * 0.5f;
+        }
+
+        OutTransforms.Emplace(SegmentRotation, SegmentLocation);
+        const FVector Forward = SegmentRotation.GetForwardVector();
+        const FVector Right = SegmentRotation.GetRightVector();
+        const FVector2D BoundsExtent(FMath::Abs(Forward.X) * BodyHalfLength + FMath::Abs(Right.X) * BodyHalfWidth, FMath::Abs(Forward.Y) * BodyHalfLength + FMath::Abs(Right.Y) * BodyHalfWidth);
+        PoseBounds += FVector2D(SegmentLocation) - BoundsExtent;
+        PoseBounds += FVector2D(SegmentLocation) + BoundsExtent;
+    }
+
+    const FVector2D PoseCenter = PoseBounds.GetCenter();
+    for (FTransform& Transform : OutTransforms)
+    {
+        Transform.AddToTranslation(FVector(-PoseCenter.X, -PoseCenter.Y, 0.0f));
+    }
+}
+}
 
 // 바람·컨베이어 가속도를 질량과 무관하게 적용해 정지 마찰을 넘김
 void ACMChimera::ApplyEnvironmentalForce(const FVector& Acceleration)
@@ -113,6 +147,114 @@ bool ACMChimera::TeleportAssembly(const FTransform& DestinationTransform)
     UpdateReplicatedSegmentStates();
     ForceNetUpdate();
     return true;
+}
+
+bool ACMChimera::TeleportAssemblyForCheckpointRespawn(const FTransform& CheckpointTransform)
+{
+    UWorld* World = GetWorld();
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    if (!HasAuthority() || !World || !BodyMesh
+        || SegmentCount <= 0)
+    {
+        return false;
+    }
+
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        if (!IsValid(BodySegments[Index]))
+        {
+            return false;
+        }
+    }
+
+    const float IdealBendDegrees = 360.0f / SegmentCount;
+    const float SafeBendLimitDegrees = FMath::Max(HorizontalBendLimitDegrees - CheckpointRespawnBendSafetyMargin, 0.0f);
+    const float BendDegrees = FMath::Min(IdealBendDegrees, SafeBendLimitDegrees);
+    const float CheckpointYaw = CheckpointTransform.Rotator().Yaw;
+    const FQuat CheckpointRotation = FRotator(0.0f, CheckpointYaw, 0.0f).Quaternion();
+    const FVector CheckpointLocation = CheckpointTransform.GetLocation();
+
+    TArray<FVector2D> CandidateOffsets;
+    CandidateOffsets.Add(FVector2D::ZeroVector);
+    constexpr int32 DirectionsPerRing = 8;
+    for (int32 RingIndex = 1; RingIndex <= CheckpointRespawnSearchRings; ++RingIndex)
+    {
+        const float Radius = CheckpointRespawnSearchStep * RingIndex;
+        for (int32 DirectionIndex = 0; DirectionIndex < DirectionsPerRing; ++DirectionIndex)
+        {
+            const float AngleRadians = UE_TWO_PI * DirectionIndex / DirectionsPerRing;
+            CandidateOffsets.Add(FVector2D(FMath::Cos(AngleRadians), FMath::Sin(AngleRadians)) * Radius);
+        }
+    }
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CMCheckpointRespawn), false, this);
+    TArray<AActor*> AttachedActors;
+    GetAttachedActors(AttachedActors, true, true);
+    QueryParams.AddIgnoredActors(AttachedActors);
+
+    TArray<FTransform> LocalTransforms;
+    TArray<FTransform> CandidateTransforms;
+    CandidateTransforms.Reserve(SegmentCount);
+    for (const FVector2D& CandidateOffset : CandidateOffsets)
+    {
+        const FVector WorldOffset = CheckpointRotation.RotateVector(FVector(CandidateOffset, 0.0f));
+        const FVector TraceOrigin = CheckpointLocation + WorldOffset;
+        const FVector TraceStart = TraceOrigin + FVector::UpVector * CheckpointRespawnGroundTraceHeight;
+        const FVector TraceEnd = TraceOrigin - FVector::UpVector * CheckpointRespawnGroundTraceDepth;
+        FHitResult GroundHit;
+        if (!World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, GroundTraceChannel, QueryParams)
+            || GroundHit.ImpactNormal.Z < CheckpointRespawnMinimumGroundNormalZ)
+        {
+            continue;
+        }
+
+        for (const float CurlDirection : { 1.0f, -1.0f })
+        {
+            BuildCurledRespawnPose(SegmentCount, SegmentSpacing, BodyCollisionHalfLength, BodyCollisionHalfWidth, BendDegrees * CurlDirection, LocalTransforms);
+            CandidateTransforms.Reset(SegmentCount);
+            const float RespawnZ = GroundHit.ImpactPoint.Z + BodyCollisionHalfHeight + CheckpointRespawnGroundClearance;
+            const FVector PoseOrigin(TraceOrigin.X, TraceOrigin.Y, RespawnZ);
+            bool bBlocked = false;
+
+            for (int32 Index = 0; Index < SegmentCount; ++Index)
+            {
+                const FQuat WorldRotation = CheckpointRotation * LocalTransforms[Index].GetRotation();
+                const FVector WorldLocation = PoseOrigin + CheckpointRotation.RotateVector(LocalTransforms[Index].GetLocation());
+                const FVector CollisionExtent = BodySegments[Index]->GetScaledBoxExtent() + FVector(CheckpointRespawnCollisionPadding);
+                CandidateTransforms.Emplace(WorldRotation, WorldLocation);
+                if (World->OverlapBlockingTestByProfile(WorldLocation, WorldRotation, BodySegments[Index]->GetCollisionProfileName(), FCollisionShape::MakeBox(CollisionExtent), QueryParams))
+                {
+                    bBlocked = true;
+                    break;
+                }
+            }
+
+            if (bBlocked)
+            {
+                continue;
+            }
+
+            ClearPressedControlParts();
+            for (int32 Index = 0; Index < SegmentCount; ++Index)
+            {
+                UBoxComponent* SegmentBody = BodySegments[Index];
+                SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+                SegmentBody->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+                SegmentBody->SetWorldTransform(CandidateTransforms[Index], false, nullptr, ETeleportType::TeleportPhysics);
+                SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+                SegmentBody->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+                SegmentBody->WakeAllRigidBodies();
+            }
+
+            UpdateReplicatedSegmentStates();
+            ForceNetUpdate();
+            UE_LOG(LogChimeraLineBody, Display, TEXT("[Checkpoint Respawn Pose] Segments=%d Bend=%.1f Direction=%s Offset=(%.1f, %.1f) GroundZ=%.1f"), SegmentCount, BendDegrees, CurlDirection > 0.0f ? TEXT("Clockwise") : TEXT("CounterClockwise"), CandidateOffset.X, CandidateOffset.Y, GroundHit.ImpactPoint.Z);
+            return true;
+        }
+    }
+
+    UE_LOG(LogChimeraLineBody, Error, TEXT("[Checkpoint Respawn Failed] No collision-free curled pose found. Segments=%d Checkpoint=%s SearchRadius=%.1f"), SegmentCount, *CheckpointLocation.ToCompactString(), CheckpointRespawnSearchStep * CheckpointRespawnSearchRings);
+    return false;
 }
 
 void ACMChimera::ConfigureSegments()
