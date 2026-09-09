@@ -75,7 +75,7 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power",
         meta = (ClampMin = "0.0"))
-    float ConnectionRadius = 150.0f;
+    float ConnectionRadius = 350.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Power",
         meta = (ClampMin = "1"))
