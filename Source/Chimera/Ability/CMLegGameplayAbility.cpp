@@ -161,11 +161,13 @@ void UCMLegGameplayAbility::ActivateAbility(
     ACMChimera* Chimera = ActorInfo
         ? Cast<ACMChimera>(ActorInfo->AvatarActor.Get())
         : nullptr;
-    const bool bMovementApplied = Chimera && Chimera->TryActivateLegPart(
-        LegPart->GetAttachedSlotAddress(),
-        LegPart->ConsumeContributingPlayerState(),
-        LegPart->ConsumePendingReverseMovement()
-    );
+    const bool bMovementApplied = Chimera
+        && Chimera->TryActivateLegPartWithStrength(
+            LegPart->GetAttachedSlotAddress(),
+            LegPart->ConsumeContributingPlayerState(),
+            LegPart->ConsumePendingReverseMovement(),
+            LegPart->ConsumePendingInputStrengthMultiplier()
+        );
     if (!bMovementApplied)
     {
         UE_LOG(LogChimeraLegAbility, Warning,

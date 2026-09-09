@@ -2,6 +2,7 @@
 
 #include "Ability/CMChimeraAttributeSet.h"
 #include "AbilitySystemComponent.h"
+#include "GameMode/CMGameState.h"
 #include "Player/CMControlTypes.h"
 #include "DrawDebugHelpers.h"
 #include "Parts/Arm/CMArmHoldTarget.h"
@@ -144,9 +145,12 @@ bool UCMLineBodyMovementCoordinator::TryActivateLeg(
             SegmentIndex,
             bReverseMovement
         );
+    const float PlayerCountForceMultiplier =
+        GetPlayerCountForceMultiplier(Chimera);
     const float PushForceMagnitude =
         MovementImpulse
         * DirectionalChainMassMultiplier
+        * PlayerCountForceMultiplier
         * FMath::Max(Chimera.LegStepForceScale, 0.0f)
         / PushDuration;
     if (PushDirection.IsNearlyZero()
@@ -413,7 +417,8 @@ bool UCMLineBodyMovementCoordinator::ApplyArmImpulse(
     }
 
     const FVector Impulse = ForwardDirection
-        * MovementImpulse;
+        * MovementImpulse
+        * GetPlayerCountForceMultiplier(Chimera);
     const float TranslationFraction = FMath::Clamp(
         Chimera.IndividualPlanarTranslationFraction,
         0.0f,
@@ -822,6 +827,27 @@ float UCMLineBodyMovementCoordinator::GetDirectionalChainMassMultiplier(
             1.0f
         )
     );
+}
+
+float UCMLineBodyMovementCoordinator::GetPlayerCountForceMultiplier(
+    const ACMChimera& Chimera
+) const
+{
+    const ACMGameState* GameState = Chimera.GetWorld()
+        ? Chimera.GetWorld()->GetGameState<ACMGameState>()
+        : nullptr;
+    const int32 PlayerCount = FMath::Clamp(
+        GameState ? GameState->GetLobbyPlayerCount() : 1,
+        1,
+        CMControl::MaxPlayers
+    );
+    if (PlayerCount == 1)
+    {
+        return 1.0f + 2.0f * Chimera.PlayerCountForceMultiplier;
+    }
+    return 1.0f
+        + static_cast<float>(PlayerCount - 2)
+            * Chimera.PlayerCountForceMultiplier;
 }
 
 void UCMLineBodyMovementCoordinator::ApplyWholeBodyYawAssist(

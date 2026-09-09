@@ -7,6 +7,7 @@
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "Aggressive/Common/Movement/CMAIFixedLegActuatorComponent.h"
+#include "Aggressive/Common/Movement/CMGroundPlacementBoxComponent.h"
 #include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "UObject/ConstructorHelpers.h"
@@ -36,9 +37,11 @@ ACMRipperPawn::ACMRipperPawn()
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
-    PhysicsRoot = CreateDefaultSubobject<UBoxComponent>(TEXT("FrontBodyCollision"));
+    UCMGroundPlacementBoxComponent* GroundedPhysicsRoot = CreateDefaultSubobject<UCMGroundPlacementBoxComponent>(TEXT("FrontBodyCollision"));
+    PhysicsRoot = GroundedPhysicsRoot;
     SetRootComponent(PhysicsRoot);
     PhysicsRoot->SetBoxExtent(FVector(CMRipperBody::CubeHalfExtent));
+    GroundedPhysicsRoot->SetGroundContactHeight(CMRipperBody::GroundContactHeight);
     PhysicsRoot->SetCollisionProfileName(TEXT("PhysicsActor"));
     PhysicsRoot->SetSimulatePhysics(true);
     PhysicsRoot->SetIsReplicated(true);
@@ -74,6 +77,7 @@ ACMRipperPawn::ACMRipperPawn()
 void ACMRipperPawn::BeginPlay()
 {
     Super::BeginPlay();
+    LegActuator->ResolveInitialGroundPenetration(PhysicsRoot, LegContactPoints, LegActuationSettings);
     ApplyBodySettings();
     LegActuator->InitializeLegs(LegContactPoints.Num());
 }

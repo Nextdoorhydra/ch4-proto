@@ -7,6 +7,7 @@
 #include "Aggressive/Common/Movement/CMAggressiveAccelerationMovementComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
+#include "Aggressive/Common/Movement/CMGroundPlacementBoxComponent.h"
 #include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "UObject/ConstructorHelpers.h"
@@ -34,9 +35,11 @@ ACMTetraPawn::ACMTetraPawn()
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
-    PhysicsRoot = CreateDefaultSubobject<UBoxComponent>(TEXT("BodyCollision"));
+    UCMGroundPlacementBoxComponent* GroundedPhysicsRoot = CreateDefaultSubobject<UCMGroundPlacementBoxComponent>(TEXT("BodyCollision"));
+    PhysicsRoot = GroundedPhysicsRoot;
     SetRootComponent(PhysicsRoot);
     PhysicsRoot->SetBoxExtent(FVector(CubeHalfExtent));
+    GroundedPhysicsRoot->SetGroundContactHeight(-CubeHalfExtent);
     PhysicsRoot->SetCollisionProfileName(TEXT("PhysicsActor"));
     PhysicsRoot->SetSimulatePhysics(true);
     PhysicsRoot->SetIsReplicated(true);

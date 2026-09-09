@@ -53,4 +53,8 @@ struct CHIMERA_API FCMBodyTableRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float MaxVelocity = 0.0f;
+
+	// 2인 기준 힘에서 플레이어 한 명이 늘 때마다 더해지는 배율이다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float PlayerCountForceMultiplier = 0.3f;
 };

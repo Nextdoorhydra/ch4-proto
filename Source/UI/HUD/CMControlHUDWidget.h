@@ -69,7 +69,7 @@ protected:
         Category = "Chimera HUD|Wireframe")
     TObjectPtr<UCurveLinearColor> WireframeHealthColorCurve;
 
-    /** Scene-capture view angle, editable in the widget Blueprint defaults. */
+    /** Screen orientation for the fixed top-down scene capture. Only yaw is used. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera HUD|Wireframe|Camera")
     FRotator WireframeCameraRotation = FRotator(-90.0f, -90.0f, 0.0f);
@@ -88,18 +88,6 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera HUD|Wireframe|Layout")
     FVector2D WireframePanelOffset = FVector2D(168.0f, -28.0f);
-
-    /** Degrees per mouse-delta unit while holding the right mouse button. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite,
-        Category = "Chimera HUD|Wireframe|Interaction",
-        meta = (DisplayName = "Mouse Sensitivity",
-            ClampMin = "0.01", UIMin = "0.01"))
-    float WireframeOrbitSensitivity = 2.16f;
-
-    /** Minimum and maximum pitch allowed during right-mouse orbit. */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-        Category = "Chimera HUD|Wireframe|Camera")
-    FVector2D WireframePitchLimits = FVector2D(-90.0f, 90.0f);
 
     /** Orthographic zoom change per mouse-wheel notch. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -165,6 +153,8 @@ private:
     void TeardownWireframeHUD();
     void UpdateWireframePanelLayout(const FGeometry& MyGeometry);
     void UpdateWireframeCameraInput();
+    void InitializeRetryVoteHUD();
+    void RefreshRetryVoteHUD();
     void RefreshWireframeCallouts(
         const FGeometry& MyGeometry,
         float InDeltaTime
@@ -217,6 +207,18 @@ private:
     TObjectPtr<UImage> WireframeRenderImage;
 
     UPROPERTY(Transient)
+    TObjectPtr<UWidget> RetryVotePanelRoot;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> RetryVoteTitleText;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> RetryVoteStatusText;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UProgressBar> RetryVoteHoldProgressBar;
+
+    UPROPERTY(Transient)
     TObjectPtr<UCanvasPanel> WireframeCanvas;
 
     UPROPERTY(Transient)
@@ -232,9 +234,7 @@ private:
     TMap<FName, bool> CalloutRightSideById;
     FVector2D WireframeImageTopLeft = FVector2D::ZeroVector;
     FVector2D WireframeImageSize = FVector2D::ZeroVector;
-    FRotator RuntimeWireframeCameraRotation = FRotator::ZeroRotator;
     float RuntimeWireframeZoom = 1.0f;
-    bool bWireframeOrbitActive = false;
     TArray<TWeakObjectPtr<UCMPartSlotComponent>> ObservedPartSlots;
     TArray<TWeakObjectPtr<ACMPartActorBase>> ObservedParts;
     FDelegateHandle StaminaChangedHandle;

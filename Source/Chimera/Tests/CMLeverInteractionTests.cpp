@@ -96,12 +96,34 @@ bool FCMLeverInteractionRegressionTest::RunTest(const FString& Parameters)
     ACMChimera* Chimera = World->SpawnActor<ACMChimera>();
     ACMArmPart* Arm = World->SpawnActor<ACMArmPart>();
     Lever->MaximumHoldDistance = 200.0f;
-    Arm->SetActorLocation(Lever->GetActorLocation() + FVector(1000.0f));
+    Arm->SetActorLocation(Lever->GetActorLocation() + FVector(0.0f, 0.0f, 1000.0f));
+    TestFalse(TEXT("Vertical separation does not release lever hold"),
+        Lever->IsHoldDistanceExceeded(*Arm));
+    Arm->SetActorLocation(Lever->GetActorLocation() + FVector(1000.0f, 0.0f, 1000.0f));
     TestTrue(TEXT("Distant arm exceeds lever hold distance"),
         Lever->IsHoldDistanceExceeded(*Arm));
     Lever->MaximumHoldDistance = 0.0f;
     TestFalse(TEXT("Zero lever hold distance disables release"),
         Lever->IsHoldDistanceExceeded(*Arm));
+
+    Lever->InteractionMode = ECMLeverInteractionMode::LinearPull;
+    Lever->LocalPullAxis = FVector::ForwardVector;
+    Lever->FullTravelDistance = 100.0f;
+    Lever->GrabStartArmLocation = Lever->GetActorLocation();
+    Lever->GrabStartAlpha = -1.0f;
+    TestTrue(TEXT("Linear lever ignores vertical arm movement"),
+        FMath::IsNearlyEqual(Lever->CalculateLeverAlphaFromArmLocation(
+            Lever->GetActorLocation() + FVector(50.0f, 0.0f, 1000.0f)), 0.0f));
+
+    Lever->InteractionMode = ECMLeverInteractionMode::WheelRotation;
+    Lever->LocalRotationAxis = FVector::UpVector;
+    Lever->RotationHalfAngle = 45.0f;
+    Lever->GrabStartAlpha = -1.0f;
+    Lever->GrabStartWheelDirection = FVector::ForwardVector;
+    const FVector WheelPivot = Lever->LeverPivot->GetComponentLocation();
+    TestTrue(TEXT("Wheel lever follows hand angle around its axis"),
+        FMath::IsNearlyEqual(Lever->CalculateLeverAlphaFromArmLocation(
+            WheelPivot + FVector(0.0f, 100.0f, 0.0f)), 1.0f));
     FCMPartSlotAddress Slot;
     Slot.SegmentIndex = 0;
     Slot.PartSlotIndex = 0;

@@ -1,8 +1,12 @@
 #include "Stage/Trigger/CMVisionStoneBase.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
+#include "Sound/CMGameSoundBridgeSubsystem.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 #include "TimerManager.h"
 #include "Vision/CMVisionManagerSubsystem.h"
@@ -27,6 +31,17 @@ void ACMVisionStoneBase::GetLifetimeReplicatedProps(
 void ACMVisionStoneBase::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge =
+                GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.AddUObject(
+                this,
+                &ThisClass::HandleSoundCatalogsRebuilt);
+        }
+    }
 
     ActivationTrigger->OnActivated.AddUniqueDynamic(
         this, &ThisClass::HandleVisionStoneActivated);
@@ -53,6 +68,16 @@ void ACMVisionStoneBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
     {
         World->GetTimerManager().ClearTimer(EvaluationTimerHandle);
     }
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge =
+                GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.RemoveAll(this);
+        }
+    }
+    StopVisionLoopSound();
 
     Super::EndPlay(EndPlayReason);
 }
@@ -114,6 +139,53 @@ void ACMVisionStoneBase::RefreshVisionPresentationState(bool bConditionMet)
 void ACMVisionStoneBase::OnRep_VisionPresentationState()
 {
     OnVisionPresentationStateChanged.Broadcast(VisionPresentationState);
+    RefreshVisionLoopSound();
+}
+
+void ACMVisionStoneBase::HandleSoundCatalogsRebuilt()
+{
+    RefreshVisionLoopSound();
+}
+
+void ACMVisionStoneBase::RefreshVisionLoopSound()
+{
+    if (!VisionPresentationState.bReady)
+    {
+        return;
+    }
+
+    const bool bConditionMet = VisionPresentationState.bConditionMet;
+    if (bHasPlayingLoopState
+        && bPlayingLoopConditionMet == bConditionMet
+        && IsValid(VisionLoopSoundComponent)
+        && VisionLoopSoundComponent->IsPlaying())
+    {
+        return;
+    }
+
+    StopVisionLoopSound();
+    VisionLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        VisionPoint,
+        bConditionMet
+            ? CMSoundTags::Stage_VisionStone_OnLoop
+            : CMSoundTags::Stage_VisionStone_OffLoop);
+    if (IsValid(VisionLoopSoundComponent))
+    {
+        constexpr float VisionLoopFadeInDuration = 0.2f;
+        VisionLoopSoundComponent->FadeIn(VisionLoopFadeInDuration);
+        bHasPlayingLoopState = true;
+        bPlayingLoopConditionMet = bConditionMet;
+    }
+}
+
+void ACMVisionStoneBase::StopVisionLoopSound()
+{
+    if (IsValid(VisionLoopSoundComponent))
+    {
+        VisionLoopSoundComponent->Stop();
+        VisionLoopSoundComponent = nullptr;
+    }
+    bHasPlayingLoopState = false;
 }
 
 void ACMVisionStoneBase::HandleVisionStoneActivated(AActor* TriggeringActor)

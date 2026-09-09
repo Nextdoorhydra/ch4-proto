@@ -7,6 +7,7 @@
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "Aggressive/Common/Movement/CMAIFixedLegActuatorComponent.h"
+#include "Aggressive/Common/Movement/CMGroundPlacementBoxComponent.h"
 #include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -36,9 +37,11 @@ ACMCentipedePawn::ACMCentipedePawn()
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
-    HeadBody = CreateDefaultSubobject<UBoxComponent>(TEXT("Segment00Body"));
+    UCMGroundPlacementBoxComponent* GroundedHeadBody = CreateDefaultSubobject<UCMGroundPlacementBoxComponent>(TEXT("Segment00Body"));
+    HeadBody = GroundedHeadBody;
     SetRootComponent(HeadBody);
     HeadBody->SetBoxExtent(FVector(BodyLength, BodyWidth, BodyHeight) * 0.5f);
+    GroundedHeadBody->SetGroundContactHeight(CMCentipedeBody::GroundContactHeight);
     HeadBody->SetCollisionProfileName(TEXT("PhysicsActor"));
     HeadBody->SetSimulatePhysics(true);
     HeadBody->SetIsReplicated(true);
@@ -87,6 +90,7 @@ ACMCentipedePawn::ACMCentipedePawn()
 void ACMCentipedePawn::BeginPlay()
 {
     Super::BeginPlay();
+    LegActuator->ResolveInitialGroundPenetration(HeadBody, LegContactPoints, LegActuationSettings);
     ApplyBodySettings();
     CreateSegmentConstraints();
     LegActuator->InitializeLegs(LegContactPoints.Num());

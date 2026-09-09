@@ -1,6 +1,49 @@
 #include "GameMode/Play/CMPlayGameState.h"
 
 #include "Net/UnrealNetwork.h"
+#include "GameFlow/CMPlayStateMessages.h"
+
+// 먼저 요청을 구독하고 현재 상태를 보낸다. 오디오 구독 순서와 관계없이 초기 상태를 전달한다.
+void ACMPlayGameState::BeginPlay()
+{
+    Super::BeginPlay();
+    if (GetNetMode() != NM_DedicatedServer && UGameplayMessageSubsystem::HasInstance(this))
+    {
+        PlayStateRequestHandle = UGameplayMessageSubsystem::Get(this).RegisterListener<FCMPlayStateRequest>(
+            CMPlayStateMessages::RequestCurrentState, this, &ThisClass::HandlePlayStateRequest);
+        BroadcastPlayState();
+    }
+}
+
+void ACMPlayGameState::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    PlayStateRequestHandle.Unregister();
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACMPlayGameState::HandlePlayStateRequest(FGameplayTag Channel, const FCMPlayStateRequest& Request)
+{
+    if (Request.World == GetWorld())
+    {
+        BroadcastPlayState();
+    }
+}
+
+// 게임 상태와 설정만 전달하며 BGM 재생/정지 정책은 CMSound가 결정한다.
+void ACMPlayGameState::BroadcastPlayState() const
+{
+    if (GetNetMode() == NM_DedicatedServer || !UGameplayMessageSubsystem::HasInstance(this))
+    {
+        return;
+    }
+
+    FCMPlayStateMessage Message;
+    Message.World = GetWorld();
+    Message.Phase = PlayPhase;
+    Message.StageIndex = CurrentStageIndex;
+    Message.StageBGMTag = CurrentStageBGMTag;
+    UGameplayMessageSubsystem::Get(this).BroadcastMessage(CMPlayStateMessages::StateChanged, Message);
+}
 
 // 플레이 흐름과 로드 Snapshot을 네트워크 복제 대상으로 등록
 void ACMPlayGameState::GetLifetimeReplicatedProps(
@@ -10,12 +53,35 @@ void ACMPlayGameState::GetLifetimeReplicatedProps(
 
     DOREPLIFETIME(ACMPlayGameState, PlayPhase);
     DOREPLIFETIME(ACMPlayGameState, CurrentStageIndex);
+    DOREPLIFETIME(ACMPlayGameState, CurrentStageBGMTag);
     DOREPLIFETIME(ACMPlayGameState, TotalStageCount);
     DOREPLIFETIME(ACMPlayGameState, PhaseStartServerTime);
     DOREPLIFETIME(ACMPlayGameState, PhaseDuration);
     DOREPLIFETIME(ACMPlayGameState, CompletedStageTime);
     DOREPLIFETIME(ACMPlayGameState, StageLoadSnapshot);
     DOREPLIFETIME(ACMPlayGameState, StagePresentationState);
+    DOREPLIFETIME(ACMPlayGameState, RetryVoteSnapshot);
+}
+
+void ACMPlayGameState::SetRetryVoteState(
+    bool bActive,
+    const TArray<int32>& VotedPlayerIds,
+    int32 EligiblePlayerCount,
+    int32 RequiredVoteCount)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    RetryVoteSnapshot.bActive = bActive;
+    RetryVoteSnapshot.VotedPlayerIds = VotedPlayerIds;
+    RetryVoteSnapshot.VoteCount = VotedPlayerIds.Num();
+    RetryVoteSnapshot.EligiblePlayerCount = FMath::Max(0, EligiblePlayerCount);
+    RetryVoteSnapshot.RequiredVoteCount = FMath::Max(0, RequiredVoteCount);
+    ++RetryVoteSnapshot.Revision;
+    OnRep_RetryVoteSnapshot();
+    ForceNetUpdate();
 }
 
 // 서버에서 모든 머신이 재생할 스테이지 연출 상태 갱신
@@ -125,7 +191,7 @@ void ACMPlayGameState::SetPlayPhase(ECMPlayPhase NewPhase, float NewDuration)
 }
 
 // 서버에서 현재 인덱스와 전체 스테이지 수를 유효 범위로 갱신
-void ACMPlayGameState::SetStageProgress(int32 NewStageIndex, int32 NewStageCount)
+void ACMPlayGameState::SetStageProgress(int32 NewStageIndex, int32 NewStageCount, FGameplayTag NewStageBGMTag)
 {
     if (!HasAuthority())
     {
@@ -134,13 +200,15 @@ void ACMPlayGameState::SetStageProgress(int32 NewStageIndex, int32 NewStageCount
 
     NewStageCount = FMath::Max(1, NewStageCount);
     NewStageIndex = FMath::Clamp(NewStageIndex, 0, NewStageCount - 1);
-    if (CurrentStageIndex == NewStageIndex && TotalStageCount == NewStageCount)
+    if (CurrentStageIndex == NewStageIndex && TotalStageCount == NewStageCount
+        && CurrentStageBGMTag == NewStageBGMTag)
     {
         return;
     }
 
     CurrentStageIndex = NewStageIndex;
     TotalStageCount = NewStageCount;
+    CurrentStageBGMTag = NewStageBGMTag;
     OnRep_PlayState();
     ForceNetUpdate();
 }
@@ -160,6 +228,7 @@ float ACMPlayGameState::GetPhaseRemainingTime() const
 void ACMPlayGameState::OnRep_PlayState()
 {
     OnPlayStateChanged.Broadcast();
+    BroadcastPlayState();
 }
 
 // 복제된 요청과 로드 진행도의 동일 Revision을 로더와 UI에 전달
@@ -173,4 +242,9 @@ void ACMPlayGameState::OnRep_StageLoadSnapshot()
 void ACMPlayGameState::OnRep_StagePresentationState()
 {
     OnStagePresentationChanged.Broadcast();
+}
+
+void ACMPlayGameState::OnRep_RetryVoteSnapshot()
+{
+    OnRetryVoteChanged.Broadcast();
 }

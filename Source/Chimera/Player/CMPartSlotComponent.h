@@ -148,6 +148,11 @@ private:
     UFUNCTION()
     void HandleAttachedPartDestroyed(AActor* DestroyedPart);
 
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayPartAttachmentSound(
+        bool bAttached,
+        FVector_NetQuantize10 SoundLocation);
+
     UAbilitySystemComponent* GetOwnerAbilitySystemComponent() const;
     void RemoveGrantedAbility();
 

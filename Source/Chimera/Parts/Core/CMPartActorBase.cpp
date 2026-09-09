@@ -19,9 +19,13 @@ DEFINE_LOG_CATEGORY_STATIC(LogChimeraPart, Log, All);
 
 ACMPartActorBase::ACMPartActorBase()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
+    PrimaryActorTick.TickGroup = TG_PostPhysics;
     bReplicates = true;
     SetReplicateMovement(true);
+    SetNetUpdateFrequency(30.0f);
+    SetMinNetUpdateFrequency(10.0f);
     Tags.AddUnique(TEXT("TentacleInteractiveObject"));
 
     SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
@@ -134,6 +138,21 @@ void ACMPartActorBase::BeginPlay()
     ApplyAttachmentPhysicsState();
 }
 
+void ACMPartActorBase::Tick(const float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    if (HasAuthority()
+        && !bDead
+        && !bTentaclePullActive
+        && !CMControl::IsValidPartSlot(AttachedSlotAddress)
+        && PartMesh
+        && PartMesh->IsSimulatingPhysics())
+    {
+        UpdateReplicatedLoosePartLocation();
+    }
+}
+
 void ACMPartActorBase::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const
@@ -141,6 +160,7 @@ void ACMPartActorBase::GetLifetimeReplicatedProps(
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACMPartActorBase, AttachedSlotAddress);
     DOREPLIFETIME(ACMPartActorBase, bTentaclePullActive);
+    DOREPLIFETIME(ACMPartActorBase, ReplicatedLoosePartLocation);
     DOREPLIFETIME(ACMPartActorBase, MaxHealth);
     DOREPLIFETIME(ACMPartActorBase, Health);
     DOREPLIFETIME(ACMPartActorBase, Strength);
@@ -216,6 +236,69 @@ void ACMPartActorBase::SynchronizeAttachedPartSlot(
     ForceNetUpdate();
 }
 
+void ACMPartActorBase::PrepareForPartSlotAttachment()
+{
+    CaptureMountedPhysicsState();
+    if (!bMountedPhysicsStateCaptured || !PartMesh || !SceneRoot)
+    {
+        return;
+    }
+
+    ResetMeshFromRagdoll();
+    SetActorTickEnabled(false);
+    if (HasAuthority())
+    {
+        SetReplicateMovement(true);
+    }
+
+    PartMesh->SetCollisionProfileName(MountedMeshCollisionProfile);
+    ECollisionEnabled::Type MountedQueryCollision =
+        MountedMeshCollisionEnabled.GetValue();
+    if (MountedQueryCollision == ECollisionEnabled::QueryAndPhysics)
+    {
+        MountedQueryCollision = ECollisionEnabled::QueryOnly;
+    }
+    else if (MountedQueryCollision == ECollisionEnabled::PhysicsOnly)
+    {
+        MountedQueryCollision = ECollisionEnabled::NoCollision;
+    }
+    PartMesh->SetCollisionEnabled(MountedQueryCollision);
+    PartMesh->SetGenerateOverlapEvents(bMountedMeshGenerateOverlapEvents);
+    DamageHurtbox->SetCollisionEnabled(MountedHurtboxCollisionEnabled);
+}
+
+void ACMPartActorBase::ResetMeshFromRagdoll()
+{
+    if (!PartMesh || !SceneRoot)
+    {
+        return;
+    }
+
+    // Remove the physics bodies from collision before teleporting them out of
+    // the ragdoll pose. Otherwise an overlapping Chimera body receives the
+    // penetration correction during the attachment frame.
+    PartMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+    PartMesh->SetGenerateOverlapEvents(false);
+    PartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    PartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+    PartMesh->SetAllBodiesSimulatePhysics(false);
+    PartMesh->SetSimulatePhysics(false);
+    PartMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PartMesh->SetAllBodiesPhysicsBlendWeight(0.0f, false);
+    PartMesh->SetPhysicsBlendWeight(0.0f);
+    PartMesh->AttachToComponent(
+        SceneRoot,
+        FAttachmentTransformRules::KeepWorldTransform);
+    PartMesh->SetRelativeTransform(
+        MountedMeshRelativeTransform,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    PartMesh->ResetAnimInstanceDynamics(ETeleportType::ResetPhysics);
+    PartMesh->RefreshBoneTransforms();
+    PartMesh->UpdateBounds();
+}
+
 UCMPartSlotComponent* ACMPartActorBase::GetAttachedPartSlot() const
 {
     if (UCMPartSlotComponent* PartSlot = AttachedPartSlot.Get())
@@ -251,6 +334,13 @@ UCMBattleComponent* ACMPartActorBase::GetBattleComponent() const
 UCMPartStatusComponent* ACMPartActorBase::GetPartStatusComponent() const
 {
     return PartStatusComponent;
+}
+
+FVector ACMPartActorBase::GetAuthoritativePickupLocation() const
+{
+    return bTentaclePullActive
+        ? GetActorLocation()
+        : FVector(ReplicatedLoosePartLocation);
 }
 
 float ACMPartActorBase::GetHealth() const
@@ -440,7 +530,14 @@ bool ACMPartActorBase::ApplyPartDamageAtHit(
     const FVector SurfaceNormal,
     const FVector BloodDirection)
 {
-    if (!HasAuthority() || !IsAlive() || Damage <= 0.0f)
+    const UCMPartSlotComponent* AttachedSlot = GetAttachedPartSlot();
+    const AActor* PartSlotOwner = AttachedSlot
+        ? AttachedSlot->GetOwner()
+        : nullptr;
+    if (!HasAuthority()
+        || (PartSlotOwner && !PartSlotOwner->CanBeDamaged())
+        || !IsAlive()
+        || Damage <= 0.0f)
     {
         return false;
     }
@@ -504,6 +601,7 @@ bool ACMPartActorBase::ApplyPartDamageAtHit(
 
 void ACMPartActorBase::ApplyDestroyedState()
 {
+    SetActorTickEnabled(false);
     if (PartMesh)
     {
         PartMesh->SetVisibility(false, true);
@@ -529,6 +627,7 @@ void ACMPartActorBase::CaptureMountedPhysicsState()
     MountedHurtboxCollisionEnabled = DamageHurtbox->GetCollisionEnabled();
     bMountedMeshGenerateOverlapEvents =
         PartMesh->GetGenerateOverlapEvents();
+    MountedMeshRelativeTransform = PartMesh->GetRelativeTransform();
     bMountedPhysicsStateCaptured = true;
 }
 
@@ -546,33 +645,85 @@ void ACMPartActorBase::ApplyAttachmentPhysicsState()
 
     const bool bMounted =
         CMControl::IsValidPartSlot(AttachedSlotAddress);
-    PartMesh->SetAllBodiesSimulatePhysics(false);
-    PartMesh->SetSimulatePhysics(false);
-    PartMesh->SetPhysicsBlendWeight(0.0f);
 
     if (bMounted)
     {
-        PartMesh->SetCollisionProfileName(MountedMeshCollisionProfile);
-        PartMesh->SetCollisionEnabled(MountedMeshCollisionEnabled);
-        PartMesh->SetGenerateOverlapEvents(
-            bMountedMeshGenerateOverlapEvents);
-        DamageHurtbox->SetCollisionEnabled(
-            MountedHurtboxCollisionEnabled);
+        PrepareForPartSlotAttachment();
         return;
     }
+
+    ResetMeshFromRagdoll();
 
     // A loose usable Part is represented only by its authored Physics Asset.
     DamageHurtbox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     PartMesh->SetCollisionProfileName(TEXT("Ragdoll"));
-    PartMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    PartMesh->SetGenerateOverlapEvents(true);
-    if (!bTentaclePullActive)
+    if (bTentaclePullActive)
     {
+        PartMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        PartMesh->SetGenerateOverlapEvents(false);
+        SetActorTickEnabled(false);
+        if (HasAuthority())
+        {
+            SetReplicateMovement(true);
+        }
+        return;
+    }
+
+    if (HasAuthority())
+    {
+        SetReplicateMovement(false);
+        PartMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PartMesh->SetGenerateOverlapEvents(true);
         PartMesh->SetAllBodiesSimulatePhysics(true);
         PartMesh->SetSimulatePhysics(true);
         PartMesh->SetAllBodiesPhysicsBlendWeight(1.0f, false);
         PartMesh->WakeAllRigidBodies();
+        UpdateReplicatedLoosePartLocation();
+        SetActorTickEnabled(true);
     }
+    else
+    {
+        PartMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        PartMesh->SetGenerateOverlapEvents(false);
+        SetActorTickEnabled(false);
+        ApplyReplicatedLoosePartLocation();
+    }
+}
+
+void ACMPartActorBase::UpdateReplicatedLoosePartLocation()
+{
+    if (!HasAuthority() || !PartMesh)
+    {
+        return;
+    }
+
+    PartMesh->UpdateBounds();
+    ReplicatedLoosePartLocation = PartMesh->Bounds.Origin;
+}
+
+void ACMPartActorBase::ApplyReplicatedLoosePartLocation()
+{
+    if (HasAuthority()
+        || bDead
+        || bTentaclePullActive
+        || CMControl::IsValidPartSlot(AttachedSlotAddress)
+        || !PartMesh)
+    {
+        return;
+    }
+
+    SetActorLocation(
+        ReplicatedLoosePartLocation,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    PartMesh->UpdateBounds();
+    PartMesh->AddWorldOffset(
+        FVector(ReplicatedLoosePartLocation) - PartMesh->Bounds.Origin,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    PartMesh->UpdateBounds();
 }
 
 void ACMPartActorBase::SetPartDisabled(bool bNewDisabled)
@@ -625,6 +776,11 @@ void ACMPartActorBase::OnRep_AttachmentPhysicsState()
     ApplyAttachmentPhysicsState();
 }
 
+void ACMPartActorBase::OnRep_ReplicatedLoosePartLocation()
+{
+    ApplyReplicatedLoosePartLocation();
+}
+
 void ACMPartActorBase::SetContributingPlayerState(
     ACMPlayerState* PlayerState
 )
@@ -654,8 +810,14 @@ bool ACMPartActorBase::TryReserveForTentacle(AActor* Requester)
         return false;
     }
     TentacleReservationOwner = Requester;
+    UpdateReplicatedLoosePartLocation();
     bTentaclePullActive = true;
     ApplyAttachmentPhysicsState();
+    SetActorLocation(
+        ReplicatedLoosePartLocation,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
     ForceNetUpdate();
     return true;
 }
@@ -665,6 +827,7 @@ void ACMPartActorBase::ReleaseTentacleReservation(AActor* Requester)
     if (HasAuthority() && TentacleReservationOwner.Get() == Requester)
     {
         TentacleReservationOwner.Reset();
+        ReplicatedLoosePartLocation = GetActorLocation();
         bTentaclePullActive = false;
         ApplyAttachmentPhysicsState();
         ForceNetUpdate();

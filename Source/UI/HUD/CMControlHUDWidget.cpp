@@ -2,6 +2,7 @@
 
 #include "Ability/CMChimeraAttributeSet.h"
 #include "GameMode/CMGameState.h"
+#include "GameMode/Play/CMPlayGameState.h"
 #include "HUD/Wireframe/CMWireframeHUDCaptureActor.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Core/CMPartStatusComponent.h"
@@ -10,6 +11,7 @@
 #include "Player/CMControlBody.h"
 #include "Player/CMPartInterface.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
 #include "AbilitySystemComponent.h"
 #include "Blueprint/WidgetTree.h"
@@ -22,7 +24,10 @@
 #include "Components/OverlaySlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Components/Widget.h"
 #include "Curves/CurveLinearColor.h"
 #include "Engine/Texture2D.h"
@@ -30,6 +35,7 @@
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Fonts/FontMeasure.h"
+#include "Camera/PlayerCameraManager.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 #include "Rendering/DrawElements.h"
@@ -87,6 +93,43 @@ void AddStatusTextUnique(TArray<FText>& StatusTexts, const FText& Text)
         StatusTexts.Add(Text);
     }
 }
+
+FText GetPartTypeText(const ACMPartActorBase* PartActor)
+{
+    if (!PartActor)
+    {
+        return FText::GetEmpty();
+    }
+
+    switch (ICMPartInterface::Execute_GetPartType(
+        const_cast<ACMPartActorBase*>(PartActor)))
+    {
+    case ECMPartSlotType::Head:
+        return LOCTEXT("PartTypeHead", "Head");
+    case ECMPartSlotType::Arm:
+        return LOCTEXT("PartTypeArm", "Arm");
+    case ECMPartSlotType::Leg:
+        return LOCTEXT("PartTypeLeg", "Leg");
+    case ECMPartSlotType::Organ:
+        return LOCTEXT("PartTypeOrgan", "Organ");
+    default:
+        return FText::GetEmpty();
+    }
+}
+
+FText GetControlKeyText(
+    const TCHAR* KeyName,
+    const ACMPartActorBase* PartActor)
+{
+    const FText KeyText = FText::FromString(KeyName);
+    const FText PartTypeText = GetPartTypeText(PartActor);
+    return PartTypeText.IsEmpty()
+        ? KeyText
+        : FText::Format(
+            LOCTEXT("ControlKeyWithPartType", "{0} - {1}"),
+            KeyText,
+            PartTypeText);
+}
 }
 
 UCMControlHUDWidget::UCMControlHUDWidget(
@@ -113,9 +156,9 @@ void UCMControlHUDWidget::NativeOnInitialized()
     }
 
     SetVisibility(ESlateVisibility::HitTestInvisible);
-    RuntimeWireframeCameraRotation = WireframeCameraRotation;
     RuntimeWireframeZoom = 1.0f;
     InitializeWireframeHUD();
+    InitializeRetryVoteHUD();
 }
 
 void UCMControlHUDWidget::NativeDestruct()
@@ -133,6 +176,7 @@ void UCMControlHUDWidget::NativeTick(
     UpdateWireframeCameraInput();
     UpdateWireframePanelLayout(MyGeometry);
     RefreshWireframeCallouts(MyGeometry, InDeltaTime);
+    RefreshRetryVoteHUD();
 }
 
 int32 UCMControlHUDWidget::NativePaint(
@@ -666,7 +710,6 @@ void UCMControlHUDWidget::RefreshAssignedParts()
 
         FPartSlotVisual& Visual = PhysicalPartSlots[FlatSlotIndex];
         Visual.Root->SetVisibility(ESlateVisibility::HitTestInvisible);
-        Visual.KeyText->SetText(FText::FromString(KeyNames[ControlIndex]));
         Visual.KeyText->SetColorAndOpacity(
             FSlateColor(CurrentControlBody->IsControlSlotEnabled(ControlIndex)
                 ? IdleControlKeyColor
@@ -677,6 +720,8 @@ void UCMControlHUDWidget::RefreshAssignedParts()
         const ACMPartActorBase* PartActor = PartSlot
             ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
             : nullptr;
+        Visual.KeyText->SetText(GetControlKeyText(
+            KeyNames[ControlIndex], PartActor));
         UTexture2D* PartTexture = GetPartTexture(PartActor);
         const FVector2D PartImageScale = CMControl::IsRightPartSlot(Address)
             ? FVector2D(-1.0f, 1.0f)
@@ -935,7 +980,6 @@ void UCMControlHUDWidget::TeardownWireframeHUD()
     WireframeCallouts.Reset();
     SmoothedCalloutPositions.Reset();
     CalloutRightSideById.Reset();
-    bWireframeOrbitActive = false;
     if (WireframeRenderImage)
     {
         WireframeRenderImage->SetVisibility(ESlateVisibility::Collapsed);
@@ -997,31 +1041,6 @@ void UCMControlHUDWidget::UpdateWireframeCameraInput()
         && ImageGeometry.IsUnderLocation(
             FSlateApplication::Get().GetCursorPos());
 
-    if (OwningPlayer->WasInputKeyJustPressed(EKeys::RightMouseButton)
-        && bCursorOverPanel)
-    {
-        bWireframeOrbitActive = true;
-    }
-    if (!OwningPlayer->IsInputKeyDown(EKeys::RightMouseButton))
-    {
-        bWireframeOrbitActive = false;
-    }
-
-    if (bWireframeOrbitActive)
-    {
-        float MouseDeltaX = 0.0f;
-        float MouseDeltaY = 0.0f;
-        OwningPlayer->GetInputMouseDelta(MouseDeltaX, MouseDeltaY);
-        RuntimeWireframeCameraRotation.Yaw +=
-            MouseDeltaX * WireframeOrbitSensitivity;
-        RuntimeWireframeCameraRotation.Pitch = FMath::Clamp(
-            RuntimeWireframeCameraRotation.Pitch
-                - MouseDeltaY * WireframeOrbitSensitivity,
-            FMath::Min(WireframePitchLimits.X, WireframePitchLimits.Y),
-            FMath::Max(WireframePitchLimits.X, WireframePitchLimits.Y));
-        RuntimeWireframeCameraRotation.Normalize();
-    }
-
     if (bCursorOverPanel)
     {
         const float MinZoom = FMath::Max(
@@ -1047,9 +1066,150 @@ void UCMControlHUDWidget::UpdateWireframeCameraInput()
         }
     }
 
+    const float PlayerScreenYaw = OwningPlayer->PlayerCameraManager
+        ? OwningPlayer->PlayerCameraManager->GetCameraRotation().Yaw
+        : WireframeCameraRotation.Yaw;
     WireframeCaptureActor->SetCameraView(
-        RuntimeWireframeCameraRotation,
+        FRotator(-90.0f, PlayerScreenYaw, 0.0f),
         RuntimeWireframeZoom);
+}
+
+void UCMControlHUDWidget::InitializeRetryVoteHUD()
+{
+    if (RetryVotePanelRoot)
+    {
+        return;
+    }
+
+    UOverlay* RootOverlay = Cast<UOverlay>(
++        WidgetTree->FindWidget(TEXT("RootCanvas")));
+    if (!RootOverlay)
+    {
+        RootOverlay = Cast<UOverlay>(WidgetTree->RootWidget);
+    }
+    if (!RootOverlay)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("Retry vote HUD requires the Control HUD Overlay root."));
+        return;
+    }
+
+    USizeBox* PanelSize = WidgetTree->ConstructWidget<USizeBox>(
+        USizeBox::StaticClass(), TEXT("RetryVotePanelRoot"));
+    PanelSize->SetWidthOverride(270.0f);
+    UOverlaySlot* PanelSlot = RootOverlay->AddChildToOverlay(PanelSize);
+    PanelSlot->SetHorizontalAlignment(HAlign_Right);
+    PanelSlot->SetVerticalAlignment(VAlign_Top);
+    PanelSlot->SetPadding(FMargin(0.0f, 32.0f, 32.0f, 0.0f));
+
+    UBorder* PanelBorder = WidgetTree->ConstructWidget<UBorder>(
+        UBorder::StaticClass(), TEXT("RetryVotePanel"));
+    PanelBorder->SetBrushColor(FLinearColor(0.015f, 0.02f, 0.025f, 0.82f));
+    PanelBorder->SetPadding(FMargin(14.0f, 10.0f));
+    PanelSize->SetContent(PanelBorder);
+
+    UVerticalBox* PanelContent = WidgetTree->ConstructWidget<UVerticalBox>(
+        UVerticalBox::StaticClass(), TEXT("RetryVotePanelContent"));
+    PanelBorder->SetContent(PanelContent);
+
+    RetryVoteTitleText = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("RetryVoteTitleText"));
+    RetryVoteTitleText->SetFont(
+        FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16));
+    RetryVoteTitleText->SetColorAndOpacity(
+        FSlateColor(FLinearColor(1.0f, 0.34f, 0.12f)));
+    RetryVoteTitleText->SetJustification(ETextJustify::Right);
+    PanelContent->AddChildToVerticalBox(RetryVoteTitleText);
+
+    RetryVoteStatusText = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("RetryVoteStatusText"));
+    RetryVoteStatusText->SetFont(
+        FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 13));
+    RetryVoteStatusText->SetColorAndOpacity(
+        FSlateColor(FLinearColor(0.9f, 0.92f, 0.95f, 1.0f)));
+    RetryVoteStatusText->SetJustification(ETextJustify::Right);
+    if (UVerticalBoxSlot* StatusSlot =
+        PanelContent->AddChildToVerticalBox(RetryVoteStatusText))
+    {
+        StatusSlot->SetPadding(FMargin(0.0f, 3.0f, 0.0f, 0.0f));
+    }
+
+    RetryVoteHoldProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
+        UProgressBar::StaticClass(), TEXT("RetryVoteHoldProgressBar"));
+    RetryVoteHoldProgressBar->SetFillColorAndOpacity(
+        FLinearColor(1.0f, 0.22f, 0.05f));
+    if (UVerticalBoxSlot* ProgressSlot =
+        PanelContent->AddChildToVerticalBox(RetryVoteHoldProgressBar))
+    {
+        ProgressSlot->SetPadding(FMargin(0.0f, 7.0f, 0.0f, 0.0f));
+    }
+
+    RetryVotePanelRoot = PanelSize;
+    RefreshRetryVoteHUD();
+}
+
+void UCMControlHUDWidget::RefreshRetryVoteHUD()
+{
+    if (!RetryVotePanelRoot || !RetryVoteTitleText
+        || !RetryVoteStatusText || !RetryVoteHoldProgressBar)
+    {
+        return;
+    }
+
+    const ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+    const ACMPlayerController* PlayerController = Cast<ACMPlayerController>(
+        GetOwningPlayer());
+    if (!PlayState || !PlayerController
+        || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    {
+        RetryVotePanelRoot->SetVisibility(ESlateVisibility::Collapsed);
+        return;
+    }
+
+    RetryVotePanelRoot->SetVisibility(ESlateVisibility::HitTestInvisible);
+    const FCMRetryVoteSnapshot& Vote =
+        PlayState->GetRetryVoteSnapshot();
+    const APlayerState* LocalPlayerState = PlayerController->PlayerState;
+    const bool bHasVoted = LocalPlayerState
+        && Vote.VotedPlayerIds.Contains(LocalPlayerState->GetPlayerId());
+    const bool bHolding = PlayerController->IsRetryVoteHoldActive();
+
+    RetryVoteTitleText->SetText(bHolding
+        ? LOCTEXT("RetryVoteHoldingTitle", "재시작 요청")
+        : LOCTEXT("RetryVoteTitle", "재시작 투표"));
+
+    if (bHolding)
+    {
+        const float Progress =
+            PlayerController->GetRetryVoteHoldProgress();
+        FNumberFormattingOptions NumberFormat;
+        NumberFormat.SetMinimumFractionalDigits(1);
+        NumberFormat.SetMaximumFractionalDigits(1);
+        RetryVoteStatusText->SetText(FText::Format(
+            LOCTEXT("RetryVoteHoldingStatus", "우클릭 유지  {0} / 3.0초"),
+            FText::AsNumber(Progress * 3.0f, &NumberFormat)));
+        RetryVoteHoldProgressBar->SetPercent(Progress);
+        RetryVoteHoldProgressBar->SetVisibility(
+            ESlateVisibility::HitTestInvisible);
+        return;
+    }
+
+    RetryVoteHoldProgressBar->SetVisibility(ESlateVisibility::Collapsed);
+    if (Vote.bActive)
+    {
+        RetryVoteStatusText->SetText(FText::Format(
+            bHasVoted
+                ? LOCTEXT("RetryVoteCompleteStatus", "{0} / {1}표 · 투표 완료")
+                : LOCTEXT("RetryVoteActiveStatus", "{0} / {1}표 · 우클릭 길게 누르기"),
+            FText::AsNumber(Vote.VoteCount),
+            FText::AsNumber(Vote.RequiredVoteCount)));
+    }
+    else
+    {
+        RetryVoteStatusText->SetText(
+            LOCTEXT("RetryVoteIdleStatus", "우클릭 3초 길게 누르기"));
+    }
 }
 
 void UCMControlHUDWidget::RefreshWireframeCallouts(
@@ -1097,8 +1257,14 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             if (CMControl::IsValidPartSlot(
                     Address, CurrentChimera->GetActiveSegmentCount()))
             {
+                const UCMPartSlotComponent* PartSlot =
+                    CurrentChimera->GetPartSlotComponent(Address);
+                const ACMPartActorBase* PartActor = PartSlot
+                    ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
+                    : nullptr;
                 LocalKeyBySlot.FindOrAdd(Address) =
-                    FText::FromString(ControlKeyNames[ControlIndex]);
+                    GetControlKeyText(
+                        ControlKeyNames[ControlIndex], PartActor);
             }
         }
     }

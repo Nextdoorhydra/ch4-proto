@@ -25,6 +25,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
     FCMFinalRoomCommittedSignature,
     FName, RoomId);
 
+DECLARE_MULTICAST_DELEGATE_OneParam(
+    FCMRoomCheckpointCommittedSignature,
+    FName);
+
 UCLASS(Blueprintable)
 // 선형 룸 순서에 따라 현재·다음 룸을 표시하고 다다음 룸을 숨김 프리로드
 class CHIMERA_API ACMRoomStreamingController : public AActor
@@ -51,11 +55,16 @@ public:
     // 마지막으로 통과가 확정된 룸의 체크포인트 위치 반환
     bool TryGetActiveCheckpointTransform(FTransform& OutTransform) const;
 
+    // 마지막 체크포인트가 속한 룸의 배치 액터를 시작 상태로 복원
+    bool ResetActiveCheckpointRoom();
+
     // 개발용: Rooms 배열 순서(1부터)로 미도달 룸도 선택한다. 클리어 이벤트는 발생시키지 않는다.
     bool TryCheatSelectCheckpoint(int32 OneBasedCheckpointNumber);
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Stage|Room Streaming")
     FCMFinalRoomCommittedSignature OnFinalRoomCommitted;
+
+    FCMRoomCheckpointCommittedSignature OnCheckpointCommitted;
 
 #if WITH_EDITOR
     virtual EDataValidationResult IsDataValid(

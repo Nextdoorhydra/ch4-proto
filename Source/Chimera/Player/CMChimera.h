@@ -110,6 +110,17 @@ public:
         bool bReverseMovement
     );
 
+    /** Activates a Part while supplying the release-time strength for Legs. */
+    void ActivatePartSlotWithLegStrength(
+        const FCMPartSlotAddress& PartSlotAddress,
+        ACMPlayerState* ContributingPlayerState,
+        bool bReverseMovement,
+        float LegStrengthMultiplier
+    );
+
+    /** Maps a control-key hold duration to the configured Leg strength. */
+    float GetLegInputStrengthMultiplier(float HoldSeconds) const;
+
     void SetPartSlotPressed(
         const FCMPartSlotAddress& PartSlotAddress,
         bool bPressed
@@ -269,6 +280,13 @@ public:
         const FCMPartSlotAddress& PartSlotAddress,
         ACMPlayerState* ContributingPlayerState,
         bool bReverseMovement
+    );
+
+    bool TryActivateLegPartWithStrength(
+        const FCMPartSlotAddress& PartSlotAddress,
+        ACMPlayerState* ContributingPlayerState,
+        bool bReverseMovement,
+        float StrengthMultiplier
     );
 
     /** Cancels the sustained push owned by one attached Leg. */
@@ -484,6 +502,26 @@ protected:
         meta = (ClampMin = "0.0"))
     float LegStepForceScale = 2.0f;
 
+    /** Strength used by an immediate Leg-control tap. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float LegInputMinimumStrength = 0.35f;
+
+    /** Hold time below which a Leg remains at minimum strength. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "0.0", Units = "s"))
+    float LegInputTapHoldSeconds = 0.04f;
+
+    /** Hold time at which a Leg reaches its existing full strength. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "0.01", Units = "s"))
+    float LegInputFullStrengthHoldSeconds = 0.28f;
+
+    /** Greater values reserve more of the hold range for fine adjustment. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "0.01"))
+    float LegInputStrengthExponent = 1.35f;
+
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
     float GroundCheckRadius = 12.0f;
@@ -523,6 +561,10 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Leg")
     float MaxSpeed = 600.0f;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly,
+        Category = "Chimera|Movement")
+    float PlayerCountForceMultiplier = 0.3f;
     
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
     Category = "Chimera|Movement|SpringArm",

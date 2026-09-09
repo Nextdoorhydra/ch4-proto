@@ -33,6 +33,7 @@ void ACMChimera::ApplyDamageToSegmentAtHit(
 )
 {
     if (!HasAuthority()
+        || !CanBeDamaged()
         || !SegmentHealthStates.IsValidIndex(SegmentIndex)
         || Damage <= 0.0f)
     {
