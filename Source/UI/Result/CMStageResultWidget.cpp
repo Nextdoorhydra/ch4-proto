@@ -42,11 +42,15 @@ void UCMStageResultWidget::NativeDestruct()
 
 UWidget* UCMStageResultWidget::NativeGetDesiredFocusTarget() const
 {
-    if (NextLevelButton && NextLevelButton->GetIsEnabled())
+    if (NextLevelButton
+        && NextLevelButton->GetIsEnabled()
+        && NextLevelButton->IsVisible())
     {
         return NextLevelButton;
     }
-    return RestartButton && RestartButton->GetIsEnabled()
+    return RestartButton
+        && RestartButton->GetIsEnabled()
+        && RestartButton->IsVisible()
         ? RestartButton.Get()
         : MainMenuButton.Get();
 }
@@ -56,6 +60,19 @@ void UCMStageResultWidget::SetResult(
     bool bCanControlResult,
     bool bHasNextStage)
 {
+    if (!bHasNextStage)
+    {
+        TimeText->SetText(LOCTEXT(
+            "CompleteClearMessage",
+            "CONGRATULATIONS!\n모든 스테이지를 클리어했습니다"));
+        RestartButton->SetVisibility(ESlateVisibility::Collapsed);
+        RestartButton->SetIsEnabled(false);
+        NextLevelButton->SetVisibility(ESlateVisibility::Collapsed);
+        NextLevelButton->SetIsEnabled(false);
+        MainMenuButton->SetVisibility(ESlateVisibility::Visible);
+        return;
+    }
+
     const int32 TotalSeconds = FMath::Max(0, FMath::RoundToInt(ElapsedSeconds));
     const int32 Minutes = TotalSeconds / 60;
     const int32 Seconds = TotalSeconds % 60;
@@ -64,8 +81,11 @@ void UCMStageResultWidget::SetResult(
         FText::AsNumber(Minutes, &FNumberFormattingOptions::DefaultNoGrouping()),
         FText::FromString(FString::Printf(TEXT("%02d"), Seconds))));
 
+    RestartButton->SetVisibility(ESlateVisibility::Visible);
     RestartButton->SetIsEnabled(bCanControlResult);
-    NextLevelButton->SetIsEnabled(bCanControlResult && bHasNextStage);
+    NextLevelButton->SetVisibility(ESlateVisibility::Visible);
+    NextLevelButton->SetIsEnabled(bCanControlResult);
+    MainMenuButton->SetVisibility(ESlateVisibility::Visible);
 }
 
 void UCMStageResultWidget::HandleRestartClicked()
