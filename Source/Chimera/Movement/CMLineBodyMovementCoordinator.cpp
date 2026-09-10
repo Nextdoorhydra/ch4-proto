@@ -961,6 +961,14 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
     TArray<UBoxComponent*> SimulatedSegments;
     float TotalMass = 0.0f;
     FVector MassWeightedHorizontalVelocity = FVector::ZeroVector;
+    const float RequestedMaxSpeed =
+        Chimera.IsSpringArmPulling()
+            ? Chimera.SpringArmMaxSpeed
+            : Chimera.MaxSpeed;
+    const float EffectiveMaxSpeed =
+        CMChimeraPhysics::ResolveLinearSpeedLimit(
+            RequestedMaxSpeed,
+            Chimera.MaximumSafeLinearSpeed);
     for (int32 SegmentIndex = 0;
         SegmentIndex < Chimera.ActiveSegmentCount;
         ++SegmentIndex)
@@ -975,7 +983,16 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
         }
 
         const float SegmentMass = FMath::Max(BodySegment->GetMass(), 0.01f);
-        const FVector SegmentVelocity = BodySegment->GetPhysicsLinearVelocity();
+        const FVector CurrentVelocity =
+            BodySegment->GetPhysicsLinearVelocity();
+        const FVector SegmentVelocity =
+            CMChimeraPhysics::ClampLinearVelocity(
+                CurrentVelocity,
+                Chimera.MaximumSafeLinearSpeed);
+        if (!SegmentVelocity.Equals(CurrentVelocity))
+        {
+            BodySegment->SetPhysicsLinearVelocity(SegmentVelocity);
+        }
         MassWeightedHorizontalVelocity += FVector(
             SegmentVelocity.X,
             SegmentVelocity.Y,
@@ -992,10 +1009,6 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
 
     const FVector CenterOfMassHorizontalVelocity =
         MassWeightedHorizontalVelocity / TotalMass;
-    const float EffectiveMaxSpeed =
-        Chimera.IsSpringArmPulling()
-            ? Chimera.SpringArmMaxSpeed
-            : Chimera.MaxSpeed;
 
     if (EffectiveMaxSpeed <= 0.0f
         || CenterOfMassHorizontalVelocity.Size() <= EffectiveMaxSpeed)
@@ -1003,8 +1016,8 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
         return;
     }
 
-    // 질량중심의 초과 속도만 모든 마디에서 동일하게 제거한다. 각 마디를
-    // 개별 Clamp하지 않으므로 굽힘과 흔들림에 필요한 상대 속도는 유지된다.
+    // 질량중심의 초과 수평 속도는 모든 마디에서 동일하게 제거한다.
+    // 최종 3D 안전 상한 안에서는 굽힘에 필요한 상대 속도를 유지한다.
     const FVector LimitedCenterOfMassVelocity =
         CenterOfMassHorizontalVelocity.GetSafeNormal() * EffectiveMaxSpeed;
     const FVector HorizontalVelocityCorrection =
@@ -1015,7 +1028,29 @@ void UCMLineBodyMovementCoordinator::UpdateServerMovement(
         FVector SegmentVelocity = BodySegment->GetPhysicsLinearVelocity();
         SegmentVelocity.X += HorizontalVelocityCorrection.X;
         SegmentVelocity.Y += HorizontalVelocityCorrection.Y;
-        BodySegment->SetPhysicsLinearVelocity(SegmentVelocity);
+        BodySegment->SetPhysicsLinearVelocity(
+            CMChimeraPhysics::ClampLinearVelocity(
+                SegmentVelocity,
+                Chimera.MaximumSafeLinearSpeed));
+    }
+}
+
+void UCMLineBodyMovementCoordinator::CancelAllMovement()
+{
+    for (const FActiveLegStep& Step : ActiveLegSteps)
+    {
+        if (ACMLegPart* LegPart = Step.LegPart.Get())
+        {
+            LegPart->CancelProceduralStep();
+        }
+    }
+    ActiveLegSteps.Reset();
+
+    for (int32 AnchorIndex = ActiveArmAnchors.Num() - 1;
+        AnchorIndex >= 0;
+        --AnchorIndex)
+    {
+        DestroyArmAnchor(AnchorIndex);
     }
 }
 
@@ -1792,20 +1827,7 @@ void UCMLineBodyMovementCoordinator::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
-    for (const FActiveLegStep& Step : ActiveLegSteps)
-    {
-        if (ACMLegPart* LegPart = Step.LegPart.Get())
-        {
-            LegPart->CancelProceduralStep();
-        }
-    }
-    ActiveLegSteps.Reset();
-    for (int32 AnchorIndex = ActiveArmAnchors.Num() - 1;
-        AnchorIndex >= 0;
-        --AnchorIndex)
-    {
-        DestroyArmAnchor(AnchorIndex);
-    }
+    CancelAllMovement();
 
     Super::EndPlay(EndPlayReason);
 }

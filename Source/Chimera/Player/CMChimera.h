@@ -38,6 +38,22 @@ class AActor;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogChimeraLineBody, Log, All);
 
+namespace CMChimeraPhysics
+{
+    CHIMERA_API float ResolveLinearSpeedLimit(
+        float RequestedSpeed,
+        float MaximumSafeSpeed);
+
+    CHIMERA_API FVector ClampLinearVelocity(
+        const FVector& Velocity,
+        float MaximumSafeSpeed);
+
+    CHIMERA_API bool IsBlockingPlanarContact(
+        const FVector& MovementDirection,
+        const FVector& ContactNormal,
+        float MinimumOppositionDot = 0.2f);
+}
+
 /** Fired once on the authoritative Chimera when every active body segment is dead. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMAllSegmentsDeadSignature);
 
@@ -634,6 +650,11 @@ protected:
     meta = (ClampMin = "0.0"))
     float SpringArmMaxSpeed = 4000.0f;
 
+    /** Final per-segment 3D speed ceiling, independent of external balance data. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics",
+        meta = (ClampMin = "1.0", Units = "cm/s"))
+    float MaximumSafeLinearSpeed = 1200.0f;
+
     UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",
         meta = (ClampMin = "0.0"))
     // 모든 활성 마디에 적용하는 질량 독립적인 디버그 가속도
@@ -729,12 +750,46 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     bool bEnableBodyGravity = true;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
+    bool bUseBodyCCD = true;
+
     /** Prevents each Segment from rolling sideways while allowing hills and turns. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     bool bLockBodyRoll = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     FName BodyCollisionProfile = TEXT("PhysicsActor");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery")
+    bool bEnableStuckRecovery = true;
+
+    /** Penetration must persist for this long before restoring a safe pose. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "0.05", Units = "s"))
+    float StuckRecoveryDetectionTime = 0.25f;
+
+    /** Insets overlap probes so ordinary resting contacts remain valid. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "0.0", Units = "cm"))
+    float StuckRecoveryProbeInset = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "0.02", Units = "s"))
+    float StuckRecoverySnapshotInterval = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "1", ClampMax = "32"))
+    int32 StuckRecoveryHistorySize = 12;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "0.0", Units = "s"))
+    float StuckRecoveryCooldown = 0.5f;
 
     // 위아래 꺾임 정도
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
@@ -898,8 +953,24 @@ private:
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
     void UpdatePlanarKnockback(float DeltaTime);
+    void SetBodyHitNotifications(bool bEnabled);
+    void UpdateStuckRecovery(float DeltaTime);
+    void ResetStuckRecoveryHistory();
+    bool IsAssemblyPlacementClear(
+        const TArray<FTransform>& SegmentTransforms,
+        float ProbeInset) const;
+    void SaveSafeAssemblySnapshot();
+    bool RestoreLatestSafeAssemblySnapshot();
     void UpdateReplicatedSegmentStates();
     void ApplyReplicatedSegmentStates(float DeltaTime);
+
+    UFUNCTION()
+    void HandleBodySegmentHit(
+        UPrimitiveComponent* HitComponent,
+        AActor* OtherActor,
+        UPrimitiveComponent* OtherComponent,
+        FVector NormalImpulse,
+        const FHitResult& Hit);
 
     UFUNCTION()
     void OnRep_SegmentStates();
@@ -930,6 +1001,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FCMLeverInteractionRegressionTest;
 	friend class FCMTentacleBlueprintIntegrationTest;
+	friend class FCMChimeraPhysicsRecoveryTest;
 #endif
 
     UPROPERTY(Transient)
@@ -946,6 +1018,16 @@ private:
     FVector PlanarKnockbackDirection = FVector::ForwardVector;
     float PlanarKnockbackDistanceCm = 0.0f;
     float PlanarKnockbackElapsedSeconds = 0.0f;
+
+    struct FSafeAssemblySnapshot
+    {
+        TArray<FTransform> SegmentTransforms;
+    };
+
+    TArray<FSafeAssemblySnapshot> SafeAssemblySnapshots;
+    float StuckRecoverySnapshotElapsed = 0.0f;
+    float StuckRecoveryUnsafeElapsed = 0.0f;
+    float StuckRecoveryCooldownRemaining = 0.0f;
     
     TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
     FActiveGameplayEffectHandle StaminaRegenEffectHandle;

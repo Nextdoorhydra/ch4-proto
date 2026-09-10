@@ -81,7 +81,16 @@ bool ACMChimera::InitializeFromBodyData()
     BodyGroundFriction = BodyRow->GroundFriction;
     BodyLinearDamping = BodyRow->LinearDamping;
     BodyAngularDamping = BodyRow->AngularDamping;
-    MaxSpeed = BodyRow->MaxVelocity;
+    MaxSpeed = CMChimeraPhysics::ResolveLinearSpeedLimit(
+        BodyRow->MaxVelocity,
+        MaximumSafeLinearSpeed);
+    if (!FMath::IsNearlyEqual(MaxSpeed, BodyRow->MaxVelocity))
+    {
+        UE_LOG(LogChimeraLineBody, Warning,
+            TEXT("[Physics Safety] MaxVelocity %.1f was clamped to %.1f cm/s."),
+            BodyRow->MaxVelocity,
+            MaxSpeed);
+    }
     PlayerCountForceMultiplier =
         FMath::Max(BodyRow->PlayerCountForceMultiplier, 0.0f);
     LegYawMultiplier = FMath::Max(BodyRow->LegYawMultiplier, 0.0f);
