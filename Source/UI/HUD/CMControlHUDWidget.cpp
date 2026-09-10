@@ -1684,7 +1684,9 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         const FText& LabelText,
         const FLinearColor& LabelColor,
         ACMPlayerState* StatusOwner,
-        const int32 LegControlIndex)
+        const bool bShowLegChargeGauge,
+        const int32 LegControlIndex,
+        const float ReplicatedLegHoldSeconds)
     {
         if (LabelText.IsEmpty())
         {
@@ -1714,11 +1716,11 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             }
         }
         Callout.PlayerColor = LabelColor;
-        Callout.bShowLegChargeGauge =
+        Callout.bShowLegChargeGauge = bShowLegChargeGauge;
+        const bool bHasLocalControl =
             LegControlIndex >= 0
             && LegControlIndex < CMControl::MaxKeysPerPlayer;
-        if (Callout.bShowLegChargeGauge
-            && bLocalControlPressed[LegControlIndex])
+        if (bHasLocalControl && bLocalControlPressed[LegControlIndex])
         {
             const double CurrentTime = GetWorld()
                 ? GetWorld()->GetTimeSeconds()
@@ -1726,6 +1728,10 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             Callout.LegChargeHoldSeconds = static_cast<float>(FMath::Max(
                 CurrentTime - LocalControlPressStartTimes[LegControlIndex],
                 0.0));
+        }
+        else if (!bHasLocalControl)
+        {
+            Callout.LegChargeHoldSeconds = ReplicatedLegHoldSeconds;
         }
 
         bool& bRight = CalloutRightSideById.FindOrAdd(
@@ -1762,6 +1768,9 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         const int32 LegControlIndex = LegPart && LocalControlIndex
             ? *LocalControlIndex
             : INDEX_NONE;
+        const float ReplicatedLegHoldSeconds = LegPart
+            ? CurrentChimera->GetPartSlotHoldSeconds(Address)
+            : 0.0f;
 
         const FName StableId(*FString::Printf(
             TEXT("Slot.%d.%d"),
@@ -1778,7 +1787,11 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
                     FText::FromString(Owner->GetPlayerName()),
                     Owner->GetPlayerColor(),
                     Owner,
-                    LegControlIndex);
+                    LegPart != nullptr,
+                    Owner == LocalPlayerState
+                        ? LegControlIndex
+                        : INDEX_NONE,
+                    ReplicatedLegHoldSeconds);
             }
         }
         else if (const FText* ControlKey = LocalKeyBySlot.Find(Address))
@@ -1791,7 +1804,9 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
                     ? LocalPlayerState->GetPlayerColor()
                     : FLinearColor::White,
                 nullptr,
-                LegControlIndex);
+                LegPart != nullptr,
+                LegControlIndex,
+                ReplicatedLegHoldSeconds);
         }
     }
 

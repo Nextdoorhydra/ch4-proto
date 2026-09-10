@@ -12,6 +12,7 @@
 #include "Player/CMPlayerState.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/GameStateBase.h"
 
 void ACMChimera::ActivatePartSlot(
     const FCMPartSlotAddress& PartSlotAddress,
@@ -428,6 +429,37 @@ bool ACMChimera::IsPartSlotPressed(
     const int32 FlatIndex =
         CMControl::ToFlatPartSlotIndex(PartSlotAddress);
     return (PressedPartSlotMask & (1u << FlatIndex)) != 0;
+}
+
+float ACMChimera::GetPartSlotHoldSeconds(
+    const FCMPartSlotAddress& PartSlotAddress
+) const
+{
+    if (!IsPartSlotPressed(PartSlotAddress))
+    {
+        return 0.0f;
+    }
+
+    const int32 FlatIndex =
+        CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    if (!ReplicatedPartSlotPressStartTimes.IsValidIndex(FlatIndex)
+        || ReplicatedPartSlotPressStartTimes[FlatIndex] < 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const UWorld* World = GetWorld();
+    const AGameStateBase* GameState = World
+        ? World->GetGameState()
+        : nullptr;
+    const float CurrentServerTime = GameState
+        ? GameState->GetServerWorldTimeSeconds()
+        : (World ? World->GetTimeSeconds() : 0.0f);
+    return FMath::Max(
+        CurrentServerTime
+            - ReplicatedPartSlotPressStartTimes[FlatIndex],
+        0.0f
+    );
 }
 
 bool ACMChimera::AttachPartToSlot(
@@ -1077,13 +1109,25 @@ void ACMChimera::SetPartSlotPressed(
         return;
     }
 
-    const uint32 PartSlotBit = 1u
-        << CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    const int32 FlatSlotIndex =
+        CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    const uint32 PartSlotBit = 1u << FlatSlotIndex;
     if (bPressed)
     {
         if ((PressedPartSlotMask & PartSlotBit) == 0)
         {
             InteractionConsumedPartSlotMask &= ~PartSlotBit;
+            const UWorld* World = GetWorld();
+            const AGameStateBase* GameState = World
+                ? World->GetGameState()
+                : nullptr;
+            if (ReplicatedPartSlotPressStartTimes.IsValidIndex(
+                    FlatSlotIndex))
+            {
+                ReplicatedPartSlotPressStartTimes[FlatSlotIndex] = GameState
+                    ? GameState->GetServerWorldTimeSeconds()
+                    : (World ? World->GetTimeSeconds() : 0.0f);
+            }
         }
         PressedPartSlotMask |= PartSlotBit;
     }
@@ -1091,6 +1135,10 @@ void ACMChimera::SetPartSlotPressed(
     {
         PressedPartSlotMask &= ~PartSlotBit;
         InteractionConsumedPartSlotMask &= ~PartSlotBit;
+        if (ReplicatedPartSlotPressStartTimes.IsValidIndex(FlatSlotIndex))
+        {
+            ReplicatedPartSlotPressStartTimes[FlatSlotIndex] = -1.0f;
+        }
     }
 
     if (MovementCoordinator)
