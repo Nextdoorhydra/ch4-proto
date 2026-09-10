@@ -18,12 +18,17 @@ namespace CMSoundTags
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Detach, "Chimera.Sound.Part.Detach", "부위 탈착");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_AttachPullLoop, "Chimera.Sound.Part.AttachPullLoop", "부위 장착 당김 루프");
 
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_GoHere, "Chimera.Sound.Ping.GoHere", "이동 지시 핑");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_LookHere, "Chimera.Sound.Ping.LookHere", "주시 지시 핑");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_SwapParts, "Chimera.Sound.Ping.SwapParts", "부위 교체 지시 핑");
+
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Aggressive_TargetSpotted, "Chimera.Sound.AI.Aggressive.TargetSpotted", "공격형 AI 타깃 최초 발견");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_ThreatScream, "Chimera.Sound.AI.Sacrifice.ThreatScream", "희생양 위협 발견 비명");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_HitScream, "Chimera.Sound.AI.Sacrifice.HitScream", "희생양 피격 비명");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_BleedingLoop, "Chimera.Sound.AI.Sacrifice.BleedingLoop", "희생양 출혈 신음 루프");
 
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Button_Press, "Chimera.Sound.Stage.Button.Press", "스테이지 버튼 입력");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_PowerCable_Connected, "Chimera.Sound.Stage.PowerCable.Connected", "전력 케이블 연결 완료");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_PressurePlate_WeightChanged, "Chimera.Sound.Stage.PressurePlate.WeightChanged", "감압판 무게 변화");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Obstacle_RotatingBlade_ActiveLoop, "Chimera.Sound.Stage.Obstacle.RotatingBlade.ActiveLoop", "회전 톱날 활성 루프");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Obstacle_Fan_ActiveLoop, "Chimera.Sound.Stage.Obstacle.Fan.ActiveLoop", "팬 활성 루프");
