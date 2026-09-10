@@ -899,6 +899,41 @@ void ACMControlBody::RestoreControlsAfterRespawn()
     ForceNetUpdate();
 }
 
+void ACMControlBody::RestoreControlsForRevivedSegments()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    const ACMChimera* SharedChimera = GetSharedChimera();
+    if (!SharedChimera)
+    {
+        return;
+    }
+
+    for (int32 SlotIndex = 0;
+        SlotIndex < ControlSlots.Num()
+            && SlotIndex < CMControl::MaxKeysPerPlayer;
+        ++SlotIndex)
+    {
+        if (SharedChimera->IsSegmentAlive(ControlSlots[SlotIndex].SegmentIndex))
+        {
+            DisabledControlSlotMask &= ~(1u << SlotIndex);
+        }
+    }
+
+    bControlInputEnabled = GetEnabledControlCount() > 0;
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetParticipationState(bControlInputEnabled
+            ? ECMPlayerParticipationState::Active
+            : ECMPlayerParticipationState::Defeated);
+    }
+    OnRep_ControlState();
+    ForceNetUpdate();
+}
+
 void ACMControlBody::ClearPressedControlSlots()
 {
     if (!HasAuthority())
