@@ -36,6 +36,7 @@ public:
     void SetControlBody(ACMControlBody* NewControlBody);
 
 protected:
+    virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
     virtual void NativeOnInitialized() override;
     virtual void NativeDestruct() override;
     virtual void NativeTick(

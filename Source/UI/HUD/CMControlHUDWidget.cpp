@@ -138,10 +138,16 @@ UCMControlHUDWidget::UCMControlHUDWidget(
 )
     : Super(ObjectInitializer)
 {
-    InputConfig = ENKMUIWidgetInputMode::GameAndMenu;
-    GameMouseCaptureMode = EMouseCaptureMode::NoCapture;
     WireframeLabelFont = FCoreStyle::GetDefaultFontStyle(
         TEXT("Regular"), 14);
+}
+
+TOptional<FUIInputConfig> UCMControlHUDWidget::GetDesiredInputConfig() const
+{
+    return FUIInputConfig(
+        ECommonInputMode::All,
+        EMouseCaptureMode::CaptureDuringMouseDown,
+        false);
 }
 
 void UCMControlHUDWidget::NativeOnInitialized()
