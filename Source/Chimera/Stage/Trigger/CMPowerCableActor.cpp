@@ -1478,6 +1478,8 @@ bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
         ? false : bEndOccupied && !bStartOccupied
             ? true : FVector::DistSquared(GrabLocation, StartLocation)
                 <= FVector::DistSquared(GrabLocation, EndLocation);
+    const FVector GrabbedEndpointLocation = bGrabStart
+        ? StartLocation : EndLocation;
 
     // Detach only the endpoint that the player is actually grabbing. This
     // prevents a non-detachable endpoint on the opposite side from being
@@ -1512,6 +1514,7 @@ bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
     Grabber = InGrabber;
     bRopeSleeping = false;
     RopeStableFrameCount = 0;
+    MulticastPlayGrabSound(GrabbedEndpointLocation);
     ForceNetUpdate();
     return true;
 }
@@ -1818,6 +1821,15 @@ void ACMPowerCableActor::MulticastPlayConnectionSound_Implementation(
         this,
         SoundLocation,
         CMSoundTags::Stage_PowerCable_Connected);
+}
+
+void ACMPowerCableActor::MulticastPlayGrabSound_Implementation(
+    const FVector_NetQuantize10 SoundLocation)
+{
+    FCMSoundPlayback::PlaySFXAtLocation(
+        this,
+        SoundLocation,
+        CMSoundTags::Stage_PowerCable_Grabbed);
 }
 
 void ACMPowerCableActor::NotifyPowerStateChanged()
