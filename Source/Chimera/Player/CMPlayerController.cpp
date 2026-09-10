@@ -18,6 +18,7 @@
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
+#include "Framework/Application/SlateApplication.h"
 #include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Stage/Test/CMTestAreaManager.h"
@@ -1082,7 +1083,8 @@ void ACMPlayerController::PingModifierReleased()
 void ACMPlayerController::PingMousePressed()
 {
     const ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>();
-    if (!bPingModifierHeld || bPingSelecting || !IsLocalController()
+    const bool bAltHeld = FSlateApplication::Get().GetModifierKeys().IsAltDown();
+    if (!bAltHeld || bPingSelecting || !IsLocalController()
         || !CMPlayerState || CMPlayerState->IsOnlyASpectator()
         || CMPlayerState->GetParticipationState()
             != ECMPlayerParticipationState::Active)
@@ -1106,6 +1108,7 @@ void ACMPlayerController::PingMousePressed()
     }
 
     bPingSelecting = true;
+    PingSelectorWidget->SetVisibility(ESlateVisibility::HitTestInvisible);
     PingSelectorWidget->AddToViewport(1000);
     PingSelectorWidget->BeginSelection(PingDragStart);
 }
