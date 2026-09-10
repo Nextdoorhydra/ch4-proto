@@ -270,6 +270,11 @@ public:
         const FCMPartSlotAddress& PartSlotAddress
     ) const;
 
+    /** Returns the replicated server-time hold duration for a Part slot. */
+    float GetPartSlotHoldSeconds(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
+
     /** Server-authoritative attachment entry point for pickup/UI systems. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
         Category = "Chimera|Part Slots")
@@ -916,6 +921,9 @@ private:
 
     UPROPERTY(Replicated)
     uint32 PressedPartSlotMask = 0;
+
+    UPROPERTY(Replicated)
+    TArray<float> ReplicatedPartSlotPressStartTimes;
 
     // Server-only history for the current key press, independent of anchor lifetime.
     uint32 InteractionConsumedPartSlotMask = 0;
