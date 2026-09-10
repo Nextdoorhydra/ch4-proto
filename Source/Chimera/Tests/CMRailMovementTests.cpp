@@ -141,6 +141,27 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Fixed collision push advances expected distance"),
         FMath::IsNearlyEqual(Movement->GetProgress(), 0.1f));
 
+    AActor* RailObstacle = World->SpawnActor<AActor>();
+    UBoxComponent* RailObstacleBody = NewObject<UBoxComponent>(RailObstacle);
+    RailObstacle->SetRootComponent(RailObstacleBody);
+    RailObstacleBody->SetBoxExtent(FVector(5, 20, 20));
+    RailObstacleBody->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+    RailObstacleBody->RegisterComponent();
+    RailObstacleBody->SetWorldLocation(FVector(60, 0, 100));
+    UCMRailMovementComponent* OtherRailMovement =
+        NewObject<UCMRailMovementComponent>(RailObstacle);
+    OtherRailMovement->RegisterComponent();
+    Movement->InitialProgress = 0.0f;
+    Movement->ResetRail();
+    Movement->TryCollisionPush(
+        RailObstacle,
+        FVector(100, 0, 0),
+        1.0f);
+    TestTrue(TEXT("Another rail actor remains a blocking sweep target"),
+        Movement->GetProgress() > 0.0f
+        && Movement->GetProgress() < 0.51f);
+    RailObstacleBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
     Movement->MoveToProgress(1.0f);
     for (int32 Index = 0; Index < 20; ++Index) Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
     TestEqual(TEXT("Mechanism command reaches end"), Movement->GetProgress(), 1.0f);
@@ -199,6 +220,13 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
         Arm->SynchronizeAttachedPartSlot(PartSlot);
         TestTrue(TEXT("Attached arm is operational"), Arm->IsOperational());
         Body->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        Movement->MaximumGrabDistance = 250.0f;
+        Arm->SetActorLocation(FVector(240, 0, 100));
+        TestTrue(TEXT("Rail-specific grab distance extends normal arm reach"),
+            Movement->CanArmHold(Arm));
+        Arm->SetActorLocation(FVector(260, 0, 100));
+        TestFalse(TEXT("Rail-specific grab distance still has a limit"),
+            Movement->CanArmHold(Arm));
         Arm->SetActorLocation(FVector(0, 20, 100));
         FCMArmHoldSpec Spec;
         TestTrue(TEXT("Handle can be queried"), Movement->QueryArmHold(Arm, Spec));
@@ -218,6 +246,20 @@ bool FCMRailMovementTest::RunTest(const FString& Parameters)
         TestFalse(TEXT("Disabled interaction rejects hold"), Movement->BeginArmHold(Arm));
         Movement->SetInteractionEnabled(true);
         TestTrue(TEXT("Regrab"), Movement->BeginArmHold(Arm));
+        Arm->BeginInteractableHold(Grip, Grip->GetComponentLocation(), FVector::UpVector);
+        Movement->ReleaseDistance = 400.0f;
+        Arm->SetActorLocation(FVector(350, 0, 100));
+        Movement->TickComponent(0.0f, LEVELTICK_All, nullptr);
+        TestTrue(TEXT("Rail-specific release distance keeps a distant hold"),
+            Movement->bTrackingHold);
+        Arm->SetActorLocation(FVector(411, 0, 100));
+        Movement->TickComponent(0.0f, LEVELTICK_All, nullptr);
+        TestFalse(TEXT("Rail hold releases beyond its configured distance"),
+            Movement->bTrackingHold);
+        TestFalse(TEXT("Distance release clears arm anchor"), Arm->IsHolding());
+        Arm->SetActorLocation(FVector(0, 20, 100));
+        TestTrue(TEXT("Regrab after distance release"), Movement->BeginArmHold(Arm));
+        Arm->BeginInteractableHold(Grip, Grip->GetComponentLocation(), FVector::UpVector);
         Arm->EndGroundAnchor();
         Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
         TestFalse(TEXT("Cancelled arm releases rail"), Movement->bTrackingHold);
