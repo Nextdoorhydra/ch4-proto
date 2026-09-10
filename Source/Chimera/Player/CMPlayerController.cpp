@@ -197,6 +197,14 @@ void ACMPlayerController::RequestCheatRespawnAtCheckpoint()
     }
 }
 
+void ACMPlayerController::RequestCheatRestartGame()
+{
+    if (IsLocalController())
+    {
+        ServerCheatRestartGame();
+    }
+}
+
 void ACMPlayerController::RequestCheatNextStage()
 {
 #if !UE_BUILD_SHIPPING
@@ -580,6 +588,22 @@ void ACMPlayerController::ServerCheatRespawnAtCheckpoint_Implementation()
 
     UE_LOG(LogChimeraPlayerController, Warning,
         TEXT("[Cheat] CM.Checkpoint restored the latest checkpoint."));
+}
+
+void ACMPlayerController::ServerCheatRestartGame_Implementation()
+{
+    ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>()
+        : nullptr;
+    if (!GameMode || !GameMode->TryCheatRestartGame())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.Restart could not restart the current game."));
+        return;
+    }
+
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] CM.Restart is restarting the current game."));
 }
 
 void ACMPlayerController::ServerCheatKillSegment_Implementation(
