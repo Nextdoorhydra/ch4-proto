@@ -13,6 +13,8 @@
 #include "Stage/Trigger/Component/CMPowerSocketComponent.h"
 #include "Stage/Trigger/Component/CMPowerSourceComponent.h"
 #include "Stage/Trigger/Subsystem/CMPowerSubsystem.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 
 ACMPowerCableActor::ACMPowerCableActor()
 {
@@ -154,6 +156,7 @@ void ACMPowerCableActor::BeginPlay()
         bInitialSocketAtStart = bSocketAtStart;
         bInitialSourceAtStart = bSourceAtStart;
         bInitialStateCaptured = true;
+        bConnectionSoundEnabled = true;
     }
     InitializeRope();
     CablePhysics->SetComponentTickEnabled(HasAuthority());
@@ -1475,6 +1478,8 @@ bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
         ? false : bEndOccupied && !bStartOccupied
             ? true : FVector::DistSquared(GrabLocation, StartLocation)
                 <= FVector::DistSquared(GrabLocation, EndLocation);
+    const FVector GrabbedEndpointLocation = bGrabStart
+        ? StartLocation : EndLocation;
 
     // Detach only the endpoint that the player is actually grabbing. This
     // prevents a non-detachable endpoint on the opposite side from being
@@ -1509,6 +1514,7 @@ bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
     Grabber = InGrabber;
     bRopeSleeping = false;
     RopeStableFrameCount = 0;
+    MulticastPlayGrabSound(GrabbedEndpointLocation);
     ForceNetUpdate();
     return true;
 }
@@ -1627,6 +1633,7 @@ void ACMPowerCableActor::SetConnectedSocket(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     UCMPowerSocketComponent* PreviousSocket = ConnectedSocket;
     if (Socket)
@@ -1671,6 +1678,9 @@ void ACMPowerCableActor::SetConnectedSocket(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Socket ? Socket->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
 }
 
@@ -1712,6 +1722,7 @@ void ACMPowerCableActor::SetConnectedSource(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     UCMPowerSourceComponent* PreviousSource = ConnectedSource;
     if (Source)
@@ -1740,6 +1751,9 @@ void ACMPowerCableActor::SetConnectedSource(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Source ? Source->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
 }
 
@@ -1752,6 +1766,7 @@ void ACMPowerCableActor::SetConnectedSourceSocket(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     if (ConnectedSourceSocket && ConnectedSourceSocket != Socket)
     {
@@ -1781,7 +1796,40 @@ void ACMPowerCableActor::SetConnectedSourceSocket(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Socket ? Socket->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
+}
+
+void ACMPowerCableActor::PlayConnectionSoundIfPowered(
+    const bool bWasTransmittingPower,
+    const FVector& ConnectionLocation)
+{
+    if (bConnectionSoundEnabled
+        && !bWasTransmittingPower
+        && IsTransmittingPower())
+    {
+        MulticastPlayConnectionSound(ConnectionLocation);
+    }
+}
+
+void ACMPowerCableActor::MulticastPlayConnectionSound_Implementation(
+    const FVector_NetQuantize10 SoundLocation)
+{
+    FCMSoundPlayback::PlaySFXAtLocation(
+        this,
+        SoundLocation,
+        CMSoundTags::Stage_PowerCable_Connected);
+}
+
+void ACMPowerCableActor::MulticastPlayGrabSound_Implementation(
+    const FVector_NetQuantize10 SoundLocation)
+{
+    FCMSoundPlayback::PlaySFXAtLocation(
+        this,
+        SoundLocation,
+        CMSoundTags::Stage_PowerCable_Grabbed);
 }
 
 void ACMPowerCableActor::NotifyPowerStateChanged()
