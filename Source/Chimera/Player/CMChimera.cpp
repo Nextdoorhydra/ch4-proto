@@ -32,6 +32,10 @@ DEFINE_LOG_CATEGORY(LogChimeraLineBody);
 ACMChimera::ACMChimera()
 {
     constexpr int32 MaxSegmentCount = CMControl::MaxSegments;
+    ReplicatedPartSlotPressStartTimes.Init(
+        -1.0f,
+        CMControl::MaxPartSlots
+    );
     const float SlotZ = -BodyCollisionHalfHeight + InitialGroundClearance;
     const FVector LeftSlotLocation(0.0f, -BodySlotLateralOffset, SlotZ);
     const FVector RightSlotLocation(0.0f, BodySlotLateralOffset, SlotZ);
@@ -579,6 +583,7 @@ void ACMChimera::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMChimera, ReplicatedSegmentStates);
     DOREPLIFETIME(ACMChimera, SegmentHealthStates);
     DOREPLIFETIME(ACMChimera, PressedPartSlotMask);
+    DOREPLIFETIME(ACMChimera, ReplicatedPartSlotPressStartTimes);
     DOREPLIFETIME(ACMChimera, ActiveSegmentCount);
 }
 
