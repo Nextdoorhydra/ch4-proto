@@ -224,7 +224,7 @@ private:
     TObjectPtr<UWidget> ApmPanelRoot;
 
     UPROPERTY(Transient)
-    TObjectPtr<UTextBlock> ApmText;
+    TArray<TObjectPtr<UTextBlock>> ApmPlayerTexts;
 
     UPROPERTY(Transient)
     TObjectPtr<UCanvasPanel> WireframeCanvas;

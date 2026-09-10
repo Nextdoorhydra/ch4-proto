@@ -264,6 +264,10 @@ protected:
         Category = "Chimera|Power")
     FVector CableStartLocation = FVector::ZeroVector;
 
+    /** Server-authored cable particles used by remote clients for visuals. */
+    UPROPERTY(ReplicatedUsing = OnRep_ReplicatedRopePositions, Transient)
+    TArray<FVector_NetQuantize10> ReplicatedRopePositions;
+
     UPROPERTY(Transient)
     TArray<TObjectPtr<USplineMeshComponent>> CableMeshes;
 
@@ -294,6 +298,9 @@ protected:
     void OnRep_CableStartLocation();
 
     UFUNCTION()
+    void OnRep_ReplicatedRopePositions();
+
+    UFUNCTION()
     void HandleLoadGroupFinished(
         FName FinishedLoadGroupId,
         EAsyncLoadResult Result,
@@ -308,6 +315,7 @@ protected:
     void InitializeRope();
     void SimulateRope(float DeltaSeconds);
     void UpdateCablePhysics();
+    void CaptureAuthoritativeRopePositions();
     void UpdateRopeContactPoints();
     void RebuildRopePathFromContactPoints(
         const FVector& EndTarget,

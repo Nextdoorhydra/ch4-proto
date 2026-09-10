@@ -83,6 +83,9 @@ protected:
     FCMObstacleBalanceSelection BalanceSelection;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCMObstacleKillOnEnterTest;
+#endif
     void ResolveBalance();
     void ApplyResolvedBalance();
     void ApplyComponentActiveState(bool bIsActive);

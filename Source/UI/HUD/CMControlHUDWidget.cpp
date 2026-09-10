@@ -11,6 +11,7 @@
 #include "Player/CMControlBody.h"
 #include "Player/CMPartInterface.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Player/CMControlTypes.h"
 #include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
 #include "AbilitySystemComponent.h"
@@ -1194,7 +1195,7 @@ void UCMControlHUDWidget::RefreshRetryVoteHUD()
         NumberFormat.SetMinimumFractionalDigits(1);
         NumberFormat.SetMaximumFractionalDigits(1);
         RetryVoteStatusText->SetText(FText::Format(
-            LOCTEXT("RetryVoteHoldingStatus", "우클릭 유지  {0} / 3.0초"),
+            LOCTEXT("RetryVoteHoldingStatus", "X키 누르는 중  {0} / 3.0초"),
             FText::AsNumber(Progress * 3.0f, &NumberFormat)));
         RetryVoteHoldProgressBar->SetPercent(Progress);
         RetryVoteHoldProgressBar->SetVisibility(
@@ -1208,14 +1209,14 @@ void UCMControlHUDWidget::RefreshRetryVoteHUD()
         RetryVoteStatusText->SetText(FText::Format(
             bHasVoted
                 ? LOCTEXT("RetryVoteCompleteStatus", "{0} / {1}표 · 투표 완료")
-                : LOCTEXT("RetryVoteActiveStatus", "{0} / {1}표 · 우클릭 길게 누르기"),
+                : LOCTEXT("RetryVoteActiveStatus", "{0} / {1}표 · X키를 길게 누르기"),
             FText::AsNumber(Vote.VoteCount),
             FText::AsNumber(Vote.RequiredVoteCount)));
     }
     else
     {
         RetryVoteStatusText->SetText(
-            LOCTEXT("RetryVoteIdleStatus", "우클릭 3초 길게 누르기"));
+            LOCTEXT("RetryVoteIdleStatus", "X키를 3초 동안 길게 누르기"));
     }
 }
 
@@ -1253,13 +1254,25 @@ void UCMControlHUDWidget::InitializeApmHUD()
     PanelBorder->SetPadding(FMargin(14.0f, 9.0f));
     PanelSize->SetContent(PanelBorder);
 
-    ApmText = WidgetTree->ConstructWidget<UTextBlock>(
-        UTextBlock::StaticClass(), TEXT("ApmText"));
-    ApmText->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 18));
-    ApmText->SetColorAndOpacity(
-        FSlateColor(FLinearColor(0.025f, 1.0f, 0.06f, 1.0f)));
-    ApmText->SetJustification(ETextJustify::Right);
-    PanelBorder->SetContent(ApmText);
+    UVerticalBox* ApmList = WidgetTree->ConstructWidget<UVerticalBox>(
+        UVerticalBox::StaticClass(), TEXT("ApmList"));
+    PanelBorder->SetContent(ApmList);
+
+    ApmPlayerTexts.Reserve(CMControl::MaxPlayers);
+    for (int32 Index = 0; Index < CMControl::MaxPlayers; ++Index)
+    {
+        UTextBlock* PlayerText = WidgetTree->ConstructWidget<UTextBlock>(
+            UTextBlock::StaticClass(),
+            FName(*FString::Printf(TEXT("ApmPlayerText%d"), Index)));
+        PlayerText->SetFont(
+            FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 18));
+        PlayerText->SetJustification(ETextJustify::Right);
+        PlayerText->SetVisibility(ESlateVisibility::Collapsed);
+
+        UVerticalBoxSlot* TextSlot = ApmList->AddChildToVerticalBox(PlayerText);
+        TextSlot->SetPadding(FMargin(0.0f, 2.0f));
+        ApmPlayerTexts.Add(PlayerText);
+    }
 
     ApmPanelRoot = PanelSize;
     ApmRefreshElapsed = 0.25f;
@@ -1268,7 +1281,7 @@ void UCMControlHUDWidget::InitializeApmHUD()
 
 void UCMControlHUDWidget::RefreshApmHUD()
 {
-    if (!ApmPanelRoot || !ApmText)
+    if (!ApmPanelRoot || ApmPlayerTexts.IsEmpty())
     {
         return;
     }
@@ -1276,19 +1289,57 @@ void UCMControlHUDWidget::RefreshApmHUD()
     const ACMPlayGameState* PlayState = GetWorld()
         ? GetWorld()->GetGameState<ACMPlayGameState>()
         : nullptr;
-    ACMPlayerController* PlayerController = Cast<ACMPlayerController>(
-        GetOwningPlayer());
-    if (!PlayState || !PlayerController
-        || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    if (!PlayState || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
     {
         ApmPanelRoot->SetVisibility(ESlateVisibility::Collapsed);
         return;
     }
 
     ApmPanelRoot->SetVisibility(ESlateVisibility::HitTestInvisible);
-    ApmText->SetText(FText::Format(
-        LOCTEXT("ApmFormat", "APM {0}"),
-        FText::AsNumber(PlayerController->GetCurrentApm())));
+
+    TArray<ACMPlayerState*> PlayerStates;
+    for (APlayerState* PlayerState : PlayState->PlayerArray)
+    {
+        if (ACMPlayerState* CMPlayerState = Cast<ACMPlayerState>(PlayerState))
+        {
+            PlayerStates.Add(CMPlayerState);
+        }
+    }
+    PlayerStates.Sort([](const ACMPlayerState& Left, const ACMPlayerState& Right)
+    {
+        const int32 LeftSlot = Left.GetPlayerSlotId() == INDEX_NONE
+            ? MAX_int32
+            : Left.GetPlayerSlotId();
+        const int32 RightSlot = Right.GetPlayerSlotId() == INDEX_NONE
+            ? MAX_int32
+            : Right.GetPlayerSlotId();
+        return LeftSlot < RightSlot;
+    });
+
+    for (int32 Index = 0; Index < ApmPlayerTexts.Num(); ++Index)
+    {
+        UTextBlock* PlayerText = ApmPlayerTexts[Index];
+        if (!PlayerStates.IsValidIndex(Index))
+        {
+            PlayerText->SetVisibility(ESlateVisibility::Collapsed);
+            continue;
+        }
+
+        const ACMPlayerState* PlayerState = PlayerStates[Index];
+        FString PlayerName = PlayerState->GetPlayerName();
+        if (PlayerName.IsEmpty())
+        {
+            PlayerName = FString::Printf(TEXT("Player %d"), Index + 1);
+        }
+
+        PlayerText->SetText(FText::Format(
+            LOCTEXT("PlayerApmFormat", "{0}  APM {1}"),
+            FText::FromString(PlayerName),
+            FText::AsNumber(PlayerState->GetCurrentApm())));
+        PlayerText->SetColorAndOpacity(
+            FSlateColor(PlayerState->GetPlayerColor()));
+        PlayerText->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
 }
 
 void UCMControlHUDWidget::RefreshWireframeCallouts(

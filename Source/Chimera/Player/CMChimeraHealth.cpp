@@ -234,6 +234,45 @@ bool ACMChimera::AreAllSegmentsDead() const
     return true;
 }
 
+int32 ACMChimera::ReviveDeadSegments()
+{
+    if (!HasAuthority())
+    {
+        return 0;
+    }
+
+    int32 RevivedCount = 0;
+    for (FCMBodySegmentHealthState& SegmentState : SegmentHealthStates)
+    {
+        if (!SegmentState.bDead || SegmentState.MaxHealth <= 0.0f)
+        {
+            continue;
+        }
+
+        SegmentState.Health = SegmentState.MaxHealth;
+        SegmentState.bDead = false;
+        ++RevivedCount;
+    }
+    if (RevivedCount == 0)
+    {
+        return 0;
+    }
+
+    bAllSegmentsDeathNotified = false;
+    OnSegmentStatesChanged.Broadcast();
+    for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
+    {
+        It->RestoreControlsForRevivedSegments();
+    }
+    ForceNetUpdate();
+
+    UE_LOG(LogChimeraLineBody, Log,
+        TEXT("[Checkpoint Segment Revival] Revived=%d Total=%d"),
+        RevivedCount,
+        SegmentHealthStates.Num());
+    return RevivedCount;
+}
+
 void ACMChimera::RestoreForCheckpointRespawn()
 {
     if (!HasAuthority())

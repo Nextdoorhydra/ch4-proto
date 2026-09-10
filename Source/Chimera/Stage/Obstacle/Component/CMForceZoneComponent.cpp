@@ -1,5 +1,7 @@
 #include "Stage/Obstacle/Component/CMForceZoneComponent.h"
 
+#include "Components/BoxComponent.h"
+#include "Engine/World.h"
 #include "Player/CMChimera.h"
 
 UCMForceZoneComponent::UCMForceZoneComponent()
@@ -39,6 +41,11 @@ void UCMForceZoneComponent::TickComponent(
             continue;
         }
 
+        if (!HasUnobstructedPathTo(Chimera))
+        {
+            continue;
+        }
+
         if (MaxWindSpeed > 0.0f
             && Chimera->GetAssemblyVelocityAlongDirection(ForceDirection)
                 >= MaxWindSpeed)
@@ -71,6 +78,11 @@ void UCMForceZoneComponent::TickComponent(
                 continue;
             }
 
+            if (!HasUnobstructedPathTo(Chimera, SegmentIt.Key()))
+            {
+                continue;
+            }
+
             if (bReachedMaxWindSpeed)
             {
                 continue;
@@ -86,6 +98,43 @@ void UCMForceZoneComponent::TickComponent(
             ChimeraIt.RemoveCurrent();
         }
     }
+}
+
+// 팬과 대상 마디 사이에 Visibility 차단물이 있는지 검사
+bool UCMForceZoneComponent::HasUnobstructedPathTo(
+    const ACMChimera* Chimera,
+    int32 SegmentIndex) const
+{
+    if (!bRequireUnobstructedPath || !IsValid(Chimera))
+    {
+        return true;
+    }
+
+    const AActor* Owner = GetOwner();
+    const UWorld* World = GetWorld();
+    if (!Owner || !World)
+    {
+        return false;
+    }
+
+    const UBoxComponent* TargetSegment = SegmentIndex != INDEX_NONE
+        ? Chimera->GetBodySegmentComponent(SegmentIndex)
+        : Chimera->GetBodySegmentComponent(0);
+    const FVector TraceEnd = IsValid(TargetSegment)
+        ? TargetSegment->GetComponentLocation()
+        : Chimera->GetActorLocation();
+    const FVector TraceStart = Owner->GetActorTransform().TransformPosition(
+        LocalTraceOriginOffset);
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CMForceZoneOcclusion), false);
+    QueryParams.AddIgnoredActor(Owner);
+    QueryParams.AddIgnoredActor(Chimera);
+
+    return !World->LineTraceTestByChannel(
+        TraceStart,
+        TraceEnd,
+        OcclusionTraceChannel,
+        QueryParams);
 }
 
 // 소유 액터 기준 방향을 월드 방향으로 변환

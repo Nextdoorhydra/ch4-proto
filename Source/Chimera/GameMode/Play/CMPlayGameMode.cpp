@@ -612,11 +612,16 @@ void ACMPlayGameMode::BindRoomCheckpointEvents()
 
 void ACMPlayGameMode::HandleCheckpointCommitted(FName RoomId)
 {
+    ACMChimera* SharedChimera = CachedPlayGameState
+        ? CachedPlayGameState->SharedChimera : nullptr;
+    const int32 RevivedSegmentCount = IsValid(SharedChimera)
+        ? SharedChimera->ReviveDeadSegments() : 0;
     CaptureCheckpointParts();
     UE_LOG(LogChimeraStageLoad, Display,
-        TEXT("[Checkpoint Snapshot] Room=%s Parts=%d"),
+        TEXT("[Checkpoint Snapshot] Room=%s Parts=%d RevivedSegments=%d"),
         *RoomId.ToString(),
-        CheckpointParts.Num());
+        CheckpointParts.Num(),
+        RevivedSegmentCount);
 }
 
 void ACMPlayGameMode::CaptureCheckpointParts()
@@ -1087,10 +1092,10 @@ bool ACMPlayGameMode::RespawnAtActiveCheckpoint()
 
     bCheckpointRestartInProgress = true;
     ClearRetryVoteState();
-    SharedChimera->RestoreForCheckpointRespawn();
     const bool bRoomReset = !RoomController
         || RoomController->ResetActiveCheckpointRoom();
-    const bool bTeleported = SharedChimera->TeleportAssembly(CheckpointTransform);
+    const bool bTeleported = SharedChimera->TeleportAssemblyForCheckpointRespawn(CheckpointTransform);
+    SharedChimera->RestoreForCheckpointRespawn();
     const bool bPartsRestored = RestoreCheckpointParts(SharedChimera);
     bCheckpointRestartInProgress = false;
     UE_LOG(LogChimeraStageLoad, Display,

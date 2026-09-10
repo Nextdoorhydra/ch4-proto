@@ -10,6 +10,8 @@
 #include "Stage/Device/Component/CMRailMovementComponent.h"
 #include "TimerManager.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogChimeraGrabRail, Log, All);
+
 ACMGrabRailActor::ACMGrabRailActor()
 {
     SetNetUpdateFrequency(30.0f);
@@ -20,6 +22,7 @@ ACMGrabRailActor::ACMGrabRailActor()
     RailBody->SetupAttachment(SceneRoot);
     RailBody->SetBoxExtent(FVector(40));
     RailBody->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+    RailBody->SetNotifyRigidBodyCollision(true);
     RailBody->SetMobility(EComponentMobility::Movable);
     MovingMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MovingMesh"));
     MovingMesh->SetupAttachment(RailBody);
@@ -36,13 +39,32 @@ ACMGrabRailActor::ACMGrabRailActor()
 void ACMGrabRailActor::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
-    if (!HasActorBegunPlay()) UCMRailMovementComponent::PreviewPose(Rail, RailBody,
-        RailMovement->InitialProgress, RailMovement->bFollowRailRotation, RailMovement->RotationOffset);
+    if (!HasActorBegunPlay())
+    {
+        TArray<USplineComponent*> RailSegments;
+        GatherRailSegments(RailSegments);
+        const int32 InitialSegmentIndex = FMath::Clamp(
+            RailMovement->InitialSegmentIndex,
+            0,
+            FMath::Max(RailSegments.Num() - 1, 0));
+        if (RailSegments.IsValidIndex(InitialSegmentIndex))
+        {
+            UCMRailMovementComponent::PreviewPose(
+                RailSegments[InitialSegmentIndex],
+                RailBody,
+                RailMovement->InitialProgress,
+                RailMovement->bFollowRailRotation,
+                RailMovement->RotationOffset);
+        }
+    }
 }
 
 void ACMGrabRailActor::BeginPlay()
 {
-    RailMovement->ConfigureRail(Rail, RailBody, GrabHandle);
+    TArray<USplineComponent*> RailSegments;
+    GatherRailSegments(RailSegments);
+    RailMovement->ConfigureRailGraph(RailSegments, RailBody, GrabHandle, MovingMesh);
+    RailBody->OnComponentHit.AddDynamic(this, &ThisClass::HandleRailBodyHit);
     InteractionHighlight->AddHighlightTarget(MovingMesh);
     Super::BeginPlay();
 
@@ -51,6 +73,64 @@ void ACMGrabRailActor::BeginPlay()
         GetWorldTimerManager().SetTimer(InteractionHintTimerHandle, this,
             &ThisClass::RefreshInteractionHighlight,
             FMath::Max(InteractionHintRefreshInterval, 0.02f), true, 0.0f);
+    }
+}
+
+void ACMGrabRailActor::GatherRailSegments(
+    TArray<USplineComponent*>& OutRailSegments) const
+{
+    OutRailSegments.Reset();
+    TInlineComponentArray<USplineComponent*> SplineComponents(this);
+    SplineComponents.Sort([](const USplineComponent& Left, const USplineComponent& Right)
+    {
+        return Left.GetName() < Right.GetName();
+    });
+
+    if (SplineComponents.Remove(Rail) > 0)
+    {
+        OutRailSegments.Add(Rail);
+    }
+
+    for (USplineComponent* SplineComponent : SplineComponents)
+    {
+        if (!IsValid(SplineComponent) || SplineComponent->IsClosedLoop()
+            || SplineComponent->GetNumberOfSplinePoints() < 2
+            || SplineComponent->GetSplineLength() <= UE_KINDA_SMALL_NUMBER)
+        {
+            UE_LOG(LogChimeraGrabRail, Warning,
+                TEXT("[Rail Branch Invalid] Actor=%s Branch=%s requires an open spline with at least two distinct points."),
+                *GetName(), *SplineComponent->GetName());
+            continue;
+        }
+
+        OutRailSegments.Add(SplineComponent);
+    }
+}
+
+void ACMGrabRailActor::HandleRailBodyHit(
+    UPrimitiveComponent* HitComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComponent,
+    FVector NormalImpulse,
+    const FHitResult& Hit)
+{
+    if (!HasAuthority() || !IsElementActive() || !IsValid(OtherActor)
+        || OtherActor == this || LastCollisionPushFrame == GFrameCounter)
+    {
+        return;
+    }
+
+    const FVector PusherLocation = IsValid(OtherComponent)
+        ? OtherComponent->Bounds.Origin
+        : OtherActor->GetActorLocation();
+    FVector PushDirection = RailBody->Bounds.Origin - PusherLocation;
+    PushDirection.Z = 0.0f;
+    if (RailMovement->TryCollisionPush(
+        OtherActor,
+        PushDirection,
+        GetWorld()->GetDeltaSeconds()))
+    {
+        LastCollisionPushFrame = GFrameCounter;
     }
 }
 

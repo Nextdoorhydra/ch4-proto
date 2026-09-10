@@ -34,7 +34,10 @@ public class Chimera : ModuleRules
 			"ListenServerNetwork",
 			"EnhancedInput",
 			"InputCore",
-			"PhysicsCore"
+			"PhysicsCore",
+			"Slate",
+			"SlateCore",
+			"UMG"
 		});
 	}
 }

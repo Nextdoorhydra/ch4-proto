@@ -52,6 +52,19 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|ForceZone", meta = (ClampMin = "0.0", Units = "cm/s"))
     float MaxWindSpeed = 120.0f;
 
+    // 켜면 팬과 대상 사이를 TraceChannel로 검사해 벽 뒤의 대상에는 힘을 적용하지 않는다.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|ForceZone|Occlusion")
+    bool bRequireUnobstructedPath = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|ForceZone|Occlusion",
+        meta = (EditCondition = "bRequireUnobstructedPath"))
+    TEnumAsByte<ECollisionChannel> OcclusionTraceChannel = ECC_Visibility;
+
+    // 소유 액터 원점에서 팬 토출구까지의 로컬 오프셋.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|ForceZone|Occlusion",
+        meta = (EditCondition = "bRequireUnobstructedPath"))
+    FVector LocalTraceOriginOffset = FVector::ZeroVector;
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Obstacle|ForceZone")
     FCMForceZoneTargetSignature OnTargetEntered;
 
@@ -59,6 +72,10 @@ public:
     FCMForceZoneTargetSignature OnTargetExited;
 
 private:
+    bool HasUnobstructedPathTo(
+        const ACMChimera* Chimera,
+        int32 SegmentIndex = INDEX_NONE) const;
+
     bool bZoneEnabled = true;
 
     // 여러 몸통 마디가 같은 볼륨과 겹칠 수 있어 액터별 오버랩 횟수 추적
