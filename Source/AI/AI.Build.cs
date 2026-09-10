@@ -23,9 +23,8 @@ public class AI : ModuleRules
 			"MotionWarping",
 			"NavigationSystem",
 			"Shared",
-			"Chimera"
+			"Chimera",
+			"CMSound"
 		});
-
-		PrivateDependencyModuleNames.Add("CMSound");
 	}
 }
