@@ -18,6 +18,10 @@ namespace CMSoundTags
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Detach, "Chimera.Sound.Part.Detach", "부위 탈착");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_AttachPullLoop, "Chimera.Sound.Part.AttachPullLoop", "부위 장착 당김 루프");
 
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_GoHere, "Chimera.Sound.Ping.GoHere", "이동 지시 핑");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_LookHere, "Chimera.Sound.Ping.LookHere", "주시 지시 핑");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_SwapParts, "Chimera.Sound.Ping.SwapParts", "부위 교체 지시 핑");
+
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Aggressive_TargetSpotted, "Chimera.Sound.AI.Aggressive.TargetSpotted", "공격형 AI 타깃 최초 발견");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_ThreatScream, "Chimera.Sound.AI.Sacrifice.ThreatScream", "희생양 위협 발견 비명");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_HitScream, "Chimera.Sound.AI.Sacrifice.HitScream", "희생양 피격 비명");
