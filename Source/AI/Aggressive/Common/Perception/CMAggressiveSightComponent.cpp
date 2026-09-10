@@ -12,7 +12,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogCMAggressiveSight, Log, All);
 namespace CMAggressiveSight
 {
     constexpr float UpdateInterval = 0.05f;
-    constexpr float RedTintStrength = 1.0f;
+    constexpr float RedTintStrength = 0.5f;
 
 #if !UE_BUILD_SHIPPING
     bool bDrawSightDebug = false;
