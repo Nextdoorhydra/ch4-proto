@@ -510,25 +510,59 @@ protected:
         meta = (ClampMin = "0.0"))
     float LegStepForceScale = 2.0f;
 
-    /** Strength used by an immediate Leg-control tap. */
+    /** Fixed strength used throughout the Leg-control tap window. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
-        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+        meta = (ClampMin = "0.0", ClampMax = "1.0",
+            DisplayName = "Tap Strength"))
     float LegInputMinimumStrength = 0.35f;
 
-    /** Hold time below which a Leg remains at minimum strength. */
+    /** End of the fixed-strength tap window. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
-        meta = (ClampMin = "0.0", Units = "s"))
-    float LegInputTapHoldSeconds = 0.04f;
+        meta = (ClampMin = "0.0", Units = "s",
+            DisplayName = "Tap End Hold Seconds"))
+    float LegInputTapHoldSeconds = 0.25f;
 
-    /** Hold time at which a Leg reaches its existing full strength. */
+    /** End of the Normal window, where existing full strength is reached. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
-        meta = (ClampMin = "0.01", Units = "s"))
-    float LegInputFullStrengthHoldSeconds = 0.28f;
+        meta = (ClampMin = "0.01", Units = "s",
+            DisplayName = "Normal End Hold Seconds"))
+    float LegInputFullStrengthHoldSeconds = 0.7f;
 
-    /** Greater values reserve more of the hold range for fine adjustment. */
+    /** End of the charging window, where maximum charged strength is reached. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
-        meta = (ClampMin = "0.01"))
-    float LegInputStrengthExponent = 1.35f;
+        meta = (ClampMin = "0.01", Units = "s",
+            DisplayName = "Full Charge Hold Seconds"))
+    float LegInputFullChargeHoldSeconds = 1.0f;
+
+    /** Leg strength at the boundary between charging and overcharging. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "1.0", ClampMax = "2.0",
+            DisplayName = "Maximum Charged Strength"))
+    float LegInputMaximumChargedStrength = 2.0f;
+
+    /** Additional hold time after full charge needed to finish overcharging. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "0.01", Units = "s",
+            DisplayName = "Overcharge Duration Seconds"))
+    float LegInputOverchargeDurationSeconds = 2.0f;
+
+    /** Maximum Leg strength retained after the overcharge window completes. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "2.0", ClampMax = "10.0",
+            DisplayName = "Maximum Overcharged Strength"))
+    float LegInputMaximumOverchargedStrength = 10.0f;
+
+    /** Greater values defer more overcharge strength toward the 3-second end. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "1.0",
+            DisplayName = "Overcharge Ease-In Exponent"))
+    float LegInputOverchargeExponent = 3.0f;
+
+    /** Greater values make each strength window rise earlier and settle sooner. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "0.01",
+            DisplayName = "Strength Ease-Out Exponent"))
+    float LegInputStrengthExponent = 2.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
