@@ -82,6 +82,9 @@ public:
     /** Applies the existing horizontal speed cap during the server physics Tick. */
     void UpdateServerMovement(ACMChimera& Chimera);
 
+    /** Cancels sustained movement state before a stuck-recovery teleport. */
+    void CancelAllMovement();
+
 protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
