@@ -16,6 +16,12 @@ namespace CMSoundTags
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Pickup, "Chimera.Sound.Part.Pickup", "부위 획득");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Attach, "Chimera.Sound.Part.Attach", "부위 장착");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Detach, "Chimera.Sound.Part.Detach", "부위 탈착");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_AttachPullLoop, "Chimera.Sound.Part.AttachPullLoop", "부위 장착 당김 루프");
+
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Aggressive_TargetSpotted, "Chimera.Sound.AI.Aggressive.TargetSpotted", "공격형 AI 타깃 최초 발견");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_ThreatScream, "Chimera.Sound.AI.Sacrifice.ThreatScream", "희생양 위협 발견 비명");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_HitScream, "Chimera.Sound.AI.Sacrifice.HitScream", "희생양 피격 비명");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_BleedingLoop, "Chimera.Sound.AI.Sacrifice.BleedingLoop", "희생양 출혈 신음 루프");
 
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Button_Press, "Chimera.Sound.Stage.Button.Press", "스테이지 버튼 입력");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_PressurePlate_WeightChanged, "Chimera.Sound.Stage.PressurePlate.WeightChanged", "감압판 무게 변화");

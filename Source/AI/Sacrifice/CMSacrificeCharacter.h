@@ -14,6 +14,7 @@
 class UCMDismembermentComponent;
 class UCMSacrificeStateComponent;
 class UCMSacrificeAttributeSet;
+class UAudioComponent;
 class UAbilitySystemComponent;
 class UAnimMontage;
 class UAnimSequence;
@@ -51,6 +52,7 @@ public:
     ACMSacrificeCharacter();
 
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
@@ -141,6 +143,7 @@ public:
     void SetSacrificeActionState(ECMSacrificeActionState NewState, FGameplayTag StateTag);
     void ClearSacrificeActionState(ECMSacrificeActionState State, FGameplayTag StateTag);
     void SetCurrentThreat(AActor* NewThreat);
+    void PlayThreatScream();
     void ConsumeFleeCharge();
     void RefillFleeCharges();
     float BeginHitReaction(const FVector& ImpactDirection);
@@ -176,6 +179,8 @@ protected:
     void ApplyStateTag(FGameplayTag StateTag, bool bEnabled);
     float CalculateMovementSpeed() const;
     void RefreshMovementSpeed();
+    void RefreshBleedingLoopSound(bool bBleeding);
+    void StopBleedingLoopSound();
 
     /** Optional per-part collectible settings; these rules never restrict which attached part can be severed. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Dismemberment", meta = (TitleProperty = "BodyPart", DisplayName = "Attack Part Rules"))
@@ -318,8 +323,14 @@ private:
     UFUNCTION(NetMulticast, Reliable)
     void MulticastPlaySafetyInjuryFallAnimation();
 
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayVocalSound(FGameplayTag SoundTag);
+
     UPROPERTY(Transient)
     TObjectPtr<UAnimMontage> ActiveGettingUpMontage;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> BleedingLoopSoundComponent;
 
     bool bPendingIncapacitation = false;
     TMap<FGameplayTag, FActiveGameplayEffectHandle> StateEffectHandles;

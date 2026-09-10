@@ -24,6 +24,8 @@
 #include "Player/CMPartSlotComponent.h"
 #include "Sacrifice/CMSacrificeCharacter.h"
 #include "Sacrifice/CMSacrificeStateComponent.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCMAggressiveBehavior, Log, All);
@@ -619,6 +621,9 @@ void UCMAggressiveBehaviorComponent::BeginChasing(AActor* NewTarget)
     {
         return;
     }
+    const bool bNewlySpottedTarget =
+        State == ECMAggressiveAIState::Searching
+        && !IsValidTarget(CurrentTarget);
     CurrentTarget = NewTarget;
     State = ECMAggressiveAIState::Chasing;
     bReturningHome = false;
@@ -627,6 +632,17 @@ void UCMAggressiveBehaviorComponent::BeginChasing(AActor* NewTarget)
     {
         NextActionTime = GetWorld()->GetTimeSeconds() + CMAggressiveBehavior::FailedMoveRetryInterval;
     }
+    if (bNewlySpottedTarget)
+    {
+        MulticastPlayTargetSpottedSound();
+    }
+}
+
+void UCMAggressiveBehaviorComponent::MulticastPlayTargetSpottedSound_Implementation()
+{
+    FCMSoundPlayback::PlaySFXAtActor(
+        OwnerPawn,
+        CMSoundTags::AI_Aggressive_TargetSpotted);
 }
 
 // 현재 교전을 해제하고 탐색 상태에서 생성 위치로 돌아가도록 전환한다.

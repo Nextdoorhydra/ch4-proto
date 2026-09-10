@@ -25,5 +25,7 @@ public class AI : ModuleRules
 			"Shared",
 			"Chimera"
 		});
+
+		PrivateDependencyModuleNames.Add("CMSound");
 	}
 }

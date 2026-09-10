@@ -199,6 +199,7 @@ protected:
 
 private:
     void DetectSwingTargets();
+    void DrawSwingDebug() const;
 
     static bool IsInsideSwingBox(
         const FVector& Origin,
