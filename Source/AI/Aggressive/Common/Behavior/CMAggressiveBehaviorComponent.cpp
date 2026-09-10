@@ -360,8 +360,12 @@ void UCMAggressiveBehaviorComponent::BeginStuckRecovery(const double CurrentTime
     }
 
     StopMove();
-    CurrentTarget = nullptr;
-    State = ECMAggressiveAIState::Searching;
+    const bool bKeepCentipedeTarget = Profile == ECMAggressiveBehaviorProfile::Centipede && IsValidTarget(CurrentTarget);
+    if (!bKeepCentipedeTarget)
+    {
+        CurrentTarget = nullptr;
+        State = ECMAggressiveAIState::Searching;
+    }
     bReturningHome = false;
     bHasWanderGoal = false;
     bReversingFromStuck = true;
@@ -469,7 +473,7 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
         return;
     }
 
-    if (Profile != ECMAggressiveBehaviorProfile::Tetra)
+    if (Profile == ECMAggressiveBehaviorProfile::Ripper)
     {
         ACMSacrificeCharacter* CurrentSacrifice = Cast<ACMSacrificeCharacter>(CurrentTarget);
         if (CurrentSacrifice)
@@ -506,8 +510,15 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
         }
         else
         {
-            PerformCentipedeAttack(*CurrentTarget);
-            BeginReturningHome();
+            const bool bTargetKilled = PerformCentipedeAttack(*CurrentTarget);
+            if (bTargetKilled || !IsValidTarget(CurrentTarget))
+            {
+                BeginReturningHome();
+            }
+            else
+            {
+                BeginChasing(CurrentTarget);
+            }
         }
         return;
     }
@@ -621,6 +632,10 @@ void UCMAggressiveBehaviorComponent::UpdateTetraSightScan(const double CurrentTi
 void UCMAggressiveBehaviorComponent::BeginChasing(AActor* NewTarget)
 {
     if (!IsValidTarget(NewTarget))
+    {
+        return;
+    }
+    if (Profile == ECMAggressiveBehaviorProfile::Centipede && IsValidTarget(CurrentTarget) && CurrentTarget != NewTarget)
     {
         return;
     }
