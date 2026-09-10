@@ -91,6 +91,8 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Dismemberment")
     int32 GetSpawnedFleshChunkCount() const;
 
+    void DestroySpawnedDismembermentActors();
+
     UFUNCTION(BlueprintPure, Category = "Chimera|Dismemberment")
     int32 GetBroadcastBloodBurstCount() const
     {

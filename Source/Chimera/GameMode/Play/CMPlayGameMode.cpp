@@ -5,6 +5,7 @@
 #include "GameMode/StageRoute/CMStageRouteSubsystem.h"
 #include "Stage/CMStageDirector.h"
 #include "Stage/Room/CMRoomStreamingController.h"
+#include "Stage/Checkpoint/CMCheckpointAIResettable.h"
 #include "AsyncLoad/CMStageLoadLog.h"
 #include "AsyncLoad/CMStageLoadBarrierComponent.h"
 #include "Player/CMChimera.h"
@@ -859,7 +860,7 @@ void ACMPlayGameMode::CompleteRetryVoteHold(
     if (Vote.VoteCount >= Vote.RequiredVoteCount
         && Vote.RequiredVoteCount > 0)
     {
-        RestartAtActiveCheckpoint();
+        RespawnAtActiveCheckpoint();
     }
 }
 
@@ -935,10 +936,6 @@ bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
 
 bool ACMPlayGameMode::TryCheatRestartGame()
 {
-    if (UCMStageRouteSubsystem* Route = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr)
-    {
-        Route->ClearPendingCheckpointRestart();
-    }
     return RestartCurrentWorld();
 }
 
@@ -959,97 +956,6 @@ bool ACMPlayGameMode::RestartCurrentWorld()
         bStageLoopRestartScheduled = false;
     }
     return bStarted;
-}
-
-bool ACMPlayGameMode::RestartAtActiveCheckpoint()
-{
-    UCMStageRouteSubsystem* Route = GetGameInstance()
-        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
-    if (!HasAuthority() || !Route)
-    {
-        return false;
-    }
-
-    ACMRoomStreamingController* RoomController = nullptr;
-    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
-    {
-        if (RoomController)
-        {
-            return false;
-        }
-        RoomController = *It;
-    }
-
-    TArray<FCMCheckpointRestartPart> RestartParts;
-    RestartParts.Reserve(CheckpointParts.Num());
-    for (const FCMCheckpointPartRecord& Record : CheckpointParts)
-    {
-        FCMCheckpointRestartPart& RestartPart = RestartParts.AddDefaulted_GetRef();
-        RestartPart.SlotAddress = Record.SlotAddress;
-        RestartPart.PartClass = Record.PartClass;
-        RestartPart.PartRowName = Record.PartRowName;
-        RestartPart.TierRowName = Record.TierRowName;
-    }
-
-    const int32 CheckpointNumber = RoomController ? RoomController->GetActiveCheckpointNumber() : 0;
-    Route->SetPendingCheckpointRestart(CheckpointNumber, RestartParts);
-    if (RestartCurrentWorld())
-    {
-        return true;
-    }
-
-    Route->ClearPendingCheckpointRestart();
-    return false;
-}
-
-void ACMPlayGameMode::ApplyPendingCheckpointRestart()
-{
-    UCMStageRouteSubsystem* Route = GetGameInstance()
-        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
-    int32 CheckpointNumber = INDEX_NONE;
-    TArray<FCMCheckpointRestartPart> RestartParts;
-    if (!HasAuthority() || !Route || !Route->GetPendingCheckpointRestart(CheckpointNumber, RestartParts))
-    {
-        return;
-    }
-
-    ACMRoomStreamingController* RoomController = nullptr;
-    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
-    {
-        if (RoomController)
-        {
-            UE_LOG(LogChimeraStageLoad, Error,
-                TEXT("체크포인트 재시작을 복원할 RoomStreamingController가 중복되었습니다."));
-            Route->ClearPendingCheckpointRestart();
-            return;
-        }
-        RoomController = *It;
-    }
-
-    if (CheckpointNumber > 0 && (!RoomController || !RoomController->RestoreCheckpointForRestart(CheckpointNumber)))
-    {
-        UE_LOG(LogChimeraStageLoad, Error,
-            TEXT("전체 재시작 후 체크포인트를 복원하지 못했습니다. Checkpoint=%d"),
-            CheckpointNumber);
-        Route->ClearPendingCheckpointRestart();
-        return;
-    }
-
-    CheckpointParts.Reset(RestartParts.Num());
-    for (const FCMCheckpointRestartPart& RestartPart : RestartParts)
-    {
-        FCMCheckpointPartRecord& Record = CheckpointParts.AddDefaulted_GetRef();
-        Record.SlotAddress = RestartPart.SlotAddress;
-        Record.PartClass = RestartPart.PartClass;
-        Record.PartRowName = RestartPart.PartRowName;
-        Record.TierRowName = RestartPart.TierRowName;
-    }
-
-    Route->ClearPendingCheckpointRestart();
-    const bool bRestored = RespawnAtActiveCheckpoint();
-    UE_LOG(LogChimeraStageLoad, Display,
-        TEXT("[Checkpoint World Restart] Checkpoint=%d Parts=%d Restored=%d"),
-        CheckpointNumber, CheckpointParts.Num(), bRestored);
 }
 
 bool ACMPlayGameMode::TryCheatNextStage()
@@ -1213,18 +1119,42 @@ bool ACMPlayGameMode::RespawnAtActiveCheckpoint()
     ClearRetryVoteState();
     const bool bRoomReset = !RoomController
         || RoomController->ResetActiveCheckpointRoom();
+    const bool bAIReset = ResetCheckpointAI();
     const bool bTeleported = SharedChimera->TeleportAssemblyForCheckpointRespawn(CheckpointTransform);
     SharedChimera->RestoreForCheckpointRespawn();
     const bool bPartsRestored = RestoreCheckpointParts(SharedChimera);
     bCheckpointRestartInProgress = false;
     UE_LOG(LogChimeraStageLoad, Display,
-        TEXT("키메라를 체크포인트로 복귀시켰습니다. Source=%s Room=%s RoomReset=%d Teleport=%d Parts=%d"),
+        TEXT("키메라를 체크포인트로 복귀시켰습니다. Source=%s Room=%s RoomReset=%d AIReset=%d Teleport=%d Parts=%d"),
         bUsingRoomCheckpoint ? TEXT("RoomCheckpoint") : TEXT("PlayerStart"),
         RoomController ? *RoomController->GetCurrentRoomId().ToString() : TEXT("None"),
         bRoomReset,
+        bAIReset,
         bTeleported,
         bPartsRestored);
-    return bRoomReset && bTeleported && bPartsRestored;
+    return bRoomReset && bAIReset && bTeleported && bPartsRestored;
+}
+
+bool ACMPlayGameMode::ResetCheckpointAI()
+{
+    TArray<AActor*> ResettableAI;
+    for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+    {
+        if (It->Implements<UCMCheckpointAIResettable>())
+        {
+            ResettableAI.Add(*It);
+        }
+    }
+
+    int32 ResetCount = 0;
+    for (AActor* AIActor : ResettableAI)
+    {
+        ICMCheckpointAIResettable* Resettable = Cast<ICMCheckpointAIResettable>(AIActor);
+        ResetCount += Resettable && Resettable->ResetAIForCheckpoint() ? 1 : 0;
+    }
+
+    UE_LOG(LogChimeraStageLoad, Display, TEXT("체크포인트 AI 초기화: Expected=%d Reset=%d"), ResettableAI.Num(), ResetCount);
+    return ResetCount == ResettableAI.Num();
 }
 
 // 현재 요청과 성공 보고자를 검증하고 전원 완료 시 Blocking Phase를 해제
@@ -1462,7 +1392,6 @@ bool ACMPlayGameMode::HandleStartingPresentationFinished(
     GetWorldTimerManager().ClearTimer(StartingPresentationTimeoutHandle);
     SetPlayPhase(ECMPlayPhase::Playing);
     PlayState->SetStagePresentationState(ECMStagePresentationState::None);
-    ApplyPendingCheckpointRestart();
     return true;
 }
 

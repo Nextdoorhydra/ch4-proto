@@ -193,9 +193,8 @@ private:
     void HandleAllSegmentsDead();
 
     bool RespawnAtActiveCheckpoint();
-    bool RestartAtActiveCheckpoint();
     bool RestartCurrentWorld();
-    void ApplyPendingCheckpointRestart();
+    bool ResetCheckpointAI();
     void ScheduleCheckpointRespawn();
     void HandleCheckpointRespawnTimer();
 

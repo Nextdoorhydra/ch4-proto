@@ -1,32 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Player/CMControlTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 
 #include "CMStageRouteSubsystem.generated.h"
 
 class UCMStageRouteDefinition;
-class ACMPartActorBase;
 struct FCMStageRouteEntry;
-
-USTRUCT()
-struct FCMCheckpointRestartPart
-{
-    GENERATED_BODY()
-
-    UPROPERTY()
-    FCMPartSlotAddress SlotAddress;
-
-    UPROPERTY()
-    TSubclassOf<ACMPartActorBase> PartClass;
-
-    UPROPERTY()
-    FName PartRowName;
-
-    UPROPERTY()
-    FName TierRowName;
-};
 
 UCLASS()
 // 맵 전환에도 유지되어야 하는 서버 스테이지 경로 진행 인덱스 관리
@@ -94,10 +74,6 @@ public:
     }
     int32 GetExpectedPlayerCount() const { return ExpectedPlayerCount; }
 
-    void SetPendingCheckpointRestart(int32 OneBasedCheckpointNumber, const TArray<FCMCheckpointRestartPart>& Parts);
-    bool GetPendingCheckpointRestart(int32& OutOneBasedCheckpointNumber, TArray<FCMCheckpointRestartPart>& OutParts) const;
-    void ClearPendingCheckpointRestart();
-
 private:
     UPROPERTY(Transient)
     TObjectPtr<UCMStageRouteDefinition> StageRouteDefinition;
@@ -106,8 +82,4 @@ private:
     int32 PendingStageIndex = INDEX_NONE;
     int32 ExpectedPlayerCount = 0;
     bool bSoloTestMode = false;
-    int32 PendingCheckpointRestartNumber = INDEX_NONE;
-
-    UPROPERTY(Transient)
-    TArray<FCMCheckpointRestartPart> PendingCheckpointRestartParts;
 };
