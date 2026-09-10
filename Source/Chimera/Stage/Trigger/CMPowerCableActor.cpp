@@ -13,6 +13,8 @@
 #include "Stage/Trigger/Component/CMPowerSocketComponent.h"
 #include "Stage/Trigger/Component/CMPowerSourceComponent.h"
 #include "Stage/Trigger/Subsystem/CMPowerSubsystem.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 
 ACMPowerCableActor::ACMPowerCableActor()
 {
@@ -145,6 +147,7 @@ void ACMPowerCableActor::BeginPlay()
                     *GetNameSafe(OutputActor));
             }
         }
+        bConnectionSoundEnabled = true;
     }
     InitializeRope();
     CablePhysics->SetComponentTickEnabled(HasAuthority());
@@ -1491,6 +1494,7 @@ void ACMPowerCableActor::SetConnectedSocket(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     UCMPowerSocketComponent* PreviousSocket = ConnectedSocket;
     if (Socket)
@@ -1535,6 +1539,9 @@ void ACMPowerCableActor::SetConnectedSocket(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Socket ? Socket->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
 }
 
@@ -1576,6 +1583,7 @@ void ACMPowerCableActor::SetConnectedSource(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     UCMPowerSourceComponent* PreviousSource = ConnectedSource;
     if (Source)
@@ -1604,6 +1612,9 @@ void ACMPowerCableActor::SetConnectedSource(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Source ? Source->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
 }
 
@@ -1616,6 +1627,7 @@ void ACMPowerCableActor::SetConnectedSourceSocket(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     if (ConnectedSourceSocket && ConnectedSourceSocket != Socket)
     {
@@ -1645,7 +1657,31 @@ void ACMPowerCableActor::SetConnectedSourceSocket(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Socket ? Socket->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
+}
+
+void ACMPowerCableActor::PlayConnectionSoundIfPowered(
+    const bool bWasTransmittingPower,
+    const FVector& ConnectionLocation)
+{
+    if (bConnectionSoundEnabled
+        && !bWasTransmittingPower
+        && IsTransmittingPower())
+    {
+        MulticastPlayConnectionSound(ConnectionLocation);
+    }
+}
+
+void ACMPowerCableActor::MulticastPlayConnectionSound_Implementation(
+    const FVector_NetQuantize10 SoundLocation)
+{
+    FCMSoundPlayback::PlaySFXAtLocation(
+        this,
+        SoundLocation,
+        CMSoundTags::Stage_PowerCable_Connected);
 }
 
 void ACMPowerCableActor::NotifyPowerStateChanged()

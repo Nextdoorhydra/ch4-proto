@@ -323,6 +323,14 @@ protected:
     );
     void ResolveRopeGroundContact(bool bEndIsFixed);
     void WakeRopeSimulation();
+    void PlayConnectionSoundIfPowered(
+        bool bWasTransmittingPower,
+        const FVector& ConnectionLocation
+    );
+
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayConnectionSound(FVector_NetQuantize10 SoundLocation);
+
     int32 GetVisualSegmentCount() const;
     float GetCableSag() const;
     float GetCableThicknessScale() const;
@@ -345,6 +353,7 @@ protected:
     FVector CachedVisualEndpoint = FVector::ZeroVector;
     bool bRopeInitialized = false;
     bool bCablePhysicsRegistered = false;
+    bool bConnectionSoundEnabled = false;
     bool bRopeSleeping = false;
     int32 RopeStableFrameCount = 0;
     float SimulatedRopeLength = 0.0f;
