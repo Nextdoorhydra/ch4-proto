@@ -7,6 +7,7 @@
 #include "Animation/AnimSequence.h"
 #include "Common/Ability/CMAIGameplayTags.h"
 #include "Common/Ability/CMAIStateGameplayEffect.h"
+#include "Components/AudioComponent.h"
 #include "Sacrifice/CMSacrificeActionAbilities.h"
 #include "Sacrifice/CMSacrificeAIController.h"
 #include "Sacrifice/CMSacrificeAttributeSet.h"
@@ -21,6 +22,8 @@
 #include "MotionWarpingComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "RootMotionModifier_SkewWarp.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "UObject/ConstructorHelpers.h"
 
 // 분리 가능한 신체와 GAS·모션 워핑·상태 컴포넌트를 가진 Sacrifice 캐릭터를 구성한다.
@@ -120,12 +123,20 @@ void ACMSacrificeCharacter::BeginPlay()
     SacrificeStateComponent->OnMissingPartsChanged.AddDynamic(this, &ThisClass::HandleMissingPartsChanged);
     SacrificeStateComponent->OnBleedingStateChanged.AddDynamic(this, &ThisClass::HandleBleedingStateChanged);
     SacrificeStateComponent->OnSacrificeDied.AddDynamic(this, &ThisClass::HandleSacrificeDied);
+    RefreshBleedingLoopSound(SacrificeStateComponent->IsBleeding());
 
     if (HasAuthority())
     {
         InitializeAbilitySystem();
         GrantActionAbilities();
     }
+}
+
+void ACMSacrificeCharacter::EndPlay(
+    const EEndPlayReason::Type EndPlayReason)
+{
+    StopBleedingLoopSound();
+    Super::EndPlay(EndPlayReason);
 }
 
 void ACMSacrificeCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -150,6 +161,7 @@ int32 ACMSacrificeCharacter::ReceiveDismembermentHit_Implementation(const FCMDis
     const int32 Result = SacrificeStateComponent ? SacrificeStateComponent->ResolveDismembermentHit(Request) : 0;
     if (Result > 0 && HasAuthority())
     {
+        MulticastPlayVocalSound(CMSoundTags::AI_Sacrifice_HitScream);
         OnSacrificeHitAccepted.Broadcast(Request.Attacker, Request.SourcePart, Request.ImpactDirection);
     }
     return Result;
@@ -262,6 +274,14 @@ void ACMSacrificeCharacter::SetCurrentThreat(AActor* NewThreat)
     {
         CurrentThreat = NewThreat;
         ForceNetUpdate();
+    }
+}
+
+void ACMSacrificeCharacter::PlayThreatScream()
+{
+    if (HasAuthority())
+    {
+        MulticastPlayVocalSound(CMSoundTags::AI_Sacrifice_ThreatScream);
     }
 }
 
@@ -561,10 +581,44 @@ void ACMSacrificeCharacter::HandleMissingPartsChanged(int32 MissingPartCount)
 
 void ACMSacrificeCharacter::HandleBleedingStateChanged(const bool bBleeding)
 {
+    RefreshBleedingLoopSound(bBleeding);
     if (HasAuthority())
     {
         ApplyStateTag(CMAIGameplayTags::State_Sacrifice_Bleeding, bBleeding);
     }
+}
+
+void ACMSacrificeCharacter::RefreshBleedingLoopSound(const bool bBleeding)
+{
+    if (!bBleeding)
+    {
+        StopBleedingLoopSound();
+        return;
+    }
+    if (IsValid(BleedingLoopSoundComponent)
+        && BleedingLoopSoundComponent->IsPlaying())
+    {
+        return;
+    }
+
+    BleedingLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        GetRootComponent(),
+        CMSoundTags::AI_Sacrifice_BleedingLoop);
+}
+
+void ACMSacrificeCharacter::StopBleedingLoopSound()
+{
+    if (IsValid(BleedingLoopSoundComponent))
+    {
+        BleedingLoopSoundComponent->Stop();
+        BleedingLoopSoundComponent = nullptr;
+    }
+}
+
+void ACMSacrificeCharacter::MulticastPlayVocalSound_Implementation(
+    const FGameplayTag SoundTag)
+{
+    FCMSoundPlayback::PlaySFXAtActor(this, SoundTag);
 }
 
 // 모든 신체 애니메이션과 행동을 멈추고 사망 어빌리티 및 이동 불가 상태를 적용한다.

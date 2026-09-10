@@ -223,6 +223,10 @@ void ACMSacrificeAIController::AcquireThreat(AActor* Threat, const bool bFromHit
     const bool bAlreadyReacting = Phase == ECMSacrificeBehaviorPhase::BackFall || Phase == ECMSacrificeBehaviorPhase::BackCrawl || Phase == ECMSacrificeBehaviorPhase::Escape;
     if (!bAlreadyReacting || bFromHit)
     {
+        if (!bAlreadyReacting && !bFromHit)
+        {
+            Sacrifice->PlayThreatScream();
+        }
         StartThreatReaction();
     }
 }
