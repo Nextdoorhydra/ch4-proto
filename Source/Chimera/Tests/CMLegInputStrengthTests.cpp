@@ -19,6 +19,23 @@ bool FCMLegInputStrengthTest::RunTest(const FString& Parameters)
         return false;
     }
 
+    float TapEndSeconds = 0.0f;
+    float NormalEndSeconds = 0.0f;
+    float ChargeEndSeconds = 0.0f;
+    float OverchargeEndSeconds = 0.0f;
+    Chimera->GetLegInputHoldThresholds(
+        TapEndSeconds,
+        NormalEndSeconds,
+        ChargeEndSeconds,
+        OverchargeEndSeconds
+    );
+    TestTrue(
+        TEXT("The shared HUD and gameplay thresholds retain their defaults"),
+        FMath::IsNearlyEqual(TapEndSeconds, 0.25f)
+            && FMath::IsNearlyEqual(NormalEndSeconds, 0.7f)
+            && FMath::IsNearlyEqual(ChargeEndSeconds, 1.0f)
+            && FMath::IsNearlyEqual(OverchargeEndSeconds, 3.0f));
+
     const float ImmediateTap =
         Chimera->GetLegInputStrengthMultiplier(0.0f);
     const float TapBoundary =

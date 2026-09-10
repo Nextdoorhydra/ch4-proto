@@ -121,6 +121,14 @@ public:
     /** Maps a control-key hold duration to the configured Leg strength. */
     float GetLegInputStrengthMultiplier(float HoldSeconds) const;
 
+    /** Returns the sanitized Tap, Normal, Charge, and Overcharge end times. */
+    void GetLegInputHoldThresholds(
+        float& OutTapEndSeconds,
+        float& OutNormalEndSeconds,
+        float& OutChargeEndSeconds,
+        float& OutOverchargeEndSeconds
+    ) const;
+
     void SetPartSlotPressed(
         const FCMPartSlotAddress& PartSlotAddress,
         bool bPressed
