@@ -22,39 +22,52 @@ bool FCMLegInputStrengthTest::RunTest(const FString& Parameters)
     const float ImmediateTap =
         Chimera->GetLegInputStrengthMultiplier(0.0f);
     const float TapBoundary =
-        Chimera->GetLegInputStrengthMultiplier(0.04f);
-    const float ShortHold =
-        Chimera->GetLegInputStrengthMultiplier(0.10f);
-    const float MidHold =
-        Chimera->GetLegInputStrengthMultiplier(0.16f);
-    const float LongHold =
-        Chimera->GetLegInputStrengthMultiplier(0.22f);
-    const float FullHold =
-        Chimera->GetLegInputStrengthMultiplier(0.28f);
+        Chimera->GetLegInputStrengthMultiplier(0.25f);
+    const float NormalMidpoint =
+        Chimera->GetLegInputStrengthMultiplier(0.475f);
+    const float NormalBoundary =
+        Chimera->GetLegInputStrengthMultiplier(0.7f);
+    const float ChargeMidpoint =
+        Chimera->GetLegInputStrengthMultiplier(0.85f);
+    const float FullCharge =
+        Chimera->GetLegInputStrengthMultiplier(1.0f);
+    const float OverchargeMidpoint =
+        Chimera->GetLegInputStrengthMultiplier(2.0f);
+    const float FullOvercharge =
+        Chimera->GetLegInputStrengthMultiplier(3.0f);
 
     TestTrue(
         TEXT("Immediate taps retain 35 percent strength"),
         FMath::IsNearlyEqual(ImmediateTap, 0.35f));
     TestTrue(
-        TEXT("The first 40 ms remains in the tap-strength band"),
+        TEXT("The first 250 ms remains in the tap-strength band"),
         FMath::IsNearlyEqual(TapBoundary, ImmediateTap));
     TestTrue(
-        TEXT("Strength rises monotonically through the hold window"),
-        ImmediateTap < ShortHold
-            && ShortHold < MidHold
-            && MidHold < LongHold
-            && LongHold < FullHold);
+        TEXT("Normal strength rises from 35 to 100 percent"),
+        TapBoundary < NormalMidpoint
+            && NormalMidpoint < NormalBoundary
+            && FMath::IsNearlyEqual(NormalBoundary, 1.0f));
     TestTrue(
-        TEXT("The curve reserves its first half for fine adjustment"),
-        MidHold < 0.675f);
+        TEXT("The Normal window uses the configured ease-out curve"),
+        NormalMidpoint > 0.675f);
     TestTrue(
-        TEXT("A 280 ms hold reaches full existing strength"),
-        FMath::IsNearlyEqual(FullHold, 1.0f));
+        TEXT("Charging strength rises from 100 to 200 percent"),
+        NormalBoundary < ChargeMidpoint
+            && ChargeMidpoint < FullCharge
+            && FMath::IsNearlyEqual(FullCharge, 2.0f));
     TestTrue(
-        TEXT("Long holds never exceed full existing strength"),
+        TEXT("Overcharging uses a late-rising cubic curve"),
+        FullCharge < OverchargeMidpoint
+            && OverchargeMidpoint < FullOvercharge
+            && FMath::IsNearlyEqual(OverchargeMidpoint, 3.0f)
+            && FullOvercharge - OverchargeMidpoint
+                > OverchargeMidpoint - FullCharge
+            && FMath::IsNearlyEqual(FullOvercharge, 10.0f));
+    TestTrue(
+        TEXT("Long holds remain at 1000 percent after full overcharge"),
         FMath::IsNearlyEqual(
-            Chimera->GetLegInputStrengthMultiplier(1.0f),
-            1.0f));
+            Chimera->GetLegInputStrengthMultiplier(4.0f),
+            10.0f));
     TestTrue(
         TEXT("Invalid negative durations clamp to tap strength"),
         FMath::IsNearlyEqual(

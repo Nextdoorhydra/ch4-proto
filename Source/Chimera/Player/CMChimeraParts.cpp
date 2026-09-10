@@ -101,24 +101,89 @@ float ACMChimera::GetLegInputStrengthMultiplier(
         LegInputTapHoldSeconds,
         0.0f
     );
-    const float FullStrengthHoldSeconds = FMath::Max(
+    const float NormalHoldSeconds = FMath::Max(
         LegInputFullStrengthHoldSeconds,
         TapHoldSeconds + UE_SMALL_NUMBER
     );
-    const float HoldAlpha = FMath::Clamp(
-        (FMath::Max(HoldSeconds, 0.0f) - TapHoldSeconds)
-            / (FullStrengthHoldSeconds - TapHoldSeconds),
-        0.0f,
-        1.0f
+    const float FullChargeHoldSeconds = FMath::Max(
+        LegInputFullChargeHoldSeconds,
+        NormalHoldSeconds + UE_SMALL_NUMBER
     );
-    return FMath::Lerp(
-        MinimumStrength,
+    const float MaximumChargedStrength = FMath::Clamp(
+        LegInputMaximumChargedStrength,
         1.0f,
-        FMath::Pow(
-            HoldAlpha,
-            FMath::Max(LegInputStrengthExponent, UE_SMALL_NUMBER)
-        )
+        2.0f
     );
+    const float FullOverchargeHoldSeconds = FullChargeHoldSeconds
+        + FMath::Max(
+            LegInputOverchargeDurationSeconds,
+            UE_SMALL_NUMBER
+        );
+    const float MaximumOverchargedStrength = FMath::Clamp(
+        LegInputMaximumOverchargedStrength,
+        MaximumChargedStrength,
+        10.0f
+    );
+    const float SafeHoldSeconds = FMath::Max(HoldSeconds, 0.0f);
+    const float StrengthExponent = FMath::Max(
+        LegInputStrengthExponent,
+        UE_SMALL_NUMBER
+    );
+
+    if (SafeHoldSeconds <= TapHoldSeconds)
+    {
+        return MinimumStrength;
+    }
+
+    const auto CalculateEaseOutAlpha = [StrengthExponent](
+        const float Alpha)
+    {
+        const float ClampedAlpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
+        return 1.0f - FMath::Pow(1.0f - ClampedAlpha, StrengthExponent);
+    };
+
+    if (SafeHoldSeconds <= NormalHoldSeconds)
+    {
+        const float NormalAlpha = (SafeHoldSeconds - TapHoldSeconds)
+            / (NormalHoldSeconds - TapHoldSeconds);
+        return FMath::Lerp(
+            MinimumStrength,
+            1.0f,
+            CalculateEaseOutAlpha(NormalAlpha)
+        );
+    }
+
+    if (SafeHoldSeconds <= FullChargeHoldSeconds)
+    {
+        const float ChargeAlpha = (SafeHoldSeconds - NormalHoldSeconds)
+            / (FullChargeHoldSeconds - NormalHoldSeconds);
+        return FMath::Lerp(
+            1.0f,
+            MaximumChargedStrength,
+            CalculateEaseOutAlpha(ChargeAlpha)
+        );
+    }
+
+    if (SafeHoldSeconds <= FullOverchargeHoldSeconds)
+    {
+        const float OverchargeAlpha = FMath::Clamp(
+            (SafeHoldSeconds - FullChargeHoldSeconds)
+                / (FullOverchargeHoldSeconds - FullChargeHoldSeconds),
+            0.0f,
+            1.0f
+        );
+        const float OverchargeEaseInAlpha = FMath::Pow(
+            OverchargeAlpha,
+            FMath::Max(LegInputOverchargeExponent, 1.0f)
+        );
+        return FMath::Lerp(
+            MaximumChargedStrength,
+            MaximumOverchargedStrength,
+            OverchargeEaseInAlpha
+        );
+    }
+
+    return MaximumOverchargedStrength;
 }
 
 bool ACMChimera::TryActivateLegPart(
@@ -166,7 +231,7 @@ bool ACMChimera::TryActivateLegPartWithStrength(
             *LegPart,
             ContributingPlayerState,
             LegPart->GetMovementImpulse()
-                * FMath::Clamp(StrengthMultiplier, 0.0f, 1.0f),
+                * FMath::Clamp(StrengthMultiplier, 0.0f, 10.0f),
             bReverseMovement
         );
 }
