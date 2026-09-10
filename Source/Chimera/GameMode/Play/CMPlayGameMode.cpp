@@ -859,7 +859,7 @@ void ACMPlayGameMode::CompleteRetryVoteHold(
     if (Vote.VoteCount >= Vote.RequiredVoteCount
         && Vote.RequiredVoteCount > 0)
     {
-        RespawnAtActiveCheckpoint();
+        RestartAtActiveCheckpoint();
     }
 }
 
@@ -931,6 +931,125 @@ bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
     GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
     bCheckpointRespawnPending = false;
     return RespawnAtActiveCheckpoint();
+}
+
+bool ACMPlayGameMode::TryCheatRestartGame()
+{
+    if (UCMStageRouteSubsystem* Route = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr)
+    {
+        Route->ClearPendingCheckpointRestart();
+    }
+    return RestartCurrentWorld();
+}
+
+bool ACMPlayGameMode::RestartCurrentWorld()
+{
+    if (!HasAuthority() || !GetWorld() || bStageLoopRestartScheduled)
+    {
+        return false;
+    }
+
+    bStageLoopRestartScheduled = true;
+    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
+    GetWorldTimerManager().ClearTimer(StageLoopRestartTimerHandle);
+    bCheckpointRespawnPending = false;
+    const bool bStarted = GetWorld()->ServerTravel(TEXT("?Restart"), false);
+    if (!bStarted)
+    {
+        bStageLoopRestartScheduled = false;
+    }
+    return bStarted;
+}
+
+bool ACMPlayGameMode::RestartAtActiveCheckpoint()
+{
+    UCMStageRouteSubsystem* Route = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
+    if (!HasAuthority() || !Route)
+    {
+        return false;
+    }
+
+    ACMRoomStreamingController* RoomController = nullptr;
+    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
+    {
+        if (RoomController)
+        {
+            return false;
+        }
+        RoomController = *It;
+    }
+
+    TArray<FCMCheckpointRestartPart> RestartParts;
+    RestartParts.Reserve(CheckpointParts.Num());
+    for (const FCMCheckpointPartRecord& Record : CheckpointParts)
+    {
+        FCMCheckpointRestartPart& RestartPart = RestartParts.AddDefaulted_GetRef();
+        RestartPart.SlotAddress = Record.SlotAddress;
+        RestartPart.PartClass = Record.PartClass;
+        RestartPart.PartRowName = Record.PartRowName;
+        RestartPart.TierRowName = Record.TierRowName;
+    }
+
+    const int32 CheckpointNumber = RoomController ? RoomController->GetActiveCheckpointNumber() : 0;
+    Route->SetPendingCheckpointRestart(CheckpointNumber, RestartParts);
+    if (RestartCurrentWorld())
+    {
+        return true;
+    }
+
+    Route->ClearPendingCheckpointRestart();
+    return false;
+}
+
+void ACMPlayGameMode::ApplyPendingCheckpointRestart()
+{
+    UCMStageRouteSubsystem* Route = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
+    int32 CheckpointNumber = INDEX_NONE;
+    TArray<FCMCheckpointRestartPart> RestartParts;
+    if (!HasAuthority() || !Route || !Route->GetPendingCheckpointRestart(CheckpointNumber, RestartParts))
+    {
+        return;
+    }
+
+    ACMRoomStreamingController* RoomController = nullptr;
+    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
+    {
+        if (RoomController)
+        {
+            UE_LOG(LogChimeraStageLoad, Error,
+                TEXT("체크포인트 재시작을 복원할 RoomStreamingController가 중복되었습니다."));
+            Route->ClearPendingCheckpointRestart();
+            return;
+        }
+        RoomController = *It;
+    }
+
+    if (CheckpointNumber > 0 && (!RoomController || !RoomController->RestoreCheckpointForRestart(CheckpointNumber)))
+    {
+        UE_LOG(LogChimeraStageLoad, Error,
+            TEXT("전체 재시작 후 체크포인트를 복원하지 못했습니다. Checkpoint=%d"),
+            CheckpointNumber);
+        Route->ClearPendingCheckpointRestart();
+        return;
+    }
+
+    CheckpointParts.Reset(RestartParts.Num());
+    for (const FCMCheckpointRestartPart& RestartPart : RestartParts)
+    {
+        FCMCheckpointPartRecord& Record = CheckpointParts.AddDefaulted_GetRef();
+        Record.SlotAddress = RestartPart.SlotAddress;
+        Record.PartClass = RestartPart.PartClass;
+        Record.PartRowName = RestartPart.PartRowName;
+        Record.TierRowName = RestartPart.TierRowName;
+    }
+
+    Route->ClearPendingCheckpointRestart();
+    const bool bRestored = RespawnAtActiveCheckpoint();
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("[Checkpoint World Restart] Checkpoint=%d Parts=%d Restored=%d"),
+        CheckpointNumber, CheckpointParts.Num(), bRestored);
 }
 
 bool ACMPlayGameMode::TryCheatNextStage()
@@ -1343,6 +1462,7 @@ bool ACMPlayGameMode::HandleStartingPresentationFinished(
     GetWorldTimerManager().ClearTimer(StartingPresentationTimeoutHandle);
     SetPlayPhase(ECMPlayPhase::Playing);
     PlayState->SetStagePresentationState(ECMStagePresentationState::None);
+    ApplyPendingCheckpointRestart();
     return true;
 }
 

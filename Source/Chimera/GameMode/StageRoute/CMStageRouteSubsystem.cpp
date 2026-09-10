@@ -47,6 +47,31 @@ void UCMStageRouteSubsystem::ResetStageRoute()
     PendingStageIndex = INDEX_NONE;
     ExpectedPlayerCount = 0;
     bSoloTestMode = false;
+    ClearPendingCheckpointRestart();
+}
+
+void UCMStageRouteSubsystem::SetPendingCheckpointRestart(const int32 OneBasedCheckpointNumber, const TArray<FCMCheckpointRestartPart>& Parts)
+{
+    PendingCheckpointRestartNumber = OneBasedCheckpointNumber;
+    PendingCheckpointRestartParts = Parts;
+}
+
+bool UCMStageRouteSubsystem::GetPendingCheckpointRestart(int32& OutOneBasedCheckpointNumber, TArray<FCMCheckpointRestartPart>& OutParts) const
+{
+    if (PendingCheckpointRestartNumber == INDEX_NONE)
+    {
+        return false;
+    }
+
+    OutOneBasedCheckpointNumber = PendingCheckpointRestartNumber;
+    OutParts = PendingCheckpointRestartParts;
+    return true;
+}
+
+void UCMStageRouteSubsystem::ClearPendingCheckpointRestart()
+{
+    PendingCheckpointRestartNumber = INDEX_NONE;
+    PendingCheckpointRestartParts.Reset();
 }
 
 // RouteDefinition에 저장된 현재 스테이지 반복 정책 반환
