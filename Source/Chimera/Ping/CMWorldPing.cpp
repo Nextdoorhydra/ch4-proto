@@ -74,6 +74,8 @@ ACMWorldPing::ACMWorldPing()
     MarkerWidgetComponent->SetDrawSize(FVector2D(190.0f, 155.0f));
     MarkerWidgetComponent->SetPivot(FVector2D(0.5f, 0.5f));
     ConfigureWorldWidget(*MarkerWidgetComponent);
+    MarkerWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+    MarkerWidgetComponent->SetTickWhenOffscreen(true);
 }
 
 void ACMWorldPing::BeginPlay()

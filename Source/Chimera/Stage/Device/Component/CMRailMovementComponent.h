@@ -120,8 +120,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Rail", meta = (ClampMin = "0.1", ClampMax = "10", Units = "cm"))
     float CollisionStepDistance = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Rail", meta = (ClampMin = "1", Units = "cm"))
-    float ReleaseDistance = 250.0f;
+    // Actor-specific reach override. The arm's normal reach still applies when it is larger.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Rail|Hold", meta = (ClampMin = "1", Units = "cm"))
+    float MaximumGrabDistance = 250.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Rail|Hold", meta = (ClampMin = "1", Units = "cm"))
+    float ReleaseDistance = 400.0f;
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Rail")
     FCMRailProgressSignature OnProgressChanged;

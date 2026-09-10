@@ -232,8 +232,12 @@ bool UCMRailMovementComponent::CanArmHold(ACMArmPart* Arm) const
     if (!GetOwner()->HasAuthority() || !IsConfigured() || !bInteractionEnabled
         || bTrackingHold || bAutomaticMove || !IsValid(Arm) || !Arm->IsOperational()) return false;
 
-    return FVector::Dist(Arm->GetActorLocation(), Handle->GetComponentLocation())
-        <= Arm->GetHoldRange() + Arm->GetHoldRadius();
+    const float GrabDistance = FMath::Max(
+        MaximumGrabDistance,
+        Arm->GetHoldRange() + Arm->GetHoldRadius());
+    return FVector::DistSquared(
+        Arm->GetActorLocation(),
+        Handle->GetComponentLocation()) <= FMath::Square(GrabDistance);
 }
 
 bool UCMRailMovementComponent::BeginArmHold(ACMArmPart* Arm)
@@ -543,9 +547,16 @@ bool UCMRailMovementComponent::TryCollisionPush(
     const float PushSpeed = FMath::Min(
         FMath::Max(CollisionPushSpeed, 0.01f),
         FMath::Max(MaxMoveSpeed, 1.0f));
+    // Ignore the character/body that is supplying the push so it does not
+    // immediately block the movement. Another rail actor must remain in the
+    // sweep, otherwise two rail bodies can move through each other.
+    const AActor* IgnoredPusher =
+        PushingActor->FindComponentByClass<UCMRailMovementComponent>()
+            ? nullptr
+            : PushingActor;
     return AdvanceFromWorldDelta(
         WorldPushDirection * PushSpeed * DeltaTime,
-        PushingActor);
+        IgnoredPusher);
 }
 
 void UCMRailMovementComponent::PublishProgress(float PreviousProgress)
@@ -582,8 +593,13 @@ void UCMRailMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
     if (bTrackingHold)
     {
         ACMArmPart* Arm = HoldingArm.Get();
+        const float EffectiveReleaseDistance = FMath::Max(
+            ReleaseDistance,
+            MaximumGrabDistance);
         if (!IsValid(Arm) || !Arm->IsOperational() || !Arm->IsHolding()
-            || FVector::Dist(Arm->GetActorLocation(), Handle->GetComponentLocation()) > ReleaseDistance)
+            || FVector::DistSquared(
+                Arm->GetActorLocation(),
+                Handle->GetComponentLocation()) > FMath::Square(EffectiveReleaseDistance))
         {
             StopMovement();
             return;

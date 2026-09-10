@@ -25,6 +25,8 @@ private:
     void ApplyPresentation();
 
     ECMPingType PingType = ECMPingType::GoHere;
+    FSlateBrush GlowBrush;
     FSlateBrush CircleBrush;
+    TSharedPtr<SImage> GlowImage;
     TSharedPtr<SImage> CircleImage;
 };
