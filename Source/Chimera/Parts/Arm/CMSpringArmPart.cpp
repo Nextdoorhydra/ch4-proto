@@ -34,6 +34,12 @@ ACMSpringArmPart::ACMSpringArmPart()
     PrimaryActorTick.bCanEverTick = true;
 }
 
+void ACMSpringArmPart::BeginPlay()
+{
+    Super::BeginPlay();
+    OnPartDied.AddDynamic(this, &ACMSpringArmPart::HandleSpringArmDied);
+}
+
 void ACMSpringArmPart::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const
@@ -96,6 +102,15 @@ void ACMSpringArmPart::Tick(float DeltaSeconds)
     if (!AimDirection.IsNearlyZero())
     {
         SweepDirectionArrow->SetWorldRotation(AimDirection.Rotation());
+    }
+}
+
+void ACMSpringArmPart::HandleSpringArmDied()
+{
+    if (SweepDirectionArrow)
+    {
+        SweepDirectionArrow->SetVisibility(false);
+        SweepDirectionArrow->SetHiddenInGame(true);
     }
 }
 
