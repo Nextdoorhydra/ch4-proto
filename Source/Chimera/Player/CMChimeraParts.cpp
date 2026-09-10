@@ -88,6 +88,32 @@ void ACMChimera::ActivatePartSlotWithLegStrength(
         PartSlotAddress.PartSlotIndex);
 }
 
+void ACMChimera::GetLegInputHoldThresholds(
+    float& OutTapEndSeconds,
+    float& OutNormalEndSeconds,
+    float& OutChargeEndSeconds,
+    float& OutOverchargeEndSeconds
+) const
+{
+    OutTapEndSeconds = FMath::Max(
+        LegInputTapHoldSeconds,
+        0.0f
+    );
+    OutNormalEndSeconds = FMath::Max(
+        LegInputFullStrengthHoldSeconds,
+        OutTapEndSeconds + UE_SMALL_NUMBER
+    );
+    OutChargeEndSeconds = FMath::Max(
+        LegInputFullChargeHoldSeconds,
+        OutNormalEndSeconds + UE_SMALL_NUMBER
+    );
+    OutOverchargeEndSeconds = OutChargeEndSeconds
+        + FMath::Max(
+            LegInputOverchargeDurationSeconds,
+            UE_SMALL_NUMBER
+        );
+}
+
 float ACMChimera::GetLegInputStrengthMultiplier(
     const float HoldSeconds
 ) const
@@ -97,28 +123,21 @@ float ACMChimera::GetLegInputStrengthMultiplier(
         0.0f,
         1.0f
     );
-    const float TapHoldSeconds = FMath::Max(
-        LegInputTapHoldSeconds,
-        0.0f
-    );
-    const float NormalHoldSeconds = FMath::Max(
-        LegInputFullStrengthHoldSeconds,
-        TapHoldSeconds + UE_SMALL_NUMBER
-    );
-    const float FullChargeHoldSeconds = FMath::Max(
-        LegInputFullChargeHoldSeconds,
-        NormalHoldSeconds + UE_SMALL_NUMBER
+    float TapHoldSeconds = 0.0f;
+    float NormalHoldSeconds = 0.0f;
+    float FullChargeHoldSeconds = 0.0f;
+    float FullOverchargeHoldSeconds = 0.0f;
+    GetLegInputHoldThresholds(
+        TapHoldSeconds,
+        NormalHoldSeconds,
+        FullChargeHoldSeconds,
+        FullOverchargeHoldSeconds
     );
     const float MaximumChargedStrength = FMath::Clamp(
         LegInputMaximumChargedStrength,
         1.0f,
         2.0f
     );
-    const float FullOverchargeHoldSeconds = FullChargeHoldSeconds
-        + FMath::Max(
-            LegInputOverchargeDurationSeconds,
-            UE_SMALL_NUMBER
-        );
     const float MaximumOverchargedStrength = FMath::Clamp(
         LegInputMaximumOverchargedStrength,
         MaximumChargedStrength,
