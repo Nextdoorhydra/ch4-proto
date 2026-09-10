@@ -208,7 +208,7 @@ void UCMPingSelectorWidget::BeginSelection(
 {
     SetDesiredSizeInViewport(FVector2D(WheelSize, WheelSize));
     SetAlignmentInViewport(FVector2D(0.5f, 0.5f));
-    SetPositionInViewport(ScreenPosition, false);
+    SetPositionInViewport(ScreenPosition, true);
     CurrentDrag = FVector2D::ZeroVector;
     bHasSelection = false;
     RefreshSelection();
