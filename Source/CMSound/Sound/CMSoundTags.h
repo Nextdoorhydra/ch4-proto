@@ -30,6 +30,7 @@ namespace CMSoundTags
     CMSOUND_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(AI_Sacrifice_BleedingLoop);
 
     CMSOUND_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stage_Button_Press);
+    CMSOUND_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stage_PowerCable_Grabbed);
     CMSOUND_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stage_PowerCable_Connected);
     CMSOUND_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stage_PressurePlate_WeightChanged);
     CMSOUND_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Stage_Obstacle_RotatingBlade_ActiveLoop);

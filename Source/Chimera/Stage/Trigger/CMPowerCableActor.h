@@ -341,6 +341,9 @@ protected:
     UFUNCTION(NetMulticast, Unreliable)
     void MulticastPlayConnectionSound(FVector_NetQuantize10 SoundLocation);
 
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayGrabSound(FVector_NetQuantize10 SoundLocation);
+
     int32 GetVisualSegmentCount() const;
     float GetCableSag() const;
     float GetCableThicknessScale() const;
