@@ -158,10 +158,12 @@ void ACMPowerCableActor::BeginPlay()
         bInitialStateCaptured = true;
         bConnectionSoundEnabled = true;
     }
-    InitializeRope();
-    CablePhysics->SetComponentTickEnabled(HasAuthority());
-    if (HasAuthority())
+    const bool bCanInitializeCable = HasAuthority()
+        && CableDefinition.IsNull();
+    CablePhysics->SetComponentTickEnabled(bCanInitializeCable);
+    if (bCanInitializeCable)
     {
+        InitializeRope();
         UpdateCablePhysics();
     }
 
@@ -216,7 +218,8 @@ void ACMPowerCableActor::Tick(float DeltaSeconds)
         bHasCachedVisualEndpoint = false;
     }
 
-    if (HasAuthority() && CablePhysics)
+    if (HasAuthority() && CablePhysics
+        && CablePhysics->IsComponentTickEnabled())
     {
         UpdateCablePhysics();
         TArray<FVector> ParticleLocations;
@@ -2009,6 +2012,42 @@ bool ACMPowerCableActor::TryBuildCableVisual()
         RopePositions.Reset();
         RopePreviousPositions.Reset();
         InitializeRope();
+    }
+
+    if (HasAuthority() && CablePhysics
+        && !CablePhysics->IsComponentTickEnabled())
+    {
+        UpdateCablePhysics();
+
+        if (!IsGrabbed() && !HasAnyEndpointConnected())
+        {
+            // CableComponent initializes every particle inside EndLocation's
+            // short default span. Grow long loose cables one node at a time
+            // before displaying them so constraint correction cannot launch
+            // the initial particles through the floor.
+            const float TargetLength = CablePhysics->CableLength;
+            CablePhysics->CableLength = FMath::Min(
+                TargetLength,
+                FMath::Max(CablePhysics->EndLocation.Size(),
+                    GetRopeNodeSpacing()));
+            CablePhysics->ReregisterComponent();
+
+            while (CablePhysics->CableLength < TargetLength)
+            {
+                CablePhysics->CableLength = FMath::Min(
+                    CablePhysics->CableLength + GetRopeNodeSpacing(),
+                    TargetLength);
+                CablePhysics->TickComponent(
+                    1.0f / 60.0f, LEVELTICK_All, nullptr);
+            }
+            for (int32 SettleStep = 0; SettleStep < 60; ++SettleStep)
+            {
+                CablePhysics->TickComponent(
+                    1.0f / 60.0f, LEVELTICK_All, nullptr);
+            }
+        }
+
+        CablePhysics->SetComponentTickEnabled(true);
     }
 
     CableMeshes.Reserve(GetVisualSegmentCount());
