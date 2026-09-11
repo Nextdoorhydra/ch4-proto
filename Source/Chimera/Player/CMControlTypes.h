@@ -14,10 +14,10 @@ struct CHIMERA_API FCMPartSlotAddress
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
     int32 SegmentIndex = INDEX_NONE;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
     int32 PartSlotIndex = INDEX_NONE;
 
     bool operator==(const FCMPartSlotAddress& Other) const

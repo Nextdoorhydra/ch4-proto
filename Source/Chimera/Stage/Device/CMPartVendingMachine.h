@@ -105,7 +105,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|Part Vending Machine|Output",
         meta = (Units = "cm/s"))
-    FVector LocalEjectVelocity = FVector(300.0f, 0.0f, 150.0f);
+    FVector LocalEjectVelocity = FVector(500.0f, 0.0f, 150.0f);
 
     /** 배출 가능한 남은 횟수다. 성공적으로 배출됐을 때만 감소한다. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_RemainingUses,
