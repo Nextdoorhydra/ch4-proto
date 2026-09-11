@@ -21,6 +21,13 @@ bool FListenServerStatePolicyTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Second operation id"), Second, uint64(2));
 	TestTrue(TEXT("Old callback is stale"), ListenServerNetworkPolicy::IsStaleOperation(First, Second));
 	TestFalse(TEXT("Current callback is not stale"), ListenServerNetworkPolicy::IsStaleOperation(Second, Second));
+	TestFalse(TEXT("Listen host stays up when a connection is lost"), ListenServerNetworkPolicy::ShouldRecoverFromNetworkFailure(ENetworkFailure::ConnectionLost, NM_ListenServer));
+	TestFalse(TEXT("Listen host stays up when a connection times out"), ListenServerNetworkPolicy::ShouldRecoverFromNetworkFailure(ENetworkFailure::ConnectionTimeout, NM_ListenServer));
+	TestTrue(TEXT("Listen host recovers when its net driver cannot listen"), ListenServerNetworkPolicy::ShouldRecoverFromNetworkFailure(ENetworkFailure::NetDriverListenFailure, NM_ListenServer));
+	TestTrue(TEXT("Client recovers when its server connection is lost"), ListenServerNetworkPolicy::ShouldRecoverFromNetworkFailure(ENetworkFailure::ConnectionLost, NM_Client));
+	TestTrue(TEXT("Host retries a transient net driver create failure"), ListenServerNetworkPolicy::IsRetryableHostListenFailure(ENetworkFailure::NetDriverCreateFailure));
+	TestTrue(TEXT("Host retries a transient listen failure"), ListenServerNetworkPolicy::IsRetryableHostListenFailure(ENetworkFailure::NetDriverListenFailure));
+	TestFalse(TEXT("Host does not retry a protocol mismatch"), ListenServerNetworkPolicy::IsRetryableHostListenFailure(ENetworkFailure::NetChecksumMismatch));
 
 	FListenServerSearchResultHandle Handle;
 	Handle.SearchGeneration = 7;
