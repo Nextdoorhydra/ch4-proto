@@ -41,6 +41,7 @@ bool FCMPartVendingMachineTest::RunTest(const FString& Parameters)
         return false;
     }
     Machine->PartClass = ACMArmPart::StaticClass();
+    Machine->RemainingUses = 2;
 
     FCMCombatHitRequest Request;
     Request.SourcePart = Arm;
@@ -58,6 +59,8 @@ bool FCMPartVendingMachineTest::RunTest(const FString& Parameters)
         }
     }
     TestEqual(TEXT("One Part is spawned"), SpawnedParts.Num(), 1);
+    TestEqual(TEXT("A successful dispense consumes one use"),
+        Machine->RemainingUses, 1);
 
     TestTrue(TEXT("Repeated detection of the same swing is accepted"),
         ICMCombatHitTarget::Execute_ReceiveCombatHit(Machine, Request));
@@ -71,6 +74,27 @@ bool FCMPartVendingMachineTest::RunTest(const FString& Parameters)
     }
     TestEqual(TEXT("The same swing does not dispense twice"),
         SpawnedParts.Num(), 1);
+    TestEqual(TEXT("Repeated detection does not consume another use"),
+        Machine->RemainingUses, 1);
+
+    Request.AttackId = FGuid::NewGuid();
+    TestTrue(TEXT("A second swing consumes the final use"),
+        ICMCombatHitTarget::Execute_ReceiveCombatHit(Machine, Request));
+    TestEqual(TEXT("No uses remain"), Machine->RemainingUses, 0);
+
+    Request.AttackId = FGuid::NewGuid();
+    TestFalse(TEXT("An exhausted machine rejects a new swing"),
+        ICMCombatHitTarget::Execute_ReceiveCombatHit(Machine, Request));
+    SpawnedParts.Reset();
+    for (TActorIterator<ACMPartActorBase> It(World); It; ++It)
+    {
+        if (*It != Arm)
+        {
+            SpawnedParts.Add(*It);
+        }
+    }
+    TestEqual(TEXT("An exhausted machine spawns no additional Part"),
+        SpawnedParts.Num(), 2);
 
     FCMCombatHitRequest InvalidRequest;
     InvalidRequest.SourcePart = World->SpawnActor<AActor>();
