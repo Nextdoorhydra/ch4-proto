@@ -31,6 +31,7 @@ public class Chimera : ModuleRules
 		{
 			"CMGore",
 			"CMSound",
+			"NKMSoundRuntime",
 			"ListenServerNetwork",
 			"EnhancedInput",
 			"InputCore",

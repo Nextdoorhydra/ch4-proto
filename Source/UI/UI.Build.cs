@@ -25,6 +25,7 @@ public class UI : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"CMSound",
 			"GameplayAbilities",
 			"InputCore",
 			"Niagara",
