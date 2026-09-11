@@ -191,6 +191,31 @@ namespace ListenServerNetworkPolicy
 		}
 	}
 
+	bool IsRetryableHostListenFailure(ENetworkFailure::Type FailureType)
+	{
+		return FailureType == ENetworkFailure::NetDriverCreateFailure || FailureType == ENetworkFailure::NetDriverListenFailure;
+	}
+
+	bool ShouldRecoverFromNetworkFailure(ENetworkFailure::Type FailureType, ENetMode FailedNetMode)
+	{
+		const bool bHost = FailedNetMode == NM_ListenServer || FailedNetMode == NM_DedicatedServer;
+		if (!bHost)
+		{
+			return true;
+		}
+
+		switch (FailureType)
+		{
+		case ENetworkFailure::ConnectionLost:
+		case ENetworkFailure::ConnectionTimeout:
+		case ENetworkFailure::NetGuidMismatch:
+		case ENetworkFailure::NetChecksumMismatch:
+			return false;
+		default:
+			return true;
+		}
+	}
+
 	FString SanitizeExternalString(const FString& Value, int32 MaxLength)
 	{
 		FString Result;

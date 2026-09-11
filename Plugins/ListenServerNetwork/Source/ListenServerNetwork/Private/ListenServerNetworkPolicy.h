@@ -1,7 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineBaseTypes.h"
 #include "ListenServerNetworkTypes.h"
+#include "Net/Core/Connection/NetEnums.h"
 
 namespace ListenServerNetworkKeys
 {
@@ -74,5 +76,7 @@ namespace ListenServerNetworkPolicy
 	bool ValidateAttributes(const TArray<FListenServerSessionAttribute>& Attributes, bool bRejectReservedKeys, FString& OutReason);
 	EListenServerError CheckCompatibility(const FCompatibilityCandidate& Candidate, const FCompatibilityRequest& Request);
 	EListenServerError MapJoinFailure(EJoinFailureCode FailureCode);
+	bool IsRetryableHostListenFailure(ENetworkFailure::Type FailureType);
+	bool ShouldRecoverFromNetworkFailure(ENetworkFailure::Type FailureType, ENetMode FailedNetMode);
 	FString SanitizeExternalString(const FString& Value, int32 MaxLength = MaxAttributeValueLength);
 }
