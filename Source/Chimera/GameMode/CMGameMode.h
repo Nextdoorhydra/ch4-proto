@@ -7,6 +7,7 @@
 
 class ACMPlayerState;
 class ACMChimera;
+class UCMStageLoadCoordinatorSubsystem;
 
 UCLASS()
 class CHIMERA_API ACMGameMode : public AGameModeBase
@@ -17,6 +18,7 @@ public:
     ACMGameMode();
 
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void Logout(AController* Exiting) override;
     virtual void RestartPlayer(AController* NewPlayer) override;
     virtual void GenericPlayerInitialization(AController* C) override;
@@ -38,6 +40,7 @@ protected:
         ACMChimera* SharedChimera);
 
     bool IsGameplayMap() const;
+    bool IsMainMenuMap() const;
     bool IsSoloTestMode() const;
     void AssignPlayerSlots();
     void AssignPlayerColors();
@@ -50,6 +53,19 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Chimera|Spawn")
     FName SharedChimeraPlayerStartTag;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Main Menu")
+    FPrimaryAssetId MainMenuLoadScheduleId;
+
 private:
+    void StartMainMenuAudio();
+    void StopMainMenuAudio();
+
+    UFUNCTION()
+    void HandleMainMenuLoadFinished(FGuid RequestId, bool bSucceeded);
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCMStageLoadCoordinatorSubsystem> MainMenuLoadCoordinator;
+
+    FGuid MainMenuLoadRequestId;
     bool bRetryInProgress = false;
 };

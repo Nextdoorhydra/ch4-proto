@@ -4,6 +4,8 @@
 #include "AsyncPDALoader.h"
 #include "AsyncPDALoaderTags.h"
 #include "PrimaryDataAssetBase.h"
+#include "Components/AudioComponent.h"
+#include "Sound/NKMSoundCatalogProvider.h"
 #include "Sound/NKMSoundSettings.h"
 #include "Sound/NKMSoundSubsystem.h"
 
@@ -34,6 +36,8 @@ void UCMGameSoundBridgeSubsystem::Deinitialize()
     {
         SoundSubsystem->ClearSoundDataAssets();
     }
+    PersistentSFXEntryVolumesByTag.Empty();
+    PersistentSFXComponents.Empty();
     SoundSubsystem = nullptr;
     Super::Deinitialize();
 }
@@ -61,17 +65,66 @@ void UCMGameSoundBridgeSubsystem::RebuildRegisteredSoundCatalogs()
     }
 
     SoundSubsystem->ClearSoundDataAssets();
+    PersistentSFXEntryVolumesByTag.Empty();
     bool bRegisteredAnyCatalog = false;
     for (const FPrimaryAssetId& AssetId : Settings->SoundDataAssetIds)
     {
         if (UObject* SoundCatalog = Loader->FindCachedAsset(AssetId))
         {
             bRegisteredAnyCatalog |= SoundSubsystem->RegisterSoundCatalog(SoundCatalog);
+            if (const INKMSoundCatalogProvider* Provider = Cast<INKMSoundCatalogProvider>(SoundCatalog))
+            {
+                for (const FNKMSoundEntry& Entry : Provider->GetSoundEntries())
+                {
+                    if (Entry.SoundTag.IsValid()
+                        && Entry.Layer != ENKMSoundLayer::BGM
+                        && Entry.Layer != ENKMSoundLayer::Crowd)
+                    {
+                        PersistentSFXEntryVolumesByTag.FindOrAdd(Entry.SoundTag, Entry.Volume);
+                    }
+                }
+            }
         }
     }
 
     if (bRegisteredAnyCatalog)
     {
         OnSoundCatalogsRebuilt.Broadcast();
+    }
+}
+
+void UCMGameSoundBridgeSubsystem::RegisterPersistentSFX(
+    UAudioComponent* AudioComponent,
+    FGameplayTag SoundTag)
+{
+    if (!IsValid(AudioComponent))
+    {
+        return;
+    }
+
+    if (const float* EntryVolume = PersistentSFXEntryVolumesByTag.Find(SoundTag))
+    {
+        PersistentSFXComponents.Add(AudioComponent, *EntryVolume);
+    }
+}
+
+void UCMGameSoundBridgeSubsystem::ApplyPersistentSFXVolumes()
+{
+    if (!SoundSubsystem)
+    {
+        return;
+    }
+
+    const float LayerVolume = SoundSubsystem->GetMasterVolume() * SoundSubsystem->GetSFXVolume();
+    for (auto It = PersistentSFXComponents.CreateIterator(); It; ++It)
+    {
+        UAudioComponent* AudioComponent = It.Key().Get();
+        if (!IsValid(AudioComponent) || !AudioComponent->IsPlaying())
+        {
+            It.RemoveCurrent();
+            continue;
+        }
+
+        AudioComponent->SetVolumeMultiplier(It.Value() * LayerVolume);
     }
 }
