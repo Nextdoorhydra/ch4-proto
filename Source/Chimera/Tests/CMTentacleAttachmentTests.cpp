@@ -802,6 +802,10 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             TEXT("Part attaches after entering the slot acceptance distance"),
             PullSlot ? PullSlot->GetAttachedPart() : nullptr,
             static_cast<AActor*>(RuntimeTarget));
+        TestEqual(
+            TEXT("Attached Part is owned by the authoritative Chimera"),
+            RuntimeTarget->GetOwner(),
+            static_cast<AActor*>(Chimera));
         TestFalse(
             TEXT("Part reservation clears after attachment"),
             RuntimeTarget->IsReservedByTentacle(RuntimeTentacle));
@@ -824,6 +828,31 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             TEXT("Attached Part restores its authored gameplay hurtbox"),
             RuntimeTarget->GetDamageHurtbox()->GetCollisionEnabled(),
             ExpectedMountedHurtboxCollision);
+        const FTransform ExpectedAttachedRootTransform =
+            RuntimeTarget->GetRootComponent()->GetRelativeTransform();
+        RuntimeTarget->GetPartMesh()->SetVisibility(false, true);
+        RuntimeTarget->GetPartMesh()->SetHiddenInGame(true, true);
+        RuntimeTarget->SetRole(ROLE_SimulatedProxy);
+        RuntimeTarget->PrepareForPartSlotAttachment();
+        TestTrue(
+            TEXT("Client attachment restores a living Part mesh visibility"),
+            RuntimeTarget->GetPartMesh()->IsVisible());
+        TestFalse(
+            TEXT("Client attachment clears a living Part mesh hidden state"),
+            RuntimeTarget->GetPartMesh()->bHiddenInGame);
+        RuntimeTarget->DetachFromActor(
+            FDetachmentTransformRules::KeepWorldTransform);
+        RuntimeTarget->AttachedSlotAddress = PullSlotAddress;
+        RuntimeTarget->OnRep_AttachmentPhysicsState();
+        TestEqual(
+            TEXT("Client Part mount address restores the slot attachment"),
+            RuntimeTarget->GetRootComponent()->GetAttachParent(),
+            static_cast<USceneComponent*>(PullSlot));
+        TestTrue(
+            TEXT("Client Part mount address restores the server-relative transform"),
+            RuntimeTarget->GetRootComponent()->GetRelativeTransform().Equals(
+                ExpectedAttachedRootTransform));
+        RuntimeTarget->SetRole(ROLE_Authority);
 
         AActor* DetachedPart = Chimera->DetachPartFromSlot(
             PullSlotAddress);
@@ -869,6 +898,44 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             RuntimeTarget->GetAuthoritativePickupLocation().Equals(
                 ReplicatedServerCenter,
                 0.1f));
+
+        UClass* RuntimeHeadClass = LoadClass<ACMPartActorBase>(
+            nullptr,
+            TEXT("/Game/Chimera/Character/Part/Head/BluePrint/BP_CMHead01HeadPart.BP_CMHead01HeadPart_C"));
+        ACMPartActorBase* RuntimeHead = PullSlot
+            ? World->SpawnActor<ACMPartActorBase>(
+                RuntimeHeadClass,
+                PullSlot->GetComponentTransform())
+            : nullptr;
+        TestNotNull(TEXT("Runtime Head Part spawns"), RuntimeHead);
+        TestTrue(
+            TEXT("Runtime Head Part attaches on the server"),
+            RuntimeHead && PullSlot->AttachPart(RuntimeHead));
+        if (RuntimeHead)
+        {
+            const FTransform ServerHeadRelativeTransform =
+                RuntimeHead->GetRootComponent()->GetRelativeTransform();
+            RuntimeHead->SetRole(ROLE_SimulatedProxy);
+            RuntimeHead->DetachFromActor(
+                FDetachmentTransformRules::KeepWorldTransform);
+            RuntimeHead->AttachedSlotAddress = PullSlotAddress;
+            RuntimeHead->OnRep_AttachmentPhysicsState();
+            TestTrue(
+                TEXT("Client Head Part remains visible after attachment replication"),
+                RuntimeHead->GetPartMesh()->IsVisible()
+                    && !RuntimeHead->GetPartMesh()->bHiddenInGame);
+            TestEqual(
+                TEXT("Client Head Part attaches to the server slot"),
+                RuntimeHead->GetRootComponent()->GetAttachParent(),
+                static_cast<USceneComponent*>(PullSlot));
+            TestTrue(
+                TEXT("Client Head Part matches the server-relative transform"),
+                RuntimeHead->GetRootComponent()->GetRelativeTransform().Equals(
+                    ServerHeadRelativeTransform));
+            RuntimeHead->SetRole(ROLE_Authority);
+            PullSlot->DetachPart();
+            RuntimeHead->Destroy();
+        }
 
         ACMDroppedPartActor* RuntimeDrop =
             World->SpawnActor<ACMDroppedPartActor>();
