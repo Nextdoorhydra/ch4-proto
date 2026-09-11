@@ -1,6 +1,7 @@
 #include "CMUserSettingsSubsystem.h"
 
 #include "Misc/ConfigCacheIni.h"
+#include "Sound/CMGameSoundBridgeSubsystem.h"
 #include "Sound/NKMSoundSubsystem.h"
 
 namespace CMUserSettings
@@ -32,6 +33,11 @@ void UCMUserSettingsSubsystem::SetMasterVolume(float Value)
     {
         Sound->SetMasterVolume(MasterVolume);
     }
+    if (UCMGameSoundBridgeSubsystem* SoundBridge =
+        GetGameInstance()->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+    {
+        SoundBridge->ApplyPersistentSFXVolumes();
+    }
 }
 
 void UCMUserSettingsSubsystem::SetBGMVolume(float Value)
@@ -49,6 +55,11 @@ void UCMUserSettingsSubsystem::SetSFXVolume(float Value)
     if (UNKMSoundSubsystem* Sound = GetGameInstance()->GetSubsystem<UNKMSoundSubsystem>())
     {
         Sound->SetSFXVolume(SFXVolume);
+    }
+    if (UCMGameSoundBridgeSubsystem* SoundBridge =
+        GetGameInstance()->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+    {
+        SoundBridge->ApplyPersistentSFXVolumes();
     }
 }
 
@@ -81,6 +92,11 @@ void UCMUserSettingsSubsystem::ApplyVolumes() const
         Sound->SetMasterVolume(MasterVolume);
         Sound->SetBGMVolume(BGMVolume);
         Sound->SetSFXVolume(SFXVolume);
+    }
+    if (UCMGameSoundBridgeSubsystem* SoundBridge =
+        GetGameInstance()->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+    {
+        SoundBridge->ApplyPersistentSFXVolumes();
     }
 }
 

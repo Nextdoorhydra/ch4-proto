@@ -4,6 +4,7 @@
 #include "GameMode/CMGameState.h"
 #include "GameMode/Play/CMPlayGameMode.h"
 #include "GameMode/StageRoute/CMStageRouteSubsystem.h"
+#include "AsyncLoad/CMStageLoadCoordinatorSubsystem.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPlayerState.h"
@@ -14,6 +15,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "ListenServerNetworkSettings.h"
 #include "Misc/PackageName.h"
+#include "Sound/CMGameSoundBridgeSubsystem.h"
+#include "Sound/CMSoundTags.h"
+#include "Sound/NKMSoundSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraMultiplayer, Log, All);
 
@@ -25,6 +29,9 @@ ACMGameMode::ACMGameMode()
     GameStateClass = ACMGameState::StaticClass();
     DefaultPawnClass = ACMChimera::StaticClass();
     bUseSeamlessTravel = true;
+    MainMenuLoadScheduleId = FPrimaryAssetId(
+        FPrimaryAssetType(TEXT("CMStageLoadSchedule")),
+        TEXT("PDA_CMLoadSchedule_MainMenu"));
 }
 
 // 맵 시작 시 플레이어 색상과 공용 키메라 조작 상태 초기화
@@ -35,7 +42,11 @@ void ACMGameMode::BeginPlay()
     AssignPlayerSlots();
     AssignPlayerColors();
 
-    if (IsGameplayMap())
+    if (IsMainMenuMap())
+    {
+        StartMainMenuAudio();
+    }
+    else if (IsGameplayMap())
     {
         if (ACMGameState* CMGameState = GetGameState<ACMGameState>())
         {
@@ -43,6 +54,12 @@ void ACMGameMode::BeginPlay()
         }
         EnsureSharedChimera();
     }
+}
+
+void ACMGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    StopMainMenuAudio();
+    Super::EndPlay(EndPlayReason);
 }
 
 // 플레이어 이탈 시 해당 플레이어를 제외하고 조작 부위 재배정
@@ -311,6 +328,112 @@ bool ACMGameMode::IsGameplayMap() const
     );
 
     return !GameMapName.IsEmpty() && CurrentMapName == GameMapName;
+}
+
+bool ACMGameMode::IsMainMenuMap() const
+{
+    const UWorld* World = GetWorld();
+    const UListenServerNetworkSettings* NetworkSettings =
+        GetDefault<UListenServerNetworkSettings>();
+    if (!World || !NetworkSettings)
+    {
+        return false;
+    }
+
+    const FString MainMenuPackage = FPackageName::ObjectPathToPackageName(
+        NetworkSettings->MainMenuMap.ToString());
+    const FString MainMenuName = FPackageName::GetShortName(MainMenuPackage);
+    return !MainMenuName.IsEmpty()
+        && UGameplayStatics::GetCurrentLevelName(World, true) == MainMenuName;
+}
+
+void ACMGameMode::StartMainMenuAudio()
+{
+    if (GetNetMode() == NM_DedicatedServer
+        || !MainMenuLoadScheduleId.IsValid()
+        || !GetGameInstance())
+    {
+        return;
+    }
+
+    MainMenuLoadCoordinator = GetGameInstance()->GetSubsystem<
+        UCMStageLoadCoordinatorSubsystem>();
+    if (!MainMenuLoadCoordinator)
+    {
+        return;
+    }
+
+    MainMenuLoadCoordinator->OnStageStartRequiredFinished.AddUniqueDynamic(
+        this,
+        &ThisClass::HandleMainMenuLoadFinished);
+    MainMenuLoadRequestId = FGuid::NewGuid();
+    if (!MainMenuLoadCoordinator->StartStageScheduleRequest(
+            MainMenuLoadScheduleId,
+            MainMenuLoadRequestId))
+    {
+        UE_LOG(LogChimeraMultiplayer, Error,
+            TEXT("Main menu audio schedule failed to start. Schedule=%s"),
+            *MainMenuLoadScheduleId.ToString());
+        StopMainMenuAudio();
+    }
+}
+
+void ACMGameMode::StopMainMenuAudio()
+{
+    if (MainMenuLoadCoordinator)
+    {
+        MainMenuLoadCoordinator->OnStageStartRequiredFinished.RemoveDynamic(
+            this,
+            &ThisClass::HandleMainMenuLoadFinished);
+        MainMenuLoadCoordinator = nullptr;
+    }
+    MainMenuLoadRequestId.Invalidate();
+
+    if (IsMainMenuMap() && GetGameInstance())
+    {
+        if (UNKMSoundSubsystem* SoundSubsystem =
+                GetGameInstance()->GetSubsystem<UNKMSoundSubsystem>())
+        {
+            SoundSubsystem->StopBGM();
+        }
+    }
+}
+
+void ACMGameMode::HandleMainMenuLoadFinished(
+    FGuid RequestId,
+    bool bSucceeded)
+{
+    if (RequestId != MainMenuLoadRequestId)
+    {
+        return;
+    }
+
+    if (MainMenuLoadCoordinator)
+    {
+        MainMenuLoadCoordinator->OnStageStartRequiredFinished.RemoveDynamic(
+            this,
+            &ThisClass::HandleMainMenuLoadFinished);
+    }
+    MainMenuLoadRequestId.Invalidate();
+
+    if (!bSucceeded || !GetGameInstance())
+    {
+        UE_LOG(LogChimeraMultiplayer, Error,
+            TEXT("Main menu audio schedule failed. Schedule=%s"),
+            *MainMenuLoadScheduleId.ToString());
+        return;
+    }
+
+    if (UCMGameSoundBridgeSubsystem* SoundBridge =
+            GetGameInstance()->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+    {
+        SoundBridge->RebuildRegisteredSoundCatalogs();
+    }
+    if (UNKMSoundSubsystem* SoundSubsystem =
+            GetGameInstance()->GetSubsystem<UNKMSoundSubsystem>())
+    {
+        SoundSubsystem->PlayBGM(CMSoundTags::BGM_Menu);
+    }
 }
 
 bool ACMGameMode::IsSoloTestMode() const
