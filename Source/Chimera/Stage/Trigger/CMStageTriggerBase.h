@@ -7,6 +7,7 @@
 #include "CMStageTriggerBase.generated.h"
 
 class UCMActivationTriggerComponent;
+class USceneComponent;
 class ACMStageTriggerBase;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
@@ -33,6 +34,7 @@ class CHIMERA_API ACMStageTriggerBase : public ACMStageElementBase
 
 public:
     ACMStageTriggerBase();
+    virtual void Tick(float DeltaSeconds) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Trigger|Presentation")
@@ -100,6 +102,12 @@ protected:
     // 모든 기본 스위치는 ON=Activated, OFF=Deactivated를 사용한다.
     virtual ECMStageTriggerSignal ResolveTriggerSignal(bool bActivated) const;
 
+    bool HasBillboardIndicator() const;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Trigger|Billboard", meta = (ClampMin = "0.0"))
+    float BillboardMaxDistance = 5000.0f;
+
 private:
     UFUNCTION()
     void OnRep_PresentationState();
@@ -114,6 +122,11 @@ private:
     void HandleTriggerDeactivated(AActor* TriggeringActor);
 
     FName ResolveTargetPlacementId() const;
+    void ResolveBillboardIndicator();
+    void UpdateBillboardIndicator();
+
+    UPROPERTY(Transient)
+    TObjectPtr<USceneComponent> BillboardIndicator;
 
     bool bDirectTargetCommandEnabled = true;
 };
