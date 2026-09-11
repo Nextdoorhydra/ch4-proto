@@ -32,6 +32,10 @@ DEFINE_LOG_CATEGORY(LogChimeraLineBody);
 ACMChimera::ACMChimera()
 {
     constexpr int32 MaxSegmentCount = CMControl::MaxSegments;
+    ReplicatedPartSlotPressStartTimes.Init(
+        -1.0f,
+        CMControl::MaxPartSlots
+    );
     const float SlotZ = -BodyCollisionHalfHeight + InitialGroundClearance;
     const FVector LeftSlotLocation(0.0f, -BodySlotLateralOffset, SlotZ);
     const FVector RightSlotLocation(0.0f, BodySlotLateralOffset, SlotZ);
@@ -119,6 +123,7 @@ ACMChimera::ACMChimera()
         CMCollision::WeaponTrace,
         ECR_Ignore
     );
+    BodyMesh->SetUseCCD(bUseBodyCCD, NAME_None);
     BodyMesh->SetIsReplicated(false);
 
     LeftFootPoint = CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -262,6 +267,7 @@ ACMChimera::ACMChimera()
             CMCollision::WeaponTrace,
             ECR_Ignore
         );
+        SegmentBody->SetUseCCD(bUseBodyCCD, NAME_None);
 
         UCMPartSlotComponent* SegmentLeftFoot =
             CreateDefaultSubobject<UCMPartSlotComponent>(
@@ -500,6 +506,7 @@ void ACMChimera::Tick(float DeltaTime)
     }
 
     UpdatePlanarKnockback(DeltaTime);
+    UpdateStuckRecovery(DeltaTime);
 
     UpdateReplicatedSegmentStates();
 }
@@ -579,6 +586,7 @@ void ACMChimera::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMChimera, ReplicatedSegmentStates);
     DOREPLIFETIME(ACMChimera, SegmentHealthStates);
     DOREPLIFETIME(ACMChimera, PressedPartSlotMask);
+    DOREPLIFETIME(ACMChimera, ReplicatedPartSlotPressStartTimes);
     DOREPLIFETIME(ACMChimera, ActiveSegmentCount);
 }
 
@@ -742,7 +750,10 @@ void ACMChimera::ApplyPlanarKnockback(FVector WorldDirection, float Speed)
         return;
 
     WorldDirection.Z = 0.0f;
-    const FVector VelocityChange = WorldDirection.GetSafeNormal() * FMath::Max(Speed, 0.0f);
+    const float SafeSpeed = CMChimeraPhysics::ResolveLinearSpeedLimit(
+        Speed,
+        MaximumSafeLinearSpeed);
+    const FVector VelocityChange = WorldDirection.GetSafeNormal() * SafeSpeed;
     if (VelocityChange.IsNearlyZero())
         return;
 
@@ -780,6 +791,7 @@ void ACMChimera::StartPlanarKnockback(
     PlanarKnockbackDirection = WorldDirection;
     PlanarKnockbackDistanceCm = DistanceCm;
     PlanarKnockbackElapsedSeconds = 0.0f;
+    SetBodyHitNotifications(true);
     ApplyPlanarKnockback(
         PlanarKnockbackDirection,
         FMath::Max(DistanceCm / 0.35f, 300.0f));
@@ -795,6 +807,7 @@ void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
     if (!ReferenceBody)
     {
         bPlanarKnockbackActive = false;
+        SetBodyHitNotifications(false);
         return;
     }
 
@@ -807,6 +820,7 @@ void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
         || PlanarKnockbackElapsedSeconds >= 0.75f)
     {
         bPlanarKnockbackActive = false;
+        SetBodyHitNotifications(false);
         const int32 SegmentCount = FMath::Min(
             ActiveSegmentCount, BodySegments.Num());
         for (int32 SegmentIndex = 0;
@@ -826,7 +840,9 @@ void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
     }
 
     const float RemainingDistance = PlanarKnockbackDistanceCm - Travel;
-    const float Speed = FMath::Max(RemainingDistance / 0.2f, 150.0f);
+    const float Speed = CMChimeraPhysics::ResolveLinearSpeedLimit(
+        FMath::Max(RemainingDistance / 0.2f, 150.0f),
+        MaximumSafeLinearSpeed);
     const int32 SegmentCount = FMath::Min(
         ActiveSegmentCount, BodySegments.Num());
     for (int32 SegmentIndex = 0;
@@ -839,8 +855,10 @@ void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
         }
         const float VerticalSpeed = Segment->GetPhysicsLinearVelocity().Z;
         Segment->SetPhysicsLinearVelocity(
-            PlanarKnockbackDirection * Speed
-                + FVector::UpVector * VerticalSpeed);
+            CMChimeraPhysics::ClampLinearVelocity(
+                PlanarKnockbackDirection * Speed
+                    + FVector::UpVector * VerticalSpeed,
+                MaximumSafeLinearSpeed));
     }
 }
 

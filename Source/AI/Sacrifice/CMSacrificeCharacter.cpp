@@ -108,6 +108,7 @@ ACMSacrificeCharacter::ACMSacrificeCharacter()
 void ACMSacrificeCharacter::BeginPlay()
 {
     Super::BeginPlay();
+    InitialCheckpointTransform = GetActorTransform();
 
     const FRotator CurrentMeshRotation = GetMesh()->GetRelativeRotation();
     GetMesh()->SetRelativeRotation(FRotator(CurrentMeshRotation.Pitch, CharacterMeshYawOffsetDegrees, CurrentMeshRotation.Roll));
@@ -130,6 +131,37 @@ void ACMSacrificeCharacter::BeginPlay()
         InitializeAbilitySystem();
         GrantActionAbilities();
     }
+}
+
+bool ACMSacrificeCharacter::ResetAIForCheckpoint()
+{
+    UWorld* World = GetWorld();
+    if (!HasAuthority() || !World)
+    {
+        return false;
+    }
+
+    if (DismembermentComponent)
+    {
+        DismembermentComponent->DestroySpawnedDismembermentActors();
+    }
+
+    FActorSpawnParameters SpawnParameters;
+    SpawnParameters.OverrideLevel = GetLevel();
+    SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AController* ExistingController = GetController();
+    AActor* Replacement = World->SpawnActor(GetClass(), &InitialCheckpointTransform, SpawnParameters);
+    if (!Replacement)
+    {
+        return false;
+    }
+
+    if (IsValid(ExistingController))
+    {
+        ExistingController->Destroy();
+    }
+    Destroy();
+    return true;
 }
 
 void ACMSacrificeCharacter::EndPlay(

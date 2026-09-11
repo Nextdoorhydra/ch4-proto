@@ -63,6 +63,9 @@ public:
     // Non-Shipping 치트 요청에서 최신 활성 체크포인트로 즉시 복귀
     bool TryCheatRespawnAtLatestCheckpoint();
 
+    // 현재 플레이 맵 전체를 다시 열어 모든 런타임 액터를 초기화
+    bool TryCheatRestartGame();
+
     // 개발용: 현재 스테이지의 목적지/결과 연출을 건너뛰고 다음 맵으로 이동
     bool TryCheatNextStage();
 
@@ -190,6 +193,8 @@ private:
     void HandleAllSegmentsDead();
 
     bool RespawnAtActiveCheckpoint();
+    bool RestartCurrentWorld();
+    bool ResetCheckpointAI();
     void ScheduleCheckpointRespawn();
     void HandleCheckpointRespawnTimer();
 

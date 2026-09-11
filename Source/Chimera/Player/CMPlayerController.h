@@ -76,6 +76,9 @@ public:
     // 최신 룸 체크포인트로 공용 키메라 복구·이동을 서버에 요청
     void RequestCheatRespawnAtCheckpoint();
 
+    // 현재 플레이 맵 전체 재시작을 서버에 요청
+    void RequestCheatRestartGame();
+
     void RequestCheatNextStage();
 
     void RequestCheatGoToStage(int32 OneBasedStageNumber);
@@ -226,6 +229,9 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatRespawnAtCheckpoint();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatRestartGame();
 
     UFUNCTION(Server, Reliable)
     void ServerCheatNextStage();

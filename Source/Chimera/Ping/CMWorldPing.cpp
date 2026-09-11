@@ -1,6 +1,8 @@
 #include "Ping/CMWorldPing.h"
 
 #include "Camera/PlayerCameraManager.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Components/SceneComponent.h"
 #include "Components/WidgetComponent.h"
 #include "EngineUtils.h"
@@ -22,6 +24,20 @@ namespace
         Component.SetTranslucentSortPriority(TNumericLimits<int16>::Max());
         Component.ComponentTags.Add(TEXT("NoVisionOccluder"));
         Component.SetBoundsScale(4.0f);
+    }
+
+    FGameplayTag GetPingSoundTag(ECMPingType Type)
+    {
+        switch (Type)
+        {
+        case ECMPingType::LookHere:
+            return CMSoundTags::Ping_LookHere;
+        case ECMPingType::SwapParts:
+            return CMSoundTags::Ping_SwapParts;
+        case ECMPingType::GoHere:
+        default:
+            return CMSoundTags::Ping_GoHere;
+        }
     }
 }
 
@@ -58,6 +74,8 @@ ACMWorldPing::ACMWorldPing()
     MarkerWidgetComponent->SetDrawSize(FVector2D(190.0f, 155.0f));
     MarkerWidgetComponent->SetPivot(FVector2D(0.5f, 0.5f));
     ConfigureWorldWidget(*MarkerWidgetComponent);
+    MarkerWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+    MarkerWidgetComponent->SetTickWhenOffscreen(true);
 }
 
 void ACMWorldPing::BeginPlay()
@@ -68,6 +86,7 @@ void ACMWorldPing::BeginPlay()
     GroundWidgetComponent->InitWidget();
     MarkerWidgetComponent->InitWidget();
     ApplyPresentation();
+    FCMSoundPlayback::PlaySFXAtActor(this, GetPingSoundTag(PingType));
     if (HasAuthority())
     {
         SetLifeSpan(CMPing::DisplayDuration);

@@ -7,6 +7,7 @@
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Core/CMPartStatusComponent.h"
 #include "Parts/Core/CMPartStatusTags.h"
+#include "Parts/Leg/CMLegPart.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMPartInterface.h"
@@ -50,6 +51,10 @@ namespace
 const FLinearColor IdleControlKeyColor(0.55f, 0.55f, 0.55f, 0.65f);
 const FLinearColor DisabledControlKeyColor(0.22f, 0.22f, 0.22f, 0.45f);
 const FLinearColor DeadSegmentColor(0.10f, 0.10f, 0.10f, 0.95f);
+const FLinearColor LegGaugeTapColor(0.08f, 0.36f, 1.0f, 1.0f);
+const FLinearColor LegGaugeNormalColor(0.08f, 0.85f, 0.28f, 1.0f);
+const FLinearColor LegGaugeChargeColor(1.0f, 0.78f, 0.04f, 1.0f);
+const FLinearColor LegGaugeOverchargeColor(1.0f, 0.06f, 0.03f, 1.0f);
 constexpr float StatusCycleSeconds = 1.6f;
 constexpr float StatusNameEnd = 0.62f;
 constexpr float StatusTextStart = 0.80f;
@@ -60,6 +65,42 @@ float GetPercent(float Current, float Maximum)
     return Maximum > 0.0f
         ? FMath::Clamp(Current / Maximum, 0.0f, 1.0f)
         : 0.0f;
+}
+
+FLinearColor GetLegChargeGaugeColor(
+    const float HoldSeconds,
+    const float TapEndSeconds,
+    const float NormalEndSeconds,
+    const float ChargeEndSeconds,
+    const float OverchargeEndSeconds
+)
+{
+    if (HoldSeconds <= TapEndSeconds)
+    {
+        return LegGaugeTapColor;
+    }
+    if (HoldSeconds <= NormalEndSeconds)
+    {
+        return LegGaugeNormalColor;
+    }
+    if (HoldSeconds <= ChargeEndSeconds)
+    {
+        return LegGaugeChargeColor;
+    }
+
+    const float OverchargeAlpha = FMath::Clamp(
+        (HoldSeconds - ChargeEndSeconds)
+            / FMath::Max(
+                OverchargeEndSeconds - ChargeEndSeconds,
+                UE_SMALL_NUMBER),
+        0.0f,
+        1.0f
+    );
+    return FMath::Lerp(
+        LegGaugeChargeColor,
+        LegGaugeOverchargeColor,
+        OverchargeAlpha
+    );
 }
 
 FSlateBrush MakeSolidBrush(const FLinearColor& Color)
@@ -138,10 +179,16 @@ UCMControlHUDWidget::UCMControlHUDWidget(
 )
     : Super(ObjectInitializer)
 {
-    InputConfig = ENKMUIWidgetInputMode::GameAndMenu;
-    GameMouseCaptureMode = EMouseCaptureMode::NoCapture;
     WireframeLabelFont = FCoreStyle::GetDefaultFontStyle(
         TEXT("Regular"), 14);
+}
+
+TOptional<FUIInputConfig> UCMControlHUDWidget::GetDesiredInputConfig() const
+{
+    return FUIInputConfig(
+        ECommonInputMode::All,
+        EMouseCaptureMode::CaptureDuringMouseDown,
+        false);
 }
 
 void UCMControlHUDWidget::NativeOnInitialized()
@@ -236,6 +283,19 @@ int32 UCMControlHUDWidget::NativePaint(
     const float CycleTime = FMath::Fmod(WorldTime, StatusCycleSeconds);
     const int32 CycleIndex = FMath::FloorToInt(
         WorldTime / StatusCycleSeconds);
+    float TapEndSeconds = 0.25f;
+    float NormalEndSeconds = 0.7f;
+    float ChargeEndSeconds = 1.0f;
+    float OverchargeEndSeconds = 3.0f;
+    if (const ACMChimera* CurrentChimera = SharedChimera.Get())
+    {
+        CurrentChimera->GetLegInputHoldThresholds(
+            TapEndSeconds,
+            NormalEndSeconds,
+            ChargeEndSeconds,
+            OverchargeEndSeconds
+        );
+    }
 
     for (const FWireframeCallout& Callout : WireframeCallouts)
     {
@@ -289,6 +349,113 @@ int32 UCMControlHUDWidget::NativePaint(
                 TextOpacity = 0.0f;
             }
         }
+
+        FVector2D TextAreaSize = Callout.LabelSize;
+        if (Callout.bShowLegChargeGauge)
+        {
+            constexpr float GaugeHeight = 5.0f;
+            constexpr float GaugeTopPadding = 2.0f;
+            TextAreaSize.Y = FMath::Max(
+                Callout.LabelSize.Y - GaugeHeight - GaugeTopPadding,
+                1.0f
+            );
+            const FVector2D GaugePosition(
+                Callout.LabelPosition.X,
+                Callout.LabelPosition.Y + TextAreaSize.Y + GaugeTopPadding
+            );
+            const FVector2D GaugeSize(
+                Callout.LabelSize.X,
+                GaugeHeight
+            );
+            FSlateDrawElement::MakeBox(
+                OutDrawElements,
+                ++CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(
+                    GaugeSize,
+                    FSlateLayoutTransform(GaugePosition)),
+                WhiteBrush,
+                ESlateDrawEffect::None,
+                FLinearColor(0.015f, 0.02f, 0.03f, 0.82f));
+
+            const float GaugeFillAlpha = FMath::Clamp(
+                Callout.LegChargeHoldSeconds
+                    / FMath::Max(ChargeEndSeconds, UE_SMALL_NUMBER),
+                0.0f,
+                1.0f
+            );
+            if (GaugeFillAlpha > 0.0f)
+            {
+                FSlateDrawElement::MakeBox(
+                    OutDrawElements,
+                    ++CurrentLayer,
+                    AllottedGeometry.ToPaintGeometry(
+                        FVector2D(GaugeSize.X * GaugeFillAlpha, GaugeSize.Y),
+                        FSlateLayoutTransform(GaugePosition)),
+                    WhiteBrush,
+                    ESlateDrawEffect::None,
+                    GetLegChargeGaugeColor(
+                        Callout.LegChargeHoldSeconds,
+                        TapEndSeconds,
+                        NormalEndSeconds,
+                        ChargeEndSeconds,
+                        OverchargeEndSeconds));
+            }
+
+            const float TapDividerX = GaugePosition.X
+                + GaugeSize.X * FMath::Clamp(
+                    TapEndSeconds
+                        / FMath::Max(ChargeEndSeconds, UE_SMALL_NUMBER),
+                    0.0f,
+                    1.0f);
+            const float NormalDividerX = GaugePosition.X
+                + GaugeSize.X * FMath::Clamp(
+                    NormalEndSeconds
+                        / FMath::Max(ChargeEndSeconds, UE_SMALL_NUMBER),
+                    0.0f,
+                    1.0f);
+            const TArray<FVector2D> TapDivider = {
+                FVector2D(TapDividerX, GaugePosition.Y),
+                FVector2D(TapDividerX, GaugePosition.Y + GaugeSize.Y)
+            };
+            const TArray<FVector2D> NormalDivider = {
+                FVector2D(NormalDividerX, GaugePosition.Y),
+                FVector2D(NormalDividerX, GaugePosition.Y + GaugeSize.Y)
+            };
+            const TArray<FVector2D> GaugeOutline = {
+                GaugePosition,
+                GaugePosition + FVector2D(GaugeSize.X, 0.0f),
+                GaugePosition + GaugeSize,
+                GaugePosition + FVector2D(0.0f, GaugeSize.Y),
+                GaugePosition
+            };
+            FSlateDrawElement::MakeLines(
+                OutDrawElements,
+                ++CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(),
+                TapDivider,
+                ESlateDrawEffect::None,
+                FLinearColor(1.0f, 1.0f, 1.0f, 0.72f),
+                true,
+                1.0f);
+            FSlateDrawElement::MakeLines(
+                OutDrawElements,
+                CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(),
+                NormalDivider,
+                ESlateDrawEffect::None,
+                FLinearColor(1.0f, 1.0f, 1.0f, 0.72f),
+                true,
+                1.0f);
+            FSlateDrawElement::MakeLines(
+                OutDrawElements,
+                CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(),
+                GaugeOutline,
+                ESlateDrawEffect::None,
+                FLinearColor(0.9f, 0.92f, 1.0f, 0.82f),
+                true,
+                1.0f);
+        }
         if (TextOpacity <= 0.0f)
         {
             continue;
@@ -310,7 +477,7 @@ int32 UCMControlHUDWidget::NativePaint(
             OutDrawElements,
             ++CurrentLayer,
             AllottedGeometry.ToPaintGeometry(
-                Callout.LabelSize,
+                TextAreaSize,
                 FSlateLayoutTransform(TextPosition)),
             DisplayText,
             Font,
@@ -327,12 +494,22 @@ void UCMControlHUDWidget::SetControlBody(
 {
     if (ControlBody.Get() == NewControlBody && SharedChimera.IsValid())
     {
+        if (NewControlBody)
+        {
+            NewControlBody->OnControlInputChanged.AddUniqueDynamic(
+                this, &ThisClass::HandleControlInputChanged);
+        }
         InitializeWireframeHUD();
         return;
     }
 
     TeardownWireframeHUD();
     ControlBody = NewControlBody;
+    if (NewControlBody)
+    {
+        NewControlBody->OnControlInputChanged.AddUniqueDynamic(
+            this, &ThisClass::HandleControlInputChanged);
+    }
     SharedChimera = NewControlBody
         ? NewControlBody->GetSharedChimera()
         : nullptr;
@@ -854,6 +1031,20 @@ void UCMControlHUDWidget::HandleControlInputChanged(
     bool bPressed
 )
 {
+    if (SlotIndex >= 0 && SlotIndex < CMControl::MaxKeysPerPlayer)
+    {
+        if (bPressed && !bLocalControlPressed[SlotIndex])
+        {
+            LocalControlPressStartTimes[SlotIndex] = GetWorld()
+                ? GetWorld()->GetTimeSeconds()
+                : 0.0;
+        }
+        else if (!bPressed)
+        {
+            LocalControlPressStartTimes[SlotIndex] = 0.0;
+        }
+        bLocalControlPressed[SlotIndex] = bPressed;
+    }
     SetControlSlotHighlighted(SlotIndex, bPressed);
 }
 
@@ -985,9 +1176,21 @@ void UCMControlHUDWidget::InitializeWireframeHUD()
 
 void UCMControlHUDWidget::TeardownWireframeHUD()
 {
+    if (ACMControlBody* CurrentControlBody = ControlBody.Get())
+    {
+        CurrentControlBody->OnControlInputChanged.RemoveDynamic(
+            this, &ThisClass::HandleControlInputChanged);
+    }
     WireframeCallouts.Reset();
     SmoothedCalloutPositions.Reset();
     CalloutRightSideById.Reset();
+    for (int32 ControlIndex = 0;
+        ControlIndex < CMControl::MaxKeysPerPlayer;
+        ++ControlIndex)
+    {
+        LocalControlPressStartTimes[ControlIndex] = 0.0;
+        bLocalControlPressed[ControlIndex] = false;
+    }
     if (WireframeRenderImage)
     {
         WireframeRenderImage->SetVisibility(ESlateVisibility::Collapsed);
@@ -1365,11 +1568,12 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         OwningPlayer->IsInputKeyDown(EKeys::Tab);
 
     TMap<FCMPartSlotAddress, FText> LocalKeyBySlot;
+    TMap<FCMPartSlotAddress, int32> LocalControlIndexBySlot;
     ACMControlBody* LocalControlBody = ControlBody.Get();
     ACMPlayerState* LocalPlayerState = LocalControlBody
         ? LocalControlBody->GetPlayerState<ACMPlayerState>()
         : nullptr;
-    if (!bShowPlayerLabels && LocalControlBody)
+    if (LocalControlBody)
     {
         static const TCHAR* ControlKeyNames[] = {
             TEXT("Q"), TEXT("W"), TEXT("E"), TEXT("R")
@@ -1387,6 +1591,11 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             if (CMControl::IsValidPartSlot(
                     Address, CurrentChimera->GetActiveSegmentCount()))
             {
+                LocalControlIndexBySlot.FindOrAdd(Address) = ControlIndex;
+                if (bShowPlayerLabels)
+                {
+                    continue;
+                }
                 const UCMPartSlotComponent* PartSlot =
                     CurrentChimera->GetPartSlotComponent(Address);
                 const ACMPartActorBase* PartActor = PartSlot
@@ -1474,7 +1683,10 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         const FVector& WorldAnchor,
         const FText& LabelText,
         const FLinearColor& LabelColor,
-        ACMPlayerState* StatusOwner)
+        ACMPlayerState* StatusOwner,
+        const bool bShowLegChargeGauge,
+        const int32 LegControlIndex,
+        const float ReplicatedLegHoldSeconds)
     {
         if (LabelText.IsEmpty())
         {
@@ -1504,6 +1716,23 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             }
         }
         Callout.PlayerColor = LabelColor;
+        Callout.bShowLegChargeGauge = bShowLegChargeGauge;
+        const bool bHasLocalControl =
+            LegControlIndex >= 0
+            && LegControlIndex < CMControl::MaxKeysPerPlayer;
+        if (bHasLocalControl && bLocalControlPressed[LegControlIndex])
+        {
+            const double CurrentTime = GetWorld()
+                ? GetWorld()->GetTimeSeconds()
+                : LocalControlPressStartTimes[LegControlIndex];
+            Callout.LegChargeHoldSeconds = static_cast<float>(FMath::Max(
+                CurrentTime - LocalControlPressStartTimes[LegControlIndex],
+                0.0));
+        }
+        else if (!bHasLocalControl)
+        {
+            Callout.LegChargeHoldSeconds = ReplicatedLegHoldSeconds;
+        }
 
         bool& bRight = CalloutRightSideById.FindOrAdd(
             StableId,
@@ -1532,6 +1761,17 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             continue;
         }
 
+        const ACMLegPart* LegPart =
+            Cast<ACMLegPart>(PartSlot->GetAttachedPart());
+        const int32* LocalControlIndex =
+            LocalControlIndexBySlot.Find(Address);
+        const int32 LegControlIndex = LegPart && LocalControlIndex
+            ? *LocalControlIndex
+            : INDEX_NONE;
+        const float ReplicatedLegHoldSeconds = LegPart
+            ? CurrentChimera->GetPartSlotHoldSeconds(Address)
+            : 0.0f;
+
         const FName StableId(*FString::Printf(
             TEXT("Slot.%d.%d"),
             Address.SegmentIndex,
@@ -1546,7 +1786,12 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
                     PartSlot->GetComponentLocation(),
                     FText::FromString(Owner->GetPlayerName()),
                     Owner->GetPlayerColor(),
-                    Owner);
+                    Owner,
+                    LegPart != nullptr,
+                    Owner == LocalPlayerState
+                        ? LegControlIndex
+                        : INDEX_NONE,
+                    ReplicatedLegHoldSeconds);
             }
         }
         else if (const FText* ControlKey = LocalKeyBySlot.Find(Address))
@@ -1558,7 +1803,10 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
                 LocalPlayerState
                     ? LocalPlayerState->GetPlayerColor()
                     : FLinearColor::White,
-                nullptr);
+                nullptr,
+                LegPart != nullptr,
+                LegControlIndex,
+                ReplicatedLegHoldSeconds);
         }
     }
 
@@ -1590,7 +1838,7 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         const float Step = WireframeImageSize.Y
             / static_cast<float>(Indices.Num());
         const float LabelHeight = FMath::Clamp(Step - 2.0f, 13.0f, 24.0f);
-        const int32 FontSize = FMath::Clamp(
+        const int32 DefaultFontSize = FMath::Clamp(
             FMath::FloorToInt(LabelHeight - 6.0f), 10, 14);
         const float LabelX = bRight
             ? WireframeImageTopLeft.X + WireframeImageSize.X + 10.0f
@@ -1600,7 +1848,10 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         {
             FWireframeCallout& Callout = NewCallouts[Indices[Order]];
             Callout.LabelSize = FVector2D(LabelWidth, LabelHeight);
-            Callout.FontSize = FontSize;
+            Callout.FontSize = Callout.bShowLegChargeGauge
+                ? FMath::Clamp(
+                    FMath::FloorToInt(LabelHeight - 9.0f), 9, 14)
+                : DefaultFontSize;
             const FVector2D TargetPosition(
                 FMath::Clamp(LabelX, 4.0f, ViewSize.X - LabelWidth - 4.0f),
                 FMath::Clamp(

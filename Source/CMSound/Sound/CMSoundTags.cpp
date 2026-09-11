@@ -18,12 +18,18 @@ namespace CMSoundTags
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_Detach, "Chimera.Sound.Part.Detach", "부위 탈착");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Part_AttachPullLoop, "Chimera.Sound.Part.AttachPullLoop", "부위 장착 당김 루프");
 
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_GoHere, "Chimera.Sound.Ping.GoHere", "이동 지시 핑");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_LookHere, "Chimera.Sound.Ping.LookHere", "주시 지시 핑");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ping_SwapParts, "Chimera.Sound.Ping.SwapParts", "부위 교체 지시 핑");
+
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Aggressive_TargetSpotted, "Chimera.Sound.AI.Aggressive.TargetSpotted", "공격형 AI 타깃 최초 발견");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_ThreatScream, "Chimera.Sound.AI.Sacrifice.ThreatScream", "희생양 위협 발견 비명");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_HitScream, "Chimera.Sound.AI.Sacrifice.HitScream", "희생양 피격 비명");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_Sacrifice_BleedingLoop, "Chimera.Sound.AI.Sacrifice.BleedingLoop", "희생양 출혈 신음 루프");
 
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Button_Press, "Chimera.Sound.Stage.Button.Press", "스테이지 버튼 입력");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_PowerCable_Grabbed, "Chimera.Sound.Stage.PowerCable.Grabbed", "전력 케이블 잡기");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_PowerCable_Connected, "Chimera.Sound.Stage.PowerCable.Connected", "전력 케이블 연결 완료");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_PressurePlate_WeightChanged, "Chimera.Sound.Stage.PressurePlate.WeightChanged", "감압판 무게 변화");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Obstacle_RotatingBlade_ActiveLoop, "Chimera.Sound.Stage.Obstacle.RotatingBlade.ActiveLoop", "회전 톱날 활성 루프");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Obstacle_Fan_ActiveLoop, "Chimera.Sound.Stage.Obstacle.Fan.ActiveLoop", "팬 활성 루프");
@@ -35,6 +41,8 @@ namespace CMSoundTags
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Lever_Settle, "Chimera.Sound.Stage.Lever.Settle", "레버 끝 위치 정착");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_VisionStone_OnLoop, "Chimera.Sound.Stage.VisionStone.OnLoop", "시야석 조건 충족 루프");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_VisionStone_OffLoop, "Chimera.Sound.Stage.VisionStone.OffLoop", "시야석 조건 미충족 루프");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Move, "Chimera.Sound.Stage.Door.Move", "일반 문 이동");
+    UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_StageClearMove, "Chimera.Sound.Stage.Door.StageClearMove", "스테이지 클리어 문 이동");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Open, "Chimera.Sound.Stage.Door.Open", "스테이지 문 열림");
     UE_DEFINE_GAMEPLAY_TAG_COMMENT(Stage_Door_Close, "Chimera.Sound.Stage.Door.Close", "스테이지 문 닫힘");
 

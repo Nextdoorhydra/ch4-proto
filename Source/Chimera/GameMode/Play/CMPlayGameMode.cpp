@@ -5,6 +5,7 @@
 #include "GameMode/StageRoute/CMStageRouteSubsystem.h"
 #include "Stage/CMStageDirector.h"
 #include "Stage/Room/CMRoomStreamingController.h"
+#include "Stage/Checkpoint/CMCheckpointAIResettable.h"
 #include "AsyncLoad/CMStageLoadLog.h"
 #include "AsyncLoad/CMStageLoadBarrierComponent.h"
 #include "Player/CMChimera.h"
@@ -933,6 +934,30 @@ bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
     return RespawnAtActiveCheckpoint();
 }
 
+bool ACMPlayGameMode::TryCheatRestartGame()
+{
+    return RestartCurrentWorld();
+}
+
+bool ACMPlayGameMode::RestartCurrentWorld()
+{
+    if (!HasAuthority() || !GetWorld() || bStageLoopRestartScheduled)
+    {
+        return false;
+    }
+
+    bStageLoopRestartScheduled = true;
+    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
+    GetWorldTimerManager().ClearTimer(StageLoopRestartTimerHandle);
+    bCheckpointRespawnPending = false;
+    const bool bStarted = GetWorld()->ServerTravel(TEXT("?Restart"), false);
+    if (!bStarted)
+    {
+        bStageLoopRestartScheduled = false;
+    }
+    return bStarted;
+}
+
 bool ACMPlayGameMode::TryCheatNextStage()
 {
     const UCMStageRouteSubsystem* Route = GetGameInstance()
@@ -1094,18 +1119,42 @@ bool ACMPlayGameMode::RespawnAtActiveCheckpoint()
     ClearRetryVoteState();
     const bool bRoomReset = !RoomController
         || RoomController->ResetActiveCheckpointRoom();
+    const bool bAIReset = ResetCheckpointAI();
     const bool bTeleported = SharedChimera->TeleportAssemblyForCheckpointRespawn(CheckpointTransform);
     SharedChimera->RestoreForCheckpointRespawn();
     const bool bPartsRestored = RestoreCheckpointParts(SharedChimera);
     bCheckpointRestartInProgress = false;
     UE_LOG(LogChimeraStageLoad, Display,
-        TEXT("키메라를 체크포인트로 복귀시켰습니다. Source=%s Room=%s RoomReset=%d Teleport=%d Parts=%d"),
+        TEXT("키메라를 체크포인트로 복귀시켰습니다. Source=%s Room=%s RoomReset=%d AIReset=%d Teleport=%d Parts=%d"),
         bUsingRoomCheckpoint ? TEXT("RoomCheckpoint") : TEXT("PlayerStart"),
         RoomController ? *RoomController->GetCurrentRoomId().ToString() : TEXT("None"),
         bRoomReset,
+        bAIReset,
         bTeleported,
         bPartsRestored);
-    return bRoomReset && bTeleported && bPartsRestored;
+    return bRoomReset && bAIReset && bTeleported && bPartsRestored;
+}
+
+bool ACMPlayGameMode::ResetCheckpointAI()
+{
+    TArray<AActor*> ResettableAI;
+    for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+    {
+        if (It->Implements<UCMCheckpointAIResettable>())
+        {
+            ResettableAI.Add(*It);
+        }
+    }
+
+    int32 ResetCount = 0;
+    for (AActor* AIActor : ResettableAI)
+    {
+        ICMCheckpointAIResettable* Resettable = Cast<ICMCheckpointAIResettable>(AIActor);
+        ResetCount += Resettable && Resettable->ResetAIForCheckpoint() ? 1 : 0;
+    }
+
+    UE_LOG(LogChimeraStageLoad, Display, TEXT("체크포인트 AI 초기화: Expected=%d Reset=%d"), ResettableAI.Num(), ResetCount);
+    return ResetCount == ResettableAI.Num();
 }
 
 // 현재 요청과 성공 보고자를 검증하고 전원 완료 시 Blocking Phase를 해제

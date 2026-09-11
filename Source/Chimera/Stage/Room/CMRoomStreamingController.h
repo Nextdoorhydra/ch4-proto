@@ -52,11 +52,19 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Stage|Room Streaming")
     int32 GetCurrentRoomIndex() const { return CurrentRoomIndex; }
 
+    int32 GetActiveCheckpointNumber() const
+    {
+        return Rooms.IsValidIndex(ActiveCheckpointRoomIndex) ? ActiveCheckpointRoomIndex + 1 : 0;
+    }
+
     // 마지막으로 통과가 확정된 룸의 체크포인트 위치 반환
     bool TryGetActiveCheckpointTransform(FTransform& OutTransform) const;
 
     // 마지막 체크포인트가 속한 룸의 배치 액터를 시작 상태로 복원
     bool ResetActiveCheckpointRoom();
+
+    // 전체 월드 재시작 후 저장된 체크포인트를 이벤트 재발행 없이 복원
+    bool RestoreCheckpointForRestart(int32 OneBasedCheckpointNumber);
 
     // 개발용: Rooms 배열 순서(1부터)로 미도달 룸도 선택한다. 클리어 이벤트는 발생시키지 않는다.
     bool TryCheatSelectCheckpoint(int32 OneBasedCheckpointNumber);

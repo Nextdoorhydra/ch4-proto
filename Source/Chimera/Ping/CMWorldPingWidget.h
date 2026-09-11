@@ -33,11 +33,13 @@ private:
     ECMPingType PingType = ECMPingType::GoHere;
     FString PingingPlayerName;
     FLinearColor PingingPlayerColor = FLinearColor::White;
+    FSlateBrush GlowBrush;
     FSlateBrush IconBrush;
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> IconTexture;
 
+    TSharedPtr<SImage> GlowImage;
     TSharedPtr<SImage> IconImage;
     TSharedPtr<STextBlock> PlayerNameText;
 };

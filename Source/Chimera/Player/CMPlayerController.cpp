@@ -18,6 +18,7 @@
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
+#include "Framework/Application/SlateApplication.h"
 #include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Stage/Test/CMTestAreaManager.h"
@@ -193,6 +194,14 @@ void ACMPlayerController::RequestCheatRespawnAtCheckpoint()
     if (IsLocalController())
     {
         ServerCheatRespawnAtCheckpoint();
+    }
+}
+
+void ACMPlayerController::RequestCheatRestartGame()
+{
+    if (IsLocalController())
+    {
+        ServerCheatRestartGame();
     }
 }
 
@@ -579,6 +588,22 @@ void ACMPlayerController::ServerCheatRespawnAtCheckpoint_Implementation()
 
     UE_LOG(LogChimeraPlayerController, Warning,
         TEXT("[Cheat] CM.Checkpoint restored the latest checkpoint."));
+}
+
+void ACMPlayerController::ServerCheatRestartGame_Implementation()
+{
+    ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>()
+        : nullptr;
+    if (!GameMode || !GameMode->TryCheatRestartGame())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.Restart could not restart the current game."));
+        return;
+    }
+
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] CM.Restart is restarting the current game."));
 }
 
 void ACMPlayerController::ServerCheatKillSegment_Implementation(
@@ -1082,7 +1107,8 @@ void ACMPlayerController::PingModifierReleased()
 void ACMPlayerController::PingMousePressed()
 {
     const ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>();
-    if (!bPingModifierHeld || bPingSelecting || !IsLocalController()
+    const bool bAltHeld = FSlateApplication::Get().GetModifierKeys().IsAltDown();
+    if (!bAltHeld || bPingSelecting || !IsLocalController()
         || !CMPlayerState || CMPlayerState->IsOnlyASpectator()
         || CMPlayerState->GetParticipationState()
             != ECMPlayerParticipationState::Active)
@@ -1106,6 +1132,7 @@ void ACMPlayerController::PingMousePressed()
     }
 
     bPingSelecting = true;
+    PingSelectorWidget->SetVisibility(ESlateVisibility::HitTestInvisible);
     PingSelectorWidget->AddToViewport(1000);
     PingSelectorWidget->BeginSelection(PingDragStart);
 }

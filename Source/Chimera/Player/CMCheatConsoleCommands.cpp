@@ -44,6 +44,14 @@ void RespawnAtLatestCheckpoint(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+void RestartGame(const TArray<FString>& Args, UWorld* World)
+{
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatRestartGame();
+    }
+}
+
 void KillSegment(UWorld* World, int32 SegmentIndex)
 {
     if (ACMPlayerController* Controller = FindLocalController(World))
@@ -248,9 +256,9 @@ FAutoConsoleCommandWithWorldAndArgs RespawnAtLatestCheckpointCommand(
 
 FAutoConsoleCommandWithWorldAndArgs RestartCommand(
     TEXT("CM.Restart"),
-    TEXT("Restarts from the latest checkpoint and restores checkpoint state."),
+    TEXT("Restarts the current game and resets all runtime actors."),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
-        &RespawnAtLatestCheckpoint
+        &RestartGame
     )
 );
 

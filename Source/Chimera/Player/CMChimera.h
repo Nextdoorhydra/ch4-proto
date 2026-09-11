@@ -38,6 +38,22 @@ class AActor;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogChimeraLineBody, Log, All);
 
+namespace CMChimeraPhysics
+{
+    CHIMERA_API float ResolveLinearSpeedLimit(
+        float RequestedSpeed,
+        float MaximumSafeSpeed);
+
+    CHIMERA_API FVector ClampLinearVelocity(
+        const FVector& Velocity,
+        float MaximumSafeSpeed);
+
+    CHIMERA_API bool IsBlockingPlanarContact(
+        const FVector& MovementDirection,
+        const FVector& ContactNormal,
+        float MinimumOppositionDot = 0.2f);
+}
+
 /** Fired once on the authoritative Chimera when every active body segment is dead. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMAllSegmentsDeadSignature);
 
@@ -120,6 +136,14 @@ public:
 
     /** Maps a control-key hold duration to the configured Leg strength. */
     float GetLegInputStrengthMultiplier(float HoldSeconds) const;
+
+    /** Returns the sanitized Tap, Normal, Charge, and Overcharge end times. */
+    void GetLegInputHoldThresholds(
+        float& OutTapEndSeconds,
+        float& OutNormalEndSeconds,
+        float& OutChargeEndSeconds,
+        float& OutOverchargeEndSeconds
+    ) const;
 
     void SetPartSlotPressed(
         const FCMPartSlotAddress& PartSlotAddress,
@@ -259,6 +283,11 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Slots")
     bool IsPartSlotPressed(
+        const FCMPartSlotAddress& PartSlotAddress
+    ) const;
+
+    /** Returns the replicated server-time hold duration for a Part slot. */
+    float GetPartSlotHoldSeconds(
         const FCMPartSlotAddress& PartSlotAddress
     ) const;
 
@@ -510,25 +539,59 @@ protected:
         meta = (ClampMin = "0.0"))
     float LegStepForceScale = 2.0f;
 
-    /** Strength used by an immediate Leg-control tap. */
+    /** Fixed strength used throughout the Leg-control tap window. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
-        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+        meta = (ClampMin = "0.0", ClampMax = "1.0",
+            DisplayName = "Tap Strength"))
     float LegInputMinimumStrength = 0.35f;
 
-    /** Hold time below which a Leg remains at minimum strength. */
+    /** End of the fixed-strength tap window. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
-        meta = (ClampMin = "0.0", Units = "s"))
-    float LegInputTapHoldSeconds = 0.04f;
+        meta = (ClampMin = "0.0", Units = "s",
+            DisplayName = "Tap End Hold Seconds"))
+    float LegInputTapHoldSeconds = 0.25f;
 
-    /** Hold time at which a Leg reaches its existing full strength. */
+    /** End of the Normal window, where existing full strength is reached. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
-        meta = (ClampMin = "0.01", Units = "s"))
-    float LegInputFullStrengthHoldSeconds = 0.28f;
+        meta = (ClampMin = "0.01", Units = "s",
+            DisplayName = "Normal End Hold Seconds"))
+    float LegInputFullStrengthHoldSeconds = 0.7f;
 
-    /** Greater values reserve more of the hold range for fine adjustment. */
+    /** End of the charging window, where maximum charged strength is reached. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
-        meta = (ClampMin = "0.01"))
-    float LegInputStrengthExponent = 1.35f;
+        meta = (ClampMin = "0.01", Units = "s",
+            DisplayName = "Full Charge Hold Seconds"))
+    float LegInputFullChargeHoldSeconds = 1.0f;
+
+    /** Leg strength at the boundary between charging and overcharging. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "1.0", ClampMax = "2.0",
+            DisplayName = "Maximum Charged Strength"))
+    float LegInputMaximumChargedStrength = 2.0f;
+
+    /** Additional hold time after full charge needed to finish overcharging. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "0.01", Units = "s",
+            DisplayName = "Overcharge Duration Seconds"))
+    float LegInputOverchargeDurationSeconds = 2.0f;
+
+    /** Maximum Leg strength retained after the overcharge window completes. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "2.0", ClampMax = "10.0",
+            DisplayName = "Maximum Overcharged Strength"))
+    float LegInputMaximumOverchargedStrength = 10.0f;
+
+    /** Greater values defer more overcharge strength toward the 3-second end. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "1.0",
+            DisplayName = "Overcharge Ease-In Exponent"))
+    float LegInputOverchargeExponent = 3.0f;
+
+    /** Greater values make each strength window rise earlier and settle sooner. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Leg|Input Strength",
+        meta = (ClampMin = "0.01",
+            DisplayName = "Strength Ease-Out Exponent"))
+    float LegInputStrengthExponent = 2.0f;
 
     UPROPERTY(EditAnywhere, Category = "Leg|Ground Check",
         meta = (ClampMin = "1.0"))
@@ -586,6 +649,11 @@ protected:
     Category = "Chimera|Movement|SpringArm",
     meta = (ClampMin = "0.0"))
     float SpringArmMaxSpeed = 4000.0f;
+
+    /** Final per-segment 3D speed ceiling, independent of external balance data. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics",
+        meta = (ClampMin = "1.0", Units = "cm/s"))
+    float MaximumSafeLinearSpeed = 1200.0f;
 
     UPROPERTY(EditAnywhere, Category = "Chimera|Debug Movement",
         meta = (ClampMin = "0.0"))
@@ -682,12 +750,46 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     bool bEnableBodyGravity = true;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
+    bool bUseBodyCCD = true;
+
     /** Prevents each Segment from rolling sideways while allowing hills and turns. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     bool bLockBodyRoll = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Physics")
     FName BodyCollisionProfile = TEXT("PhysicsActor");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery")
+    bool bEnableStuckRecovery = true;
+
+    /** Penetration must persist for this long before restoring a safe pose. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "0.05", Units = "s"))
+    float StuckRecoveryDetectionTime = 0.25f;
+
+    /** Insets overlap probes so ordinary resting contacts remain valid. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "0.0", Units = "cm"))
+    float StuckRecoveryProbeInset = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "0.02", Units = "s"))
+    float StuckRecoverySnapshotInterval = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "1", ClampMax = "32"))
+    int32 StuckRecoveryHistorySize = 12;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Physics|Stuck Recovery",
+        meta = (ClampMin = "0.0", Units = "s"))
+    float StuckRecoveryCooldown = 0.5f;
 
     // 위아래 꺾임 정도
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Constraint",
@@ -851,8 +953,24 @@ private:
     void UpdateCameraFollowOffset();
     void UpdateControlAssignmentMarkers(float DeltaTime);
     void UpdatePlanarKnockback(float DeltaTime);
+    void SetBodyHitNotifications(bool bEnabled);
+    void UpdateStuckRecovery(float DeltaTime);
+    void ResetStuckRecoveryHistory();
+    bool IsAssemblyPlacementClear(
+        const TArray<FTransform>& SegmentTransforms,
+        float ProbeInset) const;
+    void SaveSafeAssemblySnapshot();
+    bool RestoreLatestSafeAssemblySnapshot();
     void UpdateReplicatedSegmentStates();
     void ApplyReplicatedSegmentStates(float DeltaTime);
+
+    UFUNCTION()
+    void HandleBodySegmentHit(
+        UPrimitiveComponent* HitComponent,
+        AActor* OtherActor,
+        UPrimitiveComponent* OtherComponent,
+        FVector NormalImpulse,
+        const FHitResult& Hit);
 
     UFUNCTION()
     void OnRep_SegmentStates();
@@ -875,11 +993,15 @@ private:
     UPROPERTY(Replicated)
     uint32 PressedPartSlotMask = 0;
 
+    UPROPERTY(Replicated)
+    TArray<float> ReplicatedPartSlotPressStartTimes;
+
     // Server-only history for the current key press, independent of anchor lifetime.
     uint32 InteractionConsumedPartSlotMask = 0;
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FCMLeverInteractionRegressionTest;
 	friend class FCMTentacleBlueprintIntegrationTest;
+	friend class FCMChimeraPhysicsRecoveryTest;
 #endif
 
     UPROPERTY(Transient)
@@ -896,6 +1018,16 @@ private:
     FVector PlanarKnockbackDirection = FVector::ForwardVector;
     float PlanarKnockbackDistanceCm = 0.0f;
     float PlanarKnockbackElapsedSeconds = 0.0f;
+
+    struct FSafeAssemblySnapshot
+    {
+        TArray<FTransform> SegmentTransforms;
+    };
+
+    TArray<FSafeAssemblySnapshot> SafeAssemblySnapshots;
+    float StuckRecoverySnapshotElapsed = 0.0f;
+    float StuckRecoveryUnsafeElapsed = 0.0f;
+    float StuckRecoveryCooldownRemaining = 0.0f;
     
     TWeakObjectPtr<ACMSpringArmPart> ActiveSpringArmPull;
     FActiveGameplayEffectHandle StaminaRegenEffectHandle;

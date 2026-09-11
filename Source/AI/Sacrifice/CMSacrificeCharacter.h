@@ -8,6 +8,7 @@
 #include "Gore/CMDismemberableTarget.h"
 #include "Gore/CMDismembermentDefinition.h"
 #include "Sacrifice/CMSacrificeAITypes.h"
+#include "Stage/Checkpoint/CMCheckpointAIResettable.h"
 
 #include "CMSacrificeCharacter.generated.h"
 
@@ -44,7 +45,7 @@ struct AI_API FCMSacrificeAttackPartRule
 
 /** Character foundation for the Sacrifice AI; contains no AI behavior. */
 UCLASS(Blueprintable)
-class AI_API ACMSacrificeCharacter : public ACharacter, public IAbilitySystemInterface, public ICMDismemberableTarget
+class AI_API ACMSacrificeCharacter : public ACharacter, public IAbilitySystemInterface, public ICMDismemberableTarget, public ICMCheckpointAIResettable
 {
     GENERATED_BODY()
 
@@ -57,6 +58,7 @@ public:
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
     virtual int32 ReceiveDismembermentHit_Implementation(const FCMDismembermentHitRequest& Request) override;
+    virtual bool ResetAIForCheckpoint() override;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Sacrifice")
     UCMSacrificeStateComponent* GetSacrificeStateComponent() const
@@ -332,6 +334,7 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UAudioComponent> BleedingLoopSoundComponent;
 
+    FTransform InitialCheckpointTransform = FTransform::Identity;
     bool bPendingIncapacitation = false;
     TMap<FGameplayTag, FActiveGameplayEffectHandle> StateEffectHandles;
 };

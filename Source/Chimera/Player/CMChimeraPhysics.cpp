@@ -2,7 +2,48 @@
 
 #include "Components/BoxComponent.h"
 #include "Engine/World.h"
+#include "Movement/CMLineBodyMovementCoordinator.h"
+#include "Parts/Arm/CMSpringArmPart.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
+
+float CMChimeraPhysics::ResolveLinearSpeedLimit(
+    const float RequestedSpeed,
+    const float MaximumSafeSpeed)
+{
+    return FMath::Clamp(
+        RequestedSpeed,
+        0.0f,
+        FMath::Max(MaximumSafeSpeed, 0.0f));
+}
+
+FVector CMChimeraPhysics::ClampLinearVelocity(
+    const FVector& Velocity,
+    const float MaximumSafeSpeed)
+{
+    const float SafeLimit = FMath::Max(MaximumSafeSpeed, 0.0f);
+    return SafeLimit > 0.0f
+        ? Velocity.GetClampedToMaxSize(SafeLimit)
+        : FVector::ZeroVector;
+}
+
+bool CMChimeraPhysics::IsBlockingPlanarContact(
+    const FVector& MovementDirection,
+    const FVector& ContactNormal,
+    const float MinimumOppositionDot)
+{
+    const FVector PlanarDirection = FVector(
+        MovementDirection.X,
+        MovementDirection.Y,
+        0.0f).GetSafeNormal();
+    const FVector PlanarNormal = FVector(
+        ContactNormal.X,
+        ContactNormal.Y,
+        0.0f).GetSafeNormal();
+    return !PlanarDirection.IsNearlyZero()
+        && !PlanarNormal.IsNearlyZero()
+        && FVector::DotProduct(PlanarDirection, PlanarNormal)
+            <= -FMath::Clamp(MinimumOppositionDot, 0.0f, 1.0f);
+}
 
 namespace
 {
@@ -40,7 +81,9 @@ void BuildCurledRespawnPose(int32 SegmentCount, float SegmentSpacing, float Body
 // 바람·컨베이어 가속도를 질량과 무관하게 적용해 정지 마찰을 넘김
 void ACMChimera::ApplyEnvironmentalForce(const FVector& Acceleration)
 {
-    if (!HasAuthority() || Acceleration.IsNearlyZero())
+    if (!HasAuthority()
+        || Acceleration.IsNearlyZero()
+        || StuckRecoveryCooldownRemaining > 0.0f)
     {
         return;
     }
@@ -60,7 +103,8 @@ void ACMChimera::ApplyEnvironmentalForceToSegment(
         || Acceleration.IsNearlyZero()
         || SegmentIndex < 0
         || SegmentIndex >= ActiveSegmentCount
-        || !BodySegments.IsValidIndex(SegmentIndex))
+        || !BodySegments.IsValidIndex(SegmentIndex)
+        || StuckRecoveryCooldownRemaining > 0.0f)
     {
         return;
     }
@@ -101,6 +145,301 @@ float ACMChimera::GetAssemblyVelocityAlongDirection(
     return TotalMass > UE_SMALL_NUMBER
         ? FVector::DotProduct(MassWeightedVelocity / TotalMass, Direction)
         : 0.0f;
+}
+
+void ACMChimera::HandleBodySegmentHit(
+    UPrimitiveComponent* HitComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComponent,
+    FVector NormalImpulse,
+    const FHitResult& Hit)
+{
+    if (!HasAuthority()
+        || !bPlanarKnockbackActive
+        || OtherActor == this)
+    {
+        return;
+    }
+
+    const FVector ContactNormal = !Hit.ImpactNormal.IsNearlyZero()
+        ? Hit.ImpactNormal
+        : Hit.Normal;
+    if (!CMChimeraPhysics::IsBlockingPlanarContact(
+            PlanarKnockbackDirection,
+            ContactNormal))
+    {
+        return;
+    }
+
+    bPlanarKnockbackActive = false;
+    SetBodyHitNotifications(false);
+    FVector PlanarNormal(ContactNormal.X, ContactNormal.Y, 0.0f);
+    PlanarNormal.Normalize();
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount,
+        BodySegments.Num());
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!SegmentBody || !SegmentBody->IsSimulatingPhysics())
+        {
+            continue;
+        }
+
+        FVector Velocity = SegmentBody->GetPhysicsLinearVelocity();
+        const float IntoSurfaceSpeed = FVector::DotProduct(
+            Velocity,
+            PlanarNormal);
+        if (IntoSurfaceSpeed < 0.0f)
+        {
+            Velocity -= PlanarNormal * IntoSurfaceSpeed;
+            SegmentBody->SetPhysicsLinearVelocity(Velocity);
+        }
+    }
+
+    UE_LOG(LogChimeraLineBody, Verbose,
+        TEXT("[Planar Knockback Stopped] Segment=%s Other=%s Normal=%s"),
+        *GetNameSafe(HitComponent),
+        *GetNameSafe(OtherActor),
+        *ContactNormal.ToCompactString());
+}
+
+void ACMChimera::ResetStuckRecoveryHistory()
+{
+    SafeAssemblySnapshots.Reset();
+    StuckRecoverySnapshotElapsed = 0.0f;
+    StuckRecoveryUnsafeElapsed = 0.0f;
+    StuckRecoveryCooldownRemaining = 0.0f;
+}
+
+void ACMChimera::SetBodyHitNotifications(const bool bEnabled)
+{
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount,
+        BodySegments.Num());
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        if (UBoxComponent* SegmentBody = BodySegments[Index])
+        {
+            SegmentBody->SetNotifyRigidBodyCollision(bEnabled);
+        }
+    }
+}
+
+bool ACMChimera::IsAssemblyPlacementClear(
+    const TArray<FTransform>& SegmentTransforms,
+    const float ProbeInset) const
+{
+    const UWorld* World = GetWorld();
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount,
+        BodySegments.Num());
+    if (!World || SegmentCount <= 0
+        || SegmentTransforms.Num() != SegmentCount)
+    {
+        return false;
+    }
+
+    FCollisionQueryParams QueryParams(
+        SCENE_QUERY_STAT(CMStuckRecovery),
+        false,
+        this);
+    TArray<AActor*> AttachedActors;
+    GetAttachedActors(AttachedActors, true, true);
+    QueryParams.AddIgnoredActors(AttachedActors);
+
+    const float SafeInset = FMath::Max(ProbeInset, 0.0f);
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!IsValid(SegmentBody))
+        {
+            return false;
+        }
+
+        FVector CollisionExtent = SegmentBody->GetScaledBoxExtent()
+            - FVector(SafeInset);
+        CollisionExtent.X = FMath::Max(CollisionExtent.X, 1.0f);
+        CollisionExtent.Y = FMath::Max(CollisionExtent.Y, 1.0f);
+        CollisionExtent.Z = FMath::Max(CollisionExtent.Z, 1.0f);
+        const FTransform& Transform = SegmentTransforms[Index];
+        if (World->OverlapBlockingTestByProfile(
+                Transform.GetLocation(),
+                Transform.GetRotation(),
+                SegmentBody->GetCollisionProfileName(),
+                FCollisionShape::MakeBox(CollisionExtent),
+                QueryParams))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void ACMChimera::SaveSafeAssemblySnapshot()
+{
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount,
+        BodySegments.Num());
+    if (SegmentCount <= 0)
+    {
+        return;
+    }
+
+    FSafeAssemblySnapshot Snapshot;
+    Snapshot.SegmentTransforms.Reserve(SegmentCount);
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!IsValid(SegmentBody))
+        {
+            return;
+        }
+        Snapshot.SegmentTransforms.Add(SegmentBody->GetComponentTransform());
+    }
+
+    SafeAssemblySnapshots.Add(MoveTemp(Snapshot));
+    const int32 MaximumHistory = FMath::Clamp(
+        StuckRecoveryHistorySize,
+        1,
+        32);
+    if (SafeAssemblySnapshots.Num() > MaximumHistory)
+    {
+        SafeAssemblySnapshots.RemoveAt(
+            0,
+            SafeAssemblySnapshots.Num() - MaximumHistory,
+            EAllowShrinking::No);
+    }
+}
+
+bool ACMChimera::RestoreLatestSafeAssemblySnapshot()
+{
+    for (int32 SnapshotIndex = SafeAssemblySnapshots.Num() - 1;
+        SnapshotIndex >= 0;
+        --SnapshotIndex)
+    {
+        const FSafeAssemblySnapshot& Snapshot =
+            SafeAssemblySnapshots[SnapshotIndex];
+        if (!IsAssemblyPlacementClear(
+                Snapshot.SegmentTransforms,
+                StuckRecoveryProbeInset))
+        {
+            continue;
+        }
+
+        bPlanarKnockbackActive = false;
+        SetBodyHitNotifications(false);
+        ClearPressedControlParts();
+        if (MovementCoordinator)
+        {
+            MovementCoordinator->CancelAllMovement();
+        }
+        if (ACMSpringArmPart* SpringArm = ActiveSpringArmPull.Get())
+        {
+            SpringArm->CancelBodyPullFromOverride();
+        }
+        ActiveSpringArmPull.Reset();
+
+        for (int32 Index = 0;
+            Index < Snapshot.SegmentTransforms.Num();
+            ++Index)
+        {
+            UBoxComponent* SegmentBody = BodySegments[Index];
+            SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+            SegmentBody->SetPhysicsAngularVelocityInRadians(
+                FVector::ZeroVector);
+            SegmentBody->SetWorldTransform(
+                Snapshot.SegmentTransforms[Index],
+                false,
+                nullptr,
+                ETeleportType::TeleportPhysics);
+            SegmentBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+            SegmentBody->SetPhysicsAngularVelocityInRadians(
+                FVector::ZeroVector);
+            SegmentBody->WakeAllRigidBodies();
+        }
+
+        StuckRecoveryUnsafeElapsed = 0.0f;
+        StuckRecoverySnapshotElapsed = 0.0f;
+        StuckRecoveryCooldownRemaining = FMath::Max(
+            StuckRecoveryCooldown,
+            0.0f);
+        UpdateReplicatedSegmentStates();
+        ForceNetUpdate();
+        UE_LOG(LogChimeraLineBody, Warning,
+            TEXT("[Stuck Recovery] Restored snapshot %d/%d with %d segments."),
+            SnapshotIndex + 1,
+            SafeAssemblySnapshots.Num(),
+            Snapshot.SegmentTransforms.Num());
+        return true;
+    }
+    return false;
+}
+
+void ACMChimera::UpdateStuckRecovery(const float DeltaTime)
+{
+    if (!HasAuthority() || !bEnableStuckRecovery)
+    {
+        return;
+    }
+
+    StuckRecoveryCooldownRemaining = FMath::Max(
+        StuckRecoveryCooldownRemaining - DeltaTime,
+        0.0f);
+
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount,
+        BodySegments.Num());
+    TArray<FTransform> CurrentTransforms;
+    CurrentTransforms.Reserve(SegmentCount);
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!IsValid(SegmentBody))
+        {
+            return;
+        }
+        CurrentTransforms.Add(SegmentBody->GetComponentTransform());
+    }
+
+    if (IsAssemblyPlacementClear(
+            CurrentTransforms,
+            StuckRecoveryProbeInset))
+    {
+        StuckRecoveryUnsafeElapsed = 0.0f;
+        StuckRecoverySnapshotElapsed += DeltaTime;
+        if (SafeAssemblySnapshots.IsEmpty()
+            || StuckRecoverySnapshotElapsed
+                >= FMath::Max(StuckRecoverySnapshotInterval, 0.02f))
+        {
+            SaveSafeAssemblySnapshot();
+            StuckRecoverySnapshotElapsed = 0.0f;
+        }
+        return;
+    }
+
+    StuckRecoverySnapshotElapsed = 0.0f;
+    if (StuckRecoveryCooldownRemaining > 0.0f)
+    {
+        return;
+    }
+
+    StuckRecoveryUnsafeElapsed += DeltaTime;
+    if (StuckRecoveryUnsafeElapsed
+        < FMath::Max(StuckRecoveryDetectionTime, 0.05f))
+    {
+        return;
+    }
+
+    if (!RestoreLatestSafeAssemblySnapshot())
+    {
+        UE_LOG(LogChimeraLineBody, Warning,
+            TEXT("[Stuck Recovery Skipped] No collision-free snapshot is available."));
+        StuckRecoveryUnsafeElapsed = 0.0f;
+        StuckRecoveryCooldownRemaining = FMath::Max(
+            StuckRecoveryCooldown,
+            0.0f);
+    }
 }
 
 // 활성 몸통 마디의 현재 상대 배치를 유지하고 속도를 제거한 뒤 서버에서 일괄 이동
@@ -146,6 +485,7 @@ bool ACMChimera::TeleportAssembly(const FTransform& DestinationTransform)
 
     UpdateReplicatedSegmentStates();
     ForceNetUpdate();
+    ResetStuckRecoveryHistory();
     return true;
 }
 
@@ -248,6 +588,7 @@ bool ACMChimera::TeleportAssemblyForCheckpointRespawn(const FTransform& Checkpoi
 
             UpdateReplicatedSegmentStates();
             ForceNetUpdate();
+            ResetStuckRecoveryHistory();
             UE_LOG(LogChimeraLineBody, Display, TEXT("[Checkpoint Respawn Pose] Segments=%d Bend=%.1f Direction=%s Offset=(%.1f, %.1f) GroundZ=%.1f"), SegmentCount, BendDegrees, CurlDirection > 0.0f ? TEXT("Clockwise") : TEXT("CounterClockwise"), CandidateOffset.X, CandidateOffset.Y, GroundHit.ImpactPoint.Z);
             return true;
         }
@@ -288,6 +629,11 @@ void ACMChimera::ConfigureSegments()
         );
         SegmentBody->SetMobility(EComponentMobility::Movable);
         SegmentBody->SetSimulatePhysics(bIsActive);
+        SegmentBody->SetUseCCD(bIsActive && bUseBodyCCD, NAME_None);
+        SegmentBody->SetNotifyRigidBodyCollision(false);
+        SegmentBody->OnComponentHit.AddUniqueDynamic(
+            this,
+            &ACMChimera::HandleBodySegmentHit);
         if (SegmentHurtbox)
         {
             SegmentHurtbox->SetCollisionEnabled(
@@ -308,6 +654,8 @@ void ACMChimera::ConfigureSegments()
     {
         return;
     }
+
+    ResetStuckRecoveryHistory();
 
     for (UPhysicsConstraintComponent* ExistingConstraint
         : SegmentConstraints)

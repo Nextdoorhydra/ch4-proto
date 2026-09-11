@@ -4,12 +4,19 @@
 #include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 
 TSharedRef<SWidget> UCMWorldPingWidget::RebuildWidget()
 {
     IconBrush.DrawAs = ESlateBrushDrawType::Image;
     IconBrush.ImageSize = FVector2D(92.0f, 92.0f);
+    GlowBrush = *FCoreStyle::Get().GetBrush("WhiteBrush");
+    GlowBrush.DrawAs = ESlateBrushDrawType::RoundedBox;
+    GlowBrush.OutlineSettings.CornerRadii = FVector4(56.0f);
+    GlowBrush.OutlineSettings.Width = 8.0f;
+    GlowBrush.OutlineSettings.bUseBrushTransparency = false;
+    GlowBrush.TintColor = FLinearColor::Transparent;
 
     TSharedRef<SWidget> Root =
         SNew(SVerticalBox)
@@ -28,11 +35,29 @@ TSharedRef<SWidget> UCMWorldPingWidget::RebuildWidget()
         .HAlign(HAlign_Center)
         [
             SNew(SBox)
-            .WidthOverride(96.0f)
-            .HeightOverride(96.0f)
+            .WidthOverride(112.0f)
+            .HeightOverride(112.0f)
             [
-                SAssignNew(IconImage, SImage)
-                .Image(&IconBrush)
+                SNew(SOverlay)
+                + SOverlay::Slot()
+                .HAlign(HAlign_Fill)
+                .VAlign(VAlign_Fill)
+                [
+                    SAssignNew(GlowImage, SImage)
+                    .Image(&GlowBrush)
+                ]
+                + SOverlay::Slot()
+                .HAlign(HAlign_Center)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(SBox)
+                    .WidthOverride(92.0f)
+                    .HeightOverride(92.0f)
+                    [
+                        SAssignNew(IconImage, SImage)
+                        .Image(&IconBrush)
+                    ]
+                ]
             ]
         ];
 
@@ -55,6 +80,12 @@ void UCMWorldPingWidget::ApplyPresentation()
 {
     IconTexture = LoadIcon();
     IconBrush.SetResourceObject(IconTexture);
+    GlowBrush.OutlineSettings.Color =
+        CMPing::GetTypeColor(PingType).CopyWithNewOpacity(0.32f);
+    if (GlowImage)
+    {
+        GlowImage->SetImage(&GlowBrush);
+    }
     if (IconImage)
     {
         IconImage->SetImage(&IconBrush);

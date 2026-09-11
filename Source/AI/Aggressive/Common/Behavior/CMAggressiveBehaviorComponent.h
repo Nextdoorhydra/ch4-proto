@@ -76,6 +76,7 @@ private:
     ICMAggressiveMovementAgent* GetMovementAgent() const;
     FVector GetNavigationLocation() const;
     FVector GetAttackOriginLocation() const;
+    FVector GetAttackTargetLocation(const AActor& Target) const;
     UPrimitiveComponent* GetMovementBody() const;
     AActor* FindVisibleTarget() const;
     ACMSacrificeCharacter* FindCloserVisibleSacrifice(const ACMSacrificeCharacter& CurrentSacrifice) const;

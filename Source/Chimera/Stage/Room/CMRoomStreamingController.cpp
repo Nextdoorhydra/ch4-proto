@@ -196,6 +196,47 @@ bool ACMRoomStreamingController::TryCheatSelectCheckpoint(int32 OneBasedCheckpoi
 #endif
 }
 
+bool ACMRoomStreamingController::RestoreCheckpointForRestart(const int32 OneBasedCheckpointNumber)
+{
+    if (!HasAuthority() || OneBasedCheckpointNumber < 1 || OneBasedCheckpointNumber > Rooms.Num())
+    {
+        return false;
+    }
+
+    const int32 TargetIndex = OneBasedCheckpointNumber - 1;
+    const FName RoomId = Rooms[TargetIndex].RoomId;
+    if (RoomId.IsNone() || Rooms.FilterByPredicate([RoomId](const FCMRoomStreamingEntry& Room)
+            { return Room.RoomId == RoomId; }).Num() != 1)
+    {
+        return false;
+    }
+
+    ULevelStreaming* TargetLevel = ResolveStreamingLevel(Rooms[TargetIndex]);
+    if (!TargetLevel)
+    {
+        return false;
+    }
+
+    TargetLevel->SetShouldBeLoaded(true);
+    GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    const int32 PreviousCheckpoint = ActiveCheckpointRoomIndex;
+    ActiveCheckpointRoomIndex = TargetIndex;
+    FTransform CheckpointTransform;
+    const bool bValidCheckpoint = TryGetActiveCheckpointTransform(CheckpointTransform);
+    ActiveCheckpointRoomIndex = PreviousCheckpoint;
+    if (!bValidCheckpoint)
+    {
+        return false;
+    }
+
+    CurrentRoomIndex = FMath::Max(CurrentRoomIndex, TargetIndex);
+    ActiveCheckpointRoomIndex = TargetIndex;
+    ApplyStreamingWindow();
+    GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    ForceNetUpdate();
+    return true;
+}
+
 bool ACMRoomStreamingController::TryGetActiveCheckpointTransform(
     FTransform& OutTransform) const
 {

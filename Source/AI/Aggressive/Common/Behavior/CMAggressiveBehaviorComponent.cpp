@@ -360,8 +360,12 @@ void UCMAggressiveBehaviorComponent::BeginStuckRecovery(const double CurrentTime
     }
 
     StopMove();
-    CurrentTarget = nullptr;
-    State = ECMAggressiveAIState::Searching;
+    const bool bKeepCentipedeTarget = Profile == ECMAggressiveBehaviorProfile::Centipede && IsValidTarget(CurrentTarget);
+    if (!bKeepCentipedeTarget)
+    {
+        CurrentTarget = nullptr;
+        State = ECMAggressiveAIState::Searching;
+    }
     bReturningHome = false;
     bHasWanderGoal = false;
     bReversingFromStuck = true;
@@ -469,7 +473,7 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
         return;
     }
 
-    if (Profile != ECMAggressiveBehaviorProfile::Tetra)
+    if (Profile == ECMAggressiveBehaviorProfile::Ripper)
     {
         ACMSacrificeCharacter* CurrentSacrifice = Cast<ACMSacrificeCharacter>(CurrentTarget);
         if (CurrentSacrifice)
@@ -484,7 +488,7 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
 
     const FVector TargetLocation = CurrentTarget->GetActorLocation();
     const float AttackDistance = GetAttackDistance();
-    const float DistanceSquared = FVector::DistSquared2D(GetAttackOriginLocation(), TargetLocation);
+    const float DistanceSquared = FVector::DistSquared2D(GetAttackOriginLocation(), GetAttackTargetLocation(*CurrentTarget));
     if (DistanceSquared <= FMath::Square(AttackDistance))
     {
         StopMove();
@@ -506,8 +510,15 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
         }
         else
         {
-            PerformCentipedeAttack(*CurrentTarget);
-            BeginReturningHome();
+            const bool bTargetKilled = PerformCentipedeAttack(*CurrentTarget);
+            if (bTargetKilled || !IsValidTarget(CurrentTarget))
+            {
+                BeginReturningHome();
+            }
+            else
+            {
+                BeginChasing(CurrentTarget);
+            }
         }
         return;
     }
@@ -518,8 +529,11 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
         if (bMoveIssued)
         {
             bMoveIssued = false;
-            NextActionTime = CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
-            return;
+            if (Profile != ECMAggressiveBehaviorProfile::Centipede)
+            {
+                NextActionTime = CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
+                return;
+            }
         }
         if (CurrentTime < NextActionTime)
         {
@@ -618,6 +632,10 @@ void UCMAggressiveBehaviorComponent::UpdateTetraSightScan(const double CurrentTi
 void UCMAggressiveBehaviorComponent::BeginChasing(AActor* NewTarget)
 {
     if (!IsValidTarget(NewTarget))
+    {
+        return;
+    }
+    if (Profile == ECMAggressiveBehaviorProfile::Centipede && IsValidTarget(CurrentTarget) && CurrentTarget != NewTarget)
     {
         return;
     }
@@ -800,6 +818,37 @@ FVector UCMAggressiveBehaviorComponent::GetAttackOriginLocation() const
     const ACMCentipedePawn* Centipede = Cast<ACMCentipedePawn>(OwnerPawn);
 
     return Centipede ? Centipede->GetLeadingTipLocation() : GetNavigationLocation();
+}
+
+// Centipede는 플레이어 Actor 원점 대신 가장 가까운 생존 몸통 마디를 공격 거리 기준으로 사용한다.
+FVector UCMAggressiveBehaviorComponent::GetAttackTargetLocation(const AActor& Target) const
+{
+    const ACMChimera* Chimera = Profile == ECMAggressiveBehaviorProfile::Centipede ? Cast<ACMChimera>(&Target) : nullptr;
+    if (!Chimera)
+    {
+        return Target.GetActorLocation();
+    }
+
+    const FVector AttackOrigin = GetAttackOriginLocation();
+    FVector ClosestLocation = Target.GetActorLocation();
+    float ClosestDistanceSquared = TNumericLimits<float>::Max();
+    for (int32 SegmentIndex = 0; SegmentIndex < Chimera->GetActiveSegmentCount(); ++SegmentIndex)
+    {
+        const UBoxComponent* Segment = Chimera->IsSegmentAlive(SegmentIndex) ? Chimera->GetBodySegmentComponent(SegmentIndex) : nullptr;
+        if (!Segment)
+        {
+            continue;
+        }
+
+        const FVector SegmentLocation = Segment->GetComponentLocation();
+        const float DistanceSquared = FVector::DistSquared2D(AttackOrigin, SegmentLocation);
+        if (DistanceSquared < ClosestDistanceSquared)
+        {
+            ClosestLocation = SegmentLocation;
+            ClosestDistanceSquared = DistanceSquared;
+        }
+    }
+    return ClosestLocation;
 }
 
 UPrimitiveComponent* UCMAggressiveBehaviorComponent::GetMovementBody() const

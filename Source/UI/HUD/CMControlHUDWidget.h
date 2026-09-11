@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Player/CMControlTypes.h"
 #include "UI/NKMUIActivatableWidget.h"
 
 #include "CMControlHUDWidget.generated.h"
@@ -36,6 +37,7 @@ public:
     void SetControlBody(ACMControlBody* NewControlBody);
 
 protected:
+    virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
     virtual void NativeOnInitialized() override;
     virtual void NativeDestruct() override;
     virtual void NativeTick(
@@ -133,6 +135,8 @@ private:
         TArray<FText> StatusTexts;
         FLinearColor PlayerColor = FLinearColor::White;
         bool bRightSide = false;
+        bool bShowLegChargeGauge = false;
+        float LegChargeHoldSeconds = 0.0f;
         int32 FontSize = 14;
     };
 
@@ -244,6 +248,8 @@ private:
     FVector2D WireframeImageSize = FVector2D::ZeroVector;
     float RuntimeWireframeZoom = 1.0f;
     float ApmRefreshElapsed = 0.0f;
+    double LocalControlPressStartTimes[CMControl::MaxKeysPerPlayer] = {};
+    bool bLocalControlPressed[CMControl::MaxKeysPerPlayer] = {};
     TArray<TWeakObjectPtr<UCMPartSlotComponent>> ObservedPartSlots;
     TArray<TWeakObjectPtr<ACMPartActorBase>> ObservedParts;
     FDelegateHandle StaminaChangedHandle;

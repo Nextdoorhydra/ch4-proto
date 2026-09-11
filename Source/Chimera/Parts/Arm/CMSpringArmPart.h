@@ -76,6 +76,8 @@ public:
     FCMSpringArmFinishedSignature OnSpringArmFinished;
 
 protected:
+    virtual void BeginPlay() override;
+
     virtual void ApplyPartData(
         const FCMPartLegArmTableRow& PartRow
     ) override;
@@ -124,6 +126,9 @@ protected:
     float PullMaxDuration = 3.0f;
 
 private:
+    UFUNCTION()
+    void HandleSpringArmDied();
+
     bool LaunchHook();
     FVector GetHookSpawnLocation(const FVector& Direction) const;
     float GetAutomaticSweepPhase() const;
