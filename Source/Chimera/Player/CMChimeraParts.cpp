@@ -637,6 +637,7 @@ bool ResolveNamedDebugPart(
 enum class ECMStartingPartType : uint8
 {
     Empty,
+    Arm,
     Leg,
     Head
 };
@@ -645,13 +646,13 @@ const TArray<ECMStartingPartType>* FindStartingPartLayout(int32 PlayerCount)
 {
     static const TArray<ECMStartingPartType> TwoPlayerLayout = {
         ECMStartingPartType::Leg,
-        ECMStartingPartType::Empty,
+        ECMStartingPartType::Arm,
         ECMStartingPartType::Head,
         ECMStartingPartType::Empty
     };
     static const TArray<ECMStartingPartType> ThreePlayerLayout = {
         ECMStartingPartType::Leg,
-        ECMStartingPartType::Empty,
+        ECMStartingPartType::Arm,
         ECMStartingPartType::Head,
         ECMStartingPartType::Empty,
         ECMStartingPartType::Empty,
@@ -659,7 +660,7 @@ const TArray<ECMStartingPartType>* FindStartingPartLayout(int32 PlayerCount)
     };
     static const TArray<ECMStartingPartType> FourPlayerLayout = {
         ECMStartingPartType::Leg,
-        ECMStartingPartType::Empty,
+        ECMStartingPartType::Arm,
         ECMStartingPartType::Leg,
         ECMStartingPartType::Head,
         ECMStartingPartType::Empty,
@@ -700,13 +701,15 @@ void ACMChimera::SpawnStartingPartsForPlayers(int32 PlayerCount)
         return;
     }
 
+    FDebugPartSpawnOption ArmOption;
     FDebugPartSpawnOption LegOption;
     FDebugPartSpawnOption HeadOption;
-    if (!ResolveNamedDebugPart(TEXT("LegTier3"), LegOption)
+    if (!ResolveNamedDebugPart(TEXT("DefaultArm"), ArmOption)
+        || !ResolveNamedDebugPart(TEXT("LegTier3"), LegOption)
         || !ResolveNamedDebugPart(TEXT("DefaultHead"), HeadOption))
     {
         UE_LOG(LogChimeraLineBody, Error,
-            TEXT("[Starting Parts Failed] Default Leg or Head Blueprint could not be loaded."));
+            TEXT("[Starting Parts Failed] Default Arm, Leg, or Head Blueprint could not be loaded."));
         return;
     }
 
@@ -738,7 +741,9 @@ void ACMChimera::SpawnStartingPartsForPlayers(int32 PlayerCount)
         }
 
         const FDebugPartSpawnOption& PartOption =
-            PartType == ECMStartingPartType::Leg ? LegOption : HeadOption;
+            PartType == ECMStartingPartType::Arm
+                ? ArmOption
+                : PartType == ECMStartingPartType::Leg ? LegOption : HeadOption;
         for (int32 PartSlotIndex = 0;
             PartSlotIndex < CMControl::PartSlotsPerSegment;
             ++PartSlotIndex)
