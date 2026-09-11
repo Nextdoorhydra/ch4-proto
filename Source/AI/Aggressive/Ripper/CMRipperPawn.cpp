@@ -3,6 +3,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Aggressive/Common/Animation/CMAIProceduralLegComponent.h"
 #include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
@@ -60,6 +61,7 @@ ACMRipperPawn::ACMRipperPawn()
     Sight = CreateDefaultSubobject<UCMAggressiveSightComponent>(TEXT("Sight"));
     Sight->SetupAttachment(PhysicsRoot);
     Sight->SetSightDefaults(1000.0f, 70.0f, 180.0f);
+    Sight->SetVisionIndicatorAlwaysVisible(true);
 
     LegActuationSettings.ImpulseMagnitude = 20000.0f;
     LegActuationSettings.CooldownSeconds = 0.08f;
@@ -293,12 +295,21 @@ void ACMRipperPawn::AddLeg(const TCHAR* Name, const FVector& RelativeLocation, U
     LegMesh->SetRelativeScale3D(FVector(0.2f, 0.2f, 0.5f));
     LegMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     LegMesh->SetCanEverAffectNavigation(false);
+    LegMesh->SetHiddenInGame(true);
     LegMeshes.Add(LegMesh);
 
     USceneComponent* ContactPoint = CreateDefaultSubobject<USceneComponent>(*FString::Printf(TEXT("%sLegContact"), Name));
     ContactPoint->SetupAttachment(PhysicsRoot);
     ContactPoint->SetRelativeLocation(RelativeLocation);
     LegContactPoints.Add(ContactPoint);
+
+    FVector OutwardDirection(RelativeLocation.X, RelativeLocation.Y, 0.0f);
+    OutwardDirection = OutwardDirection.GetSafeNormal(SMALL_NUMBER, FVector::ForwardVector);
+    UCMAIProceduralLegComponent* ProceduralLeg = CreateDefaultSubobject<UCMAIProceduralLegComponent>(*FString::Printf(TEXT("%sProceduralLeg"), Name));
+    ProceduralLeg->SetupAttachment(PhysicsRoot);
+    ProceduralLeg->SetRelativeLocation(RelativeLocation - OutwardDirection * 30.0f + FVector::UpVector * 80.0f);
+    ProceduralLeg->Configure(ContactPoint, OutwardDirection, static_cast<float>(ProceduralLegMeshes.Num()) / 3.0f, 1.8f);
+    ProceduralLegMeshes.Add(ProceduralLeg);
 }
 
 // 빠른 가속과 Yaw 회전이 가능하도록 Ripper AI 몸통 물리 설정을 적용한다.

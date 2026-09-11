@@ -23,6 +23,8 @@ public:
 
     void SetSightForwardReversed(bool bInReversed);
 
+    void SetVisionIndicatorAlwaysVisible(bool bInAlwaysVisible);
+
     UFUNCTION(BlueprintPure, Category = "Aggressive AI|Sight")
     float GetSightDistanceCm() const
     {
@@ -70,4 +72,6 @@ private:
 
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Sight", meta = (AllowPrivateAccess = "true"))
     bool bSightForwardReversed = false;
+
+    bool bVisionIndicatorAlwaysVisible = false;
 };
