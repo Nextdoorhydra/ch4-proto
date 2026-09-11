@@ -554,6 +554,10 @@ void FListenServerSessionSubsystemImpl::ClearParticipants()
 
 bool FListenServerSessionSubsystemImpl::TickConnectionDiagnostics(float)
 {
+	if (PendingTravel.IsValid())
+	{
+		HandlePostLoadMap(GetWorld());
+	}
 	RefreshConnectionDiagnostics();
 	return true;
 }
