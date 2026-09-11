@@ -1,12 +1,17 @@
 #include "Stage/Trigger/CMStageTriggerBase.h"
 #include "Net/UnrealNetwork.h"
 
+#include "Components/SceneComponent.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/PlayerController.h"
 #include "Stage/CMStageCommandTags.h"
 #include "Stage/CMStageElementComponent.h"
 #include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
 
 ACMStageTriggerBase::ACMStageTriggerBase()
 {
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
     ActivationTrigger = CreateDefaultSubobject<UCMActivationTriggerComponent>(TEXT("ActivationTrigger"));
     TargetCommandTag = CMStageCommandTags::Mechanism_Activate;
     ReleaseCommandTag = CMStageCommandTags::Mechanism_Deactivate;
@@ -20,6 +25,18 @@ void ACMStageTriggerBase::BeginPlay()
     ActivationTrigger->OnActivated.AddUniqueDynamic(this, &ThisClass::HandleTriggerActivated);
     ActivationTrigger->OnDeactivated.AddUniqueDynamic(this, &ThisClass::HandleTriggerDeactivated);
     RefreshPresentationState();
+    ResolveBillboardIndicator();
+    if (HasBillboardIndicator())
+    {
+        SetActorTickEnabled(true);
+        UpdateBillboardIndicator();
+    }
+}
+
+void ACMStageTriggerBase::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+    UpdateBillboardIndicator();
 }
 
 void ACMStageTriggerBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -147,4 +164,61 @@ FName ACMStageTriggerBase::ResolveTargetPlacementId() const
         }
     }
     return TargetPlacementId;
+}
+
+bool ACMStageTriggerBase::HasBillboardIndicator() const
+{
+    return IsValid(BillboardIndicator)
+        && GetNetMode() != NM_DedicatedServer;
+}
+
+void ACMStageTriggerBase::ResolveBillboardIndicator()
+{
+    static const TArray<FName> IndicatorNames = {
+        TEXT("CMPowerSourceIndicator"),
+        TEXT("CMPressurePlateIndicator"),
+        TEXT("CMVisionStoneIndicator")
+    };
+
+    TArray<USceneComponent*> SceneComponents;
+    GetComponents(SceneComponents);
+    for (USceneComponent* SceneComponent : SceneComponents)
+    {
+        if (IsValid(SceneComponent)
+            && IndicatorNames.Contains(SceneComponent->GetFName()))
+        {
+            BillboardIndicator = SceneComponent;
+            return;
+        }
+    }
+}
+
+void ACMStageTriggerBase::UpdateBillboardIndicator()
+{
+    if (!HasBillboardIndicator())
+    {
+        return;
+    }
+
+    const APlayerController* PlayerController =
+        GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+    const APlayerCameraManager* CameraManager = PlayerController
+        ? PlayerController->PlayerCameraManager
+        : nullptr;
+    if (!CameraManager)
+    {
+        return;
+    }
+
+    const FVector IndicatorLocation = BillboardIndicator->GetComponentLocation();
+    const FVector CameraLocation = CameraManager->GetCameraLocation();
+    if (BillboardMaxDistance > 0.0f
+        && FVector::DistSquared(IndicatorLocation, CameraLocation)
+            > FMath::Square(BillboardMaxDistance))
+    {
+        return;
+    }
+
+    BillboardIndicator->SetWorldRotation(
+        (CameraLocation - IndicatorLocation).Rotation());
 }
