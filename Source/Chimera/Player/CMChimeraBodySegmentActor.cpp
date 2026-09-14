@@ -3,11 +3,13 @@
 #include "Components/ChildActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMChimera.h"
 #include "Player/CMChimeraIdleTentacleComponent.h"
 #include "Player/CMRuntimeChildActorComponent.h"
 #include "Player/CMChimeraVisualDefinition.h"
+#include "Player/CMChimeraWrapTentacleComponent.h"
 
 ECMChimeraSegmentVisualRole CMChimeraVisual::ResolveSegmentVisualRole(
     const int32 SegmentIndex,
@@ -49,6 +51,10 @@ ACMChimeraBodySegmentActor::ACMChimeraBodySegmentActor()
     IdleTentacles = CreateDefaultSubobject<
         UCMChimeraIdleTentacleComponent>(TEXT("IdleTentacles"));
     IdleTentacles->SetupAttachment(SceneRoot);
+
+    WrapTentacles = CreateDefaultSubobject<
+        UCMChimeraWrapTentacleComponent>(TEXT("WrapTentacles"));
+    WrapTentacles->SetupAttachment(SceneRoot);
 }
 
 void ACMChimeraBodySegmentActor::OnConstruction(
@@ -83,6 +89,7 @@ void ACMChimeraBodySegmentActor::SetTentacleActorClass(
         SegmentTentacle->SetSegmentActive(bSegmentActive);
     }
     RefreshIdleTentacleSource();
+    RefreshWrapTentacleTarget();
 }
 
 void ACMChimeraBodySegmentActor::InitializeForSegment(
@@ -112,6 +119,7 @@ void ACMChimeraBodySegmentActor::InitializeForSegment(
         SegmentTentacle->SetSegmentActive(bSegmentActive);
     }
     RefreshIdleTentacleSource();
+    RefreshWrapTentacleTarget();
 }
 
 void ACMChimeraBodySegmentActor::SetSegmentPresentation(
@@ -151,6 +159,10 @@ void ACMChimeraBodySegmentActor::SetSegmentPresentation(
     {
         IdleTentacles->SetEffectActive(bInActive);
     }
+    if (WrapTentacles)
+    {
+        WrapTentacles->SetEffectActive(bInActive);
+    }
     if (bActiveChanged)
     {
         K2_SetSegmentVisualActive(bInActive);
@@ -182,18 +194,63 @@ ACMTentacleSegmentActor* ACMChimeraBodySegmentActor::GetTentacleActor() const
         : nullptr;
 }
 
+void ACMChimeraBodySegmentActor::SetWrapTentacleTarget(
+    UMeshComponent* InTargetMesh)
+{
+    if (WrapTentacles)
+    {
+        WrapTentacles->SetTargetMesh(InTargetMesh);
+    }
+}
+
+void ACMChimeraBodySegmentActor::RefreshWrapTentacleTarget()
+{
+    if (!WrapTentacles || !BodySegment)
+    {
+        return;
+    }
+
+    USkeletalMeshComponent* PairedTorso = nullptr;
+    TArray<USceneComponent*> DirectChildren;
+    BodySegment->GetChildrenComponents(false, DirectChildren);
+    for (USceneComponent* Child : DirectChildren)
+    {
+        USkeletalMeshComponent* Candidate =
+            Cast<USkeletalMeshComponent>(Child);
+        const USkeletalMesh* CandidateMesh = Candidate
+            ? Candidate->GetSkeletalMeshAsset()
+            : nullptr;
+        if (CandidateMesh
+            && CandidateMesh->GetName().Contains(
+                TEXT("Torso"),
+                ESearchCase::IgnoreCase))
+        {
+            PairedTorso = Candidate;
+            break;
+        }
+    }
+
+    WrapTentacles->SetTargetMesh(PairedTorso);
+}
+
 void ACMChimeraBodySegmentActor::RefreshIdleTentacleSource()
 {
-    if (!IdleTentacles)
+    if (!IdleTentacles && !WrapTentacles)
     {
         return;
     }
 
     ACMTentacleSegmentActor* SegmentTentacle = GetTentacleActor();
-    IdleTentacles->ConfigureSource(
-        SegmentTentacle
-            ? static_cast<UMeshComponent*>(
-                SegmentTentacle->GetGooBodyComponent())
-            : static_cast<UMeshComponent*>(BodyVisual.Get()),
-        SegmentIndex);
+    UMeshComponent* SourceMesh = SegmentTentacle
+        ? static_cast<UMeshComponent*>(
+            SegmentTentacle->GetGooBodyComponent())
+        : static_cast<UMeshComponent*>(BodyVisual.Get());
+    if (IdleTentacles)
+    {
+        IdleTentacles->ConfigureSource(SourceMesh, SegmentIndex);
+    }
+    if (WrapTentacles)
+    {
+        WrapTentacles->ConfigureSource(SourceMesh, SegmentIndex);
+    }
 }

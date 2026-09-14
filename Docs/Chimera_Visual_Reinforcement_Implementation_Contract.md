@@ -1,9 +1,9 @@
 # 키메라 비주얼 보강 구현 계약
 
-> 문서 상태: Phase 5 키메라 이동 궤적 decal stamp pool 구현 완료
-> 작성 기준일: 2026-09-07
+> 문서 상태: Phase 6 타겟 메시 표면 휘감기 촉수 수직 슬라이스 구현 완료
+> 작성 기준일: 2026-09-08
 > 대상 엔진: Unreal Engine 5.7
-> 다음 구현 단계: 타겟 메시를 휘감는 촉수
+> 다음 구현 단계: 하부 무수한 팔 Niagara
 
 ## 1. 목적
 
@@ -443,6 +443,45 @@ triangle-to-bone 바인딩 또는 baked surface data를 추가한다.
 투영축, 전용 머티리얼과 요청 브러시, 초기 `Opacity=1`과 페이드 중간 시점의
 `Opacity=0.5` 적용을 검증한다.
 
+### 8.4 Phase 6 타겟 메시 표면 휘감기 촉수 결과
+
+`UCMChimeraWrapTentacleComponent`를 모든 몸통 presentation의 고정 서브오브젝트로
+추가했다. 기존 파츠 예약·당기기 촉수와 독립된 로컬 cosmetic 표현이며 Dedicated
+Server에서는 Tick하지 않는다.
+
+구현된 동작은 다음과 같다.
+
+1. 각 presentation은 자신과 1:1로 연결된 `BodyMesh_n`의 직접 자식 중 TORSO
+   `USkeletalMeshComponent`를 찾아 `WrapTentacles` 타깃으로 자동 지정한다.
+   다른 연출이 필요한 경우 `Set Wrap Tentacle Target`으로 Static/Skeletal Mesh를
+   런타임에 명시적으로 교체할 수 있다.
+2. 소스 촉수마디 위치와 타깃의 실제 월드 bounds 사이 거리가
+   `ActivationDistance` 이내일 때만 전개한다.
+3. 타깃 LOD의 triangle을 면적 가중치로 샘플링하고 최소 anchor 간격을 적용한다.
+4. 첫 샘플은 촉수마디에서 가까운 순으로 선택한다. 이후 샘플은 직전 표면점에서
+   가장 가깝고 노멀이 반대 방향이 아닌 후보를 선택해, 반대편 외피로 건너뛰지 않는
+   연속 surface path를 만든다.
+5. `Entanglement`, 진폭, cycle로 표면 normal의 접평면에 굴곡을 추가한다.
+6. Static Mesh anchor는 target-local 좌표로 저장해 컴포넌트 이동을 추종한다.
+   Skeletal Mesh anchor는 최초 샘플의 최근접 bone-local 좌표도 저장해 현재 pose와
+   래그돌 변형을 추종한다.
+7. 경유점마다 `SM_VFX_Arm_03`을 반복하지 않는다. 촉수 하나당 공유 ring 정점으로
+   구성된 단일 `UProceduralMeshComponent` tube를 만들고 기존
+   `MI_VFX_Goo_Arm_01` 머티리얼을 적용한다.
+8. 진입 시 각 spline point를 순차적으로 드러내며 성장하고, 거리 밖으로 나가면
+   `RetractionDuration`에 맞춰 촉수마디 방향으로 회수한다.
+9. 개수, 점 수, 두께, 엉킴, 표면 오프셋, 활성 거리, 전개·회수 시간과
+   머티리얼을 몸통 Blueprint의 상속된 `WrapTentacles`에서 조정할 수 있다.
+
+기본 설정은 촉수 3개, spline point 32개, 활성 거리 450cm, 전개 1.2초, 회수
+0.8초, 최소 anchor 간격 2cm, 두께 0.25, 엉킴 0이다. 촉수당 표면 anchor를
+31개 사용하고 `Linear` span으로 연결해 곡선 보간의 내부 오버슈트를 없앤다.
+기본 lateral entanglement offset도 적용하지 않아 각 점이 surface normal 위의
+`SurfaceOffset` 위치를 유지한다. 현재
+TORSO인 `male_Torso`는 모든 LOD의
+`Allow CPU Access`를 활성화했다. 다른 Static/Skeletal 타깃에도 선택한 LOD의 CPU
+접근이 필요하며, 과도하게 큰 타깃은 향후 baked surface data로 전환할 수 있다.
+
 ## 9. 기준선 및 완료 검증
 
 ### 9.1 자동화 테스트
@@ -495,7 +534,7 @@ UE 5.7 `UnrealEditor-Cmd`의 `-NullRHI` 환경에서 다음 결과를 확인했�
 
 | 필터 | 결과 |
 | --- | --- |
-| `Chimera.BodySegment` | 3/3 성공 |
+| `Chimera.BodySegment` | 5/5 성공 |
 | `Chimera.Tentacle` | 3/3 성공 |
 | `Chimera.Multiplayer.ControlAssignments` | 2/2 성공 |
 | `Chimera.Animation.Part` | 2/2 성공 |
@@ -504,6 +543,11 @@ UE 5.7 `UnrealEditor-Cmd`의 `-NullRHI` 환경에서 다음 결과를 확인했�
 `Chimera.BodySegment.VisualDefinitionContract`는 필수 이름, 역할별 프리셋 선택,
 빈 정의의 정밀 오류 보고를 검증한다. `IdleTentacleMath`는 대기·수축 alpha,
 완전 수축 위치, 최소 anchor 간격, 모든 마디의 고정 Idle 컴포넌트 소유를 검증한다.
+`WrapTentacleMath`와 `WrapTentacleRuntime`은 메시 bounds 근접 판정, 순차 전개,
+고정 컴포넌트 소유, 실제 Static Mesh triangle 샘플링과 연결형 procedural tube의
+지속 가시성을 검증한다. 렌더링 통합 테스트는 실제 `BP_CMChimera`의 16개
+presentation이 각각 고유한 TORSO를 타깃으로 가지며, 활성 마디에 서로 분리되지
+않은 tube 촉수 3개가 생성되는 것도 검증한다.
 실제 메시가 들어오면 정의 애셋 자체의 Content Validation과 PIE 외형 결과를 이
 기준선에 추가한다.
 

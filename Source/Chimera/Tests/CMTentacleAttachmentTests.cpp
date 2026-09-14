@@ -10,6 +10,7 @@
 #include "Components/SplineMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -22,8 +23,10 @@
 #include "Player/CMChimera.h"
 #include "Player/CMChimeraBodySegmentActor.h"
 #include "Player/CMChimeraIdleTentacleComponent.h"
+#include "Player/CMChimeraWrapTentacleComponent.h"
 #include "Player/CMRuntimeChildActorComponent.h"
 #include "Player/CMPartSlotComponent.h"
+#include "ProceduralMeshComponent.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCMTentacleAttachmentDefaultsTest,
@@ -365,6 +368,7 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
     TSet<int32> SegmentIndices;
     TSet<int32> ActiveSegmentIndices;
     TArray<ACMChimeraBodySegmentActor*> InitialPresentations;
+    TSet<UMeshComponent*> WrapTargets;
     for (TActorIterator<ACMTentacleSegmentActor> It(World); It; ++It)
     {
         if (It->GetOwner() == Chimera)
@@ -429,8 +433,39 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                         SegmentIndex),
                     Presentation->IsSegmentActive(),
                     SegmentIndex < Chimera->GetActiveSegmentCount());
+
+                const UCMChimeraWrapTentacleComponent* Wrap =
+                    Presentation->FindComponentByClass<
+                        UCMChimeraWrapTentacleComponent>();
+                UMeshComponent* WrapTarget = Wrap
+                    ? Wrap->GetTargetMesh()
+                    : nullptr;
+                TestNotNull(
+                    *FString::Printf(
+                        TEXT("Segment %d assigns its paired TORSO to wrap tentacles"),
+                        SegmentIndex),
+                    WrapTarget);
+                const USkeletalMeshComponent* Torso =
+                    Cast<USkeletalMeshComponent>(WrapTarget);
+                TestEqual(
+                    *FString::Printf(
+                        TEXT("Segment %d wrap target uses male_Torso"),
+                        SegmentIndex),
+                    GetPathNameSafe(
+                        Torso ? Torso->GetSkeletalMeshAsset() : nullptr),
+                    FString(TEXT("/Game/CoreC/02BaseBody/SKM/"
+                        "male_Torso.male_Torso")));
+                if (WrapTarget)
+                {
+                    WrapTargets.Add(WrapTarget);
+                }
             }
         }
+
+        TestEqual(
+            TEXT("Every tentacle segment owns one distinct TORSO target"),
+            WrapTargets.Num(),
+            CMControl::MaxSegments);
 
         if (!InitialPresentations.Contains(nullptr))
         {
@@ -443,6 +478,25 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                 InitialPresentations[Chimera->GetActiveSegmentCount() - 1]
                     ->GetVisualRole(),
                 ECMChimeraSegmentVisualRole::Tail);
+
+            for (ACMChimeraBodySegmentActor* Presentation
+                : InitialPresentations)
+            {
+                UCMChimeraWrapTentacleComponent* Wrap =
+                    Presentation->FindComponentByClass<
+                        UCMChimeraWrapTentacleComponent>();
+                if (!Wrap)
+                {
+                    continue;
+                }
+                Wrap->TickComponent(1.2f, LEVELTICK_All, nullptr);
+                TestEqual(
+                    *FString::Printf(
+                        TEXT("Segment %d wrap visibility follows gameplay activation"),
+                        Presentation->GetSegmentIndex()),
+                    Wrap->GetActiveTentacleCount(),
+                    Presentation->IsSegmentActive() ? 3 : 0);
+            }
         }
     }
 
@@ -456,6 +510,7 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         }
     }
     UCMChimeraIdleTentacleComponent* RuntimeIdleTentacles = nullptr;
+    UCMChimeraWrapTentacleComponent* RuntimeWrapTentacles = nullptr;
     ACMChimeraBodySegmentActor* RuntimePresentation = nullptr;
     if (Chimera && RuntimeTentacle)
     {
@@ -465,6 +520,8 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         {
             RuntimeIdleTentacles = RuntimePresentation->FindComponentByClass<
                 UCMChimeraIdleTentacleComponent>();
+            RuntimeWrapTentacles = RuntimePresentation->FindComponentByClass<
+                UCMChimeraWrapTentacleComponent>();
         }
     }
     TestNotNull(
@@ -611,6 +668,110 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         TestTrue(
             TEXT("Idle spline meshes remain visible after respawning"),
             VisibleRespawnedIdleSpans > 0);
+    }
+    TestNotNull(
+        TEXT("Active segment contains WrapTentacles"),
+        RuntimeWrapTentacles);
+    if (RuntimeWrapTentacles)
+    {
+        const USkeletalMeshComponent* RuntimeTorso =
+            Cast<USkeletalMeshComponent>(
+                RuntimeWrapTentacles->GetTargetMesh());
+        const USkeletalMesh* RuntimeTorsoAsset = RuntimeTorso
+            ? RuntimeTorso->GetSkeletalMeshAsset()
+            : nullptr;
+        const FSkeletalMeshLODInfo* TorsoLODInfo = RuntimeTorsoAsset
+            ? RuntimeTorsoAsset->GetLODInfo(0)
+            : nullptr;
+        TestTrue(
+            TEXT("TORSO LOD 0 allows runtime CPU surface sampling"),
+            TorsoLODInfo && TorsoLODInfo->bAllowCPUAccess);
+
+        RuntimeWrapTentacles->TickComponent(
+            1.2f,
+            LEVELTICK_All,
+            nullptr);
+        TestEqual(
+            TEXT("The active segment renders three TORSO-wrapping tentacles"),
+            RuntimeWrapTentacles->GetActiveTentacleCount(),
+            3);
+
+        int32 VisibleConnectedTubeCount = 0;
+        int32 ConnectedTubeVertexCount = 0;
+        int32 ConnectedTubeIndexCount = 0;
+        float MaximumSurfaceSpanLength = 0.0f;
+        for (const FCMChimeraWrapTentacleRuntime& RuntimeTentacleState
+            : RuntimeWrapTentacles->RuntimeTentacles)
+        {
+            UProceduralMeshComponent* TubeMesh =
+                RuntimeTentacleState.TubeMesh;
+            if (TubeMesh
+                && TubeMesh->IsRegistered()
+                && TubeMesh->IsVisible()
+                && !TubeMesh->bHiddenInGame)
+            {
+                ++VisibleConnectedTubeCount;
+                if (const FProcMeshSection* TubeSection =
+                    TubeMesh->GetProcMeshSection(0))
+                {
+                    ConnectedTubeVertexCount +=
+                        TubeSection->ProcVertexBuffer.Num();
+                    ConnectedTubeIndexCount +=
+                        TubeSection->ProcIndexBuffer.Num();
+                }
+            }
+            for (int32 AnchorIndex = 0;
+                AnchorIndex < RuntimeTentacleState.TargetAnchors.Num();
+                ++AnchorIndex)
+            {
+                const FCMChimeraWrapSurfaceAnchor& Anchor =
+                    RuntimeTentacleState.TargetAnchors[AnchorIndex];
+                const FVector AnchorWorld =
+                    RuntimeWrapTentacles->ResolveAnchorWorldPosition(Anchor);
+                const FVector NormalWorld =
+                    RuntimeWrapTentacles->ResolveAnchorWorldNormal(Anchor);
+                const FVector ExpectedSplineLocal =
+                    RuntimeWrapTentacles->GetComponentTransform()
+                        .InverseTransformPosition(
+                            AnchorWorld
+                            + NormalWorld
+                                * RuntimeWrapTentacles->SurfaceOffset);
+                const FVector ActualSplineLocal =
+                    RuntimeTentacleState.Spline->GetLocationAtSplinePoint(
+                        AnchorIndex + 1,
+                        ESplineCoordinateSpace::Local);
+                TestTrue(
+                    TEXT("Wrap spline control point stays snapped to TORSO surface"),
+                    ActualSplineLocal.Equals(ExpectedSplineLocal, 0.1f));
+                if (AnchorIndex > 0)
+                {
+                    MaximumSurfaceSpanLength = FMath::Max(
+                        MaximumSurfaceSpanLength,
+                        FVector::Distance(
+                            RuntimeWrapTentacles->ResolveAnchorWorldPosition(
+                                RuntimeTentacleState.TargetAnchors[
+                                    AnchorIndex - 1]),
+                            AnchorWorld));
+                }
+            }
+        }
+        TestEqual(
+            TEXT("Three TORSO tentacles render as three connected tube meshes"),
+            VisibleConnectedTubeCount,
+            3);
+        TestEqual(
+            TEXT("Connected tubes contain all thirty-two shared path rings"),
+            ConnectedTubeVertexCount,
+            864);
+        TestEqual(
+            TEXT("All neighboring rings are joined by tube triangles"),
+            ConnectedTubeIndexCount,
+            4464);
+        TestTrue(
+            *FString::Printf(
+                TEXT("Adjacent TORSO anchors stay locally continuous (max %.2f cm)"),
+                MaximumSurfaceSpanLength),
+            MaximumSurfaceSpanLength <= 15.0f);
     }
     UClass* RuntimeArmClass = LoadClass<ACMArmPart>(
         nullptr,

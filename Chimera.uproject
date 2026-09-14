@@ -131,6 +131,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "ProceduralMeshComponent",
+			"Enabled": true
+		},
+		{
 			"Name": "CascadeToNiagaraConverter",
 			"Enabled": true
 		},
