@@ -116,6 +116,7 @@ protected:
     FCMAIFixedLegActuationSettings LegActuationSettings;
 
 private:
+    void ApplyPeerCollisionProfile();
     void BalanceLegYawImpulse(int32 LegIndex, const FCMAIFixedLegActuationResult& Result);
     void AddBodyCube(const TCHAR* Name, const FVector& RelativeLocation, UStaticMesh* CubeMesh);
     void AddLeg(const TCHAR* Name, const FVector& RelativeLocation, UStaticMesh* CubeMesh);

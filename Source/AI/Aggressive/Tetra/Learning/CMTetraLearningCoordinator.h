@@ -95,10 +95,14 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Learning")
     bool bResumeExistingSnapshots = true;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Learning|Debug")
+    bool bDrawTrainingGoal = true;
+
 private:
     bool InitializeLearningObjects();
     void RefreshPolicyUpdateState();
     void RunTrainingStep();
+    void DrawTrainingGoals() const;
     void SaveTrainingSnapshotsIfNeeded();
     void SaveTrainingCheckpointIfNeeded();
 

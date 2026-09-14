@@ -7,6 +7,7 @@
 #include "Animation/AnimSequence.h"
 #include "Common/Ability/CMAIGameplayTags.h"
 #include "Common/Ability/CMAIStateGameplayEffect.h"
+#include "Common/CMAINavigationRules.h"
 #include "Components/AudioComponent.h"
 #include "Sacrifice/CMSacrificeActionAbilities.h"
 #include "Sacrifice/CMSacrificeAIController.h"
@@ -21,6 +22,8 @@
 #include "Gore/CMDismembermentComponent.h"
 #include "MotionWarpingComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "NavigationData.h"
+#include "NavigationSystem.h"
 #include "RootMotionModifier_SkewWarp.h"
 #include "Sound/CMSoundPlayback.h"
 #include "Sound/CMSoundTags.h"
@@ -102,6 +105,8 @@ ACMSacrificeCharacter::ACMSacrificeCharacter()
     bUseControllerRotationYaw = false;
     GetCharacterMovement()->bOrientRotationToMovement = true;
     GetCharacterMovement()->bUseControllerDesiredRotation = false;
+    GetCharacterMovement()->bUseRVOAvoidance = true;
+    GetCharacterMovement()->AvoidanceConsiderationRadius = 500.0f;
 }
 
 // 애니메이션과 GAS를 초기화하고 절단·출혈·사망 상태 이벤트를 연결한다.
@@ -399,7 +404,30 @@ float ACMSacrificeCharacter::BeginBackFallRootMotion()
 
     GetCharacterMovement()->StopMovementImmediately();
     const FVector Backward = -GetActorForwardVector().GetSafeNormal2D();
-    MulticastConfigureBackFallWarp(GetActorLocation() + Backward * StumbleBackwardDistanceCm, GetActorRotation());
+    const FVector Origin = GetActorLocation();
+    FVector SafeTarget = Origin;
+    UNavigationSystemV1* NavigationSystem = UNavigationSystemV1::GetCurrent(GetWorld());
+    ANavigationData* NavigationData = NavigationSystem ? NavigationSystem->GetNavDataForProps(GetNavAgentPropertiesRef()) : nullptr;
+    if (NavigationSystem && NavigationData)
+    {
+        constexpr float SampleIntervalCm = 20.0f;
+        constexpr float ContainmentToleranceCm = 25.0f;
+        const int32 SampleCount = FMath::Max(FMath::CeilToInt(StumbleBackwardDistanceCm / SampleIntervalCm), 1);
+        for (int32 SampleIndex = 1; SampleIndex <= SampleCount; ++SampleIndex)
+        {
+            const float SampleDistance = FMath::Min(SampleIndex * SampleIntervalCm, StumbleBackwardDistanceCm);
+            const FVector Candidate = Origin + Backward * SampleDistance;
+            FNavLocation ProjectedCandidate;
+            const FVector ProjectionExtent(ContainmentToleranceCm, ContainmentToleranceCm, 300.0f);
+            if (!NavigationSystem->ProjectPointToNavigation(Candidate, ProjectedCandidate, ProjectionExtent, NavigationData)
+                || !FCMAINavigationRules::IsWithinProjectionTolerance(Candidate, ProjectedCandidate.Location, ContainmentToleranceCm))
+            {
+                break;
+            }
+            SafeTarget = FVector(ProjectedCandidate.Location.X, ProjectedCandidate.Location.Y, Origin.Z);
+        }
+    }
+    MulticastConfigureBackFallWarp(SafeTarget, GetActorRotation());
 
     return BackFallAnimation->GetPlayLength();
 }

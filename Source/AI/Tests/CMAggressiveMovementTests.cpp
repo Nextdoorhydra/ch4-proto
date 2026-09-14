@@ -107,6 +107,8 @@ bool FCMAggressiveGroundPlacementTest::RunTest(const FString& Parameters)
     ACMRipperPawn* ScaledRipper = World->SpawnActor<ACMRipperPawn>(FVector(0.0f, 0.0f, 120.0f), FRotator::ZeroRotator);
     ScaledRipper->SetActorScale3D(FVector(1.2f));
     ScaledRipper->DispatchBeginPlay();
+    TestEqual(TEXT("A native Ripper uses its dedicated collision channel"), ScaledRipper->GetPhysicsRoot()->GetCollisionObjectType(), ECC_GameTraceChannel3);
+    TestEqual(TEXT("A native Ripper ignores peer Ripper bodies"), ScaledRipper->GetPhysicsRoot()->GetCollisionResponseToChannel(ECC_GameTraceChannel3), ECR_Ignore);
     TestEqual(TEXT("A scaled Ripper body center keeps the leg offset above the floor"), ScaledRipper->GetActorLocation().Z, 120.0, 0.1);
     TestEqual(TEXT("A scaled Ripper root bounds bottom rests on the floor"), ScaledRipper->GetRootComponent()->Bounds.GetBox().Min.Z, 0.0, 0.1);
     TestTrue(TEXT("A scaled grounded Ripper can activate a leg"), ScaledRipper->ActivateLeg(0));
@@ -135,6 +137,8 @@ bool FCMAggressiveGroundPlacementTest::RunTest(const FString& Parameters)
     if (TestNotNull(TEXT("Ripper Blueprint instance"), BlueprintRipper))
     {
         BlueprintRipper->DispatchBeginPlay();
+        TestEqual(TEXT("A Blueprint Ripper uses its dedicated collision channel"), BlueprintRipper->GetPhysicsRoot()->GetCollisionObjectType(), ECC_GameTraceChannel3);
+        TestEqual(TEXT("A Blueprint Ripper ignores peer Ripper bodies"), BlueprintRipper->GetPhysicsRoot()->GetCollisionResponseToChannel(ECC_GameTraceChannel3), ECR_Ignore);
         TestEqual(TEXT("A Ripper Blueprint root bounds bottom rests on the floor"), BlueprintRipper->GetRootComponent()->Bounds.GetBox().Min.Z, 0.0, 0.1);
         TestTrue(TEXT("A grounded Ripper Blueprint can activate a leg"), BlueprintRipper->ActivateLeg(0));
         for (const UStaticMeshComponent* LegMesh : BlueprintRipper->GetLegMeshes())

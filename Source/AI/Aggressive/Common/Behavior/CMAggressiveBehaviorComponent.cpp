@@ -51,9 +51,12 @@ namespace CMAggressiveBehavior
     constexpr float TetraPlayerKnockbackDistance = 150.0f;
     constexpr float StuckDetectionSeconds = 3.0f;
     constexpr float StuckMovementDistance = 15.0f;
+    constexpr float RipperStuckDetectionSeconds = 3.0f;
+    constexpr float RipperStuckMovementDistance = 20.0f;
     constexpr float StuckReverseDuration = 0.75f;
     constexpr float StuckReverseSpeed = 250.0f;
     constexpr float FailedMoveRetryInterval = 1.0f;
+    constexpr float RipperAttackCooldownSeconds = 10.0f;
 
 #if !UE_BUILD_SHIPPING
     bool bDrawWanderGoalDebug = false;
@@ -109,6 +112,16 @@ namespace CMAggressiveBehavior
     FAutoConsoleCommandWithWorldAndArgs WanderGoalDebugCommand(TEXT("CM.AI.WanderDebug"), TEXT("Draws hostile AI random wander goals. Usage: CM.AI.WanderDebug on|off"), FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetWanderGoalDebugDraw));
 #endif
 } // namespace CMAggressiveBehavior
+
+bool CMAggressiveBehaviorRules::HasMadeGoalProgress(const float PreviousDistance, const float CurrentDistance, const float RequiredProgressDistance)
+{
+    return PreviousDistance - CurrentDistance >= FMath::Max(RequiredProgressDistance, 0.0f);
+}
+
+bool CMAggressiveBehaviorRules::IsRipperAttackReady(const double CurrentTime, const double NextAttackTime)
+{
+    return CurrentTime >= NextAttackTime;
+}
 
 UCMAggressiveBehaviorComponent::UCMAggressiveBehaviorComponent()
 {
@@ -196,6 +209,7 @@ void UCMAggressiveBehaviorComponent::SetBehaviorEnabled(const bool bEnabled)
     SpawnLocation = GetNavigationLocation();
     State = ECMAggressiveAIState::Searching;
     NextActionTime = 0.0;
+    NextRipperAttackTime = 0.0;
     NextTetraSightTurnTime = 0.0;
     bMoveIssued = false;
     bReturningHome = false;
@@ -248,6 +262,7 @@ void UCMAggressiveBehaviorComponent::UpdateBehavior()
     }
 
     const double CurrentTime = World->GetTimeSeconds();
+    RecoverToNavigation();
     UpdateTetraSightScan(CurrentTime);
     // 정체 복구 중에도 새 타깃 감지는 우선 처리해 눈앞의 희생양을 놓치지 않는다.
     if (State == ECMAggressiveAIState::Searching)
@@ -285,6 +300,60 @@ void UCMAggressiveBehaviorComponent::UpdateBehavior()
     }
 }
 
+// 물리 몸체가 전용 NavMesh 밖으로 밀리면 전체 몸체를 가장 가까운 유효 위치로 복귀시킨다.
+bool UCMAggressiveBehaviorComponent::RecoverToNavigation()
+{
+    UCMAggressiveOmnidirectionalPathComponent* PathMovement = OwnerPawn ? OwnerPawn->FindComponentByClass<UCMAggressiveOmnidirectionalPathComponent>() : nullptr;
+    FVector RecoveryLocation;
+    if (!PathMovement || !PathMovement->FindNavigationRecoveryLocation(RecoveryLocation))
+    {
+        return false;
+    }
+
+    const FVector CurrentLocation = GetNavigationLocation();
+    FVector RecoveryOffset = RecoveryLocation - CurrentLocation;
+    RecoveryOffset.Z = 0.0f;
+    StopMove();
+    if (ACMCentipedePawn* Centipede = Cast<ACMCentipedePawn>(OwnerPawn))
+    {
+        for (UBoxComponent* Segment : Centipede->GetBodySegments())
+        {
+            if (!Segment)
+            {
+                continue;
+            }
+            Segment->SetWorldLocation(Segment->GetComponentLocation() + RecoveryOffset, false, nullptr, ETeleportType::TeleportPhysics);
+            Segment->SetPhysicsLinearVelocity(FVector::ZeroVector);
+            Segment->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+        }
+    }
+    else if (UPrimitiveComponent* Body = GetMovementBody())
+    {
+        Body->SetWorldLocation(Body->GetComponentLocation() + RecoveryOffset, false, nullptr, ETeleportType::TeleportPhysics);
+        Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        Body->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+    }
+
+    if (Profile == ECMAggressiveBehaviorProfile::Tetra && State == ECMAggressiveAIState::Attacking)
+    {
+        CastChecked<ACMTetraPawn>(OwnerPawn)->GetAccelerationMovement()->SetMaximumSpeedMultiplier(1.0f);
+        const bool bHasValidTarget = IsValidTarget(CurrentTarget);
+        State = bHasValidTarget ? ECMAggressiveAIState::Chasing : ECMAggressiveAIState::Searching;
+        bReturningHome = !bHasValidTarget;
+        if (!bHasValidTarget)
+        {
+            CurrentTarget = nullptr;
+        }
+    }
+    bMoveIssued = false;
+    bReversingFromStuck = false;
+    bCompletingStuckRecoveryMove = false;
+    NextActionTime = 0.0;
+    ResetStuckTracking();
+    OwnerPawn->ForceNetUpdate();
+    return true;
+}
+
 // 후진과 새 임의 이동으로 구성된 정체 복구 단계를 진행한다.
 bool UCMAggressiveBehaviorComponent::UpdateStuckRecovery(const double CurrentTime)
 {
@@ -297,6 +366,19 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckRecovery(const double CurrentTim
         }
 
         bReversingFromStuck = false;
+        if (Profile == ECMAggressiveBehaviorProfile::Ripper && State == ECMAggressiveAIState::Chasing && IsValidTarget(CurrentTarget))
+        {
+            if (!CanPursueTarget(*CurrentTarget))
+            {
+                BeginReturningHome();
+                ResetStuckTracking();
+                return true;
+            }
+            bMoveIssued = StartMove(CurrentTarget->GetActorLocation(), GetAttackDistance());
+            bCompletingStuckRecoveryMove = false;
+            ResetStuckTracking();
+            return bMoveIssued;
+        }
         bMoveIssued = BeginRandomMove();
         bCompletingStuckRecoveryMove = bMoveIssued;
         ResetStuckTracking();
@@ -321,7 +403,7 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckRecovery(const double CurrentTim
     return false;
 }
 
-// 이동 명령 중 위치 변화가 일정 시간 부족하면 정체 복구를 시작한다.
+// 이동 명령 중 목적지까지의 거리 감소가 일정 시간 부족하면 정체 복구를 시작한다.
 bool UCMAggressiveBehaviorComponent::UpdateStuckDetection(const double CurrentTime)
 {
     const bool bShouldTrack = bMoveIssued && IsMoveRunning() && (State == ECMAggressiveAIState::Searching || State == ECMAggressiveAIState::Chasing);
@@ -332,13 +414,21 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckDetection(const double CurrentTi
     }
 
     const FVector CurrentLocation = GetNavigationLocation();
-    if (StuckProgressStartTime <= 0.0 || FVector::DistSquared2D(CurrentLocation, StuckProgressLocation) >= FMath::Square(CMAggressiveBehavior::StuckMovementDistance))
+    const float RequiredProgressDistance = Profile == ECMAggressiveBehaviorProfile::Ripper ? CMAggressiveBehavior::RipperStuckMovementDistance : CMAggressiveBehavior::StuckMovementDistance;
+    const float DetectionSeconds = Profile == ECMAggressiveBehaviorProfile::Ripper ? CMAggressiveBehavior::RipperStuckDetectionSeconds : CMAggressiveBehavior::StuckDetectionSeconds;
+    if (StuckProgressStartTime <= 0.0)
     {
-        StuckProgressLocation = CurrentLocation;
-        StuckProgressStartTime = CurrentTime;
+        ResetStuckTracking();
         return false;
     }
-    if (CurrentTime - StuckProgressStartTime < CMAggressiveBehavior::StuckDetectionSeconds)
+    const float PreviousGoalDistance = FVector::Dist2D(StuckProgressLocation, LastMoveGoal);
+    const float CurrentGoalDistance = FVector::Dist2D(CurrentLocation, LastMoveGoal);
+    if (CMAggressiveBehaviorRules::HasMadeGoalProgress(PreviousGoalDistance, CurrentGoalDistance, RequiredProgressDistance))
+    {
+        ResetStuckTracking();
+        return false;
+    }
+    if (CurrentTime - StuckProgressStartTime < DetectionSeconds)
     {
         return false;
     }
@@ -360,8 +450,8 @@ void UCMAggressiveBehaviorComponent::BeginStuckRecovery(const double CurrentTime
     }
 
     StopMove();
-    const bool bKeepCentipedeTarget = Profile == ECMAggressiveBehaviorProfile::Centipede && IsValidTarget(CurrentTarget);
-    if (!bKeepCentipedeTarget)
+    const bool bKeepCombatTarget = (Profile == ECMAggressiveBehaviorProfile::Ripper || Profile == ECMAggressiveBehaviorProfile::Centipede) && IsValidTarget(CurrentTarget);
+    if (!bKeepCombatTarget)
     {
         CurrentTarget = nullptr;
         State = ECMAggressiveAIState::Searching;
@@ -492,21 +582,26 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
     if (DistanceSquared <= FMath::Square(AttackDistance))
     {
         StopMove();
+        if (Profile == ECMAggressiveBehaviorProfile::Ripper)
+        {
+            const double CurrentTime = GetWorld()->GetTimeSeconds();
+            if (CMAggressiveBehaviorRules::IsRipperAttackReady(CurrentTime, NextRipperAttackTime))
+            {
+                if (PerformRipperAttack(*CurrentTarget))
+                {
+                    NextRipperAttackTime = CurrentTime + CMAggressiveBehavior::RipperAttackCooldownSeconds;
+                }
+                else
+                {
+                    BeginReturningHome();
+                }
+            }
+            return;
+        }
         State = ECMAggressiveAIState::Attacking;
         if (Profile == ECMAggressiveBehaviorProfile::Tetra)
         {
             BeginTetraDash();
-        }
-        else if (Profile == ECMAggressiveBehaviorProfile::Ripper)
-        {
-            if (PerformRipperAttack(*CurrentTarget))
-            {
-                BeginWaiting(20.0f);
-            }
-            else
-            {
-                BeginReturningHome();
-            }
         }
         else
         {
@@ -529,14 +624,14 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
         if (bMoveIssued)
         {
             bMoveIssued = false;
-            if (Profile != ECMAggressiveBehaviorProfile::Centipede)
-            {
-                NextActionTime = CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
-                return;
-            }
         }
         if (CurrentTime < NextActionTime)
         {
+            return;
+        }
+        if (Profile == ECMAggressiveBehaviorProfile::Ripper && !CanPursueTarget(*CurrentTarget))
+        {
+            BeginReturningHome();
             return;
         }
         bMoveIssued = StartMove(TargetLocation, AttackDistance);
@@ -544,10 +639,23 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
         {
             NextActionTime = CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
         }
+        else
+        {
+            NextActionTime = 0.0;
+        }
     }
     else if (FVector::DistSquared2D(TargetLocation, LastMoveGoal) >= FMath::Square(CMAggressiveBehavior::RepathDistance))
     {
-        UpdateMoveGoal(TargetLocation);
+        if (Profile == ECMAggressiveBehaviorProfile::Ripper && !CanPursueTarget(*CurrentTarget))
+        {
+            BeginReturningHome();
+            return;
+        }
+        if (!UpdateMoveGoal(TargetLocation))
+        {
+            bMoveIssued = false;
+            NextActionTime = 0.0;
+        }
     }
 }
 
@@ -635,6 +743,14 @@ void UCMAggressiveBehaviorComponent::BeginChasing(AActor* NewTarget)
     {
         return;
     }
+    if (Profile == ECMAggressiveBehaviorProfile::Ripper && !CanPursueTarget(*NewTarget))
+    {
+        if (State == ECMAggressiveAIState::Chasing)
+        {
+            BeginReturningHome();
+        }
+        return;
+    }
     if (Profile == ECMAggressiveBehaviorProfile::Centipede && IsValidTarget(CurrentTarget) && CurrentTarget != NewTarget)
     {
         return;
@@ -645,6 +761,7 @@ void UCMAggressiveBehaviorComponent::BeginChasing(AActor* NewTarget)
     CurrentTarget = NewTarget;
     State = ECMAggressiveAIState::Chasing;
     bReturningHome = false;
+    NextActionTime = 0.0;
     bMoveIssued = StartMove(CurrentTarget->GetActorLocation(), GetAttackDistance());
     if (!bMoveIssued)
     {
@@ -872,7 +989,7 @@ AActor* UCMAggressiveBehaviorComponent::FindVisibleTarget() const
     const ACMGameState* GameState = World ? World->GetGameState<ACMGameState>() : nullptr;
 
     ACMChimera* Chimera = GameState ? GameState->SharedChimera : nullptr;
-    if (IsValidTarget(Chimera) && CanSeeActor(*Chimera))
+    if (IsValidTarget(Chimera) && CanSeeActor(*Chimera) && CanPursueTarget(*Chimera))
     {
         BestTarget = Chimera;
         BestDistanceSquared = FVector::DistSquared2D(GetNavigationLocation(), Chimera->GetActorLocation());
@@ -886,7 +1003,7 @@ AActor* UCMAggressiveBehaviorComponent::FindVisibleTarget() const
     for (TActorIterator<ACMSacrificeCharacter> It(World); It; ++It)
     {
         ACMSacrificeCharacter* Sacrifice = *It;
-        if (!IsValidTarget(Sacrifice) || !CanSeeActor(*Sacrifice))
+        if (!IsValidTarget(Sacrifice) || !CanSeeActor(*Sacrifice) || !CanPursueTarget(*Sacrifice))
         {
             continue;
         }
@@ -915,7 +1032,8 @@ ACMSacrificeCharacter* UCMAggressiveBehaviorComponent::FindCloserVisibleSacrific
     for (TActorIterator<ACMSacrificeCharacter> It(World); It; ++It)
     {
         ACMSacrificeCharacter* Candidate = *It;
-        if (Candidate == &CurrentSacrifice || !IsValidTarget(Candidate) || !CanSeeActor(*Candidate))
+        if (Candidate == &CurrentSacrifice || !IsValidTarget(Candidate) || !CanSeeActor(*Candidate)
+            || !CanPursueTarget(*Candidate))
         {
             continue;
         }
@@ -927,6 +1045,16 @@ ACMSacrificeCharacter* UCMAggressiveBehaviorComponent::FindCloserVisibleSacrific
         }
     }
     return BestSacrifice;
+}
+
+bool UCMAggressiveBehaviorComponent::CanPursueTarget(const AActor& Target) const
+{
+    if (Profile != ECMAggressiveBehaviorProfile::Ripper)
+    {
+        return true;
+    }
+    const UCMAggressiveOmnidirectionalPathComponent* PathMovement = OwnerPawn ? OwnerPawn->FindComponentByClass<UCMAggressiveOmnidirectionalPathComponent>() : nullptr;
+    return PathMovement && PathMovement->IsNavigationGoalReachable(Target.GetActorLocation(), GetAttackDistance());
 }
 
 bool UCMAggressiveBehaviorComponent::CanSeeActor(const AActor& Target) const

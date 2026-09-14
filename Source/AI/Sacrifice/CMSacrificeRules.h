@@ -12,6 +12,8 @@ struct AI_API FCMSacrificeRules
     static float GetAdditionalBleedReduction(int32 NewlyMissingPartCount);
     static ECMSacrificeHitReactionDirection SelectHitReactionDirection(const FVector& ActorForward, const FVector& ImpactDirection);
     static bool ShouldUseInjuredCrawlAfterHit(bool bWasBackCrawling, bool bHasLostArmOrLeg);
+    static bool IsMovementActionState(ECMSacrificeActionState ActionState);
+    static bool HasMeaningfulProjectedMove(const FVector& StartLocation, const FVector& ProjectedLocation, float AcceptanceRadius, float MinimumTravelDistance);
     static bool IsPointInsideVisionCone(const FVector& Origin, const FVector& Forward, float DistanceCm, float HalfYawDegrees, float UpDegrees, float DownDegrees, const FVector& Point);
 
     static FVector CalculateFleeDirection(const FVector& SacrificeLocation, const TArray<FVector>& ThreatLocations, const FVector& PreferredDirection, float ProbeDistanceCm);

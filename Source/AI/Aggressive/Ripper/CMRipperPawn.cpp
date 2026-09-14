@@ -43,7 +43,7 @@ ACMRipperPawn::ACMRipperPawn()
     SetRootComponent(PhysicsRoot);
     PhysicsRoot->SetBoxExtent(FVector(CMRipperBody::CubeHalfExtent));
     GroundedPhysicsRoot->SetGroundContactHeight(CMRipperBody::GroundContactHeight);
-    PhysicsRoot->SetCollisionProfileName(TEXT("PhysicsActor"));
+    PhysicsRoot->SetCollisionProfileName(TEXT("CMRipperBody"));
     PhysicsRoot->SetSimulatePhysics(true);
     PhysicsRoot->SetIsReplicated(true);
     PhysicsRoot->SetCanEverAffectNavigation(false);
@@ -79,9 +79,29 @@ ACMRipperPawn::ACMRipperPawn()
 void ACMRipperPawn::BeginPlay()
 {
     Super::BeginPlay();
+    ApplyPeerCollisionProfile();
     LegActuator->ResolveInitialGroundPenetration(PhysicsRoot, LegContactPoints, LegActuationSettings);
     ApplyBodySettings();
     LegActuator->InitializeLegs(LegContactPoints.Num());
+}
+
+// Blueprint 기본값과 무관하게 모든 물리 형상이 Ripper 상호 충돌을 무시하게 한다.
+void ACMRipperPawn::ApplyPeerCollisionProfile()
+{
+    for (UBoxComponent* Collision : BodyCollisions)
+    {
+        if (Collision)
+        {
+            Collision->SetCollisionProfileName(TEXT("CMRipperBody"));
+        }
+    }
+    for (UBoxComponent* Collision : LegCollisions)
+    {
+        if (Collision)
+        {
+            Collision->SetCollisionProfileName(TEXT("CMRipperBody"));
+        }
+    }
 }
 
 // 지정한 다리 하나를 전방 임펄스로 구동하고 비대칭 Yaw 회전력만 보정한다.
@@ -258,7 +278,7 @@ void ACMRipperPawn::AddBodyCube(const TCHAR* Name, const FVector& RelativeLocati
         Collision->SetupAttachment(PhysicsRoot);
         Collision->SetRelativeLocation(RelativeLocation);
         Collision->SetBoxExtent(FVector(CMRipperBody::CubeHalfExtent));
-        Collision->SetCollisionProfileName(TEXT("PhysicsActor"));
+        Collision->SetCollisionProfileName(TEXT("CMRipperBody"));
         Collision->SetSimulatePhysics(false);
         Collision->SetCanEverAffectNavigation(false);
         Collision->BodyInstance.bAutoWeld = true;
@@ -282,7 +302,7 @@ void ACMRipperPawn::AddLeg(const TCHAR* Name, const FVector& RelativeLocation, U
     LegCollision->SetupAttachment(PhysicsRoot);
     LegCollision->SetRelativeLocation(LegCenterLocation);
     LegCollision->SetBoxExtent(FVector(10.0f, 10.0f, CMRipperBody::LegHalfHeight));
-    LegCollision->SetCollisionProfileName(TEXT("PhysicsActor"));
+    LegCollision->SetCollisionProfileName(TEXT("CMRipperBody"));
     LegCollision->SetSimulatePhysics(false);
     LegCollision->SetCanEverAffectNavigation(false);
     LegCollision->BodyInstance.bAutoWeld = true;

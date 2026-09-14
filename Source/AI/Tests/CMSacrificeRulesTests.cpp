@@ -1,5 +1,6 @@
 #include "Misc/AutomationTest.h"
 
+#include "Common/CMAINavigationRules.h"
 #include "Sacrifice/CMSacrificeCharacter.h"
 #include "Sacrifice/CMSacrificeRules.h"
 #include "Sacrifice/CMSacrificeStateComponent.h"
@@ -26,6 +27,13 @@ bool FCMSacrificeRulesTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("No limb loss gets up instead of injured crawl"), FCMSacrificeRules::ShouldUseInjuredCrawlAfterHit(false, false));
     TestTrue(TEXT("A back-crawling hit continues as injured crawl"), FCMSacrificeRules::ShouldUseInjuredCrawlAfterHit(true, false));
     TestTrue(TEXT("A lost arm or leg always uses injured crawl"), FCMSacrificeRules::ShouldUseInjuredCrawlAfterHit(false, true));
+    TestTrue(TEXT("Back crawl is monitored as a movement action"), FCMSacrificeRules::IsMovementActionState(ECMSacrificeActionState::BackCrawl));
+    TestTrue(TEXT("Flee is monitored as a movement action"), FCMSacrificeRules::IsMovementActionState(ECMSacrificeActionState::Flee));
+    TestFalse(TEXT("Prayer is not monitored as a movement action"), FCMSacrificeRules::IsMovementActionState(ECMSacrificeActionState::Prayer));
+    TestFalse(TEXT("A NavMesh projection collapsed near the sacrifice is rejected"), FCMSacrificeRules::HasMeaningfulProjectedMove(FVector::ZeroVector, FVector(50.0f, 0.0f, 0.0f), 50.0f, 100.0f));
+    TestTrue(TEXT("A distant NavMesh projection remains a useful move"), FCMSacrificeRules::HasMeaningfulProjectedMove(FVector::ZeroVector, FVector(150.0f, 0.0f, 0.0f), 50.0f, 100.0f));
+    TestTrue(TEXT("A location near its NavMesh projection remains contained"), FCMAINavigationRules::IsWithinProjectionTolerance(FVector::ZeroVector, FVector(25.0f, 0.0f, 100.0f), 25.0f));
+    TestFalse(TEXT("A location beyond its NavMesh projection tolerance requires recovery"), FCMAINavigationRules::IsWithinProjectionTolerance(FVector::ZeroVector, FVector(25.1f, 0.0f, 0.0f), 25.0f));
 
     TestTrue(TEXT("A point in front is inside sacrifice vision"), FCMSacrificeRules::IsPointInsideVisionCone(FVector::ZeroVector, FVector::ForwardVector, 300.0f, 30.0f, 50.0f, 70.0f, FVector(200.0f, 0.0f, 0.0f)));
     TestFalse(TEXT("A point behind is outside sacrifice vision"), FCMSacrificeRules::IsPointInsideVisionCone(FVector::ZeroVector, FVector::ForwardVector, 300.0f, 30.0f, 50.0f, 70.0f, FVector(-200.0f, 0.0f, 0.0f)));
