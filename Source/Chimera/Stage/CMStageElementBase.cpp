@@ -20,7 +20,7 @@ ACMStageElementBase::ACMStageElementBase()
 void ACMStageElementBase::BeginPlay()
 {
     Super::BeginPlay();
-    StageElement->OnStageCommandReceived.AddDynamic(
+    StageElement->OnStageCommandReceived.AddUniqueDynamic(
         this, &ThisClass::HandleStageCommand);
 
     if (!PowerSocket)

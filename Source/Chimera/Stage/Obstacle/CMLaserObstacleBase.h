@@ -30,6 +30,10 @@ protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void HandleObstacleActiveStateChanged(bool bIsActive) override;
+    virtual bool ShouldManagePrimaryEffectAutomatically() const override
+    {
+        return false;
+    }
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Components")
     TObjectPtr<USceneComponent> LaserStart;
@@ -58,6 +62,12 @@ protected:
         meta = (ClampMin = "0.0"))
     float RefreshInterval = 0.0f;
 
+    // 레벨이 처음 표시될 때 여러 레이저의 Niagara 활성화를 여러 프레임에 분산한다.
+    // 0이면 기존처럼 즉시 활성화한다.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly,
+        Category = "Chimera|Laser Performance", meta = (ClampMin = "0.0"))
+    float InitialEffectActivationSpread = 0.5f;
+
 private:
     UFUNCTION()
     void OnRep_LaserEndLocation();
@@ -84,6 +94,7 @@ private:
     void ApplyLaserGeometry();
     void UpdateRefreshTimer(bool bShouldRun);
     bool IsPlayerImpactTarget(const AActor* HitActor) const;
+    void FinishInitialEffectActivationDelay();
 
     UPROPERTY(ReplicatedUsing = OnRep_LaserEndLocation)
     FVector_NetQuantize100 LaserEndLocation = FVector::ZeroVector;
@@ -93,6 +104,8 @@ private:
 
     bool bHasObservedActiveState = false;
     bool bLastObservedActiveState = false;
+    bool bInitialEffectActivationDeferred = false;
 
     FTimerHandle RefreshTimerHandle;
+    FTimerHandle InitialEffectActivationTimerHandle;
 };

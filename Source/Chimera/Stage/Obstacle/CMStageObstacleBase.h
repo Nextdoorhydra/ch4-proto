@@ -45,6 +45,7 @@ protected:
     virtual void HandleElementReset_Implementation() override;
 
     virtual void HandleObstacleActiveStateChanged(bool bIsActive) {}
+    virtual bool ShouldManagePrimaryEffectAutomatically() const { return true; }
 
     UFUNCTION(BlueprintImplementableEvent, Category = "Chimera|Obstacle")
     void OnObstacleActiveChanged(bool bIsActive);
