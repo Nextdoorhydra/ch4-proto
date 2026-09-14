@@ -3,6 +3,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Aggressive/Common/Animation/CMAIProceduralLegComponent.h"
 #include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveAccelerationMovementComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
@@ -10,6 +11,7 @@
 #include "Aggressive/Common/Movement/CMGroundPlacementBoxComponent.h"
 #include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace CMTetraBody
@@ -63,6 +65,7 @@ ACMTetraPawn::ACMTetraPawn()
     Sight = CreateDefaultSubobject<UCMAggressiveSightComponent>(TEXT("Sight"));
     Sight->SetupAttachment(PhysicsRoot);
     Sight->SetSightDefaults(1000.0f, 100.0f, 180.0f);
+    Sight->SetVisionIndicatorAlwaysVisible(true);
 
     AddVisualLeg(TEXT("FrontLeft"), FVector(35.0f, -45.0f, -50.0f), CubeMeshAsset.Object);
     AddVisualLeg(TEXT("FrontRight"), FVector(35.0f, 45.0f, -50.0f), CubeMeshAsset.Object);
@@ -213,25 +216,49 @@ void ACMTetraPawn::AddVisualLeg(const TCHAR* Name, const FVector& RelativeContac
     LegMesh->SetRelativeScale3D(FVector(0.2f, 0.2f, 0.3f));
     LegMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     LegMesh->SetCanEverAffectNavigation(false);
+    LegMesh->SetHiddenInGame(true);
     LegMeshes.Add(LegMesh);
+
+    USceneComponent* ContactPoint = CreateDefaultSubobject<USceneComponent>(*FString::Printf(TEXT("%sLegContact"), Name));
+    ContactPoint->SetupAttachment(VisualBodyRoot);
+    ContactPoint->SetRelativeLocation(RelativeContactLocation);
+    LegContactPoints.Add(ContactPoint);
+
+    FVector OutwardDirection(RelativeContactLocation.X, RelativeContactLocation.Y, 0.0f);
+    OutwardDirection = OutwardDirection.GetSafeNormal(SMALL_NUMBER, FVector::ForwardVector);
+    UCMAIProceduralLegComponent* ProceduralLeg = CreateDefaultSubobject<UCMAIProceduralLegComponent>(*FString::Printf(TEXT("%sProceduralLeg"), Name));
+    ProceduralLeg->SetupAttachment(VisualBodyRoot);
+    ProceduralLeg->SetRelativeLocation(RelativeContactLocation - OutwardDirection * 18.0f + FVector::UpVector * 55.0f);
+    ProceduralLeg->Configure(ContactPoint, OutwardDirection, static_cast<float>(ProceduralLegMeshes.Num()) / 4.0f, 1.3f);
+    ProceduralLegMeshes.Add(ProceduralLeg);
 }
 
-// 중력과 수직 이동 및 모든 회전을 잠그고 평면 가속도만 물리에 허용한다.
+// 지면 착지는 허용하고 회전과 지면 마찰은 제거해 맵 재질과 무관하게 평면 가속도를 적용한다.
 void ACMTetraPawn::ApplyPlanarPhysicsSettings()
 {
     if (!PhysicsRoot)
         return;
 
     PhysicsRoot->SetSimulatePhysics(true);
-    PhysicsRoot->SetEnableGravity(false);
+    PhysicsRoot->SetEnableGravity(true);
     PhysicsRoot->SetRelativeRotation(FRotator::ZeroRotator);
     if (VisualBodyRoot)
         VisualBodyRoot->SetRelativeRotation(FRotator::ZeroRotator);
+
+    if (!RuntimeGroundPhysicalMaterial)
+    {
+        RuntimeGroundPhysicalMaterial = NewObject<UPhysicalMaterial>(this, TEXT("TetraGroundPhysicalMaterial"));
+        RuntimeGroundPhysicalMaterial->Friction = 0.0f;
+        RuntimeGroundPhysicalMaterial->StaticFriction = 0.0f;
+        RuntimeGroundPhysicalMaterial->bOverrideFrictionCombineMode = true;
+        RuntimeGroundPhysicalMaterial->FrictionCombineMode = EFrictionCombineMode::Multiply;
+    }
+    PhysicsRoot->SetPhysMaterialOverride(RuntimeGroundPhysicalMaterial);
 
     FBodyInstance& BodyInstance = PhysicsRoot->BodyInstance;
     BodyInstance.bLockXRotation = true;
     BodyInstance.bLockYRotation = true;
     BodyInstance.bLockZRotation = true;
-    BodyInstance.bLockZTranslation = true;
+    BodyInstance.bLockZTranslation = false;
     BodyInstance.SetDOFLock(EDOFMode::SixDOF);
 }

@@ -130,6 +130,11 @@ void UCMAggressiveSightComponent::SetSightForwardReversed(bool bInReversed)
     bSightForwardReversed = bInReversed;
 }
 
+void UCMAggressiveSightComponent::SetVisionIndicatorAlwaysVisible(bool bInAlwaysVisible)
+{
+    bVisionIndicatorAlwaysVisible = bInAlwaysVisible;
+}
+
 // 거리와 수평·수직 시야각 및 정적 장애물 차폐를 모두 통과한 대상을 감지한다.
 bool UCMAggressiveSightComponent::CanSeeActor(const AActor* Target) const
 {
@@ -226,7 +231,7 @@ void UCMAggressiveSightComponent::UpdateAuthoritySight()
     const ACMGameState* GameState = World ? World->GetGameState<ACMGameState>() : nullptr;
     const ACMChimera* PlayerChimera = GameState ? GameState->SharedChimera : nullptr;
     const bool bPlayerSeen = IsValid(PlayerChimera) && CanSeeActor(PlayerChimera);
-    SetVisionActive(bPlayerSeen);
+    SetVisionActive(bVisionIndicatorAlwaysVisible || bPlayerSeen);
 }
 
 // 대상 액터의 기준점이나 충돌 몸체 최근접점이 시야 영역과 차폐 검사를 모두 통과하는지 확인한다.

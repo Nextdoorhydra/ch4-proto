@@ -10,6 +10,7 @@
 #include "Engine/CanvasRenderTarget2D.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/Level.h"
 #include "Engine/Texture2D.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
@@ -64,6 +65,21 @@ namespace
         TEXT("Draws slot vision origins (green), component locations (red), and aim rays (cyan)."),
         ECVF_Cheat
     );
+
+    bool IsVisionSourceRenderable(const UCMVisionComponent* VisionComponent)
+    {
+        if (!VisionComponent || !VisionComponent->IsRegistered() || !VisionComponent->IsVisible()
+            || !VisionComponent->IsVisionActive())
+        {
+            return false;
+        }
+
+        const AActor* Owner = VisionComponent->GetOwner();
+        const ULevel* Level = Owner ? Owner->GetLevel() : nullptr;
+
+        return Owner && !Owner->IsHidden() && !Owner->IsActorBeingDestroyed()
+            && (!Level || Level->bIsVisible);
+    }
 }
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraVisionManager, Log, All);
@@ -463,7 +479,7 @@ void UCMVisionManagerSubsystem::GetActiveVisionSources(
         : VisionSources)
     {
         UCMVisionComponent* VisionComponent = VisionSource.Get();
-        if (VisionComponent && VisionComponent->IsVisionActive())
+        if (IsVisionSourceRenderable(VisionComponent))
         {
             OutVisionSources.Add(VisionComponent);
         }
@@ -1205,11 +1221,7 @@ bool UCMVisionManagerSubsystem::HasLineOfSight(
         .Equals(PlanarTarget, 1.0f);
 }
 
-FVector2D UCMVisionManagerSubsystem::WorldToScreenMaskPixel(
-    const FVector& WorldLocation,
-    int32 Width,
-    int32 Height
-) const
+bool UCMVisionManagerSubsystem::WorldToScreenMaskPixel(const FVector& WorldLocation, int32 Width, int32 Height, FVector2D& OutPixel) const
 {
     const APlayerController* PlayerController = GetWorld()
         ? GetWorld()->GetFirstPlayerController() : nullptr;
@@ -1220,11 +1232,12 @@ FVector2D UCMVisionManagerSubsystem::WorldToScreenMaskPixel(
             WorldLocation, ScreenPosition, false)
         || !GetViewportSize(ViewportSize))
     {
-        return FVector2D(-Width, -Height);
+        return false;
     }
-    return FVector2D(
+    OutPixel = FVector2D(
         ScreenPosition.X * Width / static_cast<float>(ViewportSize.X),
         ScreenPosition.Y * Height / static_cast<float>(ViewportSize.Y));
+    return true;
 }
 
 void UCMVisionManagerSubsystem::DrawOccluderVisibilityMask(
@@ -1327,11 +1340,16 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
             continue;
         }
 
-        const FVector2D OriginPixel = WorldToScreenMaskPixel(
-            SourceData.Origin,
-            Width,
-            Height
-        );
+        FVector2D OriginPixel;
+        if (!WorldToScreenMaskPixel(SourceData.Origin, Width, Height, OriginPixel))
+        {
+            continue;
+        }
+        if (OriginPixel.X < 0.0f || OriginPixel.X > Width || OriginPixel.Y < 0.0f
+            || OriginPixel.Y > Height)
+        {
+            continue;
+        }
 
         TArray<FCanvasUVTri> Triangles;
         const int32 ArcSegmentCount = SourceData.Rays.Num() - 1;
@@ -1405,16 +1423,12 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
                 ? RayB.RevealedEnd
                 : RayB.BaseEnd;
 
-            const FVector2D PointAPixel = WorldToScreenMaskPixel(
-                PointA,
-                Width,
-                Height
-            );
-            const FVector2D PointBPixel = WorldToScreenMaskPixel(
-                PointB,
-                Width,
-                Height
-            );
+            FVector2D PointAPixel;
+            FVector2D PointBPixel;
+            if (!WorldToScreenMaskPixel(PointA, Width, Height, PointAPixel) || !WorldToScreenMaskPixel(PointB, Width, Height, PointBPixel))
+            {
+                return;
+            }
 
             const bool bUseEdgeSoftness =
                 !bDrawVisionTint && RenderConfig->VisionEdgeSoftness > 0.0f;
@@ -1621,6 +1635,11 @@ void UCMVisionManagerSubsystem::DrawCachedVisionMask(
                 ArcIndex == 0,
                 ArcIndex == ArcSegmentCount - 1
             );
+        }
+
+        if (Triangles.IsEmpty())
+        {
+            continue;
         }
 
         FCanvasTriangleItem TriangleItem(

@@ -10,6 +10,7 @@
 
 class UBoxComponent;
 class UCMAggressiveBehaviorComponent;
+class UCMAIProceduralLegComponent;
 class UCMAIFixedLegActuatorComponent;
 class UCMAggressiveMovementCommandComponent;
 class UCMAggressiveOmnidirectionalPathComponent;
@@ -152,6 +153,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Body")
     TArray<TObjectPtr<UStaticMeshComponent>> LegMeshes;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Animation")
+    TArray<TObjectPtr<UCMAIProceduralLegComponent>> ProceduralLegMeshes;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Centipede|Body")
     TArray<TObjectPtr<UBoxComponent>> LegCollisions;
