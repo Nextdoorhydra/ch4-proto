@@ -18,10 +18,10 @@ namespace CMOptionWidget
     const FString Korean = TEXT("한국어");
     const FString English = TEXT("English");
     const TArray<FString> ColorVisionModes = {
-        TEXT("일반"),
-        TEXT("녹색 계열 보정"),
-        TEXT("적색 계열 보정"),
-        TEXT("청황색 계열 보정")
+        TEXT("사용 안 함"),
+        TEXT("녹색약"),
+        TEXT("적색약"),
+        TEXT("청황색약")
     };
 }
 
