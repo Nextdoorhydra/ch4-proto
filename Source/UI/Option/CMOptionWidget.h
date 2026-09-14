@@ -52,6 +52,9 @@ private:
     void HandleLanguageChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 
     UFUNCTION()
+    void HandleColorVisionModeChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+    UFUNCTION()
     void HandleMasterVolumeChanged(float Value);
 
     UFUNCTION()
@@ -68,6 +71,9 @@ private:
 
     UPROPERTY(meta = (BindWidget))
     TObjectPtr<UComboBoxString> Combo_Language;
+
+    UPROPERTY(meta = (BindWidget))
+    TObjectPtr<UComboBoxString> Combo_ColorVisionMode;
 
     UPROPERTY(meta = (BindWidget))
     TObjectPtr<USlider> Slider_MasterVolume;
