@@ -5,6 +5,8 @@
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "Stage/Checkpoint/CMCheckpointResettable.h"
+#include "Stage/CMStageElementBase.h"
 #include "Stage/Room/CMRoomCheckpoint.h"
 #include "Stage/Room/CMRoomEntryTrigger.h"
 
@@ -107,7 +109,13 @@ bool ACMRoomStreamingController::CommitRoom(FName RoomId)
     }
     if (RequestedIndex == CurrentRoomIndex)
     {
+        const bool bCheckpointChanged =
+            ActiveCheckpointRoomIndex != RequestedIndex;
         ActiveCheckpointRoomIndex = RequestedIndex;
+        if (bCheckpointChanged)
+        {
+            OnCheckpointCommitted.Broadcast(RoomId);
+        }
         return true;
     }
     if (RequestedIndex != CurrentRoomIndex + 1)
@@ -122,6 +130,7 @@ bool ACMRoomStreamingController::CommitRoom(FName RoomId)
     ActiveCheckpointRoomIndex = RequestedIndex;
     ApplyStreamingWindow();
     ForceNetUpdate();
+    OnCheckpointCommitted.Broadcast(RoomId);
 
     if (CurrentRoomIndex == Rooms.Num() - 1)
     {
@@ -173,13 +182,59 @@ bool ACMRoomStreamingController::TryCheatSelectCheckpoint(int32 OneBasedCheckpoi
     CurrentRoomIndex = FMath::Max(CurrentRoomIndex, TargetIndex);
     ApplyStreamingWindow();
     GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    const bool bCheckpointChanged = ActiveCheckpointRoomIndex != TargetIndex;
     ActiveCheckpointRoomIndex = TargetIndex;
     ForceNetUpdate();
+    if (bCheckpointChanged)
+    {
+        OnCheckpointCommitted.Broadcast(RoomId);
+    }
     UE_LOG(LogChimeraRoomStreaming, Display,
         TEXT("[Cheat] Selected checkpoint Number=%d Room=%s (unreached rooms allowed)."),
         OneBasedCheckpointNumber, *RoomId.ToString());
     return true;
 #endif
+}
+
+bool ACMRoomStreamingController::RestoreCheckpointForRestart(const int32 OneBasedCheckpointNumber)
+{
+    if (!HasAuthority() || OneBasedCheckpointNumber < 1 || OneBasedCheckpointNumber > Rooms.Num())
+    {
+        return false;
+    }
+
+    const int32 TargetIndex = OneBasedCheckpointNumber - 1;
+    const FName RoomId = Rooms[TargetIndex].RoomId;
+    if (RoomId.IsNone() || Rooms.FilterByPredicate([RoomId](const FCMRoomStreamingEntry& Room)
+            { return Room.RoomId == RoomId; }).Num() != 1)
+    {
+        return false;
+    }
+
+    ULevelStreaming* TargetLevel = ResolveStreamingLevel(Rooms[TargetIndex]);
+    if (!TargetLevel)
+    {
+        return false;
+    }
+
+    TargetLevel->SetShouldBeLoaded(true);
+    GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    const int32 PreviousCheckpoint = ActiveCheckpointRoomIndex;
+    ActiveCheckpointRoomIndex = TargetIndex;
+    FTransform CheckpointTransform;
+    const bool bValidCheckpoint = TryGetActiveCheckpointTransform(CheckpointTransform);
+    ActiveCheckpointRoomIndex = PreviousCheckpoint;
+    if (!bValidCheckpoint)
+    {
+        return false;
+    }
+
+    CurrentRoomIndex = FMath::Max(CurrentRoomIndex, TargetIndex);
+    ActiveCheckpointRoomIndex = TargetIndex;
+    ApplyStreamingWindow();
+    GetWorld()->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+    ForceNetUpdate();
+    return true;
 }
 
 bool ACMRoomStreamingController::TryGetActiveCheckpointTransform(
@@ -219,6 +274,53 @@ bool ACMRoomStreamingController::TryGetActiveCheckpointTransform(
         return false;
     }
     OutTransform = FoundCheckpoint->GetActorTransform();
+    return true;
+}
+
+bool ACMRoomStreamingController::ResetActiveCheckpointRoom()
+{
+    const int32 ResetRoomIndex = Rooms.IsValidIndex(ActiveCheckpointRoomIndex)
+        ? ActiveCheckpointRoomIndex : CurrentRoomIndex;
+    if (!HasAuthority() || !Rooms.IsValidIndex(ResetRoomIndex))
+    {
+        return false;
+    }
+
+    ULevelStreaming* StreamingLevel =
+        ResolveStreamingLevel(Rooms[ResetRoomIndex]);
+    ULevel* LoadedLevel = StreamingLevel
+        ? StreamingLevel->GetLoadedLevel() : nullptr;
+    if (!LoadedLevel)
+    {
+        return false;
+    }
+
+    int32 ResetCount = 0;
+    for (AActor* Actor : LoadedLevel->Actors)
+    {
+        if (!IsValid(Actor))
+        {
+            continue;
+        }
+
+        if (ICMCheckpointResettable* Resettable =
+            Cast<ICMCheckpointResettable>(Actor))
+        {
+            Resettable->ResetForCheckpoint();
+            ++ResetCount;
+        }
+        else if (ACMStageElementBase* StageElement =
+            Cast<ACMStageElementBase>(Actor))
+        {
+            StageElement->ResetElement();
+            ++ResetCount;
+        }
+    }
+
+    UE_LOG(LogChimeraRoomStreaming, Display,
+        TEXT("[Checkpoint Room Reset] Room=%s Actors=%d"),
+        *Rooms[ResetRoomIndex].RoomId.ToString(),
+        ResetCount);
     return true;
 }
 

@@ -140,6 +140,9 @@ FString ACMCentipedeLearningInferenceCoordinator::GetSnapshotDirectory() const
 // Centipede 관측·다리 행동 Interactor와 저장 정책을 단일 에이전트용으로 생성한다.
 bool ACMCentipedeLearningInferenceCoordinator::InitializeInferenceObjects()
 {
+    if (Interactor && Policy)
+        return true;
+
     ULearningAgentsManager* Manager = LearningManager;
     Interactor = UCMCentipedeLearningInteractor::MakeCentipedeInteractor(Manager, TEXT("CentipedeInferenceInteractor"));
     if (!Interactor)
@@ -414,8 +417,6 @@ void ACMCentipedeLearningInferenceCoordinator::FinishInference(ECMCentipedeMoveR
     InferenceAgentId = INDEX_NONE;
     InferenceAgent = nullptr;
     ChaseTarget = nullptr;
-    Policy = nullptr;
-    Interactor = nullptr;
     NextChasePathRefreshTime = 0.0;
     LateralEscapeStartLocation = FVector::ZeroVector;
     LateralEscapeDirection = FVector::ZeroVector;

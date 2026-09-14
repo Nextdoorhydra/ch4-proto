@@ -16,6 +16,23 @@ DEFINE_LOG_CATEGORY_STATIC(LogCMSacrifice, Log, All);
 namespace
 {
     constexpr int32 MaxRememberedAttackIds = 32;
+
+    TSubclassOf<ACMPartActorBase> GetDefaultCollectiblePartClass(const ECMBodyPart BodyPart)
+    {
+        if (BodyPart == ECMBodyPart::Head)
+        {
+            return ACMHeadPartActor::StaticClass();
+        }
+        if (BodyPart == ECMBodyPart::ArmLeft || BodyPart == ECMBodyPart::ArmRight)
+        {
+            return ACMArmPart::StaticClass();
+        }
+        if (BodyPart == ECMBodyPart::LegLeft || BodyPart == ECMBodyPart::LegRight)
+        {
+            return ACMLegPart::StaticClass();
+        }
+        return nullptr;
+    }
 }
 
 UCMSacrificeStateComponent::UCMSacrificeStateComponent()
@@ -30,7 +47,7 @@ void UCMSacrificeStateComponent::BeginPlay()
     DismembermentComponent = GetOwner() ? GetOwner()->FindComponentByClass<UCMDismembermentComponent>() : nullptr;
     if (GetOwner() && GetOwner()->HasAuthority())
     {
-        ValidateRewards();
+        ValidateAttackPartRules();
     }
 }
 
@@ -57,7 +74,8 @@ void UCMSacrificeStateComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 int32 UCMSacrificeStateComponent::ResolveDismembermentHit(const FCMDismembermentHitRequest& Request)
 {
     AActor* Owner = GetOwner();
-    if (!Owner || !Owner->HasAuthority() || bDead || !DismembermentComponent || WasAttackAlreadyResolved(Request.AttackId))
+    if (!Owner || !Owner->HasAuthority() || bDead
+        || !DismembermentComponent || WasAttackAlreadyResolved(Request.AttackId))
     {
         return 0;
     }
@@ -72,30 +90,15 @@ int32 UCMSacrificeStateComponent::ResolveDismembermentHit(const FCMDismemberment
     }
 
     const int32 PreviousMissingCount = GetMissingPartCount();
-    const FVector Impulse = Request.ImpactDirection.GetSafeNormal(SMALL_NUMBER, FVector::ForwardVector) * DismembermentImpulse;
-    // 포식 공격은 절단 파츠를 즉시 소비하므로 월드 보상 액터를 따로 생성하지 않는다.
-    const FCMSacrificeRewardPart* Reward = Request.bConsumeSeveredPart ? nullptr : FindReward(SelectedPart);
-
-    TSubclassOf<ACMPartActorBase> RewardClass = Reward && !HasRewardDropped(SelectedPart) ? Reward->PartClass : nullptr;
-    bool bSevered = false;
-    if (Request.bConsumeSeveredPart)
-    {
-        bSevered = DismembermentComponent->ConsumeBodyPart(SelectedPart, Request.ImpactPoint);
-    }
-    else if (RewardClass)
-    {
-        bSevered = DismembermentComponent->SeverBodyPartWithReward(SelectedPart, Request.ImpactPoint, Impulse, RewardClass);
-    }
-    else
-    {
-        bSevered = DismembermentComponent->SeverBodyPart(SelectedPart, Request.ImpactPoint, Impulse);
-    }
+    const ACMSacrificeCharacter* Character = Cast<ACMSacrificeCharacter>(Owner);
+    const float SeverImpulse = Character ? Character->GetDismembermentImpulse() : 0.0f;
+    const FVector Impulse = Request.ImpactDirection.GetSafeNormal(SMALL_NUMBER, FVector::ForwardVector) * SeverImpulse;
+    TSubclassOf<ACMPartActorBase> RewardClass = HasRewardDropped(SelectedPart) ? nullptr : ResolveCollectiblePartClass(SelectedPart);
+    const bool bSevered = RewardClass ? DismembermentComponent->SeverBodyPartWithReward(SelectedPart, Request.ImpactPoint, Impulse, RewardClass) : DismembermentComponent->SeverBodyPart(SelectedPart, Request.ImpactPoint, Impulse);
     if (!bSevered)
     {
         return 0;
     }
-    // 한 번이라도 포식된 개체는 사망 시 남은 신체 보상이 중복 생성되지 않게 한다.
-    bSuppressRewardDrops |= Request.bConsumeSeveredPart;
 
     const uint8 SelectedPartBit = FCMSacrificeRules::GetBodyPartBit(SelectedPart);
     MissingPartMask |= SelectedPartBit;
@@ -120,39 +123,30 @@ int32 UCMSacrificeStateComponent::ResolveDismembermentHit(const FCMDismemberment
     return 1;
 }
 
-// 치명 공격으로 남은 모든 신체를 보상 파츠와 함께 절단하고 즉시 사망 처리한다.
+// Centipede 치명 공격은 장착 규칙과 무관하게 남은 모든 신체를 절단하고 즉시 사망 처리한다.
 int32 UCMSacrificeStateComponent::ResolveFatalDismembermentHit(const FCMDismembermentHitRequest& Request)
 {
     AActor* Owner = GetOwner();
-    if (!Owner || !Owner->HasAuthority() || bDead || !DismembermentComponent || WasAttackAlreadyResolved(Request.AttackId))
+    if (!Owner || !Owner->HasAuthority() || bDead
+        || WasAttackAlreadyResolved(Request.AttackId))
     {
         return 0;
     }
     RememberResolvedAttack(Request.AttackId);
 
+    const ACMSacrificeCharacter* Character = Cast<ACMSacrificeCharacter>(Owner);
+    const float SeverImpulse = Character ? Character->GetDismembermentImpulse() : 0.0f;
     int32 SeveredPartCount = 0;
     for (const ECMBodyPart BodyPart : GetAttachedBodyParts())
     {
-        const FVector ScatterDirection = (Request.ImpactDirection + FMath::VRand() * 0.5f).GetSafeNormal(SMALL_NUMBER, FVector::ForwardVector);
-        const FVector Impulse = ScatterDirection * DismembermentImpulse;
-        const FCMSacrificeRewardPart* Reward = FindReward(BodyPart);
-        TSubclassOf<ACMPartActorBase> RewardClass = Reward && !HasRewardDropped(BodyPart) ? Reward->PartClass : nullptr;
-        if (!RewardClass)
+        if (!DismembermentComponent)
         {
-            if (BodyPart == ECMBodyPart::Head)
-            {
-                RewardClass = ACMHeadPartActor::StaticClass();
-            }
-            else if (BodyPart == ECMBodyPart::ArmLeft || BodyPart == ECMBodyPart::ArmRight)
-            {
-                RewardClass = ACMArmPart::StaticClass();
-            }
-            else if (BodyPart == ECMBodyPart::LegLeft || BodyPart == ECMBodyPart::LegRight)
-            {
-                RewardClass = ACMLegPart::StaticClass();
-            }
+            break;
         }
-        const bool bSevered = RewardClass && DismembermentComponent->SeverBodyPartWithReward(BodyPart, Request.ImpactPoint, Impulse, RewardClass);
+        const FVector ScatterDirection = (Request.ImpactDirection + FMath::VRand() * 0.5f).GetSafeNormal(SMALL_NUMBER, FVector::ForwardVector);
+        const FVector Impulse = ScatterDirection * SeverImpulse;
+        TSubclassOf<ACMPartActorBase> RewardClass = HasRewardDropped(BodyPart) ? nullptr : ResolveCollectiblePartClass(BodyPart);
+        const bool bSevered = RewardClass ? DismembermentComponent->SeverBodyPartWithReward(BodyPart, Request.ImpactPoint, Impulse, RewardClass) : DismembermentComponent->SeverBodyPart(BodyPart, Request.ImpactPoint, Impulse);
         if (!bSevered)
         {
             continue;
@@ -171,10 +165,10 @@ int32 UCMSacrificeStateComponent::ResolveFatalDismembermentHit(const FCMDismembe
     if (SeveredPartCount > 0)
     {
         OnMissingPartsChanged.Broadcast(GetMissingPartCount());
-        Die();
-        Owner->ForceNetUpdate();
     }
-    return SeveredPartCount;
+    Die();
+    Owner->ForceNetUpdate();
+    return FMath::Max(SeveredPartCount, 1);
 }
 
 bool UCMSacrificeStateComponent::HasBodyPart(const ECMBodyPart BodyPart) const
@@ -216,7 +210,7 @@ float UCMSacrificeStateComponent::GetBleedTimeRemaining() const
 
 bool UCMSacrificeStateComponent::HasRewardForBodyPart(const ECMBodyPart BodyPart) const
 {
-    return FindReward(BodyPart) != nullptr;
+    return ResolveCollectiblePartClass(BodyPart) != nullptr;
 }
 
 bool UCMSacrificeStateComponent::HasRewardDropped(const ECMBodyPart BodyPart) const
@@ -233,15 +227,15 @@ int32 UCMSacrificeStateComponent::GetRemainingRewardCount() const
         return 0;
     }
 
-    TSet<ECMBodyPart> UniqueParts;
-    for (const FCMSacrificeRewardPart& Reward : Character->GetRewardParts())
+    int32 Count = 0;
+    for (const ECMBodyPart BodyPart : FCMSacrificeRules::GetSeverableBodyParts())
     {
-        if (Reward.PartClass && FCMSacrificeRules::GetSeverableBodyParts().Contains(Reward.BodyPart) && !HasRewardDropped(Reward.BodyPart))
+        if (HasBodyPart(BodyPart) && !HasRewardDropped(BodyPart) && ResolveCollectiblePartClass(BodyPart))
         {
-            UniqueParts.Add(Reward.BodyPart);
+            ++Count;
         }
     }
-    return UniqueParts.Num();
+    return Count;
 }
 
 void UCMSacrificeStateComponent::OnRep_MissingPartMask(const uint8 PreviousMask)
@@ -302,7 +296,7 @@ void UCMSacrificeStateComponent::HandleBleedExpired()
     Die();
 }
 
-// 출혈과 보상 상태를 확정하고 시체 래그돌 및 사망 이벤트를 서버에서 한 번 실행한다.
+// 출혈 상태를 확정하고 시체 래그돌 및 사망 이벤트를 서버에서 한 번 실행한다.
 void UCMSacrificeStateComponent::Die()
 {
     if (bDead || !GetOwner() || !GetOwner()->HasAuthority())
@@ -323,10 +317,6 @@ void UCMSacrificeStateComponent::Die()
     {
         OnBleedingStateChanged.Broadcast(false);
     }
-    if (!bSuppressRewardDrops)
-    {
-        DropRemainingRewards();
-    }
     if (DismembermentComponent)
     {
         DismembermentComponent->EnterCorpseRagdoll();
@@ -335,89 +325,49 @@ void UCMSacrificeStateComponent::Die()
     GetOwner()->ForceNetUpdate();
 }
 
-// 사망 시 아직 붙어 있고 드롭되지 않은 보상 신체를 부위별로 한 번씩 절단한다.
-void UCMSacrificeStateComponent::DropRemainingRewards()
-{
-    ACMSacrificeCharacter* Character = Cast<ACMSacrificeCharacter>(GetOwner());
-    if (!Character || !DismembermentComponent)
-    {
-        return;
-    }
-
-    bool bMissingPartsChanged = false;
-    TSet<ECMBodyPart> ProcessedParts;
-    for (const FCMSacrificeRewardPart& Reward : Character->GetRewardParts())
-    {
-        if (ProcessedParts.Contains(Reward.BodyPart) || HasRewardDropped(Reward.BodyPart) || !HasBodyPart(Reward.BodyPart))
-        {
-            continue;
-        }
-        ProcessedParts.Add(Reward.BodyPart);
-
-        TSubclassOf<ACMPartActorBase> RewardClass = Reward.PartClass;
-        if (!RewardClass)
-        {
-            continue;
-        }
-
-        const FVector Impulse = FMath::VRand().GetSafeNormal(SMALL_NUMBER, FVector::UpVector) * DismembermentImpulse;
-        if (!DismembermentComponent->SeverBodyPartWithReward(Reward.BodyPart, FVector::ZeroVector, Impulse, RewardClass))
-        {
-            continue;
-        }
-
-        const uint8 Bit = FCMSacrificeRules::GetBodyPartBit(Reward.BodyPart);
-        MissingPartMask |= Bit;
-        DroppedRewardMask |= Bit;
-        bMissingPartsChanged = true;
-        OnBodyPartSevered.Broadcast(Reward.BodyPart);
-    }
-
-    if (bMissingPartsChanged)
-    {
-        OnMissingPartsChanged.Broadcast(GetMissingPartCount());
-        Character->ForceNetUpdate();
-    }
-}
-
-// 시작 시 보상 부위·클래스 누락과 중복 설정을 검사해 잘못된 데이터 구성을 알린다.
-void UCMSacrificeStateComponent::ValidateRewards() const
+// 시작 시 공격 절단 규칙의 부위와 중복 설정을 검사한다.
+void UCMSacrificeStateComponent::ValidateAttackPartRules() const
 {
     const ACMSacrificeCharacter* Character = Cast<ACMSacrificeCharacter>(GetOwner());
     if (!Character)
         return;
 
     TSet<ECMBodyPart> SeenParts;
-    for (const FCMSacrificeRewardPart& Reward : Character->GetRewardParts())
+    for (const FCMSacrificeAttackPartRule& Rule : Character->GetAttackPartRules())
     {
-        const bool bValidBodyPart = FCMSacrificeRules::GetBodyPartBit(Reward.BodyPart) != 0 && FCMSacrificeRules::GetSeverableBodyParts().Contains(Reward.BodyPart);
-        if (!bValidBodyPart || !Reward.PartClass)
+        const bool bValidBodyPart = FCMSacrificeRules::GetBodyPartBit(Rule.BodyPart) != 0 && FCMSacrificeRules::GetSeverableBodyParts().Contains(Rule.BodyPart);
+        if (!bValidBodyPart)
         {
-            UE_LOG(LogCMSacrifice, Warning, TEXT("[Sacrifice Reward] '%s' has an invalid reward entry for body part %d."), *GetNameSafe(Character), static_cast<int32>(Reward.BodyPart));
+            UE_LOG(LogCMSacrifice, Warning, TEXT("[Sacrifice Dismemberment] '%s' has an invalid attack rule for body part %d."), *GetNameSafe(Character), static_cast<int32>(Rule.BodyPart));
             continue;
         }
-        if (SeenParts.Contains(Reward.BodyPart))
+        if (SeenParts.Contains(Rule.BodyPart))
         {
-            UE_LOG(LogCMSacrifice, Warning, TEXT("[Sacrifice Reward] '%s' has duplicate reward entries for body part %d; only the first is used."), *GetNameSafe(Character), static_cast<int32>(Reward.BodyPart));
+            UE_LOG(LogCMSacrifice, Warning, TEXT("[Sacrifice Dismemberment] '%s' has duplicate attack rules for body part %d; only the first is used."), *GetNameSafe(Character), static_cast<int32>(Rule.BodyPart));
             continue;
         }
-        SeenParts.Add(Reward.BodyPart);
+        SeenParts.Add(Rule.BodyPart);
     }
 }
 
-const FCMSacrificeRewardPart* UCMSacrificeStateComponent::FindReward(const ECMBodyPart BodyPart) const
+const FCMSacrificeAttackPartRule* UCMSacrificeStateComponent::FindAttackPartRule(const ECMBodyPart BodyPart) const
 {
     const ACMSacrificeCharacter* Character = Cast<ACMSacrificeCharacter>(GetOwner());
-    if (!Character)
+    return Character ? Character->GetAttackPartRules().FindByPredicate(
+        [BodyPart](const FCMSacrificeAttackPartRule& Rule)
+        {
+            return Rule.BodyPart == BodyPart;
+        }) : nullptr;
+}
+
+TSubclassOf<ACMPartActorBase> UCMSacrificeStateComponent::ResolveCollectiblePartClass(const ECMBodyPart BodyPart) const
+{
+    const FCMSacrificeAttackPartRule* Rule = FindAttackPartRule(BodyPart);
+    if (!Rule || !Rule->bPlayerCanAcquire)
     {
         return nullptr;
     }
-    return Character->GetRewardParts().FindByPredicate(
-        [BodyPart](const FCMSacrificeRewardPart& Reward)
-        {
-            return Reward.BodyPart == BodyPart && Reward.PartClass;
-        }
-    );
+    return Rule->PartClassOverride ? Rule->PartClassOverride : GetDefaultCollectiblePartClass(BodyPart);
 }
 
 bool UCMSacrificeStateComponent::WasAttackAlreadyResolved(const FGuid& AttackId) const

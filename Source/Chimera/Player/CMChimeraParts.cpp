@@ -12,11 +12,27 @@
 #include "Player/CMPlayerState.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/GameStateBase.h"
 
 void ACMChimera::ActivatePartSlot(
     const FCMPartSlotAddress& PartSlotAddress,
     ACMPlayerState* ContributingPlayerState,
     bool bReverseMovement
+)
+{
+    ActivatePartSlotWithLegStrength(
+        PartSlotAddress,
+        ContributingPlayerState,
+        bReverseMovement,
+        1.0f
+    );
+}
+
+void ACMChimera::ActivatePartSlotWithLegStrength(
+    const FCMPartSlotAddress& PartSlotAddress,
+    ACMPlayerState* ContributingPlayerState,
+    bool bReverseMovement,
+    float LegStrengthMultiplier
 )
 {
     if (!HasAuthority()
@@ -44,6 +60,8 @@ void ACMChimera::ActivatePartSlot(
         if (LegPart)
         {
             LegPart->SetPendingReverseMovement(bReverseMovement);
+            LegPart->SetPendingInputStrengthMultiplier(
+                LegStrengthMultiplier);
         }
 
         const bool bActivated = PartSlot->TryActivateGrantedAbility();
@@ -54,6 +72,7 @@ void ACMChimera::ActivatePartSlot(
         if (LegPart && !bActivated)
         {
             LegPart->ConsumePendingReverseMovement();
+            LegPart->ConsumePendingInputStrengthMultiplier();
         }
         UE_LOG(LogChimeraLineBody, Log,
             TEXT("[Attached Part Input] Slot=(%d,%d) Part=%s Activated=%s"),
@@ -70,10 +89,142 @@ void ACMChimera::ActivatePartSlot(
         PartSlotAddress.PartSlotIndex);
 }
 
+void ACMChimera::GetLegInputHoldThresholds(
+    float& OutTapEndSeconds,
+    float& OutNormalEndSeconds,
+    float& OutChargeEndSeconds,
+    float& OutOverchargeEndSeconds
+) const
+{
+    OutTapEndSeconds = FMath::Max(
+        LegInputTapHoldSeconds,
+        0.0f
+    );
+    OutNormalEndSeconds = FMath::Max(
+        LegInputFullStrengthHoldSeconds,
+        OutTapEndSeconds + UE_SMALL_NUMBER
+    );
+    OutChargeEndSeconds = FMath::Max(
+        LegInputFullChargeHoldSeconds,
+        OutNormalEndSeconds + UE_SMALL_NUMBER
+    );
+    OutOverchargeEndSeconds = OutChargeEndSeconds
+        + FMath::Max(
+            LegInputOverchargeDurationSeconds,
+            UE_SMALL_NUMBER
+        );
+}
+
+float ACMChimera::GetLegInputStrengthMultiplier(
+    const float HoldSeconds
+) const
+{
+    const float MinimumStrength = FMath::Clamp(
+        LegInputMinimumStrength,
+        0.0f,
+        1.0f
+    );
+    float TapHoldSeconds = 0.0f;
+    float NormalHoldSeconds = 0.0f;
+    float FullChargeHoldSeconds = 0.0f;
+    float FullOverchargeHoldSeconds = 0.0f;
+    GetLegInputHoldThresholds(
+        TapHoldSeconds,
+        NormalHoldSeconds,
+        FullChargeHoldSeconds,
+        FullOverchargeHoldSeconds
+    );
+    const float MaximumChargedStrength = FMath::Clamp(
+        LegInputMaximumChargedStrength,
+        1.0f,
+        2.0f
+    );
+    const float MaximumOverchargedStrength = FMath::Clamp(
+        LegInputMaximumOverchargedStrength,
+        MaximumChargedStrength,
+        10.0f
+    );
+    const float SafeHoldSeconds = FMath::Max(HoldSeconds, 0.0f);
+    const float StrengthExponent = FMath::Max(
+        LegInputStrengthExponent,
+        UE_SMALL_NUMBER
+    );
+
+    if (SafeHoldSeconds <= TapHoldSeconds)
+    {
+        return MinimumStrength;
+    }
+
+    const auto CalculateEaseOutAlpha = [StrengthExponent](
+        const float Alpha)
+    {
+        const float ClampedAlpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
+        return 1.0f - FMath::Pow(1.0f - ClampedAlpha, StrengthExponent);
+    };
+
+    if (SafeHoldSeconds <= NormalHoldSeconds)
+    {
+        const float NormalAlpha = (SafeHoldSeconds - TapHoldSeconds)
+            / (NormalHoldSeconds - TapHoldSeconds);
+        return FMath::Lerp(
+            MinimumStrength,
+            1.0f,
+            CalculateEaseOutAlpha(NormalAlpha)
+        );
+    }
+
+    if (SafeHoldSeconds <= FullChargeHoldSeconds)
+    {
+        const float ChargeAlpha = (SafeHoldSeconds - NormalHoldSeconds)
+            / (FullChargeHoldSeconds - NormalHoldSeconds);
+        return FMath::Lerp(
+            1.0f,
+            MaximumChargedStrength,
+            CalculateEaseOutAlpha(ChargeAlpha)
+        );
+    }
+
+    if (SafeHoldSeconds <= FullOverchargeHoldSeconds)
+    {
+        const float OverchargeAlpha = FMath::Clamp(
+            (SafeHoldSeconds - FullChargeHoldSeconds)
+                / (FullOverchargeHoldSeconds - FullChargeHoldSeconds),
+            0.0f,
+            1.0f
+        );
+        const float OverchargeEaseInAlpha = FMath::Pow(
+            OverchargeAlpha,
+            FMath::Max(LegInputOverchargeExponent, 1.0f)
+        );
+        return FMath::Lerp(
+            MaximumChargedStrength,
+            MaximumOverchargedStrength,
+            OverchargeEaseInAlpha
+        );
+    }
+
+    return MaximumOverchargedStrength;
+}
+
 bool ACMChimera::TryActivateLegPart(
     const FCMPartSlotAddress& PartSlotAddress,
     ACMPlayerState* ContributingPlayerState,
     bool bReverseMovement
+)
+{
+    return TryActivateLegPartWithStrength(
+        PartSlotAddress,
+        ContributingPlayerState,
+        bReverseMovement,
+        1.0f
+    );
+}
+
+bool ACMChimera::TryActivateLegPartWithStrength(
+    const FCMPartSlotAddress& PartSlotAddress,
+    ACMPlayerState* ContributingPlayerState,
+    bool bReverseMovement,
+    float StrengthMultiplier
 )
 {
     if (!HasAuthority()
@@ -99,7 +250,8 @@ bool ACMChimera::TryActivateLegPart(
             *this,
             *LegPart,
             ContributingPlayerState,
-            LegPart->GetMovementImpulse(),
+            LegPart->GetMovementImpulse()
+                * FMath::Clamp(StrengthMultiplier, 0.0f, 10.0f),
             bReverseMovement
         );
 }
@@ -279,6 +431,37 @@ bool ACMChimera::IsPartSlotPressed(
     return (PressedPartSlotMask & (1u << FlatIndex)) != 0;
 }
 
+float ACMChimera::GetPartSlotHoldSeconds(
+    const FCMPartSlotAddress& PartSlotAddress
+) const
+{
+    if (!IsPartSlotPressed(PartSlotAddress))
+    {
+        return 0.0f;
+    }
+
+    const int32 FlatIndex =
+        CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    if (!ReplicatedPartSlotPressStartTimes.IsValidIndex(FlatIndex)
+        || ReplicatedPartSlotPressStartTimes[FlatIndex] < 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const UWorld* World = GetWorld();
+    const AGameStateBase* GameState = World
+        ? World->GetGameState()
+        : nullptr;
+    const float CurrentServerTime = GameState
+        ? GameState->GetServerWorldTimeSeconds()
+        : (World ? World->GetTimeSeconds() : 0.0f);
+    return FMath::Max(
+        CurrentServerTime
+            - ReplicatedPartSlotPressStartTimes[FlatIndex],
+        0.0f
+    );
+}
+
 bool ACMChimera::AttachPartToSlot(
     const FCMPartSlotAddress& PartSlotAddress,
     AActor* PartActor
@@ -454,6 +637,7 @@ bool ResolveNamedDebugPart(
 enum class ECMStartingPartType : uint8
 {
     Empty,
+    Arm,
     Leg,
     Head
 };
@@ -462,13 +646,13 @@ const TArray<ECMStartingPartType>* FindStartingPartLayout(int32 PlayerCount)
 {
     static const TArray<ECMStartingPartType> TwoPlayerLayout = {
         ECMStartingPartType::Leg,
-        ECMStartingPartType::Empty,
+        ECMStartingPartType::Arm,
         ECMStartingPartType::Head,
         ECMStartingPartType::Empty
     };
     static const TArray<ECMStartingPartType> ThreePlayerLayout = {
         ECMStartingPartType::Leg,
-        ECMStartingPartType::Empty,
+        ECMStartingPartType::Arm,
         ECMStartingPartType::Head,
         ECMStartingPartType::Empty,
         ECMStartingPartType::Empty,
@@ -476,7 +660,7 @@ const TArray<ECMStartingPartType>* FindStartingPartLayout(int32 PlayerCount)
     };
     static const TArray<ECMStartingPartType> FourPlayerLayout = {
         ECMStartingPartType::Leg,
-        ECMStartingPartType::Empty,
+        ECMStartingPartType::Arm,
         ECMStartingPartType::Leg,
         ECMStartingPartType::Head,
         ECMStartingPartType::Empty,
@@ -517,13 +701,15 @@ void ACMChimera::SpawnStartingPartsForPlayers(int32 PlayerCount)
         return;
     }
 
+    FDebugPartSpawnOption ArmOption;
     FDebugPartSpawnOption LegOption;
     FDebugPartSpawnOption HeadOption;
-    if (!ResolveNamedDebugPart(TEXT("LegTier3"), LegOption)
+    if (!ResolveNamedDebugPart(TEXT("DefaultArm"), ArmOption)
+        || !ResolveNamedDebugPart(TEXT("LegTier3"), LegOption)
         || !ResolveNamedDebugPart(TEXT("DefaultHead"), HeadOption))
     {
         UE_LOG(LogChimeraLineBody, Error,
-            TEXT("[Starting Parts Failed] Default Leg or Head Blueprint could not be loaded."));
+            TEXT("[Starting Parts Failed] Default Arm, Leg, or Head Blueprint could not be loaded."));
         return;
     }
 
@@ -555,7 +741,9 @@ void ACMChimera::SpawnStartingPartsForPlayers(int32 PlayerCount)
         }
 
         const FDebugPartSpawnOption& PartOption =
-            PartType == ECMStartingPartType::Leg ? LegOption : HeadOption;
+            PartType == ECMStartingPartType::Arm
+                ? ArmOption
+                : PartType == ECMStartingPartType::Leg ? LegOption : HeadOption;
         for (int32 PartSlotIndex = 0;
             PartSlotIndex < CMControl::PartSlotsPerSegment;
             ++PartSlotIndex)
@@ -926,13 +1114,25 @@ void ACMChimera::SetPartSlotPressed(
         return;
     }
 
-    const uint32 PartSlotBit = 1u
-        << CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    const int32 FlatSlotIndex =
+        CMControl::ToFlatPartSlotIndex(PartSlotAddress);
+    const uint32 PartSlotBit = 1u << FlatSlotIndex;
     if (bPressed)
     {
         if ((PressedPartSlotMask & PartSlotBit) == 0)
         {
             InteractionConsumedPartSlotMask &= ~PartSlotBit;
+            const UWorld* World = GetWorld();
+            const AGameStateBase* GameState = World
+                ? World->GetGameState()
+                : nullptr;
+            if (ReplicatedPartSlotPressStartTimes.IsValidIndex(
+                    FlatSlotIndex))
+            {
+                ReplicatedPartSlotPressStartTimes[FlatSlotIndex] = GameState
+                    ? GameState->GetServerWorldTimeSeconds()
+                    : (World ? World->GetTimeSeconds() : 0.0f);
+            }
         }
         PressedPartSlotMask |= PartSlotBit;
     }
@@ -940,6 +1140,10 @@ void ACMChimera::SetPartSlotPressed(
     {
         PressedPartSlotMask &= ~PartSlotBit;
         InteractionConsumedPartSlotMask &= ~PartSlotBit;
+        if (ReplicatedPartSlotPressStartTimes.IsValidIndex(FlatSlotIndex))
+        {
+            ReplicatedPartSlotPressStartTimes[FlatSlotIndex] = -1.0f;
+        }
     }
 
     if (MovementCoordinator)

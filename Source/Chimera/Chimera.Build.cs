@@ -22,7 +22,7 @@ public class Chimera : ModuleRules
 			"GameplayTags",
 			"GameplayTasks",
 			"Niagara",
-			"NKMSoundRuntime",
+			"Shared",
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
 			"ProceduralMeshComponent"
@@ -31,10 +31,15 @@ public class Chimera : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
 			"CMGore",
+			"CMSound",
+			"NKMSoundRuntime",
 			"ListenServerNetwork",
 			"EnhancedInput",
 			"InputCore",
-			"PhysicsCore"
+			"PhysicsCore",
+			"Slate",
+			"SlateCore",
+			"UMG"
 		});
 	}
 }

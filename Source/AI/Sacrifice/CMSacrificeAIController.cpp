@@ -1,7 +1,9 @@
 #include "Sacrifice/CMSacrificeAIController.h"
 
 #include "Aggressive/Common/Core/CMAggressiveMovementAgent.h"
+#include "Common/CMAINavigationRules.h"
 #include "NavigationSystem.h"
+#include "NavigationData.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "Sacrifice/CMSacrificeActionAbilities.h"
 #include "Sacrifice/CMSacrificeCharacter.h"
@@ -31,6 +33,8 @@ void ACMSacrificeAIController::OnPossess(APawn* InPawn)
     Sacrifice->bUseControllerRotationYaw = false;
     Sacrifice->GetCharacterMovement()->bOrientRotationToMovement = true;
     Sacrifice->GetCharacterMovement()->bUseControllerDesiredRotation = false;
+    LastValidNavigationLocation = FVector::ZeroVector;
+    bHasLastValidNavigationLocation = false;
     Sacrifice->OnSacrificeHitAccepted.AddDynamic(this, &ThisClass::HandleAcceptedHit);
     Sacrifice->GetSacrificeStateComponent()->OnSacrificeDied.AddDynamic(this, &ThisClass::HandleSacrificeDied);
     Phase = ECMSacrificeBehaviorPhase::Ambient;
@@ -46,6 +50,8 @@ void ACMSacrificeAIController::OnUnPossess()
         Sacrifice->GetSacrificeStateComponent()->OnSacrificeDied.RemoveDynamic(this, &ThisClass::HandleSacrificeDied);
     }
     ThreatTracker.Reset();
+    LastValidNavigationLocation = FVector::ZeroVector;
+    bHasLastValidNavigationLocation = false;
     Sacrifice = nullptr;
     Super::OnUnPossess();
 }
@@ -66,8 +72,16 @@ void ACMSacrificeAIController::Tick(const float DeltaSeconds)
     }
     if (Phase == ECMSacrificeBehaviorPhase::HitReact || Phase == ECMSacrificeBehaviorPhase::GettingUp)
     {
+        StationaryMovementSeconds = 0.0f;
         return;
     }
+
+    if (RecoverToNavigation())
+    {
+        return;
+    }
+
+    UpdateMovementProgress(DeltaSeconds);
 
     ThreatScanAccumulator += DeltaSeconds;
     if (ThreatScanAccumulator < 0.2f)
@@ -76,6 +90,53 @@ void ACMSacrificeAIController::Tick(const float DeltaSeconds)
     }
     ThreatScanAccumulator = 0.0f;
     ScanForThreats();
+}
+
+// 이동 중 NavMesh 경계 밖으로 밀리면 가장 가까운 유효 위치로 복귀하고 행동을 재시도한다.
+bool ACMSacrificeAIController::RecoverToNavigation()
+{
+    const ECMSacrificeActionState ActionState = Sacrifice->GetSacrificeActionState();
+    if (!FCMSacrificeRules::IsMovementActionState(ActionState))
+    {
+        return false;
+    }
+
+    UNavigationSystemV1* NavigationSystem = UNavigationSystemV1::GetCurrent(GetWorld());
+    ANavigationData* NavigationData = NavigationSystem ? NavigationSystem->GetNavDataForProps(Sacrifice->GetNavAgentPropertiesRef()) : nullptr;
+    if (!NavigationSystem || !NavigationData)
+    {
+        return false;
+    }
+
+    const FVector CurrentLocation = Sacrifice->GetActorLocation();
+    FNavLocation ProjectedLocation;
+    const FVector ContainmentExtent(NavigationContainmentToleranceCm, NavigationContainmentToleranceCm, 300.0f);
+    if (NavigationSystem->ProjectPointToNavigation(CurrentLocation, ProjectedLocation, ContainmentExtent, NavigationData)
+        && FCMAINavigationRules::IsWithinProjectionTolerance(CurrentLocation, ProjectedLocation.Location, NavigationContainmentToleranceCm))
+    {
+        LastValidNavigationLocation = CurrentLocation;
+        bHasLastValidNavigationLocation = true;
+        return false;
+    }
+
+    FVector RecoveryLocation;
+    if (bHasLastValidNavigationLocation)
+    {
+        RecoveryLocation = FVector(LastValidNavigationLocation.X, LastValidNavigationLocation.Y, CurrentLocation.Z);
+    }
+    else if (NavigationSystem->ProjectPointToNavigation(CurrentLocation, ProjectedLocation, FVector(1000.0f, 1000.0f, 500.0f), NavigationData))
+    {
+        RecoveryLocation = FVector(ProjectedLocation.Location.X, ProjectedLocation.Location.Y, CurrentLocation.Z);
+    }
+    else
+    {
+        return false;
+    }
+
+    Sacrifice->SetActorLocation(RecoveryLocation, false, nullptr, ETeleportType::TeleportPhysics);
+    Sacrifice->GetCharacterMovement()->StopMovementImmediately();
+    RecoverStalledMovement();
+    return true;
 }
 
 // 후진 기기는 이동 반대를, 일반 도주는 이동 방향을 바라보도록 회전을 제어한다.
@@ -106,6 +167,64 @@ void ACMSacrificeAIController::UpdateForwardMovementFacing()
 
     const float Yaw = FacingDirection.Rotation().Yaw;
     SetControlRotation(FRotator(0.0f, Yaw, 0.0f));
+}
+
+// 실제 이동이 멈춘 이동 행동을 빠르게 종료하고 현재 행동에 맞는 경로 재요청을 예약한다.
+void ACMSacrificeAIController::UpdateMovementProgress(const float DeltaSeconds)
+{
+    const ECMSacrificeActionState ActionState = Sacrifice->GetSacrificeActionState();
+    if (!FCMSacrificeRules::IsMovementActionState(ActionState))
+    {
+        StationaryMovementSeconds = 0.0f;
+        return;
+    }
+
+    const bool bPathIdle = GetMoveStatus() == EPathFollowingStatus::Idle;
+    if (!bPathIdle && Sacrifice->GetVelocity().SizeSquared2D() >= FMath::Square(MinimumMovingSpeedCmPerSecond))
+    {
+        StationaryMovementSeconds = 0.0f;
+        return;
+    }
+
+    StationaryMovementSeconds += DeltaSeconds;
+    if (StationaryMovementSeconds < MovementStallTimeoutSeconds)
+    {
+        return;
+    }
+
+    StationaryMovementSeconds = 0.0f;
+    RecoverStalledMovement();
+}
+
+void ACMSacrificeAIController::RecoverStalledMovement()
+{
+    const ECMSacrificeActionState ActionState = Sacrifice->GetSacrificeActionState();
+    StopMovementForTransition();
+    if (Phase == ECMSacrificeBehaviorPhase::Ambient)
+    {
+        Sacrifice->CancelSacrificeActions();
+        return;
+    }
+    if (Phase == ECMSacrificeBehaviorPhase::BackCrawl)
+    {
+        if (!bThreatWasVisible || bFinishGoalAfterThreatLost || !Sacrifice->GetCurrentThreat())
+        {
+            StartSafetyRecovery();
+            return;
+        }
+        GetWorldTimerManager().SetTimer(MoveRetryTimer, this, &ThisClass::RetryBackCrawlMovement, 0.5f, false);
+        return;
+    }
+    Sacrifice->CancelSacrificeActions();
+    if (Phase == ECMSacrificeBehaviorPhase::Escape && ActionState == ECMSacrificeActionState::InjuredCrawl)
+    {
+        GetWorldTimerManager().SetTimer(MoveRetryTimer, this, &ThisClass::StartInjuredCrawl, 0.5f, false);
+        return;
+    }
+    if (Phase == ECMSacrificeBehaviorPhase::Escape)
+    {
+        GetWorldTimerManager().SetTimer(MoveRetryTimer, this, &ThisClass::StartEscapeLeg, 0.5f, false);
+    }
 }
 
 // 시야에 잡힌 가장 가까운 위협을 선택하고 기억을 갱신해 도주 또는 안전 복구를 결정한다.
@@ -222,6 +341,10 @@ void ACMSacrificeAIController::AcquireThreat(AActor* Threat, const bool bFromHit
     const bool bAlreadyReacting = Phase == ECMSacrificeBehaviorPhase::BackFall || Phase == ECMSacrificeBehaviorPhase::BackCrawl || Phase == ECMSacrificeBehaviorPhase::Escape;
     if (!bAlreadyReacting || bFromHit)
     {
+        if (!bAlreadyReacting && !bFromHit)
+        {
+            Sacrifice->PlayThreatScream();
+        }
         StartThreatReaction();
     }
 }
@@ -249,23 +372,59 @@ void ACMSacrificeAIController::StartThreatReaction()
 // 넘어짐을 마친 뒤 위협을 마주 보는 후진 기기 상태와 단거리 도주를 시작한다.
 void ACMSacrificeAIController::StartBackCrawl()
 {
-    if (CannotAct())
+    if (CannotAct() || Phase != ECMSacrificeBehaviorPhase::BackFall)
     {
         return;
     }
     Sacrifice->FinishBackFallRootMotion();
     Phase = ECMSacrificeBehaviorPhase::BackCrawl;
+    if (!bThreatWasVisible || bFinishGoalAfterThreatLost || !Sacrifice->GetCurrentThreat())
+    {
+        StartSafetyRecovery();
+        return;
+    }
     Sacrifice->ActivateSacrificeAction(UCMSacrificeBackCrawlAbility::StaticClass());
     ClearFocus(EAIFocusPriority::Gameplay);
     Sacrifice->GetCharacterMovement()->bOrientRotationToMovement = false;
     Sacrifice->GetCharacterMovement()->bUseControllerDesiredRotation = true;
-    if (!MoveAwayFromThreat(300.0f) && bFinishGoalAfterThreatLost)
+    if (const AActor* CurrentThreat = Sacrifice->GetCurrentThreat())
+    {
+        const FVector ThreatDirection = (CurrentThreat->GetActorLocation() - Sacrifice->GetActorLocation()).GetSafeNormal2D();
+        if (!ThreatDirection.IsNearlyZero())
+        {
+            SetControlRotation(FRotator(0.0f, ThreatDirection.Rotation().Yaw, 0.0f));
+        }
+    }
+    const bool bMoveStarted = MoveAwayFromThreat(300.0f);
+    if (!bMoveStarted && bFinishGoalAfterThreatLost)
     {
         StartSafetyRecovery();
     }
-    else if (GetMoveStatus() == EPathFollowingStatus::Idle)
+    else if (!bMoveStarted)
     {
-        GetWorldTimerManager().SetTimer(MoveRetryTimer, this, &ThisClass::StartBackCrawl, 0.5f, false);
+        GetWorldTimerManager().SetTimer(MoveRetryTimer, this, &ThisClass::RetryBackCrawlMovement, 0.5f, false);
+    }
+}
+
+// 이미 넘어져 기는 중에는 자세를 재진입하지 않고 경로만 다시 요청한다.
+void ACMSacrificeAIController::RetryBackCrawlMovement()
+{
+    if (CannotAct() || Phase != ECMSacrificeBehaviorPhase::BackCrawl)
+    {
+        return;
+    }
+    if (!bThreatWasVisible || bFinishGoalAfterThreatLost || !Sacrifice->GetCurrentThreat())
+    {
+        StartSafetyRecovery();
+        return;
+    }
+    if (Sacrifice->GetSacrificeActionState() != ECMSacrificeActionState::BackCrawl)
+    {
+        Sacrifice->ActivateSacrificeAction(UCMSacrificeBackCrawlAbility::StaticClass());
+    }
+    if (!MoveAwayFromThreat(300.0f))
+    {
+        GetWorldTimerManager().SetTimer(MoveRetryTimer, this, &ThisClass::RetryBackCrawlMovement, 0.5f, false);
     }
 }
 
@@ -353,7 +512,7 @@ void ACMSacrificeAIController::OnMoveCompleted(FAIRequestID RequestID, const FPa
     }
     if (Phase == ECMSacrificeBehaviorPhase::BackCrawl)
     {
-        StartBackCrawl();
+        RetryBackCrawlMovement();
 
         return;
     }
@@ -539,7 +698,8 @@ void ACMSacrificeAIController::SelectAmbientAction()
         FNavLocation RandomPoint;
         if (UNavigationSystemV1* Nav = UNavigationSystemV1::GetCurrent(GetWorld()))
         {
-            if (Nav->GetRandomReachablePointInRadius(Sacrifice->GetActorLocation(), 300.0f, RandomPoint))
+            ANavigationData* NavigationData = Nav->GetNavDataForProps(Sacrifice->GetNavAgentPropertiesRef());
+            if (NavigationData && Nav->GetRandomReachablePointInRadius(Sacrifice->GetActorLocation(), 300.0f, RandomPoint, NavigationData))
             {
                 bMoveStarted = MoveToProjectedLocation(RandomPoint.Location, 30.0f);
             }
@@ -645,15 +805,21 @@ bool ACMSacrificeAIController::MoveAwayFromThreat(const float DistanceCm)
 bool ACMSacrificeAIController::MoveToProjectedLocation(const FVector& Goal, const float AcceptanceRadius)
 {
     UNavigationSystemV1* Nav = UNavigationSystemV1::GetCurrent(GetWorld());
+    ANavigationData* NavigationData = Nav && Sacrifice ? Nav->GetNavDataForProps(Sacrifice->GetNavAgentPropertiesRef()) : nullptr;
     FNavLocation Projected;
-    if (!Nav || !Nav->ProjectPointToNavigation(Goal, Projected, FVector(200.0f, 200.0f, 300.0f)))
+    if (!NavigationData || !Nav->ProjectPointToNavigation(Goal, Projected, FVector(200.0f, 200.0f, 300.0f), NavigationData))
+    {
+        return false;
+    }
+    if (!FCMSacrificeRules::HasMeaningfulProjectedMove(Sacrifice->GetActorLocation(), Projected.Location, AcceptanceRadius, MinimumMovementGoalDistanceCm))
     {
         return false;
     }
     // 즉시 완료되는 Move 요청이 현재 상태 전환 도중 OnMoveCompleted를 재진입하지 않게 한다.
     TGuardValue<bool> IgnoreSynchronousCompletion(bIgnoreMoveCompletion, true);
 
-    return MoveToLocation(Projected.Location, AcceptanceRadius, true, true, true, false) == EPathFollowingRequestResult::RequestSuccessful;
+    const bool bCanStrafe = Phase == ECMSacrificeBehaviorPhase::BackCrawl;
+    return MoveToLocation(Projected.Location, AcceptanceRadius, true, true, true, bCanStrafe) == EPathFollowingRequestResult::RequestSuccessful;
 }
 
 // 승인된 절단 피격이 오면 행동을 중단하고 피격 방향에 맞는 반응 상태를 시작한다.
@@ -738,6 +904,7 @@ void ACMSacrificeAIController::StopBehaviorTimers()
 void ACMSacrificeAIController::StopMovementForTransition()
 {
     LastFleeDirection = FVector::ZeroVector;
+    StationaryMovementSeconds = 0.0f;
     bIgnoreMoveCompletion = true;
     StopMovement();
     bIgnoreMoveCompletion = false;

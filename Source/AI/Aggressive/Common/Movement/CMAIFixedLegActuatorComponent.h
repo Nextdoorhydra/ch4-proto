@@ -20,6 +20,9 @@ namespace CMAIFixedLegActuation
 
     /** 접지 구체가 접촉점 위에서 시작해 허용 거리만큼 아래를 검사하도록 스윕 구간을 계산한다. */
     AI_API void CalculateGroundSweepSegment(const FVector& ContactLocation, float GroundCheckRadius, float GroundContactDistance, FVector& OutStart, FVector& OutEnd);
+
+    /** 접지점이 지면 아래에 있을 때 시작 배치에 필요한 위쪽 보정량을 반환한다. */
+    AI_API float CalculateRequiredGroundLift(float ContactHeight, float GroundHeight, float MaximumLift, float PenetrationTolerance);
 } // namespace CMAIFixedLegActuation
 
 /**
@@ -50,6 +53,9 @@ public:
 
     /** 몸통의 수평 속도만 설정된 최대값으로 제한한다. */
     void LimitPlanarSpeed(UPrimitiveComponent* Body, float MaxPlanarSpeed) const;
+
+    /** End 키 배치나 액터 스케일로 지면 아래에 들어간 접지점을 게임 시작 전에 위로 보정한다. */
+    bool ResolveInitialGroundPenetration(UPrimitiveComponent* ReferenceBody, const TArray<TObjectPtr<USceneComponent>>& ContactPoints, const FCMAIFixedLegActuationSettings& Settings, float MaximumLift = 150.0f, float PenetrationTolerance = 0.5f) const;
 
 private:
     bool FindGroundContact(const USceneComponent& ContactPoint, const FCMAIFixedLegActuationSettings& Settings, FHitResult& OutHit) const;

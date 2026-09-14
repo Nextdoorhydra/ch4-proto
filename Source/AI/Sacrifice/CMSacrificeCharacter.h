@@ -8,12 +8,14 @@
 #include "Gore/CMDismemberableTarget.h"
 #include "Gore/CMDismembermentDefinition.h"
 #include "Sacrifice/CMSacrificeAITypes.h"
+#include "Stage/Checkpoint/CMCheckpointAIResettable.h"
 
 #include "CMSacrificeCharacter.generated.h"
 
 class UCMDismembermentComponent;
 class UCMSacrificeStateComponent;
 class UCMSacrificeAttributeSet;
+class UAudioComponent;
 class UAbilitySystemComponent;
 class UAnimMontage;
 class UAnimSequence;
@@ -24,22 +26,26 @@ class ACMPartActorBase;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FCMSacrificeHitAcceptedSignature, AActor*, Attacker, AActor*, SourcePart, FVector, ImpactDirection);
 
-/** One guaranteed collectible configured on a placed Sacrifice instance. */
+/** Per-body-part rule that only controls whether the detached part is collectible. */
 USTRUCT(BlueprintType)
-struct AI_API FCMSacrificeRewardPart
+struct AI_API FCMSacrificeAttackPartRule
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Reward")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dismemberment")
     ECMBodyPart BodyPart = ECMBodyPart::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Reward")
-    TSubclassOf<ACMPartActorBase> PartClass;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dismemberment")
+    bool bPlayerCanAcquire = false;
+
+    /** Optional override; when empty, the native Head/Arm/Leg part class is used. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dismemberment", meta = (EditCondition = "bPlayerCanAcquire", EditConditionHides))
+    TSubclassOf<ACMPartActorBase> PartClassOverride;
 };
 
 /** Character foundation for the Sacrifice AI; contains no AI behavior. */
 UCLASS(Blueprintable)
-class AI_API ACMSacrificeCharacter : public ACharacter, public IAbilitySystemInterface, public ICMDismemberableTarget
+class AI_API ACMSacrificeCharacter : public ACharacter, public IAbilitySystemInterface, public ICMDismemberableTarget, public ICMCheckpointAIResettable
 {
     GENERATED_BODY()
 
@@ -47,10 +53,12 @@ public:
     ACMSacrificeCharacter();
 
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
     virtual int32 ReceiveDismembermentHit_Implementation(const FCMDismembermentHitRequest& Request) override;
+    virtual bool ResetAIForCheckpoint() override;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Sacrifice")
     UCMSacrificeStateComponent* GetSacrificeStateComponent() const
@@ -64,9 +72,14 @@ public:
         return DismembermentComponent;
     }
 
-    const TArray<FCMSacrificeRewardPart>& GetRewardParts() const
+    const TArray<FCMSacrificeAttackPartRule>& GetAttackPartRules() const
     {
-        return RewardParts;
+        return AttackPartRules;
+    }
+
+    float GetDismembermentImpulse() const
+    {
+        return DismembermentImpulse;
     }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Sacrifice|AI")
@@ -132,6 +145,7 @@ public:
     void SetSacrificeActionState(ECMSacrificeActionState NewState, FGameplayTag StateTag);
     void ClearSacrificeActionState(ECMSacrificeActionState State, FGameplayTag StateTag);
     void SetCurrentThreat(AActor* NewThreat);
+    void PlayThreatScream();
     void ConsumeFleeCharge();
     void RefillFleeCharges();
     float BeginHitReaction(const FVector& ImpactDirection);
@@ -167,10 +181,15 @@ protected:
     void ApplyStateTag(FGameplayTag StateTag, bool bEnabled);
     float CalculateMovementSpeed() const;
     void RefreshMovementSpeed();
+    void RefreshBleedingLoopSound(bool bBleeding);
+    void StopBleedingLoopSound();
 
-    /** Rewards authored per placed victim; duplicate body parts are ignored. */
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Chimera|Sacrifice|Rewards", meta = (TitleProperty = "BodyPart"))
-    TArray<FCMSacrificeRewardPart> RewardParts;
+    /** Optional per-part collectible settings; these rules never restrict which attached part can be severed. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Dismemberment", meta = (TitleProperty = "BodyPart", DisplayName = "Attack Part Rules"))
+    TArray<FCMSacrificeAttackPartRule> AttackPartRules;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Dismemberment", meta = (ClampMin = "0.0"))
+    float DismembermentImpulse = 1200.0f;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMDismembermentComponent> DismembermentComponent;
@@ -306,9 +325,16 @@ private:
     UFUNCTION(NetMulticast, Reliable)
     void MulticastPlaySafetyInjuryFallAnimation();
 
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayVocalSound(FGameplayTag SoundTag);
+
     UPROPERTY(Transient)
     TObjectPtr<UAnimMontage> ActiveGettingUpMontage;
 
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> BleedingLoopSoundComponent;
+
+    FTransform InitialCheckpointTransform = FTransform::Identity;
     bool bPendingIncapacitation = false;
     TMap<FGameplayTag, FActiveGameplayEffectHandle> StateEffectHandles;
 };

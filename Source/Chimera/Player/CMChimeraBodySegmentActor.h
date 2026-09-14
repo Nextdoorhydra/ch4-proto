@@ -43,6 +43,9 @@ class CHIMERA_API ACMChimeraBodySegmentActor : public AActor
 public:
     ACMChimeraBodySegmentActor();
 
+    virtual void GetLifetimeReplicatedProps(
+        TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
     void SetTentacleActorClass(
         TSubclassOf<ACMTentacleSegmentActor> InTentacleActorClass);
 
@@ -114,15 +117,24 @@ private:
     void ApplyVisualPreset();
     void RefreshWrapTentacleTarget();
 
+    UFUNCTION()
+    void OnRep_PresentationState();
+
     UPROPERTY(Transient)
     TObjectPtr<ACMChimera> ChimeraOwner;
 
     UPROPERTY(Transient)
     TObjectPtr<UPrimitiveComponent> BodySegment;
 
+    UPROPERTY(ReplicatedUsing = OnRep_PresentationState)
     int32 SegmentIndex = INDEX_NONE;
+
+    UPROPERTY(ReplicatedUsing = OnRep_PresentationState)
     bool bSegmentActive = false;
+
     bool bHasPresentationState = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_PresentationState)
     ECMChimeraSegmentVisualRole VisualRole =
         ECMChimeraSegmentVisualRole::Body;
 };

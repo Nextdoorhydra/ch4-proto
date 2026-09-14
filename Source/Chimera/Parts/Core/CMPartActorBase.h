@@ -11,7 +11,9 @@
 class UGameplayAbility;
 class UCMBattleComponent;
 class UCMGoreResponseComponent;
+class UCMInteractionHighlightComponent;
 class UCMPartStatusComponent;
+class UMaterialInterface;
 class UBoxComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
@@ -52,6 +54,8 @@ class CHIMERA_API ACMPartActorBase
 
 public:
     ACMPartActorBase();
+
+    virtual void Tick(float DeltaSeconds) override;
 
     /** Spawns one shared Part class and applies both data rows before BeginPlay. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
@@ -104,6 +108,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     USkeletalMeshComponent* GetPartMesh() const { return PartMesh; }
 
+    UMaterialInterface* GetPickupHighlightMaterial() const;
+
+    /** Server-authored world point shared by gameplay and client presentation. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    FVector GetAuthoritativePickupLocation() const;
+
     /** Simple query-only collision used to identify this Part without bone lookup. */
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     UBoxComponent* GetDamageHurtbox() const { return DamageHurtbox; }
@@ -133,6 +143,9 @@ public:
     FName GetTierRowName() const { return TierRowName; }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
+    FName GetPartRowName() const { return PartRowName; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Part")
     bool IsAlive() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part")
@@ -147,6 +160,9 @@ public:
 
     /** Keeps the native attachment/physics invariant even for BP overrides. */
     void SynchronizeAttachedPartSlot(UCMPartSlotComponent* PartSlot);
+
+    /** Stops loose-part physics and restores the authored mesh mount before snapping. */
+    void PrepareForPartSlotAttachment();
 
     /** Server-owned HP change used after BattleComponent resolves a hit. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
@@ -188,6 +204,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void OnRep_Owner() override;
 
     /** Lets Arm and Leg consume their type-specific columns after common data. */
     virtual void ApplyPartData(const FCMPartLegArmTableRow& PartRow);
@@ -209,6 +226,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMGoreResponseComponent> GoreResponseComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UCMInteractionHighlightComponent> InteractionHighlight;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Part")
     ECMPartSlotType PartType = ECMPartSlotType::Any;
@@ -270,7 +290,12 @@ private:
     bool InitializeFromPartData();
     void ApplyDestroyedState();
     void CaptureMountedPhysicsState();
+    void ResetMeshFromRagdoll();
     void ApplyAttachmentPhysicsState();
+    void RefreshPickupHighlight();
+    void UpdateReplicatedLoosePartLocation();
+    void ApplyReplicatedLoosePartLocation();
+    void ReconcileReplicatedAttachment();
 
     UFUNCTION()
     void OnRep_MaxHealth();
@@ -287,6 +312,9 @@ private:
     UFUNCTION()
     void OnRep_AttachmentPhysicsState();
 
+    UFUNCTION()
+    void OnRep_ReplicatedLoosePartLocation();
+
     UPROPERTY(ReplicatedUsing = OnRep_AttachmentPhysicsState,
         VisibleInstanceOnly, BlueprintReadOnly,
         Category = "Chimera|Part",
@@ -295,6 +323,10 @@ private:
 
     UPROPERTY(ReplicatedUsing = OnRep_AttachmentPhysicsState)
     bool bTentaclePullActive = false;
+
+    /** Server ragdoll center used by non-simulating client presentation. */
+    UPROPERTY(ReplicatedUsing = OnRep_ReplicatedLoosePartLocation)
+    FVector_NetQuantize10 ReplicatedLoosePartLocation;
 
     UPROPERTY(ReplicatedUsing = OnRep_Health,
         VisibleInstanceOnly, BlueprintReadOnly, Category = "Chimera|Part",
@@ -322,4 +354,7 @@ private:
         ECollisionEnabled::QueryOnly;
     bool bMountedMeshGenerateOverlapEvents = false;
     bool bMountedPhysicsStateCaptured = false;
+    FTransform MountedMeshRelativeTransform = FTransform::Identity;
+
+    friend class FCMTentacleBlueprintIntegrationTest;
 };

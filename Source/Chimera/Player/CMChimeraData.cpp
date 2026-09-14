@@ -81,20 +81,37 @@ bool ACMChimera::InitializeFromBodyData()
     BodyGroundFriction = BodyRow->GroundFriction;
     BodyLinearDamping = BodyRow->LinearDamping;
     BodyAngularDamping = BodyRow->AngularDamping;
-    MaxSpeed = BodyRow->MaxVelocity;
+    MaxSpeed = CMChimeraPhysics::ResolveLinearSpeedLimit(
+        BodyRow->MaxVelocity,
+        MaximumSafeLinearSpeed);
+    if (!FMath::IsNearlyEqual(MaxSpeed, BodyRow->MaxVelocity))
+    {
+        UE_LOG(LogChimeraLineBody, Warning,
+            TEXT("[Physics Safety] MaxVelocity %.1f was clamped to %.1f cm/s."),
+            BodyRow->MaxVelocity,
+            MaxSpeed);
+    }
+    PlayerCountForceMultiplier =
+        FMath::Max(BodyRow->PlayerCountForceMultiplier, 0.0f);
+    LegYawMultiplier = FMath::Max(BodyRow->LegYawMultiplier, 0.0f);
+    LegForwardMultiplier =
+        FMath::Max(BodyRow->LegForwardMultiplier, 0.0f);
 
     RuntimeBodyPhysicalMaterial = NewObject<UPhysicalMaterial>(this);
     RuntimeBodyPhysicalMaterial->Friction = BodyGroundFriction;
 
     UE_LOG(LogChimeraLineBody, Log,
-        TEXT("[CSV -> Physics] Row=%s Type=%s Mass=%.1f Friction=%.2f LinearDamping=%.2f AngularDamping=%.2f MaxVelocity=%.1f"),
+        TEXT("[CSV -> Physics] Row=%s Type=%s Mass=%.1f Friction=%.2f LinearDamping=%.2f AngularDamping=%.2f MaxVelocity=%.1f PlayerCountForceMultiplier=%.2f LegYawMultiplier=%.2f LegForwardMultiplier=%.2f"),
         *BodyRowName.ToString(),
         *BodyRow->BodyType.ToString(),
         BodySegmentMass,
         BodyGroundFriction,
         BodyLinearDamping,
         BodyAngularDamping,
-        MaxSpeed);
+        MaxSpeed,
+        PlayerCountForceMultiplier,
+        LegYawMultiplier,
+        LegForwardMultiplier);
 
     if (HasAuthority())
     {

@@ -331,47 +331,35 @@ void ACMArmPart::DetectSwingTargets()
             ForwardDirection = OutwardDirection;
         }
     }
+    const FVector SafeForward = ForwardDirection.GetSafeNormal();
+    if (SafeForward.IsNearlyZero())
+    {
+        return;
+    }
+
+    const float QueryRange = AttackRange
+        + DismemberableTargetHitTolerance;
+    const float QueryRadius = AttackRadius
+        + DismemberableTargetHitTolerance;
+    const FVector QueryCenter = DetectionOrigin
+        + SafeForward * QueryRange * 0.5f;
+    const FVector QueryExtent(
+        QueryRange * 0.5f,
+        QueryRadius,
+        QueryRadius);
+    const FQuat QueryRotation = FRotationMatrix::MakeFromX(
+        SafeForward).ToQuat();
 #if ENABLE_DRAW_DEBUG
     if (bDrawSwingDebug
         && !World->GetTimerManager().IsTimerActive(
             SwingDetectionTimerHandle))
     {
-        const FVector SafeForward = ForwardDirection.GetSafeNormal();
-        const float DebugRange = AttackRange
-            + DismemberableTargetHitTolerance;
-        const float DebugRadius = AttackRadius
-            + DismemberableTargetHitTolerance;
-        const float HalfAngle = FMath::Atan2(DebugRadius, DebugRange);
-        DrawDebugCone(
-            World,
-            DetectionOrigin,
-            SafeForward,
-            DebugRange,
-            HalfAngle,
-            HalfAngle,
-            24,
-            FColor::Cyan,
-            false,
-            SwingDebugDuration,
-            0,
-            1.5f
-        );
-        DrawDebugDirectionalArrow(
-            World,
-            DetectionOrigin,
-            DetectionOrigin + SafeForward * DebugRange,
-            20.0f,
-            FColor::Yellow,
-            false,
-            SwingDebugDuration,
-            0,
-            2.5f
-        );
+        DrawSwingDebug();
     }
 #endif
     TArray<FOverlapResult> Overlaps;
     FCollisionQueryParams QueryParams(
-        SCENE_QUERY_STAT(CMArmSwingSector),
+        SCENE_QUERY_STAT(CMArmSwingBox),
         false,
         this
     );
@@ -385,11 +373,10 @@ void ACMArmPart::DetectSwingTargets()
 
     World->OverlapMultiByObjectType(
         Overlaps,
-        DetectionOrigin,
-        FQuat::Identity,
+        QueryCenter,
+        QueryRotation,
         ObjectQueryParams,
-        FCollisionShape::MakeSphere(
-            AttackRange + DismemberableTargetHitTolerance),
+        FCollisionShape::MakeBox(QueryExtent),
         QueryParams
     );
 
@@ -426,7 +413,7 @@ void ACMArmPart::DetectSwingTargets()
             TargetActor->Implements<UCMDismemberableTarget>()
                 ? DismemberableTargetHitTolerance
                 : 0.0f;
-        if (!bOriginInsideTarget && !IsInsideSwingSector(
+        if (!bOriginInsideTarget && !IsInsideSwingBox(
                 DetectionOrigin,
                 ForwardDirection,
                 TargetLocation,
@@ -484,7 +471,7 @@ void ACMArmPart::DetectSwingTargets()
     }
 
     UE_LOG(LogChimeraArm, Log,
-        TEXT("[Arm Swing Sector] Part=%s Direction=%s Range=%.1f Radius=%.1f Overlaps=%d Detected=%d"),
+        TEXT("[Arm Swing Box] Part=%s Direction=%s Range=%.1f Radius=%.1f Overlaps=%d Detected=%d"),
         *GetName(),
         *ForwardDirection.ToCompactString(),
         AttackRange,
@@ -493,7 +480,74 @@ void ACMArmPart::DetectSwingTargets()
         DetectedActors.Num());
 }
 
-bool ACMArmPart::IsInsideSwingSector(
+void ACMArmPart::DrawSwingDebug() const
+{
+#if ENABLE_DRAW_DEBUG
+    UWorld* World = GetWorld();
+    const UCMPartSlotComponent* PartSlot = GetAttachedPartSlot();
+    if (!bDrawSwingDebug || !World || !PartMesh || !PartSlot
+        || AttackRange <= 0.0f || AttackRadius <= 0.0f)
+    {
+        return;
+    }
+
+    const FVector DetectionOrigin = PartSlot->GetComponentLocation();
+    FVector ForwardDirection = PartMesh->GetForwardVector();
+    if (const USceneComponent* SegmentBody = PartSlot->GetAttachParent())
+    {
+        const FVector OutwardDirection = FVector::VectorPlaneProject(
+            PartSlot->GetComponentLocation()
+                - SegmentBody->GetComponentLocation(),
+            SegmentBody->GetUpVector()).GetSafeNormal();
+        if (!OutwardDirection.IsNearlyZero())
+        {
+            ForwardDirection = OutwardDirection;
+        }
+    }
+
+    const FVector SafeForward = ForwardDirection.GetSafeNormal();
+    if (SafeForward.IsNearlyZero())
+    {
+        return;
+    }
+
+    const float QueryRange = AttackRange
+        + DismemberableTargetHitTolerance;
+    const float QueryRadius = AttackRadius
+        + DismemberableTargetHitTolerance;
+    const FVector QueryCenter = DetectionOrigin
+        + SafeForward * QueryRange * 0.5f;
+    const FVector QueryExtent(
+        QueryRange * 0.5f,
+        QueryRadius,
+        QueryRadius);
+    const FQuat QueryRotation = FRotationMatrix::MakeFromX(
+        SafeForward).ToQuat();
+
+    DrawDebugBox(
+        World,
+        QueryCenter,
+        QueryExtent,
+        QueryRotation,
+        FColor::Cyan,
+        false,
+        SwingDebugDuration,
+        0,
+        1.5f);
+    DrawDebugDirectionalArrow(
+        World,
+        DetectionOrigin,
+        DetectionOrigin + SafeForward * QueryRange,
+        20.0f,
+        FColor::Yellow,
+        false,
+        SwingDebugDuration,
+        0,
+        2.5f);
+#endif
+}
+
+bool ACMArmPart::IsInsideSwingBox(
     const FVector& Origin,
     const FVector& ForwardDirection,
     const FVector& TargetLocation,
@@ -501,10 +555,7 @@ bool ACMArmPart::IsInsideSwingSector(
     float Radius
 )
 {
-    const FVector ToTarget = TargetLocation - Origin;
-    const float DistanceSquared = ToTarget.SizeSquared();
-    if (DistanceSquared <= UE_SMALL_NUMBER
-        || DistanceSquared > FMath::Square(Range))
+    if (Range <= 0.0f || Radius <= 0.0f)
     {
         return false;
     }
@@ -515,16 +566,21 @@ bool ACMArmPart::IsInsideSwingSector(
         return false;
     }
 
-    const float CosHalfAngle = Range / FMath::Sqrt(
-        FMath::Square(Range) + FMath::Square(Radius)
-    );
-    return FVector::DotProduct(ToTarget.GetSafeNormal(), SafeForward)
-        >= CosHalfAngle;
+    const FVector LocalOffset = FRotationMatrix::MakeFromX(SafeForward)
+        .InverseTransformVector(TargetLocation - Origin);
+    return LocalOffset.X >= 0.0f
+        && LocalOffset.X <= Range
+        && FMath::Abs(LocalOffset.Y) <= Radius
+        && FMath::Abs(LocalOffset.Z) <= Radius;
 }
 
 void ACMArmPart::OnRep_Swinging()
 {
     OnSwingStateChanged.Broadcast(bSwinging);
+    if (bSwinging)
+    {
+        DrawSwingDebug();
+    }
 }
 
 void ACMArmPart::OnRep_GroundAnchor()

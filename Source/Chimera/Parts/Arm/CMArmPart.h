@@ -139,7 +139,7 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Arm")
     FCMArmSwingHitSignature OnSwingHit;
 
-    /** Server-only notification for actors found inside this Arm's swing sector. */
+    /** Server-only notification for actors found inside this Arm's swing box. */
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Arm")
     FCMArmSwingTargetDetectedSignature OnSwingTargetDetected;
 
@@ -199,8 +199,9 @@ protected:
 
 private:
     void DetectSwingTargets();
+    void DrawSwingDebug() const;
 
-    static bool IsInsideSwingSector(
+    static bool IsInsideSwingBox(
         const FVector& Origin,
         const FVector& ForwardDirection,
         const FVector& TargetLocation,

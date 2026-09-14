@@ -3,16 +3,21 @@
 #include "CoreMinimal.h"
 #include "Combat/CMCombatHitTarget.h"
 #include "GameFramework/Actor.h"
+#include "Stage/Checkpoint/CMCheckpointResettable.h"
 
 #include "CMPushBox.generated.h"
 
 class UCMMechanismWeightComponent;
+class UAudioComponent;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 
 /** 플레이어의 몸통 충돌과 기본 팔 공격으로만 이동하는 키네마틱 상자다. */
 UCLASS(Blueprintable)
-class CHIMERA_API ACMPushBox : public AActor, public ICMCombatHitTarget
+class CHIMERA_API ACMPushBox
+    : public AActor
+    , public ICMCombatHitTarget
+    , public ICMCheckpointResettable
 {
     GENERATED_BODY()
 
@@ -21,10 +26,13 @@ public:
 
     virtual void Tick(float DeltaTime) override;
     virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual bool ReceiveCombatHit_Implementation(const FCMCombatHitRequest& Request) override;
+    virtual void ResetForCheckpoint() override;
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chimera|Push Box")
     TObjectPtr<UStaticMeshComponent> BoxMesh;
@@ -53,10 +61,24 @@ private:
     void HandleBoxHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
 
     void ApplyEditorSettings();
+    FVector ResolveCardinalPushDirection(const FVector& ImpactPoint, const FVector& FallbackDirection) const;
     bool StartPush(FVector WorldDirection);
     void StopPush();
+    void HandleSoundCatalogsRebuilt();
+    void RefreshMoveLoopSound();
+    void StopMoveLoopSound();
+
+    UFUNCTION()
+    void OnRep_IsMoving();
+
+    UPROPERTY(ReplicatedUsing = OnRep_IsMoving)
+    bool bIsMoving = false;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> MoveLoopSoundComponent;
 
     FVector PushDirection = FVector::ZeroVector;
     float RemainingPushDistance = 0.0f;
     FGuid LastAcceptedAttackId;
+    FTransform InitialTransform;
 };

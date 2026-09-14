@@ -44,6 +44,64 @@ void RespawnAtLatestCheckpoint(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+void RestartGame(const TArray<FString>& Args, UWorld* World)
+{
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatRestartGame();
+    }
+}
+
+bool TryParseLoadoutSlot(
+    const TArray<FString>& Args,
+    int32& OutOneBasedSlotNumber)
+{
+    int64 SlotNumber = 0;
+    if (Args.Num() != 1 || Args[0].IsEmpty() || Args[0].Len() > 2
+        || Args[0].GetCharArray().ContainsByPredicate([](TCHAR C)
+            { return C != 0 && (C < TEXT('0') || C > TEXT('9')); })
+        || (SlotNumber = FCString::Atoi64(*Args[0])) < 1
+        || SlotNumber > 10)
+    {
+        return false;
+    }
+
+    OutOneBasedSlotNumber = static_cast<int32>(SlotNumber);
+    return true;
+}
+
+void SaveLoadout(const TArray<FString>& Args, UWorld* World)
+{
+    int32 SlotNumber = 0;
+    if (!TryParseLoadoutSlot(Args, SlotNumber))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("Usage: CM.SavePreset <1-10>, e.g. CM.SavePreset 1"));
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatSaveLoadout(SlotNumber);
+    }
+}
+
+void LoadLoadout(const TArray<FString>& Args, UWorld* World)
+{
+    int32 SlotNumber = 0;
+    if (!TryParseLoadoutSlot(Args, SlotNumber))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("Usage: CM.LoadPreset <1-10>, e.g. CM.LoadPreset 1"));
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatLoadLoadout(SlotNumber);
+    }
+}
+
 void KillSegment(UWorld* World, int32 SegmentIndex)
 {
     if (ACMPlayerController* Controller = FindLocalController(World))
@@ -101,6 +159,21 @@ void DamagePart(const TArray<FString>& Args, UWorld* World)
     if (ACMPlayerController* Controller = FindLocalController(World))
     {
         Controller->RequestCheatDamagePart(OneBasedSlotIndex, Damage);
+    }
+}
+
+void SetInvincible(const TArray<FString>& Args, UWorld* World)
+{
+    if (Args.Num() != 1 || (Args[0] != TEXT("0") && Args[0] != TEXT("1")))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[Cheat Usage] CM.God 1|0"));
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatSetInvincible(Args[0] == TEXT("1"));
     }
 }
 
@@ -231,6 +304,14 @@ FAutoConsoleCommandWithWorldAndArgs RespawnAtLatestCheckpointCommand(
     )
 );
 
+FAutoConsoleCommandWithWorldAndArgs RestartCommand(
+    TEXT("CM.Restart"),
+    TEXT("Restarts the current game and resets all runtime actors."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+        &RestartGame
+    )
+);
+
 #if !UE_BUILD_SHIPPING
 FAutoConsoleCommandWithWorldAndArgs GoToCheckpointCommand(
     TEXT("CM.GoToCheckpoint"),
@@ -289,6 +370,18 @@ FAutoConsoleCommandWithWorldAndArgs NextStageCommand(
             }
         }),
     ECVF_Cheat);
+
+FAutoConsoleCommandWithWorldAndArgs SaveLoadoutCommand(
+    TEXT("CM.SavePreset"),
+    TEXT("Permanently overwrites one Part preset slot with the current shared Chimera Parts. Usage: CM.SavePreset 1"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SaveLoadout),
+    ECVF_Cheat);
+
+FAutoConsoleCommandWithWorldAndArgs LoadLoadoutCommand(
+    TEXT("CM.LoadPreset"),
+    TEXT("Loads a persistent Part preset slot onto the shared Chimera. Usage: CM.LoadPreset 1"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&LoadLoadout),
+    ECVF_Cheat);
 #endif
 
 FAutoConsoleCommandWithWorldAndArgs DamageBodyCommand(
@@ -301,6 +394,12 @@ FAutoConsoleCommandWithWorldAndArgs DamagePartCommand(
     TEXT("CM.DamagePart"),
     TEXT("Damages the Part attached to a one-based global Chimera slot. Usage: CM.DamagePart <SlotNumber> <Damage>"),
     FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&DamagePart)
+);
+
+FAutoConsoleCommandWithWorldAndArgs InvincibleCommand(
+    TEXT("CM.God"),
+    TEXT("Enables or disables all damage to the shared Chimera and its attached Parts. Usage: CM.God 1|0"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetInvincible)
 );
 
 FAutoConsoleCommandWithWorldAndArgs SpawnRandomPartsCommand(

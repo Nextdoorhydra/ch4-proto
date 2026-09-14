@@ -120,6 +120,9 @@ public:
     // 체크포인트 복귀 시 사망으로 잠긴 Q/W/E/R 입력 복구
     void RestoreControlsAfterRespawn();
 
+    // 체크포인트 도달로 부활한 몸통에 연결된 입력만 다시 활성화
+    void RestoreControlsForRevivedSegments();
+
     void ClearPressedControlSlots();
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Control Body")
@@ -211,6 +214,8 @@ protected:
 private:
     /** 눌렀을 때 배정됐던 파츠를 기억해 Release와 재할당을 안전하게 처리한다. */
     FCMPartSlotAddress PressedPartSlots[CMControl::MaxKeysPerPlayer];
+    double PressedControlSlotStartTimes[CMControl::MaxKeysPerPlayer] = {};
+    bool bPressedControlSlotReverseMovement[CMControl::MaxKeysPerPlayer] = {};
 
     TMap<TWeakObjectPtr<UObject>, FTimerHandle> ConfusionSources;
     TMap<TWeakObjectPtr<UObject>, FTimerHandle> DeliriumSources;

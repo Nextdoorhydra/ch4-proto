@@ -1,6 +1,7 @@
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 
 #include "Collision/CMCollisionChannels.h"
+#include "Components/AudioComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
@@ -16,6 +17,8 @@
 #include "Player/CMChimera.h"
 #include "Player/CMChimeraBodySegmentActor.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraTentacle, Log, All);
 
@@ -125,6 +128,7 @@ void ACMTentacleSegmentActor::EndPlay(
     {
         AbortPull();
     }
+    StopPullLoopSound();
     DestroyVisualComponents();
     Super::EndPlay(EndPlayReason);
 }
@@ -282,9 +286,12 @@ bool ACMTentacleSegmentActor::TryBeginPartAttachment(
 
     PendingPartSlot = PartSlotAddress;
     PullStartTransform = TetheredActor->GetActorTransform();
+    PullStartTransform.SetLocation(
+        ResolveAuthoritativePickupLocation(TetheredActor));
     PullElapsedSeconds = 0.0f;
     TentacleState = ECMTentacleState::Pulling;
     ForceNetUpdate();
+    RefreshPullLoopSound();
 
     UE_LOG(LogChimeraTentacle, Log,
         TEXT("[Tentacle Pull Started] Segment=%d Slot=%d Part=%s"),
@@ -338,7 +345,11 @@ void ACMTentacleSegmentActor::RefreshOverlapTarget()
 
         const float DistanceSquared = FVector::DistSquared(
             SourceLocation,
-            ResolveVisualTargetLocation(Candidate));
+            ResolveAuthoritativePickupLocation(Candidate));
+        if (DistanceSquared > FMath::Square(DetectionRadius))
+        {
+            continue;
+        }
         if (DistanceSquared < NearestDistanceSquared)
         {
             NearestDistanceSquared = DistanceSquared;
@@ -462,8 +473,35 @@ void ACMTentacleSegmentActor::AbortPull()
     PendingPartSlot = FCMPartSlotAddress();
 }
 
+void ACMTentacleSegmentActor::RefreshPullLoopSound()
+{
+    if (TentacleState != ECMTentacleState::Pulling || !IsValid(TetheredActor))
+    {
+        StopPullLoopSound();
+        return;
+    }
+    if (IsValid(PullLoopSoundComponent) && PullLoopSoundComponent->IsPlaying())
+    {
+        return;
+    }
+
+    PullLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        TetheredActor->GetRootComponent(),
+        CMSoundTags::Part_AttachPullLoop);
+}
+
+void ACMTentacleSegmentActor::StopPullLoopSound()
+{
+    if (IsValid(PullLoopSoundComponent))
+    {
+        PullLoopSoundComponent->Stop();
+        PullLoopSoundComponent = nullptr;
+    }
+}
+
 void ACMTentacleSegmentActor::OnRep_VisualState()
 {
+    RefreshPullLoopSound();
     if (TetheredActor)
     {
         LastVisualTargetLocation = ResolveVisualTargetLocation(
@@ -487,16 +525,32 @@ USkeletalMeshComponent* ACMTentacleSegmentActor::ResolveTargetPartMesh(
     return nullptr;
 }
 
+FVector ACMTentacleSegmentActor::ResolveAuthoritativePickupLocation(
+    AActor* Target) const
+{
+    if (const ACMDroppedPartActor* DroppedPart =
+        Cast<ACMDroppedPartActor>(Target))
+    {
+        return DroppedPart->GetAuthoritativePickupLocation();
+    }
+    if (const ACMPartActorBase* UsablePart =
+        Cast<ACMPartActorBase>(Target))
+    {
+        return UsablePart->GetAuthoritativePickupLocation();
+    }
+    return Target ? Target->GetActorLocation() : FVector::ZeroVector;
+}
+
 FVector ACMTentacleSegmentActor::ResolveVisualTargetLocation(
     AActor* Target) const
 {
-    if (!Target)
+    if (!IsValid(Target))
     {
         return LastVisualTargetLocation;
     }
 
     USkeletalMeshComponent* TargetMesh = ResolveTargetPartMesh(Target);
-    if (!TargetMesh)
+    if (!IsValid(TargetMesh))
     {
         return Target->GetActorLocation();
     }
@@ -578,9 +632,9 @@ void ACMTentacleSegmentActor::EnsureVisualComponents()
             TargetNiagaraSystem,
             TargetRoot,
             NAME_None,
-            FVector::ZeroVector,
+            LastVisualTargetLocation,
             FRotator::ZeroRotator,
-            EAttachLocation::KeepRelativeOffset,
+            EAttachLocation::KeepWorldPosition,
             false,
             true,
             ENCPoolMethod::None,
@@ -626,6 +680,10 @@ void ACMTentacleSegmentActor::UpdateVisual(float DeltaTime)
         LastVisualTargetLocation = ResolveVisualTargetLocation(
             TetheredActor);
         EnsureVisualComponents();
+        if (TargetEffect)
+        {
+            TargetEffect->SetWorldLocation(LastVisualTargetLocation);
+        }
     }
     if (!RuntimeSplineMesh)
     {

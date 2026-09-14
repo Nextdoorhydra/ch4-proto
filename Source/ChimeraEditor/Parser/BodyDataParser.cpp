@@ -24,6 +24,10 @@ namespace BodyColumns
     const FString LinearDamping = TEXT("LinearDamping");
     const FString AngularDamping = TEXT("AngularDamping");
     const FString MaxVelocity = TEXT("MaxVelocity");
+    const FString PlayerCountForceMultiplier =
+        TEXT("PlayerCountForceMultiplier");
+    const FString LegYawMultiplier = TEXT("LegYawMultiplier");
+    const FString LegForwardMultiplier = TEXT("LegForwardMultiplier");
 
     const TArray<FString> RequiredHeaders =
     {
@@ -38,6 +42,9 @@ namespace BodyColumns
         LinearDamping,
         AngularDamping,
         MaxVelocity,
+        PlayerCountForceMultiplier,
+        LegYawMultiplier,
+        LegForwardMultiplier,
     };
 
     bool ReadRequiredFloat(
@@ -138,6 +145,28 @@ bool UBodyDataParser::OnParseComplete(FString& OutError)
         bHasValidNumbers &= BodyColumns::ReadRequiredFloat(Row, BodyColumns::LinearDamping, NewRow.LinearDamping, Report, Index, ParsedRowName, true);
         bHasValidNumbers &= BodyColumns::ReadRequiredFloat(Row, BodyColumns::AngularDamping, NewRow.AngularDamping, Report, Index, ParsedRowName, true);
         bHasValidNumbers &= BodyColumns::ReadRequiredFloat(Row, BodyColumns::MaxVelocity, NewRow.MaxVelocity, Report, Index, ParsedRowName);
+        bHasValidNumbers &= BodyColumns::ReadRequiredFloat(
+            Row,
+            BodyColumns::PlayerCountForceMultiplier,
+            NewRow.PlayerCountForceMultiplier,
+            Report,
+            Index,
+            ParsedRowName,
+            true);
+        bHasValidNumbers &= BodyColumns::ReadRequiredFloat(
+            Row,
+            BodyColumns::LegYawMultiplier,
+            NewRow.LegYawMultiplier,
+            Report,
+            Index,
+            ParsedRowName);
+        bHasValidNumbers &= BodyColumns::ReadRequiredFloat(
+            Row,
+            BodyColumns::LegForwardMultiplier,
+            NewRow.LegForwardMultiplier,
+            Report,
+            Index,
+            ParsedRowName);
 
         if (!Row.IsValid() || !bHasValidNumbers)
         {
@@ -149,12 +178,13 @@ bool UBodyDataParser::OnParseComplete(FString& OutError)
         Report.AddSuccess();
 
         UE_LOG(LogChimeraBodyDataParser, Verbose,
-            TEXT("[CSV -> DataTable] Row=%s ID=%s Type=%s SegmentHP=%.1f MaxStamina=%.1f"),
+            TEXT("[CSV -> DataTable] Row=%s ID=%s Type=%s SegmentHP=%.1f MaxStamina=%.1f PlayerCountForceMultiplier=%.2f"),
             *ParsedRowName.ToString(),
             *NewRow.ID.ToString(),
             *NewRow.BodyType.ToString(),
             NewRow.SegmentMaxHP,
-            NewRow.MaxStamina);
+            NewRow.MaxStamina,
+            NewRow.PlayerCountForceMultiplier);
     }
 
     return FinalizeParseReport(ParserName, Report, OutError);

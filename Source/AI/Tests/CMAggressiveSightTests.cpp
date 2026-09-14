@@ -28,6 +28,10 @@ bool FCMAggressiveSightGeometryTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Horizontal half-angle boundary is visible"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, Forward, 60.0f, 180.0f, 300.0f, HorizontalBoundary));
     TestFalse(TEXT("Point beyond horizontal half-angle is hidden"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, Forward, 60.0f, 180.0f, 300.0f, OutsideHorizontal));
 
+    const FVector RightFacingForward = Forward.RotateAngleAxis(90.0f, FVector::UpVector);
+    TestTrue(TEXT("A sight sector rotated 90 degrees includes its new forward"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, RightFacingForward, 60.0f, 180.0f, 300.0f, FVector(0.0f, 200.0f, 0.0f)));
+    TestFalse(TEXT("A sight sector rotated 90 degrees excludes its previous forward"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, RightFacingForward, 60.0f, 180.0f, 300.0f, FVector(200.0f, 0.0f, 0.0f)));
+
     TestTrue(TEXT("Full vertical sight accepts a point directly above"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, Forward, 60.0f, 180.0f, 300.0f, FVector(0.0f, 0.0f, 200.0f)));
     TestFalse(TEXT("Configured vertical half-angle rejects a high point"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, Forward, 60.0f, 60.0f, 300.0f, FVector(100.0f, 0.0f, 200.0f)));
     TestTrue(TEXT("Reversed forward supports Centipede tail sight"), UCMAggressiveSightComponent::IsPointInsideSight(Origin, -Forward, 40.0f, 180.0f, 200.0f, FVector(-150.0f, 0.0f, 0.0f)));

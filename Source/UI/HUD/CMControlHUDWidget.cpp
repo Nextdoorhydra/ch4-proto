@@ -2,14 +2,19 @@
 
 #include "Ability/CMChimeraAttributeSet.h"
 #include "GameMode/CMGameState.h"
+#include "GameMode/Play/CMPlayGameState.h"
 #include "HUD/Wireframe/CMWireframeHUDCaptureActor.h"
+#include "Parts/Arm/CMArmPart.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Core/CMPartStatusComponent.h"
 #include "Parts/Core/CMPartStatusTags.h"
+#include "Parts/Leg/CMLegPart.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMPartInterface.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Player/CMControlTypes.h"
+#include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
 #include "AbilitySystemComponent.h"
 #include "Blueprint/WidgetTree.h"
@@ -22,7 +27,10 @@
 #include "Components/OverlaySlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Components/Widget.h"
 #include "Curves/CurveLinearColor.h"
 #include "Engine/Texture2D.h"
@@ -30,6 +38,7 @@
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Fonts/FontMeasure.h"
+#include "Camera/PlayerCameraManager.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 #include "Rendering/DrawElements.h"
@@ -43,6 +52,10 @@ namespace
 const FLinearColor IdleControlKeyColor(0.55f, 0.55f, 0.55f, 0.65f);
 const FLinearColor DisabledControlKeyColor(0.22f, 0.22f, 0.22f, 0.45f);
 const FLinearColor DeadSegmentColor(0.10f, 0.10f, 0.10f, 0.95f);
+const FLinearColor LegGaugeTapColor(0.08f, 0.36f, 1.0f, 1.0f);
+const FLinearColor LegGaugeNormalColor(0.08f, 0.85f, 0.28f, 1.0f);
+const FLinearColor LegGaugeChargeColor(1.0f, 0.78f, 0.04f, 1.0f);
+const FLinearColor LegGaugeOverchargeColor(1.0f, 0.06f, 0.03f, 1.0f);
 constexpr float StatusCycleSeconds = 1.6f;
 constexpr float StatusNameEnd = 0.62f;
 constexpr float StatusTextStart = 0.80f;
@@ -53,6 +66,42 @@ float GetPercent(float Current, float Maximum)
     return Maximum > 0.0f
         ? FMath::Clamp(Current / Maximum, 0.0f, 1.0f)
         : 0.0f;
+}
+
+FLinearColor GetLegChargeGaugeColor(
+    const float HoldSeconds,
+    const float TapEndSeconds,
+    const float NormalEndSeconds,
+    const float ChargeEndSeconds,
+    const float OverchargeEndSeconds
+)
+{
+    if (HoldSeconds <= TapEndSeconds)
+    {
+        return LegGaugeTapColor;
+    }
+    if (HoldSeconds <= NormalEndSeconds)
+    {
+        return LegGaugeNormalColor;
+    }
+    if (HoldSeconds <= ChargeEndSeconds)
+    {
+        return LegGaugeChargeColor;
+    }
+
+    const float OverchargeAlpha = FMath::Clamp(
+        (HoldSeconds - ChargeEndSeconds)
+            / FMath::Max(
+                OverchargeEndSeconds - ChargeEndSeconds,
+                UE_SMALL_NUMBER),
+        0.0f,
+        1.0f
+    );
+    return FMath::Lerp(
+        LegGaugeChargeColor,
+        LegGaugeOverchargeColor,
+        OverchargeAlpha
+    );
 }
 
 FSlateBrush MakeSolidBrush(const FLinearColor& Color)
@@ -87,6 +136,61 @@ void AddStatusTextUnique(TArray<FText>& StatusTexts, const FText& Text)
         StatusTexts.Add(Text);
     }
 }
+
+FText GetPartTypeText(const ACMPartActorBase* PartActor)
+{
+    if (!PartActor)
+    {
+        return FText::GetEmpty();
+    }
+
+    switch (ICMPartInterface::Execute_GetPartType(
+        const_cast<ACMPartActorBase*>(PartActor)))
+    {
+    case ECMPartSlotType::Head:
+        return LOCTEXT("PartTypeHead", "Head");
+    case ECMPartSlotType::Arm:
+        return LOCTEXT("PartTypeArm", "Arm");
+    case ECMPartSlotType::Leg:
+        return LOCTEXT("PartTypeLeg", "Leg");
+    case ECMPartSlotType::Organ:
+        return LOCTEXT("PartTypeOrgan", "Organ");
+    default:
+        return FText::GetEmpty();
+    }
+}
+
+FText GetControlKeyText(
+    const TCHAR* KeyName,
+    const ACMPartActorBase* PartActor)
+{
+    const FText KeyText = FText::FromString(KeyName);
+    const FText PartTypeText = GetPartTypeText(PartActor);
+    return PartTypeText.IsEmpty()
+        ? KeyText
+        : FText::Format(
+            LOCTEXT("ControlKeyWithPartType", "{0} - {1}"),
+            KeyText,
+            PartTypeText);
+}
+
+FText GetArmHoldText(const ACMArmPart* ArmPart)
+{
+    if (!ArmPart)
+    {
+        return FText::GetEmpty();
+    }
+
+    switch (ArmPart->GetHoldType())
+    {
+    case ECMArmHoldType::Ground:
+        return LOCTEXT("ArmGroundHold", "hold");
+    case ECMArmHoldType::Interactable:
+        return LOCTEXT("ArmInteractableHold", "interact");
+    default:
+        return FText::GetEmpty();
+    }
+}
 }
 
 UCMControlHUDWidget::UCMControlHUDWidget(
@@ -94,10 +198,16 @@ UCMControlHUDWidget::UCMControlHUDWidget(
 )
     : Super(ObjectInitializer)
 {
-    InputConfig = ENKMUIWidgetInputMode::GameAndMenu;
-    GameMouseCaptureMode = EMouseCaptureMode::NoCapture;
     WireframeLabelFont = FCoreStyle::GetDefaultFontStyle(
         TEXT("Regular"), 14);
+}
+
+TOptional<FUIInputConfig> UCMControlHUDWidget::GetDesiredInputConfig() const
+{
+    return FUIInputConfig(
+        ECommonInputMode::All,
+        EMouseCaptureMode::CaptureDuringMouseDown,
+        false);
 }
 
 void UCMControlHUDWidget::NativeOnInitialized()
@@ -113,9 +223,11 @@ void UCMControlHUDWidget::NativeOnInitialized()
     }
 
     SetVisibility(ESlateVisibility::HitTestInvisible);
-    RuntimeWireframeCameraRotation = WireframeCameraRotation;
     RuntimeWireframeZoom = 1.0f;
+    bShowAllPlayerLabels = false;
     InitializeWireframeHUD();
+    InitializeRetryVoteHUD();
+    InitializeApmHUD();
 }
 
 void UCMControlHUDWidget::NativeDestruct()
@@ -130,9 +242,22 @@ void UCMControlHUDWidget::NativeTick(
 )
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
+    if (const APlayerController* OwningPlayer = GetOwningPlayer();
+        OwningPlayer
+        && OwningPlayer->WasInputKeyJustPressed(EKeys::Tab))
+    {
+        bShowAllPlayerLabels = !bShowAllPlayerLabels;
+    }
     UpdateWireframeCameraInput();
     UpdateWireframePanelLayout(MyGeometry);
     RefreshWireframeCallouts(MyGeometry, InDeltaTime);
+    RefreshRetryVoteHUD();
+    ApmRefreshElapsed += InDeltaTime;
+    if (ApmRefreshElapsed >= 0.25f)
+    {
+        ApmRefreshElapsed = 0.0f;
+        RefreshApmHUD();
+    }
 }
 
 int32 UCMControlHUDWidget::NativePaint(
@@ -184,6 +309,19 @@ int32 UCMControlHUDWidget::NativePaint(
     const float CycleTime = FMath::Fmod(WorldTime, StatusCycleSeconds);
     const int32 CycleIndex = FMath::FloorToInt(
         WorldTime / StatusCycleSeconds);
+    float TapEndSeconds = 0.25f;
+    float NormalEndSeconds = 0.7f;
+    float ChargeEndSeconds = 1.0f;
+    float OverchargeEndSeconds = 3.0f;
+    if (const ACMChimera* CurrentChimera = SharedChimera.Get())
+    {
+        CurrentChimera->GetLegInputHoldThresholds(
+            TapEndSeconds,
+            NormalEndSeconds,
+            ChargeEndSeconds,
+            OverchargeEndSeconds
+        );
+    }
 
     for (const FWireframeCallout& Callout : WireframeCallouts)
     {
@@ -237,11 +375,123 @@ int32 UCMControlHUDWidget::NativePaint(
                 TextOpacity = 0.0f;
             }
         }
-        if (TextOpacity <= 0.0f)
-        {
-            continue;
-        }
 
+        FVector2D TextAreaSize = Callout.LabelSize;
+        constexpr float ContextTextHeight = 12.0f;
+        constexpr float ContextTextPadding = 1.0f;
+        if (!Callout.ContextText.IsEmpty())
+        {
+            TextAreaSize.Y = FMath::Max(
+                Callout.LabelSize.Y
+                    - ContextTextHeight
+                    - ContextTextPadding,
+                1.0f);
+        }
+        if (Callout.bShowLegChargeGauge)
+        {
+            constexpr float GaugeHeight = 5.0f;
+            constexpr float GaugeTopPadding = 2.0f;
+            TextAreaSize.Y = FMath::Max(
+                Callout.LabelSize.Y - GaugeHeight - GaugeTopPadding,
+                1.0f
+            );
+            const FVector2D GaugePosition(
+                Callout.LabelPosition.X,
+                Callout.LabelPosition.Y + TextAreaSize.Y + GaugeTopPadding
+            );
+            const FVector2D GaugeSize(
+                Callout.LabelSize.X,
+                GaugeHeight
+            );
+            FSlateDrawElement::MakeBox(
+                OutDrawElements,
+                ++CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(
+                    GaugeSize,
+                    FSlateLayoutTransform(GaugePosition)),
+                WhiteBrush,
+                ESlateDrawEffect::None,
+                FLinearColor(0.015f, 0.02f, 0.03f, 0.82f));
+
+            const float GaugeFillAlpha = FMath::Clamp(
+                Callout.LegChargeHoldSeconds
+                    / FMath::Max(ChargeEndSeconds, UE_SMALL_NUMBER),
+                0.0f,
+                1.0f
+            );
+            if (GaugeFillAlpha > 0.0f)
+            {
+                FSlateDrawElement::MakeBox(
+                    OutDrawElements,
+                    ++CurrentLayer,
+                    AllottedGeometry.ToPaintGeometry(
+                        FVector2D(GaugeSize.X * GaugeFillAlpha, GaugeSize.Y),
+                        FSlateLayoutTransform(GaugePosition)),
+                    WhiteBrush,
+                    ESlateDrawEffect::None,
+                    GetLegChargeGaugeColor(
+                        Callout.LegChargeHoldSeconds,
+                        TapEndSeconds,
+                        NormalEndSeconds,
+                        ChargeEndSeconds,
+                        OverchargeEndSeconds));
+            }
+
+            const float TapDividerX = GaugePosition.X
+                + GaugeSize.X * FMath::Clamp(
+                    TapEndSeconds
+                        / FMath::Max(ChargeEndSeconds, UE_SMALL_NUMBER),
+                    0.0f,
+                    1.0f);
+            const float NormalDividerX = GaugePosition.X
+                + GaugeSize.X * FMath::Clamp(
+                    NormalEndSeconds
+                        / FMath::Max(ChargeEndSeconds, UE_SMALL_NUMBER),
+                    0.0f,
+                    1.0f);
+            const TArray<FVector2D> TapDivider = {
+                FVector2D(TapDividerX, GaugePosition.Y),
+                FVector2D(TapDividerX, GaugePosition.Y + GaugeSize.Y)
+            };
+            const TArray<FVector2D> NormalDivider = {
+                FVector2D(NormalDividerX, GaugePosition.Y),
+                FVector2D(NormalDividerX, GaugePosition.Y + GaugeSize.Y)
+            };
+            const TArray<FVector2D> GaugeOutline = {
+                GaugePosition,
+                GaugePosition + FVector2D(GaugeSize.X, 0.0f),
+                GaugePosition + GaugeSize,
+                GaugePosition + FVector2D(0.0f, GaugeSize.Y),
+                GaugePosition
+            };
+            FSlateDrawElement::MakeLines(
+                OutDrawElements,
+                ++CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(),
+                TapDivider,
+                ESlateDrawEffect::None,
+                FLinearColor(1.0f, 1.0f, 1.0f, 0.72f),
+                true,
+                1.0f);
+            FSlateDrawElement::MakeLines(
+                OutDrawElements,
+                CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(),
+                NormalDivider,
+                ESlateDrawEffect::None,
+                FLinearColor(1.0f, 1.0f, 1.0f, 0.72f),
+                true,
+                1.0f);
+            FSlateDrawElement::MakeLines(
+                OutDrawElements,
+                CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(),
+                GaugeOutline,
+                ESlateDrawEffect::None,
+                FLinearColor(0.9f, 0.92f, 1.0f, 0.82f),
+                true,
+                1.0f);
+        }
         FSlateFontInfo Font = WireframeLabelFont;
         Font.Size = Callout.FontSize;
         FVector2D TextPosition = Callout.LabelPosition;
@@ -254,16 +504,49 @@ int32 UCMControlHUDWidget::NativePaint(
                 Callout.LabelSize.X - TextSize.X,
                 0.0f);
         }
-        FSlateDrawElement::MakeText(
-            OutDrawElements,
-            ++CurrentLayer,
-            AllottedGeometry.ToPaintGeometry(
-                Callout.LabelSize,
-                FSlateLayoutTransform(TextPosition)),
-            DisplayText,
-            Font,
-            ESlateDrawEffect::None,
-            Callout.PlayerColor.CopyWithNewOpacity(TextOpacity));
+        if (TextOpacity > 0.0f)
+        {
+            FSlateDrawElement::MakeText(
+                OutDrawElements,
+                ++CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(
+                    TextAreaSize,
+                    FSlateLayoutTransform(TextPosition)),
+                DisplayText,
+                Font,
+                ESlateDrawEffect::None,
+                Callout.PlayerColor.CopyWithNewOpacity(TextOpacity));
+        }
+
+        if (!Callout.ContextText.IsEmpty())
+        {
+            FSlateFontInfo ContextFont = WireframeLabelFont;
+            ContextFont.Size = FMath::Max(Callout.FontSize - 2, 8);
+            FVector2D ContextPosition(
+                Callout.LabelPosition.X,
+                Callout.LabelPosition.Y
+                    + TextAreaSize.Y
+                    + ContextTextPadding);
+            if (!Callout.bRightSide && FSlateApplication::IsInitialized())
+            {
+                const FVector2D ContextSize = FSlateApplication::Get()
+                    .GetRenderer()->GetFontMeasureService()
+                    ->Measure(Callout.ContextText, ContextFont);
+                ContextPosition.X += FMath::Max(
+                    Callout.LabelSize.X - ContextSize.X,
+                    0.0f);
+            }
+            FSlateDrawElement::MakeText(
+                OutDrawElements,
+                ++CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(
+                    FVector2D(Callout.LabelSize.X, ContextTextHeight),
+                    FSlateLayoutTransform(ContextPosition)),
+                Callout.ContextText,
+                ContextFont,
+                ESlateDrawEffect::None,
+                Callout.PlayerColor.CopyWithNewOpacity(0.82f));
+        }
     }
 
     return CurrentLayer;
@@ -275,12 +558,22 @@ void UCMControlHUDWidget::SetControlBody(
 {
     if (ControlBody.Get() == NewControlBody && SharedChimera.IsValid())
     {
+        if (NewControlBody)
+        {
+            NewControlBody->OnControlInputChanged.AddUniqueDynamic(
+                this, &ThisClass::HandleControlInputChanged);
+        }
         InitializeWireframeHUD();
         return;
     }
 
     TeardownWireframeHUD();
     ControlBody = NewControlBody;
+    if (NewControlBody)
+    {
+        NewControlBody->OnControlInputChanged.AddUniqueDynamic(
+            this, &ThisClass::HandleControlInputChanged);
+    }
     SharedChimera = NewControlBody
         ? NewControlBody->GetSharedChimera()
         : nullptr;
@@ -666,7 +959,6 @@ void UCMControlHUDWidget::RefreshAssignedParts()
 
         FPartSlotVisual& Visual = PhysicalPartSlots[FlatSlotIndex];
         Visual.Root->SetVisibility(ESlateVisibility::HitTestInvisible);
-        Visual.KeyText->SetText(FText::FromString(KeyNames[ControlIndex]));
         Visual.KeyText->SetColorAndOpacity(
             FSlateColor(CurrentControlBody->IsControlSlotEnabled(ControlIndex)
                 ? IdleControlKeyColor
@@ -677,6 +969,8 @@ void UCMControlHUDWidget::RefreshAssignedParts()
         const ACMPartActorBase* PartActor = PartSlot
             ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
             : nullptr;
+        Visual.KeyText->SetText(GetControlKeyText(
+            KeyNames[ControlIndex], PartActor));
         UTexture2D* PartTexture = GetPartTexture(PartActor);
         const FVector2D PartImageScale = CMControl::IsRightPartSlot(Address)
             ? FVector2D(-1.0f, 1.0f)
@@ -801,6 +1095,20 @@ void UCMControlHUDWidget::HandleControlInputChanged(
     bool bPressed
 )
 {
+    if (SlotIndex >= 0 && SlotIndex < CMControl::MaxKeysPerPlayer)
+    {
+        if (bPressed && !bLocalControlPressed[SlotIndex])
+        {
+            LocalControlPressStartTimes[SlotIndex] = GetWorld()
+                ? GetWorld()->GetTimeSeconds()
+                : 0.0;
+        }
+        else if (!bPressed)
+        {
+            LocalControlPressStartTimes[SlotIndex] = 0.0;
+        }
+        bLocalControlPressed[SlotIndex] = bPressed;
+    }
     SetControlSlotHighlighted(SlotIndex, bPressed);
 }
 
@@ -932,10 +1240,23 @@ void UCMControlHUDWidget::InitializeWireframeHUD()
 
 void UCMControlHUDWidget::TeardownWireframeHUD()
 {
+    if (ACMControlBody* CurrentControlBody = ControlBody.Get())
+    {
+        CurrentControlBody->OnControlInputChanged.RemoveDynamic(
+            this, &ThisClass::HandleControlInputChanged);
+    }
     WireframeCallouts.Reset();
     SmoothedCalloutPositions.Reset();
     CalloutRightSideById.Reset();
-    bWireframeOrbitActive = false;
+    CachedWireframeOwnerBySlot.Reset();
+    bShowAllPlayerLabels = false;
+    for (int32 ControlIndex = 0;
+        ControlIndex < CMControl::MaxKeysPerPlayer;
+        ++ControlIndex)
+    {
+        LocalControlPressStartTimes[ControlIndex] = 0.0;
+        bLocalControlPressed[ControlIndex] = false;
+    }
     if (WireframeRenderImage)
     {
         WireframeRenderImage->SetVisibility(ESlateVisibility::Collapsed);
@@ -997,31 +1318,6 @@ void UCMControlHUDWidget::UpdateWireframeCameraInput()
         && ImageGeometry.IsUnderLocation(
             FSlateApplication::Get().GetCursorPos());
 
-    if (OwningPlayer->WasInputKeyJustPressed(EKeys::RightMouseButton)
-        && bCursorOverPanel)
-    {
-        bWireframeOrbitActive = true;
-    }
-    if (!OwningPlayer->IsInputKeyDown(EKeys::RightMouseButton))
-    {
-        bWireframeOrbitActive = false;
-    }
-
-    if (bWireframeOrbitActive)
-    {
-        float MouseDeltaX = 0.0f;
-        float MouseDeltaY = 0.0f;
-        OwningPlayer->GetInputMouseDelta(MouseDeltaX, MouseDeltaY);
-        RuntimeWireframeCameraRotation.Yaw +=
-            MouseDeltaX * WireframeOrbitSensitivity;
-        RuntimeWireframeCameraRotation.Pitch = FMath::Clamp(
-            RuntimeWireframeCameraRotation.Pitch
-                - MouseDeltaY * WireframeOrbitSensitivity,
-            FMath::Min(WireframePitchLimits.X, WireframePitchLimits.Y),
-            FMath::Max(WireframePitchLimits.X, WireframePitchLimits.Y));
-        RuntimeWireframeCameraRotation.Normalize();
-    }
-
     if (bCursorOverPanel)
     {
         const float MinZoom = FMath::Max(
@@ -1047,9 +1343,272 @@ void UCMControlHUDWidget::UpdateWireframeCameraInput()
         }
     }
 
+    const float PlayerScreenYaw = OwningPlayer->PlayerCameraManager
+        ? OwningPlayer->PlayerCameraManager->GetCameraRotation().Yaw
+        : WireframeCameraRotation.Yaw;
     WireframeCaptureActor->SetCameraView(
-        RuntimeWireframeCameraRotation,
+        FRotator(-90.0f, PlayerScreenYaw, 0.0f),
         RuntimeWireframeZoom);
+}
+
+void UCMControlHUDWidget::InitializeRetryVoteHUD()
+{
+    if (RetryVotePanelRoot)
+    {
+        return;
+    }
+
+    UOverlay* RootOverlay = Cast<UOverlay>(
++        WidgetTree->FindWidget(TEXT("RootCanvas")));
+    if (!RootOverlay)
+    {
+        RootOverlay = Cast<UOverlay>(WidgetTree->RootWidget);
+    }
+    if (!RootOverlay)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("Retry vote HUD requires the Control HUD Overlay root."));
+        return;
+    }
+
+    USizeBox* PanelSize = WidgetTree->ConstructWidget<USizeBox>(
+        USizeBox::StaticClass(), TEXT("RetryVotePanelRoot"));
+    PanelSize->SetWidthOverride(270.0f);
+    UOverlaySlot* PanelSlot = RootOverlay->AddChildToOverlay(PanelSize);
+    PanelSlot->SetHorizontalAlignment(HAlign_Right);
+    PanelSlot->SetVerticalAlignment(VAlign_Top);
+    PanelSlot->SetPadding(FMargin(0.0f, 32.0f, 32.0f, 0.0f));
+
+    UBorder* PanelBorder = WidgetTree->ConstructWidget<UBorder>(
+        UBorder::StaticClass(), TEXT("RetryVotePanel"));
+    PanelBorder->SetBrushColor(FLinearColor::Transparent);
+    PanelBorder->SetPadding(FMargin(14.0f, 10.0f));
+    PanelSize->SetContent(PanelBorder);
+
+    UVerticalBox* PanelContent = WidgetTree->ConstructWidget<UVerticalBox>(
+        UVerticalBox::StaticClass(), TEXT("RetryVotePanelContent"));
+    PanelBorder->SetContent(PanelContent);
+
+    RetryVoteTitleText = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("RetryVoteTitleText"));
+    RetryVoteTitleText->SetFont(
+        FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16));
+    RetryVoteTitleText->SetColorAndOpacity(
+        FSlateColor(FLinearColor(1.0f, 0.34f, 0.12f)));
+    RetryVoteTitleText->SetJustification(ETextJustify::Right);
+    PanelContent->AddChildToVerticalBox(RetryVoteTitleText);
+
+    RetryVoteStatusText = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("RetryVoteStatusText"));
+    RetryVoteStatusText->SetFont(
+        FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 13));
+    RetryVoteStatusText->SetColorAndOpacity(
+        FSlateColor(FLinearColor(0.9f, 0.92f, 0.95f, 1.0f)));
+    RetryVoteStatusText->SetJustification(ETextJustify::Right);
+    if (UVerticalBoxSlot* StatusSlot =
+        PanelContent->AddChildToVerticalBox(RetryVoteStatusText))
+    {
+        StatusSlot->SetPadding(FMargin(0.0f, 3.0f, 0.0f, 0.0f));
+    }
+
+    RetryVoteHoldProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
+        UProgressBar::StaticClass(), TEXT("RetryVoteHoldProgressBar"));
+    RetryVoteHoldProgressBar->SetFillColorAndOpacity(
+        FLinearColor(1.0f, 0.22f, 0.05f));
+    if (UVerticalBoxSlot* ProgressSlot =
+        PanelContent->AddChildToVerticalBox(RetryVoteHoldProgressBar))
+    {
+        ProgressSlot->SetPadding(FMargin(0.0f, 7.0f, 0.0f, 0.0f));
+    }
+
+    RetryVotePanelRoot = PanelSize;
+    RefreshRetryVoteHUD();
+}
+
+void UCMControlHUDWidget::RefreshRetryVoteHUD()
+{
+    if (!RetryVotePanelRoot || !RetryVoteTitleText
+        || !RetryVoteStatusText || !RetryVoteHoldProgressBar)
+    {
+        return;
+    }
+
+    const ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+    const ACMPlayerController* PlayerController = Cast<ACMPlayerController>(
+        GetOwningPlayer());
+    if (!PlayState || !PlayerController
+        || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    {
+        RetryVotePanelRoot->SetVisibility(ESlateVisibility::Collapsed);
+        return;
+    }
+
+    RetryVotePanelRoot->SetVisibility(ESlateVisibility::HitTestInvisible);
+    const FCMRetryVoteSnapshot& Vote =
+        PlayState->GetRetryVoteSnapshot();
+    const APlayerState* LocalPlayerState = PlayerController->PlayerState;
+    const bool bHasVoted = LocalPlayerState
+        && Vote.VotedPlayerIds.Contains(LocalPlayerState->GetPlayerId());
+    const bool bHolding = PlayerController->IsRetryVoteHoldActive();
+
+    RetryVoteTitleText->SetText(bHolding
+        ? LOCTEXT("RetryVoteHoldingTitle", "재시작 요청")
+        : LOCTEXT("RetryVoteTitle", "재시작 투표"));
+
+    if (bHolding)
+    {
+        const float Progress =
+            PlayerController->GetRetryVoteHoldProgress();
+        FNumberFormattingOptions NumberFormat;
+        NumberFormat.SetMinimumFractionalDigits(1);
+        NumberFormat.SetMaximumFractionalDigits(1);
+        RetryVoteStatusText->SetText(FText::Format(
+            LOCTEXT("RetryVoteHoldingStatus", "X키 누르는 중  {0} / 3.0초"),
+            FText::AsNumber(Progress * 3.0f, &NumberFormat)));
+        RetryVoteHoldProgressBar->SetPercent(Progress);
+        RetryVoteHoldProgressBar->SetVisibility(
+            ESlateVisibility::HitTestInvisible);
+        return;
+    }
+
+    RetryVoteHoldProgressBar->SetVisibility(ESlateVisibility::Collapsed);
+    if (Vote.bActive)
+    {
+        RetryVoteStatusText->SetText(FText::Format(
+            bHasVoted
+                ? LOCTEXT("RetryVoteCompleteStatus", "{0} / {1}표 · 투표 완료")
+                : LOCTEXT("RetryVoteActiveStatus", "{0} / {1}표 · X키를 길게 누르기"),
+            FText::AsNumber(Vote.VoteCount),
+            FText::AsNumber(Vote.RequiredVoteCount)));
+    }
+    else
+    {
+        RetryVoteStatusText->SetText(
+            LOCTEXT("RetryVoteIdleStatus", "X키를 3초 동안 길게 누르기"));
+    }
+}
+
+void UCMControlHUDWidget::InitializeApmHUD()
+{
+    if (ApmPanelRoot)
+    {
+        return;
+    }
+
+    UOverlay* RootOverlay = Cast<UOverlay>(
+        WidgetTree->FindWidget(TEXT("RootCanvas")));
+    if (!RootOverlay)
+    {
+        RootOverlay = Cast<UOverlay>(WidgetTree->RootWidget);
+    }
+    if (!RootOverlay)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("APM HUD requires the Control HUD Overlay root."));
+        return;
+    }
+
+    USizeBox* PanelSize = WidgetTree->ConstructWidget<USizeBox>(
+        USizeBox::StaticClass(), TEXT("ApmPanelRoot"));
+    PanelSize->SetWidthOverride(270.0f);
+    UOverlaySlot* PanelSlot = RootOverlay->AddChildToOverlay(PanelSize);
+    PanelSlot->SetHorizontalAlignment(HAlign_Right);
+    PanelSlot->SetVerticalAlignment(VAlign_Top);
+    PanelSlot->SetPadding(FMargin(0.0f, 150.0f, 32.0f, 0.0f));
+
+    UBorder* PanelBorder = WidgetTree->ConstructWidget<UBorder>(
+        UBorder::StaticClass(), TEXT("ApmPanel"));
+    PanelBorder->SetBrushColor(FLinearColor::Transparent);
+    PanelBorder->SetPadding(FMargin(14.0f, 9.0f));
+    PanelSize->SetContent(PanelBorder);
+
+    UVerticalBox* ApmList = WidgetTree->ConstructWidget<UVerticalBox>(
+        UVerticalBox::StaticClass(), TEXT("ApmList"));
+    PanelBorder->SetContent(ApmList);
+
+    ApmPlayerTexts.Reserve(CMControl::MaxPlayers);
+    for (int32 Index = 0; Index < CMControl::MaxPlayers; ++Index)
+    {
+        UTextBlock* PlayerText = WidgetTree->ConstructWidget<UTextBlock>(
+            UTextBlock::StaticClass(),
+            FName(*FString::Printf(TEXT("ApmPlayerText%d"), Index)));
+        PlayerText->SetFont(
+            FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 18));
+        PlayerText->SetJustification(ETextJustify::Right);
+        PlayerText->SetVisibility(ESlateVisibility::Collapsed);
+
+        UVerticalBoxSlot* TextSlot = ApmList->AddChildToVerticalBox(PlayerText);
+        TextSlot->SetPadding(FMargin(0.0f, 2.0f));
+        ApmPlayerTexts.Add(PlayerText);
+    }
+
+    ApmPanelRoot = PanelSize;
+    ApmRefreshElapsed = 0.25f;
+    RefreshApmHUD();
+}
+
+void UCMControlHUDWidget::RefreshApmHUD()
+{
+    if (!ApmPanelRoot || ApmPlayerTexts.IsEmpty())
+    {
+        return;
+    }
+
+    const ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>()
+        : nullptr;
+    if (!PlayState || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    {
+        ApmPanelRoot->SetVisibility(ESlateVisibility::Collapsed);
+        return;
+    }
+
+    ApmPanelRoot->SetVisibility(ESlateVisibility::HitTestInvisible);
+
+    TArray<ACMPlayerState*> PlayerStates;
+    for (APlayerState* PlayerState : PlayState->PlayerArray)
+    {
+        if (ACMPlayerState* CMPlayerState = Cast<ACMPlayerState>(PlayerState))
+        {
+            PlayerStates.Add(CMPlayerState);
+        }
+    }
+    PlayerStates.Sort([](const ACMPlayerState& Left, const ACMPlayerState& Right)
+    {
+        const int32 LeftSlot = Left.GetPlayerSlotId() == INDEX_NONE
+            ? MAX_int32
+            : Left.GetPlayerSlotId();
+        const int32 RightSlot = Right.GetPlayerSlotId() == INDEX_NONE
+            ? MAX_int32
+            : Right.GetPlayerSlotId();
+        return LeftSlot < RightSlot;
+    });
+
+    for (int32 Index = 0; Index < ApmPlayerTexts.Num(); ++Index)
+    {
+        UTextBlock* PlayerText = ApmPlayerTexts[Index];
+        if (!PlayerStates.IsValidIndex(Index))
+        {
+            PlayerText->SetVisibility(ESlateVisibility::Collapsed);
+            continue;
+        }
+
+        const ACMPlayerState* PlayerState = PlayerStates[Index];
+        FString PlayerName = PlayerState->GetPlayerName();
+        if (PlayerName.IsEmpty())
+        {
+            PlayerName = FString::Printf(TEXT("Player %d"), Index + 1);
+        }
+
+        PlayerText->SetText(FText::Format(
+            LOCTEXT("PlayerApmFormat", "{0}  APM {1}"),
+            FText::FromString(PlayerName),
+            FText::AsNumber(PlayerState->GetCurrentApm())));
+        PlayerText->SetColorAndOpacity(
+            FSlateColor(PlayerState->GetPlayerColor()));
+        PlayerText->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
 }
 
 void UCMControlHUDWidget::RefreshWireframeCallouts(
@@ -1071,15 +1630,15 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         WireframeCallouts.Reset();
         return;
     }
-    const bool bShowPlayerLabels =
-        OwningPlayer->IsInputKeyDown(EKeys::Tab);
+    const bool bShowPlayerLabels = bShowAllPlayerLabels;
 
     TMap<FCMPartSlotAddress, FText> LocalKeyBySlot;
+    TMap<FCMPartSlotAddress, int32> LocalControlIndexBySlot;
     ACMControlBody* LocalControlBody = ControlBody.Get();
     ACMPlayerState* LocalPlayerState = LocalControlBody
         ? LocalControlBody->GetPlayerState<ACMPlayerState>()
         : nullptr;
-    if (!bShowPlayerLabels && LocalControlBody)
+    if (LocalControlBody)
     {
         static const TCHAR* ControlKeyNames[] = {
             TEXT("Q"), TEXT("W"), TEXT("E"), TEXT("R")
@@ -1097,13 +1656,32 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             if (CMControl::IsValidPartSlot(
                     Address, CurrentChimera->GetActiveSegmentCount()))
             {
+                LocalControlIndexBySlot.FindOrAdd(Address) = ControlIndex;
+                if (bShowPlayerLabels)
+                {
+                    continue;
+                }
+                const UCMPartSlotComponent* PartSlot =
+                    CurrentChimera->GetPartSlotComponent(Address);
+                const ACMPartActorBase* PartActor = PartSlot
+                    ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart())
+                    : nullptr;
                 LocalKeyBySlot.FindOrAdd(Address) =
-                    FText::FromString(ControlKeyNames[ControlIndex]);
+                    GetControlKeyText(
+                        ControlKeyNames[ControlIndex], PartActor);
             }
         }
     }
 
-    TMap<FCMPartSlotAddress, ACMPlayerState*> OwnerBySlot;
+    for (auto It = CachedWireframeOwnerBySlot.CreateIterator(); It; ++It)
+    {
+        if (!It.Value().IsValid())
+        {
+            It.RemoveCurrent();
+        }
+    }
+
+    TSet<ACMPlayerState*> RefreshedOwners;
     TMap<ACMPlayerState*, TArray<FText>> StatusesByOwner;
     for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
     {
@@ -1117,9 +1695,24 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             continue;
         }
 
+        if (!RefreshedOwners.Contains(PlayerState))
+        {
+            for (auto CachedOwnerIt =
+                    CachedWireframeOwnerBySlot.CreateIterator();
+                CachedOwnerIt;
+                ++CachedOwnerIt)
+            {
+                if (CachedOwnerIt.Value().Get() == PlayerState)
+                {
+                    CachedOwnerIt.RemoveCurrent();
+                }
+            }
+            RefreshedOwners.Add(PlayerState);
+        }
+
         for (const FCMPartSlotAddress& Address : Body->GetControlSlots())
         {
-            OwnerBySlot.FindOrAdd(Address) = PlayerState;
+            CachedWireframeOwnerBySlot.FindOrAdd(Address) = PlayerState;
         }
         if (Body->IsConfused())
         {
@@ -1132,6 +1725,16 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             AddStatusTextUnique(
                 StatusesByOwner.FindOrAdd(PlayerState),
                 LOCTEXT("WireStatusDelirious", "착란"));
+        }
+    }
+
+    TMap<FCMPartSlotAddress, ACMPlayerState*> OwnerBySlot;
+    for (const TPair<FCMPartSlotAddress, TWeakObjectPtr<ACMPlayerState>>& Pair
+        : CachedWireframeOwnerBySlot)
+    {
+        if (ACMPlayerState* PlayerState = Pair.Value.Get())
+        {
+            OwnerBySlot.Add(Pair.Key, PlayerState);
         }
     }
 
@@ -1177,8 +1780,12 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         const FName StableId,
         const FVector& WorldAnchor,
         const FText& LabelText,
+        const FText& ContextText,
         const FLinearColor& LabelColor,
-        ACMPlayerState* StatusOwner)
+        ACMPlayerState* StatusOwner,
+        const bool bShowLegChargeGauge,
+        const int32 LegControlIndex,
+        const float ReplicatedLegHoldSeconds)
     {
         if (LabelText.IsEmpty())
         {
@@ -1199,6 +1806,7 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         Callout.AnchorPosition =
             WireframeImageTopLeft + ClampedAnchor * WireframeImageSize;
         Callout.PlayerName = LabelText;
+        Callout.ContextText = ContextText;
         if (StatusOwner)
         {
             if (const TArray<FText>* StatusTexts =
@@ -1208,6 +1816,23 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             }
         }
         Callout.PlayerColor = LabelColor;
+        Callout.bShowLegChargeGauge = bShowLegChargeGauge;
+        const bool bHasLocalControl =
+            LegControlIndex >= 0
+            && LegControlIndex < CMControl::MaxKeysPerPlayer;
+        if (bHasLocalControl && bLocalControlPressed[LegControlIndex])
+        {
+            const double CurrentTime = GetWorld()
+                ? GetWorld()->GetTimeSeconds()
+                : LocalControlPressStartTimes[LegControlIndex];
+            Callout.LegChargeHoldSeconds = static_cast<float>(FMath::Max(
+                CurrentTime - LocalControlPressStartTimes[LegControlIndex],
+                0.0));
+        }
+        else if (!bHasLocalControl)
+        {
+            Callout.LegChargeHoldSeconds = ReplicatedLegHoldSeconds;
+        }
 
         bool& bRight = CalloutRightSideById.FindOrAdd(
             StableId,
@@ -1236,6 +1861,20 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             continue;
         }
 
+        const ACMLegPart* LegPart =
+            Cast<ACMLegPart>(PartSlot->GetAttachedPart());
+        const ACMArmPart* ArmPart =
+            Cast<ACMArmPart>(PartSlot->GetAttachedPart());
+        const FText ArmHoldText = GetArmHoldText(ArmPart);
+        const int32* LocalControlIndex =
+            LocalControlIndexBySlot.Find(Address);
+        const int32 LegControlIndex = LegPart && LocalControlIndex
+            ? *LocalControlIndex
+            : INDEX_NONE;
+        const float ReplicatedLegHoldSeconds = LegPart
+            ? CurrentChimera->GetPartSlotHoldSeconds(Address)
+            : 0.0f;
+
         const FName StableId(*FString::Printf(
             TEXT("Slot.%d.%d"),
             Address.SegmentIndex,
@@ -1249,8 +1888,14 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
                     StableId,
                     PartSlot->GetComponentLocation(),
                     FText::FromString(Owner->GetPlayerName()),
+                    ArmHoldText,
                     Owner->GetPlayerColor(),
-                    Owner);
+                    Owner,
+                    LegPart != nullptr,
+                    Owner == LocalPlayerState
+                        ? LegControlIndex
+                        : INDEX_NONE,
+                    ReplicatedLegHoldSeconds);
             }
         }
         else if (const FText* ControlKey = LocalKeyBySlot.Find(Address))
@@ -1259,10 +1904,14 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
                 StableId,
                 PartSlot->GetComponentLocation(),
                 *ControlKey,
+                ArmHoldText,
                 LocalPlayerState
                     ? LocalPlayerState->GetPlayerColor()
                     : FLinearColor::White,
-                nullptr);
+                nullptr,
+                LegPart != nullptr,
+                LegControlIndex,
+                ReplicatedLegHoldSeconds);
         }
     }
 
@@ -1293,8 +1942,8 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         }
         const float Step = WireframeImageSize.Y
             / static_cast<float>(Indices.Num());
-        const float LabelHeight = FMath::Clamp(Step - 2.0f, 13.0f, 24.0f);
-        const int32 FontSize = FMath::Clamp(
+        const float LabelHeight = FMath::Clamp(Step - 2.0f, 13.0f, 36.0f);
+        const int32 DefaultFontSize = FMath::Clamp(
             FMath::FloorToInt(LabelHeight - 6.0f), 10, 14);
         const float LabelX = bRight
             ? WireframeImageTopLeft.X + WireframeImageSize.X + 10.0f
@@ -1304,7 +1953,10 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         {
             FWireframeCallout& Callout = NewCallouts[Indices[Order]];
             Callout.LabelSize = FVector2D(LabelWidth, LabelHeight);
-            Callout.FontSize = FontSize;
+            Callout.FontSize = Callout.bShowLegChargeGauge
+                ? FMath::Clamp(
+                    FMath::FloorToInt(LabelHeight - 9.0f), 9, 14)
+                : DefaultFontSize;
             const FVector2D TargetPosition(
                 FMath::Clamp(LabelX, 4.0f, ViewSize.X - LabelWidth - 4.0f),
                 FMath::Clamp(

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Player/CMControlTypes.h"
 #include "UI/NKMUIActivatableWidget.h"
 
 #include "CMControlHUDWidget.generated.h"
@@ -36,6 +37,7 @@ public:
     void SetControlBody(ACMControlBody* NewControlBody);
 
 protected:
+    virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
     virtual void NativeOnInitialized() override;
     virtual void NativeDestruct() override;
     virtual void NativeTick(
@@ -69,7 +71,7 @@ protected:
         Category = "Chimera HUD|Wireframe")
     TObjectPtr<UCurveLinearColor> WireframeHealthColorCurve;
 
-    /** Scene-capture view angle, editable in the widget Blueprint defaults. */
+    /** Screen orientation for the fixed top-down scene capture. Only yaw is used. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera HUD|Wireframe|Camera")
     FRotator WireframeCameraRotation = FRotator(-90.0f, -90.0f, 0.0f);
@@ -88,18 +90,6 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera HUD|Wireframe|Layout")
     FVector2D WireframePanelOffset = FVector2D(168.0f, -28.0f);
-
-    /** Degrees per mouse-delta unit while holding the right mouse button. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite,
-        Category = "Chimera HUD|Wireframe|Interaction",
-        meta = (DisplayName = "Mouse Sensitivity",
-            ClampMin = "0.01", UIMin = "0.01"))
-    float WireframeOrbitSensitivity = 2.16f;
-
-    /** Minimum and maximum pitch allowed during right-mouse orbit. */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-        Category = "Chimera HUD|Wireframe|Camera")
-    FVector2D WireframePitchLimits = FVector2D(-90.0f, 90.0f);
 
     /** Orthographic zoom change per mouse-wheel notch. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -142,9 +132,12 @@ private:
         FVector2D LabelPosition = FVector2D::ZeroVector;
         FVector2D LabelSize = FVector2D(140.0f, 22.0f);
         FText PlayerName;
+        FText ContextText;
         TArray<FText> StatusTexts;
         FLinearColor PlayerColor = FLinearColor::White;
         bool bRightSide = false;
+        bool bShowLegChargeGauge = false;
+        float LegChargeHoldSeconds = 0.0f;
         int32 FontSize = 14;
     };
 
@@ -165,6 +158,10 @@ private:
     void TeardownWireframeHUD();
     void UpdateWireframePanelLayout(const FGeometry& MyGeometry);
     void UpdateWireframeCameraInput();
+    void InitializeRetryVoteHUD();
+    void RefreshRetryVoteHUD();
+    void InitializeApmHUD();
+    void RefreshApmHUD();
     void RefreshWireframeCallouts(
         const FGeometry& MyGeometry,
         float InDeltaTime
@@ -217,6 +214,24 @@ private:
     TObjectPtr<UImage> WireframeRenderImage;
 
     UPROPERTY(Transient)
+    TObjectPtr<UWidget> RetryVotePanelRoot;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> RetryVoteTitleText;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> RetryVoteStatusText;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UProgressBar> RetryVoteHoldProgressBar;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UWidget> ApmPanelRoot;
+
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UTextBlock>> ApmPlayerTexts;
+
+    UPROPERTY(Transient)
     TObjectPtr<UCanvasPanel> WireframeCanvas;
 
     UPROPERTY(Transient)
@@ -230,11 +245,15 @@ private:
     TArray<FWireframeCallout> WireframeCallouts;
     TMap<FName, FVector2D> SmoothedCalloutPositions;
     TMap<FName, bool> CalloutRightSideById;
+    TMap<FCMPartSlotAddress, TWeakObjectPtr<ACMPlayerState>>
+        CachedWireframeOwnerBySlot;
     FVector2D WireframeImageTopLeft = FVector2D::ZeroVector;
     FVector2D WireframeImageSize = FVector2D::ZeroVector;
-    FRotator RuntimeWireframeCameraRotation = FRotator::ZeroRotator;
     float RuntimeWireframeZoom = 1.0f;
-    bool bWireframeOrbitActive = false;
+    float ApmRefreshElapsed = 0.0f;
+    double LocalControlPressStartTimes[CMControl::MaxKeysPerPlayer] = {};
+    bool bLocalControlPressed[CMControl::MaxKeysPerPlayer] = {};
+    bool bShowAllPlayerLabels = false;
     TArray<TWeakObjectPtr<UCMPartSlotComponent>> ObservedPartSlots;
     TArray<TWeakObjectPtr<ACMPartActorBase>> ObservedParts;
     FDelegateHandle StaminaChangedHandle;

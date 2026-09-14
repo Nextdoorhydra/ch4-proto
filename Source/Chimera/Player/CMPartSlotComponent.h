@@ -142,11 +142,18 @@ protected:
     ) const override;
 
 private:
+    void ApplyReplicatedPartAttachment(AActor* PartActor);
+
     UFUNCTION()
     void OnRep_AttachedPart(AActor* PreviousPart);
 
     UFUNCTION()
     void HandleAttachedPartDestroyed(AActor* DestroyedPart);
+
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayPartAttachmentSound(
+        bool bAttached,
+        FVector_NetQuantize10 SoundLocation);
 
     UAbilitySystemComponent* GetOwnerAbilitySystemComponent() const;
     void RemoveGrantedAbility();
@@ -167,4 +174,6 @@ private:
     TObjectPtr<USceneComponent> HeadRigControlAnchor;
 
     FGameplayAbilitySpecHandle GrantedAbilityHandle;
+
+    friend class ACMPartActorBase;
 };

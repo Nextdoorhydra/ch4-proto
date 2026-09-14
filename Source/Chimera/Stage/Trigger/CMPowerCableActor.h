@@ -4,6 +4,7 @@
 #include "AsyncLoadCompleteMessage.h"
 #include "GameFramework/Actor.h"
 #include "Parts/Arm/CMArmHoldTarget.h"
+#include "Stage/Checkpoint/CMCheckpointResettable.h"
 
 #include "CMPowerCableActor.generated.h"
 
@@ -24,7 +25,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 
 /** Movable cable with one source endpoint and one powered socket endpoint. */
 UCLASS()
-class CHIMERA_API ACMPowerCableActor : public AActor, public ICMArmHoldTarget
+class CHIMERA_API ACMPowerCableActor
+    : public AActor
+    , public ICMArmHoldTarget
+    , public ICMCheckpointResettable
 {
     GENERATED_BODY()
 
@@ -121,6 +125,8 @@ public:
     virtual void EndArmHold_Implementation(
         ACMArmPart* ArmPart
     ) override;
+
+    virtual void ResetForCheckpoint() override;
 
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Power")
     FCMPowerCableConnectionChanged OnConnectionChanged;
@@ -264,6 +270,10 @@ protected:
         Category = "Chimera|Power")
     FVector CableStartLocation = FVector::ZeroVector;
 
+    /** Server-authored cable particles used by remote clients for visuals. */
+    UPROPERTY(ReplicatedUsing = OnRep_ReplicatedRopePositions, Transient)
+    TArray<FVector_NetQuantize10> ReplicatedRopePositions;
+
     UPROPERTY(Transient)
     TArray<TObjectPtr<USplineMeshComponent>> CableMeshes;
 
@@ -294,6 +304,9 @@ protected:
     void OnRep_CableStartLocation();
 
     UFUNCTION()
+    void OnRep_ReplicatedRopePositions();
+
+    UFUNCTION()
     void HandleLoadGroupFinished(
         FName FinishedLoadGroupId,
         EAsyncLoadResult Result,
@@ -302,12 +315,17 @@ protected:
 
     void RefreshCableVisualState();
     bool TryBuildCableVisual();
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastResetRopeSimulation(
+        FTransform ResetTransform,
+        FVector ResetStartLocation);
     void UpdateCableVisual();
     void UpdateGrabVolume();
     void EnsureCableMeshCount(int32 DesiredCount, UStaticMesh* Mesh);
     void InitializeRope();
     void SimulateRope(float DeltaSeconds);
     void UpdateCablePhysics();
+    void CaptureAuthoritativeRopePositions();
     void UpdateRopeContactPoints();
     void RebuildRopePathFromContactPoints(
         const FVector& EndTarget,
@@ -315,6 +333,17 @@ protected:
     );
     void ResolveRopeGroundContact(bool bEndIsFixed);
     void WakeRopeSimulation();
+    void PlayConnectionSoundIfPowered(
+        bool bWasTransmittingPower,
+        const FVector& ConnectionLocation
+    );
+
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayConnectionSound(FVector_NetQuantize10 SoundLocation);
+
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayGrabSound(FVector_NetQuantize10 SoundLocation);
+
     int32 GetVisualSegmentCount() const;
     float GetCableSag() const;
     float GetCableThicknessScale() const;
@@ -337,6 +366,7 @@ protected:
     FVector CachedVisualEndpoint = FVector::ZeroVector;
     bool bRopeInitialized = false;
     bool bCablePhysicsRegistered = false;
+    bool bConnectionSoundEnabled = false;
     bool bRopeSleeping = false;
     int32 RopeStableFrameCount = 0;
     float SimulatedRopeLength = 0.0f;
@@ -356,5 +386,21 @@ protected:
     FVector LastWallHitNormal = FVector::ZeroVector;
     bool bHasLastWallHitNormal = false;
     bool bWallHitThisFrame = false;
+
+    FTransform InitialTransform;
+    FVector InitialCableStartLocation = FVector::ZeroVector;
+    UPROPERTY(Transient)
+    TObjectPtr<UCMPowerSocketComponent> InitialConnectedSocket;
+    UPROPERTY(Transient)
+    TObjectPtr<UCMPowerSourceComponent> InitialConnectedSource;
+    UPROPERTY(Transient)
+    TObjectPtr<UCMPowerSocketComponent> InitialConnectedSourceSocket;
+    bool bInitialSocketAtStart = false;
+    bool bInitialSourceAtStart = true;
+    bool bInitialStateCaptured = false;
+
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCMPowerCableCheckpointResetTest;
+#endif
 
 };

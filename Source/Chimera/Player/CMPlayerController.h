@@ -8,12 +8,15 @@
 #include "CMPlayerController.generated.h"
 
 class ACMChimera;
+class ACMPlayGameState;
 class ACMTestAreaManager;
 class UCMVisionInputComponent;
+class UCMPingSelectorWidget;
 class UInputAction;
 class UInputMappingContext;
 class UCMClientStageLoadComponent;
 struct FInputActionValue;
+enum class ECMPingType : uint8;
 
 UCLASS()
 class CHIMERA_API ACMPlayerController : public APlayerController
@@ -28,6 +31,15 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
     void RequestRetryGame();
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Game")
+    void CancelRetryGameRequest();
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Game")
+    bool IsRetryVoteHoldActive() const;
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Game")
+    float GetRetryVoteHoldProgress() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Game")
     bool CanControlStageResult() const;
@@ -48,6 +60,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Lobby")
     void RequestSetReady(bool bReady);
 
+    /** Records one local button press for the real-time APM display. */
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Input")
+    void RecordApmAction();
+
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Input")
+    int32 GetCurrentApm();
+
     // 로컬 로드 컴포넌트의 결과를 서버 RPC로 전달
     void ReportLocalStageLoadComplete(FGuid RequestId, bool bSucceeded);
 
@@ -57,17 +76,24 @@ public:
     // 최신 룸 체크포인트로 공용 키메라 복구·이동을 서버에 요청
     void RequestCheatRespawnAtCheckpoint();
 
+    // 현재 플레이 맵 전체 재시작을 서버에 요청
+    void RequestCheatRestartGame();
+
     void RequestCheatNextStage();
 
     void RequestCheatGoToStage(int32 OneBasedStageNumber);
 
     void RequestCheatGoToCheckpoint(int32 OneBasedCheckpointNumber);
 
+    void RequestCheatSaveLoadout(int32 OneBasedSlotNumber);
+    void RequestCheatLoadLoadout(int32 OneBasedSlotNumber);
+
     /** Console-command entry point using the zero-based body-segment index. */
     void RequestCheatKillSegment(int32 SegmentIndex);
 
     void RequestCheatDamageSegment(int32 SegmentIndex, float Damage);
     void RequestCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+    void RequestCheatSetInvincible(bool bEnabled);
 
     void RequestCheatSpawnRandomParts();
     void RequestCheatAttachPart(int32 OneBasedSlotIndex, FName PartName);
@@ -128,6 +154,9 @@ protected:
     /** Local-only mouse-wheel input that changes the shared-body view distance. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputAction> CameraDistanceAction;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    TObjectPtr<UInputAction> RetryVoteAction;
 
 private:
     void FirstControlKeyPressed();
@@ -156,9 +185,19 @@ private:
     void DebugTurnLeftReleased();
     void DebugTurnRightPressed();
     void DebugTurnRightReleased();
+    void RetryVotePressed();
+    void RetryVoteReleased();
+    void PingModifierPressed();
+    void PingModifierReleased();
+    void PingMousePressed();
+    void PingMouseReleased();
+    void CancelPingSelection();
+    bool CapturePingTrace(FVector& OutOrigin, FVector& OutDirection) const;
 
     ACMChimera* GetSharedChimera() const;
     ACMTestAreaManager* FindTestAreaManager() const;
+    bool PrepareApmForCurrentStage(double CurrentTime);
+    void PruneRecentApmActions(double CurrentTime);
 
     /** SharedChimera가 복제된 순간에만 로컬 ViewTarget을 연결한다. */
     UFUNCTION()
@@ -166,6 +205,9 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerRequestRetryGame();
+
+    UFUNCTION(Server, Reliable)
+    void ServerCancelRetryGameRequest();
 
     UFUNCTION(Server, Reliable)
     void ServerRequestRestartCompletedStage();
@@ -192,6 +234,9 @@ private:
     void ServerCheatRespawnAtCheckpoint();
 
     UFUNCTION(Server, Reliable)
+    void ServerCheatRestartGame();
+
+    UFUNCTION(Server, Reliable)
     void ServerCheatNextStage();
 
     UFUNCTION(Server, Reliable)
@@ -201,6 +246,12 @@ private:
     void ServerCheatGoToCheckpoint(int32 OneBasedCheckpointNumber);
 
     UFUNCTION(Server, Reliable)
+    void ServerCheatSaveLoadout(int32 OneBasedSlotNumber);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatLoadLoadout(int32 OneBasedSlotNumber);
+
+    UFUNCTION(Server, Reliable)
     void ServerCheatKillSegment(int32 SegmentIndex);
 
     UFUNCTION(Server, Reliable)
@@ -208,6 +259,9 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatDamagePart(int32 OneBasedSlotIndex, float Damage);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatSetInvincible(bool bEnabled);
 
     UFUNCTION(Server, Reliable)
     void ServerCheatSpawnRandomParts();
@@ -230,6 +284,9 @@ private:
     UFUNCTION(Server, Unreliable)
     void ServerApplyCheatDebugMovement(float ForwardInput, float TurnInput);
 
+    UFUNCTION(Server, Unreliable)
+    void ServerReportCurrentApm(int32 NewCurrentApm);
+
     UFUNCTION(Server, Reliable)
     void ServerSetSoloControlKeyPressed(
         int32 KeyIndex,
@@ -240,11 +297,20 @@ private:
     UFUNCTION(Server, Reliable)
     void ServerRequestTeleportToTestArea(FName AreaId);
 
+    UFUNCTION(Server, Reliable)
+    void ServerRequestPing(
+        ECMPingType Type,
+        FVector_NetQuantize TraceOrigin,
+        FVector_NetQuantizeNormal TraceDirection);
+
     UPROPERTY(Transient)
     TObjectPtr<ACMChimera> CachedSharedChimera;
 
     UPROPERTY(Transient)
     TObjectPtr<UCMClientStageLoadComponent> ClientStageLoadComponent;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCMPingSelectorWidget> PingSelectorWidget;
 
     bool bDetachModifierHeld = false;
     bool bReverseModifierHeld = false;
@@ -253,7 +319,26 @@ private:
     bool bDebugMoveBackwardHeld = false;
     bool bDebugTurnLeftHeld = false;
     bool bDebugTurnRightHeld = false;
+    bool bRetryVoteHoldActive = false;
+    bool bPingModifierHeld = false;
+    bool bPingSelecting = false;
+    double RetryVoteHoldStartTime = 0.0;
+    FVector2D PingDragStart = FVector2D::ZeroVector;
+    FVector PingTraceOrigin = FVector::ZeroVector;
+    FVector PingTraceDirection = FVector::ForwardVector;
+
+    TWeakObjectPtr<ACMPlayGameState> ApmTrackedPlayState;
+    TArray<double> RecentApmActionTimes;
+    double ApmMeasurementStartTime = 0.0;
+    int32 ApmTrackedStageIndex = INDEX_NONE;
+    float ApmReportElapsed = 0.0f;
+
+    static constexpr float RetryVoteHoldDuration = 3.0f;
+    static constexpr float ApmReportInterval = 0.5f;
+    static constexpr double ApmWindowSeconds = 60.0;
 
     FCMPartSlotAddress SoloPressedPartSlots[CMControl::SoloTestKeyCount];
+    double SoloControlKeyStartTimes[CMControl::SoloTestKeyCount] = {};
+    bool bSoloControlKeyReverseMovement[CMControl::SoloTestKeyCount] = {};
 
 };

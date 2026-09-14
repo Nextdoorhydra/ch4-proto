@@ -15,6 +15,8 @@ ACMAggressivePawnBase::ACMAggressivePawnBase()
 {
     bReplicates = true;
     SetReplicateMovement(true);
+    AIControllerClass = nullptr;
+    AutoPossessAI = EAutoPossessAI::Disabled;
 
     AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
     AbilitySystemComponent->SetIsReplicated(true);
@@ -27,6 +29,7 @@ ACMAggressivePawnBase::ACMAggressivePawnBase()
 void ACMAggressivePawnBase::BeginPlay()
 {
     Super::BeginPlay();
+    InitialCheckpointTransform = GetActorTransform();
     AbilitySystemComponent->InitAbilityActorInfo(this, this);
 
     if (!HasAuthority())
@@ -40,6 +43,32 @@ void ACMAggressivePawnBase::BeginPlay()
     }
 
     AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(UCMAggressiveKnockbackAbility::StaticClass()));
+}
+
+bool ACMAggressivePawnBase::ResetAIForCheckpoint()
+{
+    UWorld* World = GetWorld();
+    if (!HasAuthority() || !World)
+    {
+        return false;
+    }
+
+    FActorSpawnParameters SpawnParameters;
+    SpawnParameters.OverrideLevel = GetLevel();
+    SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AActor* Replacement = World->SpawnActor(GetClass(), &InitialCheckpointTransform, SpawnParameters);
+    if (!Replacement)
+    {
+        return false;
+    }
+
+    Destroy();
+    return true;
+}
+
+// 이동 컴포넌트가 직접 경로를 추종하므로 NavAgent 정보가 없는 기본 Controller는 생성하지 않는다.
+void ACMAggressivePawnBase::SpawnDefaultController()
+{
 }
 
 UAbilitySystemComponent* ACMAggressivePawnBase::GetAbilitySystemComponent() const

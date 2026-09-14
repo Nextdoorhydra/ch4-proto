@@ -1,10 +1,15 @@
 #include "Stage/Obstacle/CMPushBox.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "Net/UnrealNetwork.h"
 #include "Parts/Arm/CMArmPart.h"
 #include "Player/CMChimera.h"
+#include "Sound/CMGameSoundBridgeSubsystem.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -39,10 +44,58 @@ ACMPushBox::ACMPushBox()
 void ACMPushBox::BeginPlay()
 {
     Super::BeginPlay();
+
+    InitialTransform = GetActorTransform();
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge = GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.AddUObject(this, &ThisClass::HandleSoundCatalogsRebuilt);
+        }
+    }
+
     SetActorTickEnabled(true);
     ApplyEditorSettings();
     BoxMesh->OnComponentHit.AddDynamic(this, &ThisClass::HandleBoxHit);
     UE_LOG(LogChimeraPushBox, Log, TEXT("[PushBox Ready] Box=%s Weight=%.1f GenerateOverlap=%s Location=%s Extent=%s"), *GetName(), MechanismWeight ? MechanismWeight->GetMechanismWeight() : 0.0f, BoxMesh && BoxMesh->GetGenerateOverlapEvents() ? TEXT("true") : TEXT("false"), *GetActorLocation().ToCompactString(), BoxMesh ? *BoxMesh->Bounds.BoxExtent.ToCompactString() : TEXT("None"));
+}
+
+void ACMPushBox::ResetForCheckpoint()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    StopPush();
+    LastAcceptedAttackId.Invalidate();
+    SetActorTransform(
+        InitialTransform,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    ForceNetUpdate();
+}
+
+void ACMPushBox::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge = GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.RemoveAll(this);
+        }
+    }
+    StopMoveLoopSound();
+
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACMPushBox::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ThisClass, bIsMoving);
 }
 
 void ACMPushBox::OnConstruction(const FTransform& Transform)
@@ -83,7 +136,7 @@ void ACMPushBox::Tick(float DeltaTime)
             continue;
         }
 
-        const FVector BlockingNormal = SweepHit.ImpactNormal.IsNearlyZero() ? SweepHit.Normal.GetSafeNormal() : SweepHit.ImpactNormal.GetSafeNormal();
+        const FVector BlockingNormal = SweepHit.bStartPenetrating || SweepHit.ImpactNormal.IsNearlyZero() ? SweepHit.Normal.GetSafeNormal() : SweepHit.ImpactNormal.GetSafeNormal();
         if (FVector::DotProduct(PushDirection, BlockingNormal) >= -KINDA_SMALL_NUMBER)
         {
             continue;
@@ -116,7 +169,7 @@ bool ACMPushBox::ReceiveCombatHit_Implementation(const FCMCombatHitRequest& Requ
 
     AActor* PushSource = IsValid(Request.Attacker) ? Request.Attacker.Get() : Request.SourcePart.Get();
     BoxMesh->IgnoreActorWhenMoving(PushSource, true);
-    if (!StartPush(Request.ImpactDirection))
+    if (!StartPush(ResolveCardinalPushDirection(Request.ImpactPoint, Request.ImpactDirection)))
     {
         BoxMesh->IgnoreActorWhenMoving(PushSource, false);
         return false;
@@ -146,7 +199,7 @@ void ACMPushBox::HandleBoxHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
     }
 
     BoxMesh->IgnoreActorWhenMoving(OtherActor, true);
-    if (!StartPush(ContactDirection))
+    if (!StartPush(ResolveCardinalPushDirection(Hit.ImpactPoint, ContactDirection)))
     {
         BoxMesh->IgnoreActorWhenMoving(OtherActor, false);
     }
@@ -164,6 +217,34 @@ void ACMPushBox::ApplyEditorSettings()
     }
 }
 
+FVector ACMPushBox::ResolveCardinalPushDirection(const FVector& ImpactPoint, const FVector& FallbackDirection) const
+{
+    FVector FaceDirection = BoxMesh ? BoxMesh->Bounds.Origin - ImpactPoint : FVector::ZeroVector;
+    FaceDirection.Z = 0.0f;
+    if (BoxMesh && !ImpactPoint.IsNearlyZero())
+    {
+        const FVector Extent = BoxMesh->Bounds.BoxExtent;
+        const float XFaceRatio = FMath::Abs(FaceDirection.X) / FMath::Max(Extent.X, 1.0f);
+        const float YFaceRatio = FMath::Abs(FaceDirection.Y) / FMath::Max(Extent.Y, 1.0f);
+        if (!FaceDirection.IsNearlyZero())
+        {
+            return XFaceRatio >= YFaceRatio ? FVector(FMath::Sign(FaceDirection.X), 0.0f, 0.0f) : FVector(0.0f, FMath::Sign(FaceDirection.Y), 0.0f);
+        }
+    }
+
+    FVector CardinalDirection = FallbackDirection;
+    CardinalDirection.Z = 0.0f;
+    if (FMath::Abs(CardinalDirection.X) >= FMath::Abs(CardinalDirection.Y))
+    {
+        CardinalDirection = FVector(FMath::Sign(CardinalDirection.X), 0.0f, 0.0f);
+    }
+    else
+    {
+        CardinalDirection = FVector(0.0f, FMath::Sign(CardinalDirection.Y), 0.0f);
+    }
+    return CardinalDirection;
+}
+
 bool ACMPushBox::StartPush(FVector WorldDirection)
 {
     WorldDirection.Z = 0.0f;
@@ -174,6 +255,11 @@ bool ACMPushBox::StartPush(FVector WorldDirection)
 
     PushDirection = WorldDirection;
     RemainingPushDistance = PushDistance;
+    if (!bIsMoving)
+    {
+        bIsMoving = true;
+        OnRep_IsMoving();
+    }
     return true;
 }
 
@@ -182,4 +268,46 @@ void ACMPushBox::StopPush()
     BoxMesh->ClearMoveIgnoreActors();
     PushDirection = FVector::ZeroVector;
     RemainingPushDistance = 0.0f;
+    if (bIsMoving)
+    {
+        bIsMoving = false;
+        OnRep_IsMoving();
+    }
+}
+
+void ACMPushBox::HandleSoundCatalogsRebuilt()
+{
+    RefreshMoveLoopSound();
+}
+
+void ACMPushBox::OnRep_IsMoving()
+{
+    RefreshMoveLoopSound();
+}
+
+void ACMPushBox::RefreshMoveLoopSound()
+{
+    if (!bIsMoving)
+    {
+        StopMoveLoopSound();
+        return;
+    }
+
+    if (IsValid(MoveLoopSoundComponent) && MoveLoopSoundComponent->IsPlaying())
+    {
+        return;
+    }
+
+    MoveLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        BoxMesh,
+        CMSoundTags::Stage_Obstacle_PushBox_MoveLoop);
+}
+
+void ACMPushBox::StopMoveLoopSound()
+{
+    if (IsValid(MoveLoopSoundComponent))
+    {
+        MoveLoopSoundComponent->Stop();
+        MoveLoopSoundComponent = nullptr;
+    }
 }

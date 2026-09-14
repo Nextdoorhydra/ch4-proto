@@ -4,21 +4,32 @@
 #include "GameMode/CMGameState.h"
 #include "GameMode/CMGameMode.h"
 #include "GameMode/Play/CMPlayGameMode.h"
+#include "GameMode/Play/CMPlayGameState.h"
 #include "GameMode/Lobby/CMLobbyGameMode.h"
 #include "AsyncLoad/CMClientStageLoadComponent.h"
 #include "Player/CMControlBody.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Parts/Core/CMPartActorBase.h"
+#include "Parts/Leg/CMLegPart.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputCoreTypes.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
+#include "Framework/Application/SlateApplication.h"
 #include "EngineUtils.h"
+#include "HAL/PlatformTime.h"
 #include "Stage/Test/CMTestAreaManager.h"
 #include "Vision/CMVisionInputComponent.h"
+#include "Ping/CMPingSelectorWidget.h"
+#include "Ping/CMWorldPing.h"
+#include "Ping/CMPingTypes.h"
+#include "Engine/World.h"
+#include "Engine/EngineTypes.h"
+#include "Engine/GameInstance.h"
+#include "Stage/Device/CMPartLoadoutStorageSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPlayerController, Log, All);
 
@@ -67,20 +78,85 @@ ACMPlayerController::ACMPlayerController()
 
 bool ACMPlayerController::CanRequestRetryGame() const
 {
+    const ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+    const APlayerState* LocalPlayerState = PlayerState;
     return IsLocalController()
-        && HasAuthority()
-        && GetNetMode() == NM_ListenServer
-        && IsValid(GetSharedChimera());
+        && PlayState
+        && PlayState->GetPlayPhase() == ECMPlayPhase::Playing
+        && IsValid(LocalPlayerState)
+        && !LocalPlayerState->IsOnlyASpectator()
+        && !PlayState->GetRetryVoteSnapshot().VotedPlayerIds.Contains(
+            LocalPlayerState->GetPlayerId());
 }
 
 void ACMPlayerController::RequestRetryGame()
 {
-    if (!IsLocalController())
+    if (!CanRequestRetryGame())
     {
+        const ACMPlayGameState* PlayState = GetWorld()
+            ? GetWorld()->GetGameState<ACMPlayGameState>() : nullptr;
+        const APlayerState* LocalPlayerState = PlayerState;
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[RetryVote][LocalRequest] Rejected Controller=%s NetMode=%d Phase=%d PlayerState=%d PlayerId=%d Spectator=%d AlreadyVoted=%d"),
+            *GetName(), static_cast<int32>(GetNetMode()),
+            PlayState ? static_cast<int32>(PlayState->GetPlayPhase()) : INDEX_NONE,
+            IsValid(LocalPlayerState),
+            LocalPlayerState ? LocalPlayerState->GetPlayerId() : INDEX_NONE,
+            LocalPlayerState && LocalPlayerState->IsOnlyASpectator(),
+            PlayState && LocalPlayerState
+                && PlayState->GetRetryVoteSnapshot().VotedPlayerIds.Contains(
+                    LocalPlayerState->GetPlayerId()));
         return;
     }
 
+    bRetryVoteHoldActive = true;
+    RetryVoteHoldStartTime = GetWorld()
+        ? GetWorld()->GetTimeSeconds() : 0.0;
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][LocalRequest] Hold started Controller=%s NetMode=%d PlayerId=%d StartTime=%.3f"),
+        *GetName(), static_cast<int32>(GetNetMode()),
+        PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        RetryVoteHoldStartTime);
     ServerRequestRetryGame();
+}
+
+void ACMPlayerController::CancelRetryGameRequest()
+{
+    const bool bWasHolding = bRetryVoteHoldActive;
+    const float ReleasedProgress = GetRetryVoteHoldProgress();
+    bRetryVoteHoldActive = false;
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][LocalRequest] Hold released Controller=%s NetMode=%d PlayerId=%d WasHolding=%d Progress=%.2f"),
+        *GetName(), static_cast<int32>(GetNetMode()),
+        PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        bWasHolding, ReleasedProgress);
+    if (IsLocalController())
+    {
+        ServerCancelRetryGameRequest();
+    }
+}
+
+bool ACMPlayerController::IsRetryVoteHoldActive() const
+{
+    return bRetryVoteHoldActive
+        && CanRequestRetryGame()
+        && GetRetryVoteHoldProgress() < 1.0f;
+}
+
+float ACMPlayerController::GetRetryVoteHoldProgress() const
+{
+    const UWorld* World = GetWorld();
+    if (!bRetryVoteHoldActive || !World)
+    {
+        return 0.0f;
+    }
+    return FMath::Clamp(
+        static_cast<float>(
+            (World->GetTimeSeconds() - RetryVoteHoldStartTime)
+            / RetryVoteHoldDuration),
+        0.0f,
+        1.0f);
 }
 
 bool ACMPlayerController::CanControlStageResult() const
@@ -120,6 +196,14 @@ void ACMPlayerController::RequestCheatRespawnAtCheckpoint()
     if (IsLocalController())
     {
         ServerCheatRespawnAtCheckpoint();
+    }
+}
+
+void ACMPlayerController::RequestCheatRestartGame()
+{
+    if (IsLocalController())
+    {
+        ServerCheatRestartGame();
     }
 }
 
@@ -204,6 +288,76 @@ void ACMPlayerController::ServerCheatGoToCheckpoint_Implementation(int32 OneBase
 #endif
 }
 
+void ACMPlayerController::RequestCheatSaveLoadout(int32 OneBasedSlotNumber)
+{
+#if !UE_BUILD_SHIPPING
+    if (IsLocalController())
+    {
+        ServerCheatSaveLoadout(OneBasedSlotNumber);
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatSaveLoadout_Implementation(
+    int32 OneBasedSlotNumber)
+{
+#if !UE_BUILD_SHIPPING
+    UGameInstance* GameInstance = GetGameInstance();
+    UCMPartLoadoutStorageSubsystem* Storage = GameInstance
+        ? GameInstance->GetSubsystem<UCMPartLoadoutStorageSubsystem>()
+        : nullptr;
+    ACMChimera* SharedChimera = GetSharedChimera();
+    const int32 SlotIndex = OneBasedSlotNumber - 1;
+    if (!Storage || !SharedChimera
+        || !Storage->SavePersistentLoadout(SharedChimera, SlotIndex))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.SavePreset %d could not save the current Parts."),
+            OneBasedSlotNumber);
+        return;
+    }
+
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] Saved current Parts to persistent loadout slot %d. Parts=%d"),
+        OneBasedSlotNumber, Storage->GetStoredPartCount(SlotIndex));
+#endif
+}
+
+void ACMPlayerController::RequestCheatLoadLoadout(int32 OneBasedSlotNumber)
+{
+#if !UE_BUILD_SHIPPING
+    if (IsLocalController())
+    {
+        ServerCheatLoadLoadout(OneBasedSlotNumber);
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatLoadLoadout_Implementation(
+    int32 OneBasedSlotNumber)
+{
+#if !UE_BUILD_SHIPPING
+    UGameInstance* GameInstance = GetGameInstance();
+    UCMPartLoadoutStorageSubsystem* Storage = GameInstance
+        ? GameInstance->GetSubsystem<UCMPartLoadoutStorageSubsystem>()
+        : nullptr;
+    ACMChimera* SharedChimera = GetSharedChimera();
+    const int32 SlotIndex = OneBasedSlotNumber - 1;
+    if (!Storage || !SharedChimera
+        || !Storage->LoadPersistentLoadout(SharedChimera, SlotIndex))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.LoadPreset %d could not load a persistent Part preset."),
+            OneBasedSlotNumber);
+        return;
+    }
+
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] Loaded persistent Part loadout slot %d. Parts=%d"),
+        OneBasedSlotNumber, Storage->GetStoredPartCount(SlotIndex));
+#endif
+}
+
 void ACMPlayerController::RequestCheatDamageSegment(
     int32 SegmentIndex,
     float Damage
@@ -223,6 +377,14 @@ void ACMPlayerController::RequestCheatDamagePart(
     if (IsLocalController() && Damage > 0.0f)
     {
         ServerCheatDamagePart(OneBasedSlotIndex, Damage);
+    }
+}
+
+void ACMPlayerController::RequestCheatSetInvincible(bool bEnabled)
+{
+    if (IsLocalController())
+    {
+        ServerCheatSetInvincible(bEnabled);
     }
 }
 
@@ -361,9 +523,22 @@ void ACMPlayerController::ServerRequestRetryGame_Implementation()
     ACMGameMode* GameMode = GetWorld()
         ? GetWorld()->GetAuthGameMode<ACMGameMode>()
         : nullptr;
-    if (GameMode)
+    const bool bAccepted = GameMode && GameMode->TryRetryGame(this);
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][ServerRPC] Hold request Controller=%s PlayerId=%d GameMode=%s Accepted=%d"),
+        *GetName(), PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE,
+        *GetNameSafe(GameMode), bAccepted);
+}
+
+void ACMPlayerController::ServerCancelRetryGameRequest_Implementation()
+{
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[RetryVote][ServerRPC] Hold cancel Controller=%s PlayerId=%d"),
+        *GetName(), PlayerState ? PlayerState->GetPlayerId() : INDEX_NONE);
+    if (ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>() : nullptr)
     {
-        GameMode->TryRetryGame(this);
+        GameMode->CancelRetryVoteHold(this);
     }
 }
 
@@ -485,6 +660,22 @@ void ACMPlayerController::ServerCheatRespawnAtCheckpoint_Implementation()
 
     UE_LOG(LogChimeraPlayerController, Warning,
         TEXT("[Cheat] CM.Checkpoint restored the latest checkpoint."));
+}
+
+void ACMPlayerController::ServerCheatRestartGame_Implementation()
+{
+    ACMPlayGameMode* GameMode = GetWorld()
+        ? GetWorld()->GetAuthGameMode<ACMPlayGameMode>()
+        : nullptr;
+    if (!GameMode || !GameMode->TryCheatRestartGame())
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.Restart could not restart the current game."));
+        return;
+    }
+
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] CM.Restart is restarting the current game."));
 }
 
 void ACMPlayerController::ServerCheatKillSegment_Implementation(
@@ -615,6 +806,8 @@ void ACMPlayerController::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
+    CancelPingSelection();
+
     if (ACMGameState* GameState = GetWorld()
         ? GetWorld()->GetGameState<ACMGameState>()
         : nullptr)
@@ -693,6 +886,25 @@ void ACMPlayerController::ServerCheatDamagePart_Implementation(
         OneBasedSlotIndex,
         *Part->GetName(),
         Damage,
+        *GetName());
+}
+
+void ACMPlayerController::ServerCheatSetInvincible_Implementation(
+    bool bEnabled)
+{
+    ACMChimera* SharedChimera = GetSharedChimera();
+    if (!SharedChimera)
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.God: shared Chimera is unavailable."));
+        return;
+    }
+
+    SharedChimera->SetCanBeDamaged(!bEnabled);
+    SharedChimera->ForceNetUpdate();
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] CM.God %d requested by %s."),
+        bEnabled ? 1 : 0,
         *GetName());
 }
 
@@ -835,6 +1047,30 @@ void ACMPlayerController::SetupInputComponent()
             TEXT("CameraDistanceAction is not assigned on %s."),
             *GetName());
     }
+    
+    if (RetryVoteAction)
+    {
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Started,
+            this,
+            &ThisClass::RetryVotePressed
+        );
+
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Completed,
+            this,
+            &ThisClass::RetryVoteReleased
+        );
+
+        EnhancedInputComponent->BindAction(
+            RetryVoteAction,
+            ETriggerEvent::Canceled,
+            this,
+            &ThisClass::RetryVoteReleased
+        );
+    }
 
     // 기존 Q/W/E/R Mapping Context와 분리된 개발 전용 화살표 입력
     InputComponent->BindKey(EKeys::Up, IE_Pressed,
@@ -853,6 +1089,30 @@ void ACMPlayerController::SetupInputComponent()
         this, &ThisClass::DebugTurnRightPressed);
     InputComponent->BindKey(EKeys::Right, IE_Released,
         this, &ThisClass::DebugTurnRightReleased);
+
+    InputComponent->BindKey(EKeys::LeftAlt, IE_Pressed,
+        this, &ThisClass::PingModifierPressed);
+    InputComponent->BindKey(EKeys::LeftAlt, IE_Released,
+        this, &ThisClass::PingModifierReleased);
+    InputComponent->BindKey(EKeys::RightAlt, IE_Pressed,
+        this, &ThisClass::PingModifierPressed);
+    InputComponent->BindKey(EKeys::RightAlt, IE_Released,
+        this, &ThisClass::PingModifierReleased);
+    InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed,
+        this, &ThisClass::PingMousePressed);
+    InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released,
+        this, &ThisClass::PingMouseReleased);
+}
+
+void ACMPlayerController::RetryVotePressed()
+{
+    RecordApmAction();
+    RequestRetryGame();
+}
+
+void ACMPlayerController::RetryVoteReleased()
+{
+    CancelRetryGameRequest();
 }
 
 // 활성화된 로컬 화살표 상태를 서버에 낮은 신뢰도의 연속 입력으로 전달
@@ -860,7 +1120,30 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
 
-    if (!IsLocalController() || !bCheatDebugMovementEnabled)
+    if (!IsLocalController())
+    {
+        return;
+    }
+
+    ApmReportElapsed += DeltaTime;
+    if (ApmReportElapsed >= ApmReportInterval)
+    {
+        ApmReportElapsed = 0.0f;
+        ServerReportCurrentApm(GetCurrentApm());
+    }
+
+    if (bPingSelecting && PingSelectorWidget)
+    {
+        float MouseX = 0.0f;
+        float MouseY = 0.0f;
+        if (GetMousePosition(MouseX, MouseY))
+        {
+            PingSelectorWidget->UpdateSelection(
+                FVector2D(MouseX, MouseY) - PingDragStart);
+        }
+    }
+
+    if (!bCheatDebugMovementEnabled)
     {
         return;
     }
@@ -876,6 +1159,162 @@ void ACMPlayerController::PlayerTick(float DeltaTime)
     {
         ServerApplyCheatDebugMovement(ForwardInput, TurnInput);
     }
+}
+
+void ACMPlayerController::PingModifierPressed()
+{
+    bPingModifierHeld = IsLocalController();
+}
+
+void ACMPlayerController::PingModifierReleased()
+{
+    bPingModifierHeld = IsInputKeyDown(EKeys::LeftAlt)
+        || IsInputKeyDown(EKeys::RightAlt);
+    if (!bPingModifierHeld)
+    {
+        CancelPingSelection();
+    }
+}
+
+void ACMPlayerController::PingMousePressed()
+{
+    const ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>();
+    const bool bAltHeld = FSlateApplication::Get().GetModifierKeys().IsAltDown();
+    if (!bAltHeld || bPingSelecting || !IsLocalController()
+        || !CMPlayerState || CMPlayerState->IsOnlyASpectator()
+        || CMPlayerState->GetParticipationState()
+            != ECMPlayerParticipationState::Active)
+    {
+        return;
+    }
+
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    if (!GetMousePosition(MouseX, MouseY)
+        || !CapturePingTrace(PingTraceOrigin, PingTraceDirection))
+    {
+        return;
+    }
+
+    PingDragStart = FVector2D(MouseX, MouseY);
+    PingSelectorWidget = CreateWidget<UCMPingSelectorWidget>(this);
+    if (!PingSelectorWidget)
+    {
+        return;
+    }
+
+    bPingSelecting = true;
+    PingSelectorWidget->SetVisibility(ESlateVisibility::HitTestInvisible);
+    PingSelectorWidget->AddToViewport(1000);
+    PingSelectorWidget->BeginSelection(PingDragStart);
+}
+
+void ACMPlayerController::PingMouseReleased()
+{
+    if (!bPingSelecting)
+    {
+        return;
+    }
+
+    ECMPingType SelectedType = ECMPingType::GoHere;
+    const bool bShouldPing = PingSelectorWidget
+        && PingSelectorWidget->GetSelectedType(SelectedType);
+    CancelPingSelection();
+    if (bShouldPing)
+    {
+        ServerRequestPing(
+            SelectedType, PingTraceOrigin, PingTraceDirection);
+    }
+}
+
+void ACMPlayerController::CancelPingSelection()
+{
+    bPingSelecting = false;
+    if (PingSelectorWidget)
+    {
+        PingSelectorWidget->RemoveFromParent();
+        PingSelectorWidget = nullptr;
+    }
+}
+
+bool ACMPlayerController::CapturePingTrace(
+    FVector& OutOrigin,
+    FVector& OutDirection) const
+{
+    float MouseX = 0.0f;
+    float MouseY = 0.0f;
+    return GetMousePosition(MouseX, MouseY)
+        && DeprojectScreenPositionToWorld(
+            MouseX, MouseY, OutOrigin, OutDirection);
+}
+
+void ACMPlayerController::ServerRequestPing_Implementation(
+    ECMPingType Type,
+    FVector_NetQuantize TraceOrigin,
+    FVector_NetQuantizeNormal TraceDirection)
+{
+    ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>();
+    ACMChimera* SharedChimera = GetSharedChimera();
+    const uint8 TypeValue = static_cast<uint8>(Type);
+    const FVector Direction = FVector(TraceDirection).GetSafeNormal();
+    if (!CMPlayerState || !SharedChimera
+        || CMPlayerState->IsOnlyASpectator()
+        || CMPlayerState->GetParticipationState()
+            != ECMPlayerParticipationState::Active
+        || TypeValue > static_cast<uint8>(ECMPingType::SwapParts)
+        || FVector(TraceOrigin).ContainsNaN()
+        || !Direction.IsNormalized()
+        || FVector::DistSquared(TraceOrigin, SharedChimera->GetActorLocation())
+            > FMath::Square(CMPing::MaxTraceOriginDistanceFromChimera))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Ping][Server] Rejected request from %s."),
+            *GetNameSafe(CMPlayerState));
+        return;
+    }
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CMWorldPing), true);
+    QueryParams.AddIgnoredActor(GetPawn());
+    QueryParams.AddIgnoredActor(SharedChimera);
+    FHitResult Hit;
+    const FVector TraceEnd = FVector(TraceOrigin)
+        + Direction * CMPing::MaxTraceDistance;
+    if (!GetWorld()->LineTraceSingleByChannel(
+            Hit, TraceOrigin, TraceEnd, ECC_Visibility, QueryParams))
+    {
+        return;
+    }
+
+    ACMWorldPing::EnforceServerLimit(*GetWorld());
+    const FVector SurfaceNormal = Hit.ImpactNormal.GetSafeNormal();
+    const FVector PingLocation = Hit.ImpactPoint + SurfaceNormal * 2.0f;
+    const FRotator SurfaceRotation = FRotationMatrix::MakeFromZ(
+        SurfaceNormal).Rotator();
+    FTransform SpawnTransform(SurfaceRotation, PingLocation);
+    ACMWorldPing* Ping = GetWorld()->SpawnActorDeferred<ACMWorldPing>(
+        ACMWorldPing::StaticClass(),
+        SpawnTransform,
+        nullptr,
+        nullptr,
+        ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+    if (!Ping)
+    {
+        return;
+    }
+
+    Ping->InitializePing(
+        Type,
+        CMPlayerState->GetPlayerName(),
+        CMPlayerState->GetPlayerColor());
+    Ping->FinishSpawning(SpawnTransform);
+    Ping->ForceNetUpdate();
+    UE_LOG(LogChimeraPlayerController, Display,
+        TEXT("[Ping][Server] Spawned Type=%d Player=%s Location=%s Lifetime=%.1f ActiveLimit=%d"),
+        TypeValue,
+        *CMPlayerState->GetPlayerName(),
+        *PingLocation.ToCompactString(),
+        CMPing::DisplayDuration,
+        CMPing::MaxActivePings);
 }
 
 void ACMPlayerController::HandleSharedChimeraChanged()
@@ -1023,6 +1462,7 @@ void ACMPlayerController::FourthControlKeyReleased()
 
 void ACMPlayerController::DetachModifierPressed()
 {
+    RecordApmAction();
     bDetachModifierHeld = true;
 }
 
@@ -1033,6 +1473,7 @@ void ACMPlayerController::DetachModifierReleased()
 
 void ACMPlayerController::ReverseModifierPressed()
 {
+    RecordApmAction();
     bReverseModifierHeld = true;
 }
 
@@ -1119,6 +1560,11 @@ void ACMPlayerController::SetControlSlotPressed(
         return;
     }
 
+    if (bPressed)
+    {
+        RecordApmAction();
+    }
+
     // Controller는 어떤 파츠가 배정됐는지 알지 않는다.
     // Possess 중인 ControlBody에 SlotIndex와 Press/Release만 전달한다.
     if (ACMControlBody* ControlBody = GetPawn<ACMControlBody>())
@@ -1179,6 +1625,11 @@ void ACMPlayerController::SetSoloControlKeyPressed(
         return;
     }
 
+    if (bPressed)
+    {
+        RecordApmAction();
+    }
+
     if (bPressed && KeyIndex < CMControl::MaxKeysPerPlayer
         && VisionInputComponent)
     {
@@ -1190,6 +1641,87 @@ void ACMPlayerController::SetSoloControlKeyPressed(
         bPressed,
         bPressed && bReverseModifierHeld,
         bPressed && bDetachModifierHeld);
+}
+
+void ACMPlayerController::RecordApmAction()
+{
+    const double CurrentTime = FPlatformTime::Seconds();
+    if (!PrepareApmForCurrentStage(CurrentTime))
+    {
+        return;
+    }
+
+    PruneRecentApmActions(CurrentTime);
+    RecentApmActionTimes.Add(CurrentTime);
+}
+
+int32 ACMPlayerController::GetCurrentApm()
+{
+    const double CurrentTime = FPlatformTime::Seconds();
+    if (!PrepareApmForCurrentStage(CurrentTime))
+    {
+        return 0;
+    }
+
+    PruneRecentApmActions(CurrentTime);
+    const double MeasurementSeconds = FMath::Clamp(
+        CurrentTime - ApmMeasurementStartTime,
+        1.0,
+        ApmWindowSeconds);
+    return FMath::RoundToInt(
+        RecentApmActionTimes.Num() * 60.0 / MeasurementSeconds);
+}
+
+void ACMPlayerController::ServerReportCurrentApm_Implementation(
+    int32 NewCurrentApm)
+{
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetCurrentApm(FMath::Clamp(NewCurrentApm, 0, 9999));
+    }
+}
+
+bool ACMPlayerController::PrepareApmForCurrentStage(double CurrentTime)
+{
+    ACMPlayGameState* PlayState = GetWorld()
+        ? GetWorld()->GetGameState<ACMPlayGameState>()
+        : nullptr;
+    if (!IsLocalController()
+        || !PlayState
+        || PlayState->GetPlayPhase() != ECMPlayPhase::Playing)
+    {
+        ApmTrackedPlayState.Reset();
+        RecentApmActionTimes.Reset();
+        ApmMeasurementStartTime = 0.0;
+        ApmTrackedStageIndex = INDEX_NONE;
+        return false;
+    }
+
+    if (ApmTrackedPlayState.Get() != PlayState
+        || ApmTrackedStageIndex != PlayState->GetCurrentStageIndex())
+    {
+        ApmTrackedPlayState = PlayState;
+        RecentApmActionTimes.Reset();
+        ApmMeasurementStartTime = CurrentTime;
+        ApmTrackedStageIndex = PlayState->GetCurrentStageIndex();
+    }
+    return true;
+}
+
+void ACMPlayerController::PruneRecentApmActions(double CurrentTime)
+{
+    const double OldestAllowedTime = CurrentTime - ApmWindowSeconds;
+    int32 ExpiredCount = 0;
+    while (ExpiredCount < RecentApmActionTimes.Num()
+        && RecentApmActionTimes[ExpiredCount] < OldestAllowedTime)
+    {
+        ++ExpiredCount;
+    }
+    if (ExpiredCount > 0)
+    {
+        RecentApmActionTimes.RemoveAt(
+            0, ExpiredCount, EAllowShrinking::No);
+    }
 }
 
 void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
@@ -1224,19 +1756,37 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
             CMControl::SoloTestSegmentCount))
         {
             const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
-            const bool bActivateOnRelease =
+            UCMPartSlotComponent* ReleasedSlot =
+                SharedChimera->GetPartSlotComponent(ReleasedPartSlot);
+            const bool bIsLeg = ReleasedSlot
+                && Cast<ACMLegPart>(ReleasedSlot->GetAttachedPart());
+            const bool bActivateOnRelease = bIsLeg ||
                 SharedChimera->ShouldActivateBasicArmOnRelease(
                     ReleasedPartSlot);
             SharedChimera->SetPartSlotPressed(ReleasedPartSlot, false);
             if (bActivateOnRelease)
             {
-                SharedChimera->ActivatePartSlot(
+                const double CurrentTime = GetWorld()
+                    ? GetWorld()->GetTimeSeconds()
+                    : SoloControlKeyStartTimes[KeyIndex];
+                const float HoldSeconds = static_cast<float>(FMath::Max(
+                    CurrentTime - SoloControlKeyStartTimes[KeyIndex],
+                    0.0
+                ));
+                const float LegStrengthMultiplier = bIsLeg
+                    ? SharedChimera->GetLegInputStrengthMultiplier(
+                        HoldSeconds)
+                    : 1.0f;
+                SharedChimera->ActivatePartSlotWithLegStrength(
                     ReleasedPartSlot,
                     CMPlayerState,
-                    false);
+                    bSoloControlKeyReverseMovement[KeyIndex],
+                    LegStrengthMultiplier);
             }
         }
         PressedPartSlot = FCMPartSlotAddress();
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         return;
     }
 
@@ -1249,6 +1799,8 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
             SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
             PressedPartSlot = FCMPartSlotAddress();
         }
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         SharedChimera->DetachPartFromSlot(PartSlotAddress);
         return;
     }
@@ -1266,6 +1818,8 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
                 PressedPartSlot, false);
         }
         PressedPartSlot = FCMPartSlotAddress();
+        SoloControlKeyStartTimes[KeyIndex] = 0.0;
+        bSoloControlKeyReverseMovement[KeyIndex] = false;
         return;
     }
 
@@ -1276,8 +1830,15 @@ void ACMPlayerController::ServerSetSoloControlKeyPressed_Implementation(
     }
 
     PressedPartSlot = PartSlotAddress;
+    SoloControlKeyStartTimes[KeyIndex] = GetWorld()
+        ? GetWorld()->GetTimeSeconds()
+        : 0.0;
+    bSoloControlKeyReverseMovement[KeyIndex] = bReverseMovement;
     SharedChimera->SetPartSlotPressed(PartSlotAddress, true);
-    if (!SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
+    const bool bIsLeg = PartSlot
+        && Cast<ACMLegPart>(PartSlot->GetAttachedPart());
+    if (!bIsLeg
+        && !SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
     {
         SharedChimera->ActivatePartSlot(
             PartSlotAddress,

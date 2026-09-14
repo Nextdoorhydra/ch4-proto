@@ -8,6 +8,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "ListenServerNetworkSettings.h"
 #include "ListenServerSessionSubsystem.h"
+#include "Menu/CMMenuButtonWidget.h"
 #include "Option/CMOptionWidget.h"
 #include "UI/NKMUITagList.h"
 #include "UI/Subsystem/NKMUIManagerSubsystem.h"

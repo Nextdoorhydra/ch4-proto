@@ -17,6 +17,12 @@ namespace CMOptionWidget
     const FString Windowed = TEXT("창 모드");
     const FString Korean = TEXT("한국어");
     const FString English = TEXT("English");
+    const TArray<FString> ColorVisionModes = {
+        TEXT("사용 안 함"),
+        TEXT("녹색약"),
+        TEXT("적색약"),
+        TEXT("청황색약")
+    };
 }
 
 UCMOptionWidget::UCMOptionWidget(const FObjectInitializer& ObjectInitializer)
@@ -42,6 +48,7 @@ void UCMOptionWidget::NativeConstruct()
     Combo_Resolution->OnSelectionChanged.AddUniqueDynamic(this, &ThisClass::HandleResolutionChanged);
     Combo_WindowMode->OnSelectionChanged.AddUniqueDynamic(this, &ThisClass::HandleWindowModeChanged);
     Combo_Language->OnSelectionChanged.AddUniqueDynamic(this, &ThisClass::HandleLanguageChanged);
+    Combo_ColorVisionMode->OnSelectionChanged.AddUniqueDynamic(this, &ThisClass::HandleColorVisionModeChanged);
     Slider_MasterVolume->OnValueChanged.AddUniqueDynamic(this, &ThisClass::HandleMasterVolumeChanged);
     Slider_BGMVolume->OnValueChanged.AddUniqueDynamic(this, &ThisClass::HandleBGMVolumeChanged);
     Slider_SFXVolume->OnValueChanged.AddUniqueDynamic(this, &ThisClass::HandleSFXVolumeChanged);
@@ -53,6 +60,7 @@ void UCMOptionWidget::NativeDestruct()
     Combo_Resolution->OnSelectionChanged.RemoveDynamic(this, &ThisClass::HandleResolutionChanged);
     Combo_WindowMode->OnSelectionChanged.RemoveDynamic(this, &ThisClass::HandleWindowModeChanged);
     Combo_Language->OnSelectionChanged.RemoveDynamic(this, &ThisClass::HandleLanguageChanged);
+    Combo_ColorVisionMode->OnSelectionChanged.RemoveDynamic(this, &ThisClass::HandleColorVisionModeChanged);
     Slider_MasterVolume->OnValueChanged.RemoveDynamic(this, &ThisClass::HandleMasterVolumeChanged);
     Slider_BGMVolume->OnValueChanged.RemoveDynamic(this, &ThisClass::HandleBGMVolumeChanged);
     Slider_SFXVolume->OnValueChanged.RemoveDynamic(this, &ThisClass::HandleSFXVolumeChanged);
@@ -163,6 +171,13 @@ void UCMOptionWidget::RefreshFromRuntime()
         if (const UCMUserSettingsSubsystem* Settings =
             GameInstance->GetSubsystem<UCMUserSettingsSubsystem>())
         {
+            Combo_ColorVisionMode->ClearOptions();
+            for (const FString& Mode : CMOptionWidget::ColorVisionModes)
+            {
+                Combo_ColorVisionMode->AddOption(Mode);
+            }
+            Combo_ColorVisionMode->SetSelectedIndex(
+                static_cast<int32>(Settings->GetColorVisionMode()));
             Slider_MasterVolume->SetValue(Settings->GetMasterVolume());
             Slider_BGMVolume->SetValue(Settings->GetBGMVolume());
             Slider_SFXVolume->SetValue(Settings->GetSFXVolume());
@@ -267,6 +282,26 @@ void UCMOptionWidget::HandleLanguageChanged(FString SelectedItem, ESelectInfo::T
 #endif
 
     UKismetInternationalizationLibrary::SetCurrentCulture(Culture, true);
+}
+
+void UCMOptionWidget::HandleColorVisionModeChanged(FString SelectedItem, ESelectInfo::Type)
+{
+    if (bIsRefreshing)
+    {
+        return;
+    }
+
+    const int32 SelectedIndex = CMOptionWidget::ColorVisionModes.IndexOfByKey(SelectedItem);
+    if (SelectedIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    if (UCMUserSettingsSubsystem* Settings = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UCMUserSettingsSubsystem>() : nullptr)
+    {
+        Settings->SetColorVisionMode(static_cast<ECMColorVisionMode>(SelectedIndex));
+    }
 }
 
 void UCMOptionWidget::HandleMasterVolumeChanged(float Value)

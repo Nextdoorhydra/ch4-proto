@@ -7,6 +7,8 @@
 #include "Animation/AnimSequence.h"
 #include "Common/Ability/CMAIGameplayTags.h"
 #include "Common/Ability/CMAIStateGameplayEffect.h"
+#include "Common/CMAINavigationRules.h"
+#include "Components/AudioComponent.h"
 #include "Sacrifice/CMSacrificeActionAbilities.h"
 #include "Sacrifice/CMSacrificeAIController.h"
 #include "Sacrifice/CMSacrificeAttributeSet.h"
@@ -20,7 +22,11 @@
 #include "Gore/CMDismembermentComponent.h"
 #include "MotionWarpingComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "NavigationData.h"
+#include "NavigationSystem.h"
 #include "RootMotionModifier_SkewWarp.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 #include "UObject/ConstructorHelpers.h"
 
 // 분리 가능한 신체와 GAS·모션 워핑·상태 컴포넌트를 가진 Sacrifice 캐릭터를 구성한다.
@@ -99,12 +105,15 @@ ACMSacrificeCharacter::ACMSacrificeCharacter()
     bUseControllerRotationYaw = false;
     GetCharacterMovement()->bOrientRotationToMovement = true;
     GetCharacterMovement()->bUseControllerDesiredRotation = false;
+    GetCharacterMovement()->bUseRVOAvoidance = true;
+    GetCharacterMovement()->AvoidanceConsiderationRadius = 500.0f;
 }
 
 // 애니메이션과 GAS를 초기화하고 절단·출혈·사망 상태 이벤트를 연결한다.
 void ACMSacrificeCharacter::BeginPlay()
 {
     Super::BeginPlay();
+    InitialCheckpointTransform = GetActorTransform();
 
     const FRotator CurrentMeshRotation = GetMesh()->GetRelativeRotation();
     GetMesh()->SetRelativeRotation(FRotator(CurrentMeshRotation.Pitch, CharacterMeshYawOffsetDegrees, CurrentMeshRotation.Roll));
@@ -120,12 +129,51 @@ void ACMSacrificeCharacter::BeginPlay()
     SacrificeStateComponent->OnMissingPartsChanged.AddDynamic(this, &ThisClass::HandleMissingPartsChanged);
     SacrificeStateComponent->OnBleedingStateChanged.AddDynamic(this, &ThisClass::HandleBleedingStateChanged);
     SacrificeStateComponent->OnSacrificeDied.AddDynamic(this, &ThisClass::HandleSacrificeDied);
+    RefreshBleedingLoopSound(SacrificeStateComponent->IsBleeding());
 
     if (HasAuthority())
     {
         InitializeAbilitySystem();
         GrantActionAbilities();
     }
+}
+
+bool ACMSacrificeCharacter::ResetAIForCheckpoint()
+{
+    UWorld* World = GetWorld();
+    if (!HasAuthority() || !World)
+    {
+        return false;
+    }
+
+    if (DismembermentComponent)
+    {
+        DismembermentComponent->DestroySpawnedDismembermentActors();
+    }
+
+    FActorSpawnParameters SpawnParameters;
+    SpawnParameters.OverrideLevel = GetLevel();
+    SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AController* ExistingController = GetController();
+    AActor* Replacement = World->SpawnActor(GetClass(), &InitialCheckpointTransform, SpawnParameters);
+    if (!Replacement)
+    {
+        return false;
+    }
+
+    if (IsValid(ExistingController))
+    {
+        ExistingController->Destroy();
+    }
+    Destroy();
+    return true;
+}
+
+void ACMSacrificeCharacter::EndPlay(
+    const EEndPlayReason::Type EndPlayReason)
+{
+    StopBleedingLoopSound();
+    Super::EndPlay(EndPlayReason);
 }
 
 void ACMSacrificeCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -150,6 +198,7 @@ int32 ACMSacrificeCharacter::ReceiveDismembermentHit_Implementation(const FCMDis
     const int32 Result = SacrificeStateComponent ? SacrificeStateComponent->ResolveDismembermentHit(Request) : 0;
     if (Result > 0 && HasAuthority())
     {
+        MulticastPlayVocalSound(CMSoundTags::AI_Sacrifice_HitScream);
         OnSacrificeHitAccepted.Broadcast(Request.Attacker, Request.SourcePart, Request.ImpactDirection);
     }
     return Result;
@@ -265,6 +314,14 @@ void ACMSacrificeCharacter::SetCurrentThreat(AActor* NewThreat)
     }
 }
 
+void ACMSacrificeCharacter::PlayThreatScream()
+{
+    if (HasAuthority())
+    {
+        MulticastPlayVocalSound(CMSoundTags::AI_Sacrifice_ThreatScream);
+    }
+}
+
 void ACMSacrificeCharacter::ConsumeFleeCharge()
 {
     if (HasAuthority() && AbilitySystemComponent && GetFleeCharges() > 0.0f)
@@ -347,7 +404,30 @@ float ACMSacrificeCharacter::BeginBackFallRootMotion()
 
     GetCharacterMovement()->StopMovementImmediately();
     const FVector Backward = -GetActorForwardVector().GetSafeNormal2D();
-    MulticastConfigureBackFallWarp(GetActorLocation() + Backward * StumbleBackwardDistanceCm, GetActorRotation());
+    const FVector Origin = GetActorLocation();
+    FVector SafeTarget = Origin;
+    UNavigationSystemV1* NavigationSystem = UNavigationSystemV1::GetCurrent(GetWorld());
+    ANavigationData* NavigationData = NavigationSystem ? NavigationSystem->GetNavDataForProps(GetNavAgentPropertiesRef()) : nullptr;
+    if (NavigationSystem && NavigationData)
+    {
+        constexpr float SampleIntervalCm = 20.0f;
+        constexpr float ContainmentToleranceCm = 25.0f;
+        const int32 SampleCount = FMath::Max(FMath::CeilToInt(StumbleBackwardDistanceCm / SampleIntervalCm), 1);
+        for (int32 SampleIndex = 1; SampleIndex <= SampleCount; ++SampleIndex)
+        {
+            const float SampleDistance = FMath::Min(SampleIndex * SampleIntervalCm, StumbleBackwardDistanceCm);
+            const FVector Candidate = Origin + Backward * SampleDistance;
+            FNavLocation ProjectedCandidate;
+            const FVector ProjectionExtent(ContainmentToleranceCm, ContainmentToleranceCm, 300.0f);
+            if (!NavigationSystem->ProjectPointToNavigation(Candidate, ProjectedCandidate, ProjectionExtent, NavigationData)
+                || !FCMAINavigationRules::IsWithinProjectionTolerance(Candidate, ProjectedCandidate.Location, ContainmentToleranceCm))
+            {
+                break;
+            }
+            SafeTarget = FVector(ProjectedCandidate.Location.X, ProjectedCandidate.Location.Y, Origin.Z);
+        }
+    }
+    MulticastConfigureBackFallWarp(SafeTarget, GetActorRotation());
 
     return BackFallAnimation->GetPlayLength();
 }
@@ -561,10 +641,44 @@ void ACMSacrificeCharacter::HandleMissingPartsChanged(int32 MissingPartCount)
 
 void ACMSacrificeCharacter::HandleBleedingStateChanged(const bool bBleeding)
 {
+    RefreshBleedingLoopSound(bBleeding);
     if (HasAuthority())
     {
         ApplyStateTag(CMAIGameplayTags::State_Sacrifice_Bleeding, bBleeding);
     }
+}
+
+void ACMSacrificeCharacter::RefreshBleedingLoopSound(const bool bBleeding)
+{
+    if (!bBleeding)
+    {
+        StopBleedingLoopSound();
+        return;
+    }
+    if (IsValid(BleedingLoopSoundComponent)
+        && BleedingLoopSoundComponent->IsPlaying())
+    {
+        return;
+    }
+
+    BleedingLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        GetRootComponent(),
+        CMSoundTags::AI_Sacrifice_BleedingLoop);
+}
+
+void ACMSacrificeCharacter::StopBleedingLoopSound()
+{
+    if (IsValid(BleedingLoopSoundComponent))
+    {
+        BleedingLoopSoundComponent->Stop();
+        BleedingLoopSoundComponent = nullptr;
+    }
+}
+
+void ACMSacrificeCharacter::MulticastPlayVocalSound_Implementation(
+    const FGameplayTag SoundTag)
+{
+    FCMSoundPlayback::PlaySFXAtActor(this, SoundTag);
 }
 
 // 모든 신체 애니메이션과 행동을 멈추고 사망 어빌리티 및 이동 불가 상태를 적용한다.

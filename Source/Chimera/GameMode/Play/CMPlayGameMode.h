@@ -9,6 +9,8 @@
 
 class ACMStageDirector;
 class ACMPlayerController;
+class ACMPartActorBase;
+class ACMRoomStreamingController;
 class UCMStageRouteDefinition;
 class UCMStageLoadBarrierComponent;
 enum class ECMStageLoadState : uint8;
@@ -28,6 +30,15 @@ struct FCMDisconnectedPlayerRecord
     FTimerHandle ExpirationTimer;
 };
 
+struct FCMCheckpointPartRecord
+{
+    FCMPartSlotAddress SlotAddress;
+    TSubclassOf<ACMPartActorBase> PartClass;
+    FName PartRowName = NAME_None;
+    FName TierRowName = NAME_None;
+    TWeakObjectPtr<ACMPartActorBase> SourcePart;
+};
+
 UCLASS()
 // 상위 플레이 흐름·스테이지 진행 결정 담당
 class CHIMERA_API ACMPlayGameMode : public ACMGameMode
@@ -44,11 +55,16 @@ public:
     virtual void RestartPlayer(AController* NewPlayer) override;
     virtual bool TryRetryGame(APlayerController* RequestingPlayer) override;
 
+    void CancelRetryVoteHold(APlayerController* RequestingPlayer);
+
     bool TryRestartCompletedStage(APlayerController* RequestingPlayer);
     bool TryAdvanceCompletedStage(APlayerController* RequestingPlayer);
 
     // Non-Shipping 치트 요청에서 최신 활성 체크포인트로 즉시 복귀
     bool TryCheatRespawnAtLatestCheckpoint();
+
+    // 현재 플레이 맵 전체를 다시 열어 모든 런타임 액터를 초기화
+    bool TryCheatRestartGame();
 
     // 개발용: 현재 스테이지의 목적지/결과 연출을 건너뛰고 다음 맵으로 이동
     bool TryCheatNextStage();
@@ -147,6 +163,11 @@ protected:
         Category = "Chimera|Checkpoint", meta = (ClampMin = "0.0"))
     float CheckpointRespawnDelay = 1.0f;
 
+    // 다시하기 표 하나를 등록하기 위해 우클릭을 유지해야 하는 서버 시간
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Retry Vote", meta = (ClampMin = "0.1"))
+    float RetryVoteHoldDuration = 3.0f;
+
     // 에디터에서 Route를 직접 실행할 때 추가 플레이어 접속을 기다리는 시간, 0이면 즉시 시작
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Testing", meta = (ClampMin = "0.0"))
     float DirectStageJoinGracePeriod = 2.0f;
@@ -163,13 +184,25 @@ private:
     bool IsCurrentStageDirector(const ACMStageDirector* Director) const;
     void TryStartStageWhenReady();
     void BindSharedChimeraEvents();
+    void BindRoomCheckpointEvents();
+    void HandleCheckpointCommitted(FName RoomId);
+    void CaptureCheckpointParts();
+    bool RestoreCheckpointParts(class ACMChimera* SharedChimera);
 
     UFUNCTION()
     void HandleAllSegmentsDead();
 
     bool RespawnAtActiveCheckpoint();
+    bool RestartCurrentWorld();
+    bool ResetCheckpointAI();
     void ScheduleCheckpointRespawn();
     void HandleCheckpointRespawnTimer();
+
+    void CompleteRetryVoteHold(
+        TWeakObjectPtr<ACMPlayerController> RequestingPlayer);
+    bool IsEligibleRetryVoter(const APlayerController* Player) const;
+    void RefreshRetryVoteState();
+    void ClearRetryVoteState();
 
     bool PublishStageLoadRequest(FPrimaryAssetId ScheduleId);
     bool StartStageLoadRequest(const FCMQueuedStageLoadRequest& Request);
@@ -228,8 +261,12 @@ private:
     bool bStageLoadReady = false;
     bool bStageLoopRestartScheduled = false;
     bool bCheckpointRespawnPending = false;
+    bool bCheckpointRestartInProgress = false;
     bool bDirectStageRoute = false;
     bool bDirectStageJoinGraceElapsed = true;
     TMap<FString, FCMDisconnectedPlayerRecord> DisconnectedPlayers;
     TSet<FString> ExpiredReconnectKeys;
+    TArray<FCMCheckpointPartRecord> CheckpointParts;
+    TSet<TWeakObjectPtr<class APlayerState>> RetryVoters;
+    TMap<TWeakObjectPtr<ACMPlayerController>, FTimerHandle> RetryVoteHoldTimers;
 };

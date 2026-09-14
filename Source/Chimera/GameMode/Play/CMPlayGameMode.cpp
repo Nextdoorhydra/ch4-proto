@@ -5,12 +5,15 @@
 #include "GameMode/StageRoute/CMStageRouteSubsystem.h"
 #include "Stage/CMStageDirector.h"
 #include "Stage/Room/CMRoomStreamingController.h"
+#include "Stage/Checkpoint/CMCheckpointAIResettable.h"
 #include "AsyncLoad/CMStageLoadLog.h"
 #include "AsyncLoad/CMStageLoadBarrierComponent.h"
 #include "Player/CMChimera.h"
 #include "Player/CMControlBody.h"
+#include "Player/CMPartSlotComponent.h"
 #include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
+#include "Parts/Core/CMPartActorBase.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerStart.h"
@@ -41,6 +44,7 @@ void ACMPlayGameMode::BeginPlay()
         return;
     }
     BindSharedChimeraEvents();
+    BindRoomCheckpointEvents();
 
     UCMStageRouteSubsystem* StageRoute = GetGameInstance()
         ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>()
@@ -178,6 +182,13 @@ void ACMPlayGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
     GetWorldTimerManager().ClearTimer(StageLoopRestartTimerHandle);
     GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
     GetWorldTimerManager().ClearTimer(DirectStageJoinGraceTimerHandle);
+    for (TPair<TWeakObjectPtr<ACMPlayerController>, FTimerHandle>& Pair
+        : RetryVoteHoldTimers)
+    {
+        GetWorldTimerManager().ClearTimer(Pair.Value);
+    }
+    RetryVoteHoldTimers.Reset();
+    RetryVoters.Reset();
     for (TPair<FString, FCMDisconnectedPlayerRecord>& Pair : DisconnectedPlayers)
     {
         GetWorldTimerManager().ClearTimer(Pair.Value.ExpirationTimer);
@@ -190,6 +201,10 @@ void ACMPlayGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
         {
             SharedChimera->OnAllSegmentsDead.RemoveAll(this);
         }
+    }
+    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
+    {
+        It->OnCheckpointCommitted.RemoveAll(this);
     }
     Super::EndPlay(EndPlayReason);
 }
@@ -216,9 +231,12 @@ void ACMPlayGameMode::PostLogin(APlayerController* NewPlayer)
 // 퇴장한 플레이어를 완료 집합에서 제거하고 남은 인원 기준으로 배리어 재평가
 void ACMPlayGameMode::Logout(AController* Exiting)
 {
+    APlayerState* LeavingPlayerState = Exiting
+        ? Exiting->GetPlayerState<APlayerState>() : nullptr;
     if (ACMPlayerController* PlayerController = Cast<ACMPlayerController>(Exiting))
     {
         StageLoadBarrier->HandlePlayerLeft(PlayerController);
+        CancelRetryVoteHold(PlayerController);
     }
 
     ACMPlayerState* PlayerState = Exiting
@@ -254,6 +272,8 @@ void ACMPlayGameMode::Logout(AController* Exiting)
     }
 
     Super::Logout(Exiting);
+    RetryVoters.Remove(LeavingPlayerState);
+    RefreshRetryVoteState();
 }
 
 // 진행 중 신규 합류자는 현재 스테이지에서 ControlBody를 만들지 않고 관전
@@ -399,6 +419,11 @@ void ACMPlayGameMode::SetPlayPhase(
     float Duration
 )
 {
+    if (NewPhase != ECMPlayPhase::Playing
+        && (!RetryVoters.IsEmpty() || !RetryVoteHoldTimers.IsEmpty()))
+    {
+        ClearRetryVoteState();
+    }
     if (ACMPlayGameState* PlayState = CachedPlayGameState)
     {
         PlayState->SetPlayPhase(NewPhase, Duration);
@@ -413,7 +438,11 @@ void ACMPlayGameMode::InitializeStageProgress(
 {
     if (ACMPlayGameState* PlayState = CachedPlayGameState)
     {
-        PlayState->SetStageProgress(StageIndex, StageCount);
+        const UCMStageRouteSubsystem* Route = GetGameInstance()
+            ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>() : nullptr;
+        const UCMStageRouteDefinition* Definition = Route ? Route->GetStageRouteDefinition() : nullptr;
+        const FCMStageRouteEntry* Stage = Definition ? Definition->GetStage(StageIndex) : nullptr;
+        PlayState->SetStageProgress(StageIndex, StageCount, Stage ? Stage->StageBGMTag : FGameplayTag());
     }
 }
 
@@ -465,6 +494,7 @@ bool ACMPlayGameMode::StartStage()
             / CMControl::SegmentsPerPlayer;
         SharedChimera->SpawnStartingPartsForPlayers(
             StartingLayoutPlayerCount);
+        CaptureCheckpointParts();
     }
 
     GetWorldTimerManager().ClearTimer(StartingPresentationTimeoutHandle);
@@ -567,6 +597,140 @@ void ACMPlayGameMode::BindSharedChimeraEvents()
         IsValid(SharedChimera));
 }
 
+void ACMPlayGameMode::BindRoomCheckpointEvents()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    for (TActorIterator<ACMRoomStreamingController> It(GetWorld()); It; ++It)
+    {
+        It->OnCheckpointCommitted.AddUObject(
+            this, &ThisClass::HandleCheckpointCommitted);
+    }
+}
+
+void ACMPlayGameMode::HandleCheckpointCommitted(FName RoomId)
+{
+    ACMChimera* SharedChimera = CachedPlayGameState
+        ? CachedPlayGameState->SharedChimera : nullptr;
+    const int32 RevivedSegmentCount = IsValid(SharedChimera)
+        ? SharedChimera->ReviveDeadSegments() : 0;
+    CaptureCheckpointParts();
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("[Checkpoint Snapshot] Room=%s Parts=%d RevivedSegments=%d"),
+        *RoomId.ToString(),
+        CheckpointParts.Num(),
+        RevivedSegmentCount);
+}
+
+void ACMPlayGameMode::CaptureCheckpointParts()
+{
+    ACMChimera* SharedChimera = CachedPlayGameState
+        ? CachedPlayGameState->SharedChimera : nullptr;
+    if (!HasAuthority() || !IsValid(SharedChimera))
+    {
+        return;
+    }
+
+    CheckpointParts.Reset();
+    const int32 SlotCount = SharedChimera->GetActiveSegmentCount()
+        * CMControl::PartSlotsPerSegment;
+    for (int32 FlatIndex = 0; FlatIndex < SlotCount; ++FlatIndex)
+    {
+        const FCMPartSlotAddress SlotAddress =
+            CMControl::FromFlatPartSlotIndex(FlatIndex);
+        const UCMPartSlotComponent* PartSlot =
+            SharedChimera->GetPartSlotComponent(SlotAddress);
+        ACMPartActorBase* Part = PartSlot
+            ? Cast<ACMPartActorBase>(PartSlot->GetAttachedPart()) : nullptr;
+        if (!IsValid(Part))
+        {
+            continue;
+        }
+
+        FCMCheckpointPartRecord& Record = CheckpointParts.AddDefaulted_GetRef();
+        Record.SlotAddress = SlotAddress;
+        Record.PartClass = Part->GetClass();
+        Record.PartRowName = Part->GetPartRowName();
+        Record.TierRowName = Part->GetTierRowName();
+        Record.SourcePart = Part;
+    }
+}
+
+bool ACMPlayGameMode::RestoreCheckpointParts(ACMChimera* SharedChimera)
+{
+    if (!HasAuthority() || !IsValid(SharedChimera))
+    {
+        return false;
+    }
+
+    TSet<AActor*> PartsToDestroy;
+    const int32 SlotCount = SharedChimera->GetActiveSegmentCount()
+        * CMControl::PartSlotsPerSegment;
+    for (int32 FlatIndex = 0; FlatIndex < SlotCount; ++FlatIndex)
+    {
+        const FCMPartSlotAddress SlotAddress =
+            CMControl::FromFlatPartSlotIndex(FlatIndex);
+        if (UCMPartSlotComponent* PartSlot =
+            SharedChimera->GetPartSlotComponent(SlotAddress))
+        {
+            if (AActor* Part = PartSlot->DetachPart())
+            {
+                PartsToDestroy.Add(Part);
+            }
+        }
+    }
+    for (const FCMCheckpointPartRecord& Record : CheckpointParts)
+    {
+        if (ACMPartActorBase* SourcePart = Record.SourcePart.Get())
+        {
+            PartsToDestroy.Add(SourcePart);
+        }
+    }
+    for (AActor* Part : PartsToDestroy)
+    {
+        if (IsValid(Part))
+        {
+            Part->Destroy();
+        }
+    }
+
+    int32 RestoredCount = 0;
+    for (FCMCheckpointPartRecord& Record : CheckpointParts)
+    {
+        UCMPartSlotComponent* PartSlot =
+            SharedChimera->GetPartSlotComponent(Record.SlotAddress);
+        if (!PartSlot || !Record.PartClass)
+        {
+            continue;
+        }
+
+        ACMPartActorBase* NewPart = ACMPartActorBase::SpawnPartFromDataRows(
+            this,
+            Record.PartClass,
+            Record.PartRowName,
+            Record.TierRowName,
+            SharedChimera->GetActorTransform(),
+            SharedChimera);
+        if (NewPart && PartSlot->AttachPart(NewPart))
+        {
+            Record.SourcePart = NewPart;
+            ++RestoredCount;
+        }
+        else if (NewPart)
+        {
+            NewPart->Destroy();
+        }
+    }
+
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("[Checkpoint Parts Restored] Expected=%d Restored=%d"),
+        CheckpointParts.Num(), RestoredCount);
+    return RestoredCount == CheckpointParts.Num();
+}
+
 // 실제 플레이 중 모든 활성 Segment가 사망하면 체크포인트 복귀 예약
 void ACMPlayGameMode::HandleAllSegmentsDead()
 {
@@ -595,17 +759,167 @@ void ACMPlayGameMode::HandleAllSegmentsDead()
 
 bool ACMPlayGameMode::TryRetryGame(APlayerController* RequestingPlayer)
 {
-    if (!HasAuthority()
-        || GetNetMode() != NM_ListenServer
-        || !IsValid(RequestingPlayer)
-        || !RequestingPlayer->IsLocalController())
+    ACMPlayerController* ChimeraPlayer =
+        Cast<ACMPlayerController>(RequestingPlayer);
+    APlayerState* RequestingPlayerState = RequestingPlayer
+        ? RequestingPlayer->GetPlayerState<APlayerState>() : nullptr;
+    const bool bEligible = IsEligibleRetryVoter(RequestingPlayer);
+    const bool bAlreadyVoted = RequestingPlayerState
+        && RetryVoters.Contains(RequestingPlayerState);
+    const bool bHoldPending = ChimeraPlayer
+        && RetryVoteHoldTimers.Contains(ChimeraPlayer);
+    if (!bEligible || !ChimeraPlayer || bAlreadyVoted || bHoldPending)
     {
+        UE_LOG(LogChimeraStageLoad, Warning,
+            TEXT("[RetryVote][Server] Hold rejected Controller=%s PlayerId=%d Eligible=%d AlreadyVoted=%d HoldPending=%d"),
+            *GetNameSafe(RequestingPlayer),
+            RequestingPlayerState
+                ? RequestingPlayerState->GetPlayerId() : INDEX_NONE,
+            bEligible, bAlreadyVoted, bHoldPending);
         return false;
     }
 
-    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
-    bCheckpointRespawnPending = false;
-    return RespawnAtActiveCheckpoint();
+    FTimerHandle& HoldTimer = RetryVoteHoldTimers.Add(ChimeraPlayer);
+    FTimerDelegate HoldDelegate;
+    HoldDelegate.BindUObject(
+        this,
+        &ThisClass::CompleteRetryVoteHold,
+        TWeakObjectPtr<ACMPlayerController>(ChimeraPlayer));
+    GetWorldTimerManager().SetTimer(
+        HoldTimer,
+        HoldDelegate,
+        FMath::Max(RetryVoteHoldDuration, 0.1f),
+        false);
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("[RetryVote][Server] Hold timer started Controller=%s PlayerId=%d Duration=%.2f"),
+        *GetNameSafe(ChimeraPlayer), RequestingPlayerState->GetPlayerId(),
+        FMath::Max(RetryVoteHoldDuration, 0.1f));
+    return true;
+}
+
+void ACMPlayGameMode::CancelRetryVoteHold(APlayerController* RequestingPlayer)
+{
+    if (!HasAuthority() || !RequestingPlayer)
+    {
+        return;
+    }
+
+    ACMPlayerController* ChimeraPlayer =
+        Cast<ACMPlayerController>(RequestingPlayer);
+    if (!ChimeraPlayer)
+    {
+        return;
+    }
+    if (FTimerHandle* HoldTimer = RetryVoteHoldTimers.Find(ChimeraPlayer))
+    {
+        GetWorldTimerManager().ClearTimer(*HoldTimer);
+        RetryVoteHoldTimers.Remove(ChimeraPlayer);
+        UE_LOG(LogChimeraStageLoad, Display,
+            TEXT("[RetryVote][Server] Hold timer cancelled Controller=%s PlayerId=%d"),
+            *GetNameSafe(ChimeraPlayer),
+            ChimeraPlayer->PlayerState
+                ? ChimeraPlayer->PlayerState->GetPlayerId() : INDEX_NONE);
+    }
+}
+
+bool ACMPlayGameMode::IsEligibleRetryVoter(
+    const APlayerController* Player) const
+{
+    const ACMPlayGameState* PlayState = CachedPlayGameState;
+    const APlayerState* PlayerState = Player
+        ? Player->GetPlayerState<APlayerState>() : nullptr;
+    return HasAuthority()
+        && PlayState
+        && PlayState->GetPlayPhase() == ECMPlayPhase::Playing
+        && IsValid(Player)
+        && IsValid(PlayerState)
+        && !PlayerState->IsOnlyASpectator();
+}
+
+void ACMPlayGameMode::CompleteRetryVoteHold(
+    TWeakObjectPtr<ACMPlayerController> RequestingPlayer)
+{
+    ACMPlayerController* Player = RequestingPlayer.Get();
+    RetryVoteHoldTimers.Remove(RequestingPlayer);
+    if (!IsEligibleRetryVoter(Player)
+        || RetryVoters.Contains(Player->GetPlayerState<APlayerState>()))
+    {
+        return;
+    }
+
+    RetryVoters.Add(Player->GetPlayerState<APlayerState>());
+    RefreshRetryVoteState();
+
+    const FCMRetryVoteSnapshot& Vote =
+        CachedPlayGameState->GetRetryVoteSnapshot();
+    UE_LOG(LogChimeraStageLoad, Display,
+        TEXT("[RetryVote][Server] Vote registered Controller=%s PlayerId=%d Votes=%d Required=%d Eligible=%d"),
+        *GetNameSafe(Player),
+        Player->PlayerState ? Player->PlayerState->GetPlayerId() : INDEX_NONE,
+        Vote.VoteCount, Vote.RequiredVoteCount, Vote.EligiblePlayerCount);
+    if (Vote.VoteCount >= Vote.RequiredVoteCount
+        && Vote.RequiredVoteCount > 0)
+    {
+        RespawnAtActiveCheckpoint();
+    }
+}
+
+void ACMPlayGameMode::RefreshRetryVoteState()
+{
+    ACMPlayGameState* PlayState = CachedPlayGameState;
+    if (!HasAuthority() || !PlayState)
+    {
+        return;
+    }
+
+    TSet<APlayerState*> EligiblePlayers;
+    for (APlayerState* PlayerState : PlayState->PlayerArray)
+    {
+        if (IsValid(PlayerState) && !PlayerState->IsOnlyASpectator())
+        {
+            EligiblePlayers.Add(PlayerState);
+        }
+    }
+
+    for (auto It = RetryVoters.CreateIterator(); It; ++It)
+    {
+        if (!It->IsValid() || !EligiblePlayers.Contains(It->Get()))
+        {
+            It.RemoveCurrent();
+        }
+    }
+
+    TArray<int32> VotedPlayerIds;
+    for (const TWeakObjectPtr<APlayerState>& Voter : RetryVoters)
+    {
+        if (const APlayerState* PlayerState = Voter.Get())
+        {
+            VotedPlayerIds.Add(PlayerState->GetPlayerId());
+        }
+    }
+    VotedPlayerIds.Sort();
+
+    const int32 EligibleCount = EligiblePlayers.Num();
+    PlayState->SetRetryVoteState(
+        !VotedPlayerIds.IsEmpty(),
+        VotedPlayerIds,
+        EligibleCount,
+        EligibleCount > 0 ? EligibleCount / 2 + 1 : 0);
+}
+
+void ACMPlayGameMode::ClearRetryVoteState()
+{
+    for (TPair<TWeakObjectPtr<ACMPlayerController>, FTimerHandle>& Pair
+        : RetryVoteHoldTimers)
+    {
+        GetWorldTimerManager().ClearTimer(Pair.Value);
+    }
+    RetryVoteHoldTimers.Reset();
+    RetryVoters.Reset();
+    if (CachedPlayGameState)
+    {
+        CachedPlayGameState->SetRetryVoteState(false, {}, 0, 0);
+    }
 }
 
 bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
@@ -618,6 +932,30 @@ bool ACMPlayGameMode::TryCheatRespawnAtLatestCheckpoint()
     GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
     bCheckpointRespawnPending = false;
     return RespawnAtActiveCheckpoint();
+}
+
+bool ACMPlayGameMode::TryCheatRestartGame()
+{
+    return RestartCurrentWorld();
+}
+
+bool ACMPlayGameMode::RestartCurrentWorld()
+{
+    if (!HasAuthority() || !GetWorld() || bStageLoopRestartScheduled)
+    {
+        return false;
+    }
+
+    bStageLoopRestartScheduled = true;
+    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
+    GetWorldTimerManager().ClearTimer(StageLoopRestartTimerHandle);
+    bCheckpointRespawnPending = false;
+    const bool bStarted = GetWorld()->ServerTravel(TEXT("?Restart"), false);
+    if (!bStarted)
+    {
+        bStageLoopRestartScheduled = false;
+    }
+    return bStarted;
 }
 
 bool ACMPlayGameMode::TryCheatNextStage()
@@ -730,10 +1068,12 @@ void ACMPlayGameMode::HandleCheckpointRespawnTimer()
 bool ACMPlayGameMode::RespawnAtActiveCheckpoint()
 {
     bCheckpointRespawnPending = false;
+    GetWorldTimerManager().ClearTimer(CheckpointRespawnTimerHandle);
 
     ACMPlayGameState* PlayState = CachedPlayGameState;
     ACMChimera* SharedChimera = PlayState ? PlayState->SharedChimera : nullptr;
-    if (!HasAuthority() || !IsValid(SharedChimera))
+    if (!HasAuthority() || !IsValid(SharedChimera)
+        || bCheckpointRestartInProgress)
     {
         return false;
     }
@@ -775,14 +1115,46 @@ bool ACMPlayGameMode::RespawnAtActiveCheckpoint()
         CheckpointTransform = FallbackStart->GetActorTransform();
     }
 
+    bCheckpointRestartInProgress = true;
+    ClearRetryVoteState();
+    const bool bRoomReset = !RoomController
+        || RoomController->ResetActiveCheckpointRoom();
+    const bool bAIReset = ResetCheckpointAI();
+    const bool bTeleported = SharedChimera->TeleportAssemblyForCheckpointRespawn(CheckpointTransform);
     SharedChimera->RestoreForCheckpointRespawn();
-    const bool bTeleported = SharedChimera->TeleportAssembly(CheckpointTransform);
+    const bool bPartsRestored = RestoreCheckpointParts(SharedChimera);
+    bCheckpointRestartInProgress = false;
     UE_LOG(LogChimeraStageLoad, Display,
-        TEXT("키메라를 체크포인트로 복귀시켰습니다. Source=%s Room=%s Success=%d"),
+        TEXT("키메라를 체크포인트로 복귀시켰습니다. Source=%s Room=%s RoomReset=%d AIReset=%d Teleport=%d Parts=%d"),
         bUsingRoomCheckpoint ? TEXT("RoomCheckpoint") : TEXT("PlayerStart"),
         RoomController ? *RoomController->GetCurrentRoomId().ToString() : TEXT("None"),
-        bTeleported);
-    return bTeleported;
+        bRoomReset,
+        bAIReset,
+        bTeleported,
+        bPartsRestored);
+    return bRoomReset && bAIReset && bTeleported && bPartsRestored;
+}
+
+bool ACMPlayGameMode::ResetCheckpointAI()
+{
+    TArray<AActor*> ResettableAI;
+    for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+    {
+        if (It->Implements<UCMCheckpointAIResettable>())
+        {
+            ResettableAI.Add(*It);
+        }
+    }
+
+    int32 ResetCount = 0;
+    for (AActor* AIActor : ResettableAI)
+    {
+        ICMCheckpointAIResettable* Resettable = Cast<ICMCheckpointAIResettable>(AIActor);
+        ResetCount += Resettable && Resettable->ResetAIForCheckpoint() ? 1 : 0;
+    }
+
+    UE_LOG(LogChimeraStageLoad, Display, TEXT("체크포인트 AI 초기화: Expected=%d Reset=%d"), ResettableAI.Num(), ResetCount);
+    return ResetCount == ResettableAI.Num();
 }
 
 // 현재 요청과 성공 보고자를 검증하고 전원 완료 시 Blocking Phase를 해제

@@ -7,6 +7,15 @@
 
 #include "CMLeverBase.generated.h"
 
+class UAudioComponent;
+
+UENUM(BlueprintType)
+enum class ECMLeverInteractionMode : uint8
+{
+    LinearPull,
+    WheelRotation
+};
+
 UCLASS(Blueprintable)
 // 일반 팔의 홀드 이동으로 회전하며 양끝 임계점에서 상태를 전환하는 레버
 class CHIMERA_API ACMLeverBase
@@ -48,6 +57,11 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever", meta = (ClampMin = "1.0"))
     float FullTravelDistance = 100.0f;
 
+    // Linear levers follow planar hand displacement; wheel levers follow the
+    // hand's signed angle around LocalRotationAxis.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever")
+    ECMLeverInteractionMode InteractionMode = ECMLeverInteractionMode::LinearPull;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever", meta = (ClampMin = "0.01", ClampMax = "1.0"))
     float SwitchThreshold = 0.8f;
 
@@ -57,6 +71,15 @@ protected:
     // Time to visually rotate from one end to the other. Zero snaps immediately.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever", meta = (ClampMin = "0.0", Units = "s"))
     float RotationTransitionDuration = 0.3f;
+
+    // When enabled, releasing the arm deactivates the lever and returns it to its default pose.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever")
+    bool bRequiresHoldToStayActivated = false;
+
+    // Releases the arm when it moves this far from the handle. Zero disables the limit.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever",
+        meta = (ClampMin = "0.0", Units = "cm"))
+    float MaximumHoldDistance = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera Lever")
     FVector LocalRotationAxis = FVector::RightVector;
@@ -96,16 +119,29 @@ private:
     void HandleLeverTriggerChanged(AActor* TriggeringActor);
     void UpdateArmHold();
     void UpdateVisualRotation(float DeltaSeconds);
+    void StartLeverMoveSound();
+    void HandleLeverMoveSoundIdle();
+    void StopLeverMoveSound();
+    void PlayLeverSettleSound();
     void StopArmHold();
+    bool IsHoldDistanceExceeded(const ACMArmPart& ArmPart) const;
+    float CalculateLeverAlphaFromArmLocation(const FVector& ArmLocation) const;
     bool SetLeverPressed(bool bPressed, AActor* InstigatorActor);
 
     TWeakObjectPtr<ACMArmPart> HoldingArm;
     FVector GrabStartArmLocation = FVector::ZeroVector;
+    FVector GrabStartWheelDirection = FVector::ZeroVector;
     float GrabStartAlpha = -1.0f;
     FQuat InitialPivotRotation = FQuat::Identity;
     bool bLeverPoseInitialized = false;
     bool bTrackingArmHold = false;
     float VisualLeverAlpha = -1.0f;
     bool bUpdatingFromHold = false;
+    bool bLeverMovementSoundActive = false;
     ECMGrabPullResult LastPullResult = ECMGrabPullResult::Unhandled;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> LeverMoveLoopComponent;
+
+    FTimerHandle LeverMoveSoundStopTimerHandle;
 };

@@ -3,10 +3,12 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Aggressive/Common/Animation/CMAIProceduralLegComponent.h"
 #include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveMovementCommandComponent.h"
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 #include "Aggressive/Common/Movement/CMAIFixedLegActuatorComponent.h"
+#include "Aggressive/Common/Movement/CMGroundPlacementBoxComponent.h"
 #include "Aggressive/Common/Perception/CMAggressiveSightComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -16,7 +18,7 @@ namespace CMCentipedeBody
 {
     constexpr int32 SegmentCount = 4;
     constexpr int32 JointCount = SegmentCount - 1;
-    constexpr float GroundContactHeight = -100.0f;
+    constexpr float GroundContactHeight = -150.0f;
     constexpr float LegHalfHeight = 20.0f;
     constexpr float LegLateralOffset = 90.0f;
     constexpr float TrailSampleDistance = 20.0f;
@@ -36,9 +38,11 @@ ACMCentipedePawn::ACMCentipedePawn()
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
-    HeadBody = CreateDefaultSubobject<UBoxComponent>(TEXT("Segment00Body"));
+    UCMGroundPlacementBoxComponent* GroundedHeadBody = CreateDefaultSubobject<UCMGroundPlacementBoxComponent>(TEXT("Segment00Body"));
+    HeadBody = GroundedHeadBody;
     SetRootComponent(HeadBody);
     HeadBody->SetBoxExtent(FVector(BodyLength, BodyWidth, BodyHeight) * 0.5f);
+    GroundedHeadBody->SetGroundContactHeight(CMCentipedeBody::GroundContactHeight);
     HeadBody->SetCollisionProfileName(TEXT("PhysicsActor"));
     HeadBody->SetSimulatePhysics(true);
     HeadBody->SetIsReplicated(true);
@@ -87,6 +91,7 @@ ACMCentipedePawn::ACMCentipedePawn()
 void ACMCentipedePawn::BeginPlay()
 {
     Super::BeginPlay();
+    LegActuator->ResolveInitialGroundPenetration(HeadBody, LegContactPoints, LegActuationSettings);
     ApplyBodySettings();
     CreateSegmentConstraints();
     LegActuator->InitializeLegs(LegContactPoints.Num());
@@ -559,6 +564,7 @@ void ACMCentipedePawn::AddLeg(int32 SegmentIndex, bool bLeftLeg, UStaticMesh* Cu
     Mesh->SetRelativeScale3D(FVector(0.2f, 0.2f, 0.4f));
     Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Mesh->SetCanEverAffectNavigation(false);
+    Mesh->SetHiddenInGame(true);
     LegMeshes.Add(Mesh);
 
     USceneComponent* Contact = CreateDefaultSubobject<USceneComponent>(*FString::Printf(TEXT("Segment%02d%sLegContact"), SegmentIndex, SideName));
@@ -566,6 +572,14 @@ void ACMCentipedePawn::AddLeg(int32 SegmentIndex, bool bLeftLeg, UStaticMesh* Cu
     Contact->SetRelativeLocation(ContactLocation);
     LegContactPoints.Add(Contact);
     LegBodies.Add(Segment);
+
+    const FVector OutwardDirection(0.0f, SideSign, 0.0f);
+    const float PhaseOffset = static_cast<float>((SegmentIndex * 2 + (bLeftLeg ? 0 : 1)) % 4) / 4.0f;
+    UCMAIProceduralLegComponent* ProceduralLeg = CreateDefaultSubobject<UCMAIProceduralLegComponent>(*FString::Printf(TEXT("Segment%02d%sProceduralLeg"), SegmentIndex, SideName));
+    ProceduralLeg->SetupAttachment(Segment);
+    ProceduralLeg->SetRelativeLocation(ContactLocation - OutwardDirection * 30.0f + FVector::UpVector * 130.0f);
+    ProceduralLeg->Configure(Contact, OutwardDirection, PhaseOffset, 1.8f);
+    ProceduralLegMeshes.Add(ProceduralLeg);
 }
 
 void ACMCentipedePawn::ApplyBodySettings()

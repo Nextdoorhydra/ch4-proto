@@ -3,6 +3,8 @@
 #include "Components/AudioComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "NiagaraComponent.h"
+#include "Sound/CMGameSoundBridgeSubsystem.h"
+#include "Sound/CMSoundPlayback.h"
 #include "Stage/Obstacle/Component/CMForceZoneComponent.h"
 #include "Stage/Obstacle/Component/CMFlashComponent.h"
 #include "Stage/Obstacle/Component/CMHazardComponent.h"
@@ -28,18 +30,41 @@ ACMStageObstacleBase::ACMStageObstacleBase()
     PrimaryEffect->SetupAttachment(SceneRoot);
     PrimaryEffect->SetAutoActivate(false);
 
-    LoopAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("LoopAudio"));
-    LoopAudio->SetupAttachment(SceneRoot);
-    LoopAudio->bAutoActivate = false;
 }
 
 // 배치 인스턴스의 밸런스를 해석하고 런타임 효과 컴포넌트 준비
 void ACMStageObstacleBase::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge =
+                GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.AddUObject(
+                this,
+                &ThisClass::HandleSoundCatalogsRebuilt);
+        }
+    }
+
     ResolveBalance();
     ApplyResolvedBalance();
     ConfigureDirectEffects();
+}
+
+void ACMStageObstacleBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge =
+                GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.RemoveAll(this);
+        }
+    }
+    StopActiveLoopSound();
+    Super::EndPlay(EndPlayReason);
 }
 
 void ACMStageObstacleBase::ResolveBalance()
@@ -97,7 +122,9 @@ void ACMStageObstacleBase::ResolveBalance()
 
 void ACMStageObstacleBase::ApplyResolvedBalance()
 {
-    PartEffect.bEnabled = ResolvedObstacleBalance.Damage > 0.0f
+    PartEffect.bEnabled = PartEffect.ApplicationPolicy
+            == ECMObstacleEffectApplicationPolicy::KillOnEnter
+        || ResolvedObstacleBalance.Damage > 0.0f
         || PartEffect.StatusEffect != ECMPartObstacleStatusEffect::None;
     PartEffect.DamagePerApplication = ResolvedObstacleBalance.bValid
         ? ResolvedObstacleBalance.Damage : 0.0f;
@@ -222,19 +249,51 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
             PrimaryEffect->Deactivate();
         }
     }
-    if (LoopAudio && LoopAudio->GetSound())
+    if (ActiveLoopSoundTag.IsValid())
     {
         if (bIsActive)
         {
-            LoopAudio->Play();
+            TryStartActiveLoopSound();
         }
         else
         {
-            LoopAudio->Stop();
+            StopActiveLoopSound();
         }
     }
 
     HandleObstacleActiveStateChanged(bIsActive);
+}
+
+// 맵 배치 액터의 BeginPlay가 사운드 비동기 로드보다 빨랐으면 준비 완료 후 루프를 재시도한다.
+void ACMStageObstacleBase::HandleSoundCatalogsRebuilt()
+{
+    if (IsObstacleActive())
+    {
+        TryStartActiveLoopSound();
+    }
+}
+
+void ACMStageObstacleBase::TryStartActiveLoopSound()
+{
+    if (!ActiveLoopSoundTag.IsValid()
+        || (IsValid(ActiveLoopSoundComponent)
+            && ActiveLoopSoundComponent->IsPlaying()))
+    {
+        return;
+    }
+
+    ActiveLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        SceneRoot,
+        ActiveLoopSoundTag);
+}
+
+void ACMStageObstacleBase::StopActiveLoopSound()
+{
+    if (IsValid(ActiveLoopSoundComponent))
+    {
+        ActiveLoopSoundComponent->Stop();
+        ActiveLoopSoundComponent = nullptr;
+    }
 }
 
 // 해석된 피해와 파츠 상태 설정을 부착된 Hazard에 전달

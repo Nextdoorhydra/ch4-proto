@@ -68,6 +68,33 @@ void UCMDismembermentComponent::BeginPlay()
     }
 }
 
+void UCMDismembermentComponent::DestroySpawnedDismembermentActors()
+{
+    for (const TPair<ECMBodyPart, TObjectPtr<AActor>>& Pair : DetachedPartActors)
+    {
+        if (IsValid(Pair.Value))
+        {
+            Pair.Value->Destroy();
+        }
+    }
+    DetachedPartActors.Reset();
+
+    for (AActor* FleshChunk : SpawnedFleshChunks)
+    {
+        if (IsValid(FleshChunk))
+        {
+            FleshChunk->Destroy();
+        }
+    }
+    SpawnedFleshChunks.Reset();
+
+    if (IsValid(CorpseBloodPoolComponent))
+    {
+        CorpseBloodPoolComponent->DestroyComponent();
+        CorpseBloodPoolComponent = nullptr;
+    }
+}
+
 void UCMDismembermentComponent::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const

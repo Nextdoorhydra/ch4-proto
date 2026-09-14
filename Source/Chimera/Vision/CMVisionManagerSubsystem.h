@@ -90,6 +90,10 @@ public:
     float GetVisibilityMaskWorldHalfExtent() const;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FCMVisionManagerProjectionTest;
+#endif
+
     bool EnsureLoadCoordinatorSubscription();
     void RefreshRenderConfigState();
     bool TryResolveLoadedRenderConfig();
@@ -128,11 +132,7 @@ private:
         const UCMVisionComponent& VisionSource,
         const FVector& WorldLocation
     ) const;
-    FVector2D WorldToScreenMaskPixel(
-        const FVector& WorldLocation,
-        int32 Width,
-        int32 Height
-    ) const;
+    bool WorldToScreenMaskPixel(const FVector& WorldLocation, int32 Width, int32 Height, FVector2D& OutPixel) const;
     void DrawCachedVisionMask(
         UCanvas* Canvas,
         int32 Width,

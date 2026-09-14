@@ -36,6 +36,18 @@ bool FCMSacrificeRules::ShouldUseInjuredCrawlAfterHit(const bool bWasBackCrawlin
     return bWasBackCrawling || bHasLostArmOrLeg;
 }
 
+bool FCMSacrificeRules::IsMovementActionState(const ECMSacrificeActionState ActionState)
+{
+    return ActionState == ECMSacrificeActionState::Wander || ActionState == ECMSacrificeActionState::BackCrawl || ActionState == ECMSacrificeActionState::Flee
+        || ActionState == ECMSacrificeActionState::ExhaustedWalk || ActionState == ECMSacrificeActionState::InjuredCrawl;
+}
+
+bool FCMSacrificeRules::HasMeaningfulProjectedMove(const FVector& StartLocation, const FVector& ProjectedLocation, const float AcceptanceRadius, const float MinimumTravelDistance)
+{
+    const float RequiredDistance = FMath::Max(AcceptanceRadius, MinimumTravelDistance);
+    return FVector::DistSquared2D(StartLocation, ProjectedLocation) > FMath::Square(FMath::Max(RequiredDistance, 0.0f));
+}
+
 // 비대칭 상·하 각도와 수평 반각 및 거리를 적용해 시야 원뿔 포함 여부를 판정한다.
 bool FCMSacrificeRules::IsPointInsideVisionCone(const FVector& Origin, const FVector& Forward, const float DistanceCm, const float HalfYawDegrees, const float UpDegrees, const float DownDegrees, const FVector& Point)
 {

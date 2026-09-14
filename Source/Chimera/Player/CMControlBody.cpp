@@ -8,6 +8,7 @@
 #include "Player/CMPlayerState.h"
 #include "Net/UnrealNetwork.h"
 #include "Parts/Core/CMPartActorBase.h"
+#include "Parts/Leg/CMLegPart.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraControlBody, Log, All);
@@ -275,6 +276,8 @@ void ACMControlBody::ServerRequestDetachPartFromControlSlot_Implementation(
             SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
             PressedPartSlot = FCMPartSlotAddress();
         }
+        PressedControlSlotStartTimes[SlotIndex] = 0.0;
+        bPressedControlSlotReverseMovement[SlotIndex] = false;
     }
 
     AActor* DetachedPart =
@@ -320,6 +323,8 @@ void ACMControlBody::ServerRequestConsumePartFromControlSlot_Implementation(
         SharedChimera->SetPartSlotPressed(PressedPartSlot, false);
         PressedPartSlot = FCMPartSlotAddress();
     }
+    PressedControlSlotStartTimes[SlotIndex] = 0.0;
+    bPressedControlSlotReverseMovement[SlotIndex] = false;
 
     const USkeletalMeshComponent* PartMesh = Part->GetPartMesh();
     const FVector DestructionLocation = PartMesh
@@ -371,7 +376,11 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
         if (CMControl::IsValidPartSlot(PressedPartSlot))
         {
             const FCMPartSlotAddress ReleasedPartSlot = PressedPartSlot;
-            const bool bActivateOnRelease =
+            UCMPartSlotComponent* ReleasedSlot =
+                SharedChimera->GetPartSlotComponent(ReleasedPartSlot);
+            const bool bIsLeg = ReleasedSlot
+                && Cast<ACMLegPart>(ReleasedSlot->GetAttachedPart());
+            const bool bActivateOnRelease = bIsLeg ||
                 SharedChimera->ShouldActivateBasicArmOnRelease(
                     ReleasedPartSlot);
             SharedChimera->SetPartSlotPressed(
@@ -380,14 +389,29 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
             );
             if (bActivateOnRelease)
             {
-                SharedChimera->ActivatePartSlot(
+                const double CurrentTime = GetWorld()
+                    ? GetWorld()->GetTimeSeconds()
+                    : PressedControlSlotStartTimes[SlotIndex];
+                const float HoldSeconds = static_cast<float>(FMath::Max(
+                    CurrentTime
+                        - PressedControlSlotStartTimes[SlotIndex],
+                    0.0
+                ));
+                const float LegStrengthMultiplier = bIsLeg
+                    ? SharedChimera->GetLegInputStrengthMultiplier(
+                        HoldSeconds)
+                    : 1.0f;
+                SharedChimera->ActivatePartSlotWithLegStrength(
                     ReleasedPartSlot,
                     CMPlayerState,
-                    false
+                    bPressedControlSlotReverseMovement[SlotIndex],
+                    LegStrengthMultiplier
                 );
             }
         }
         PressedPartSlot = FCMPartSlotAddress();
+        PressedControlSlotStartTimes[SlotIndex] = 0.0;
+        bPressedControlSlotReverseMovement[SlotIndex] = false;
         return;
     }
 
@@ -414,6 +438,8 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
                 PressedPartSlot, false);
         }
         PressedPartSlot = FCMPartSlotAddress();
+        PressedControlSlotStartTimes[SlotIndex] = 0.0;
+        bPressedControlSlotReverseMovement[SlotIndex] = false;
         return;
     }
 
@@ -424,8 +450,15 @@ void ACMControlBody::ServerSetControlSlotPressed_Implementation(
     }
 
     PressedPartSlot = PartSlotAddress;
+    PressedControlSlotStartTimes[SlotIndex] = GetWorld()
+        ? GetWorld()->GetTimeSeconds()
+        : 0.0;
+    bPressedControlSlotReverseMovement[SlotIndex] = bReverseMovement;
     SharedChimera->SetPartSlotPressed(PartSlotAddress, true);
-    if (!SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
+    const bool bIsLeg = PartSlot
+        && Cast<ACMLegPart>(PartSlot->GetAttachedPart());
+    if (!bIsLeg
+        && !SharedChimera->IsBasicArmPartSlot(PartSlotAddress))
     {
         SharedChimera->ActivatePartSlot(
             PartSlotAddress,
@@ -866,6 +899,41 @@ void ACMControlBody::RestoreControlsAfterRespawn()
     ForceNetUpdate();
 }
 
+void ACMControlBody::RestoreControlsForRevivedSegments()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    const ACMChimera* SharedChimera = GetSharedChimera();
+    if (!SharedChimera)
+    {
+        return;
+    }
+
+    for (int32 SlotIndex = 0;
+        SlotIndex < ControlSlots.Num()
+            && SlotIndex < CMControl::MaxKeysPerPlayer;
+        ++SlotIndex)
+    {
+        if (SharedChimera->IsSegmentAlive(ControlSlots[SlotIndex].SegmentIndex))
+        {
+            DisabledControlSlotMask &= ~(1u << SlotIndex);
+        }
+    }
+
+    bControlInputEnabled = GetEnabledControlCount() > 0;
+    if (ACMPlayerState* CMPlayerState = GetPlayerState<ACMPlayerState>())
+    {
+        CMPlayerState->SetParticipationState(bControlInputEnabled
+            ? ECMPlayerParticipationState::Active
+            : ECMPlayerParticipationState::Defeated);
+    }
+    OnRep_ControlState();
+    ForceNetUpdate();
+}
+
 void ACMControlBody::ClearPressedControlSlots()
 {
     if (!HasAuthority())
@@ -874,8 +942,11 @@ void ACMControlBody::ClearPressedControlSlots()
     }
 
     ACMChimera* SharedChimera = GetSharedChimera();
-    for (FCMPartSlotAddress& PressedPartSlot : PressedPartSlots)
+    for (int32 SlotIndex = 0;
+        SlotIndex < CMControl::MaxKeysPerPlayer;
+        ++SlotIndex)
     {
+        FCMPartSlotAddress& PressedPartSlot = PressedPartSlots[SlotIndex];
         if (SharedChimera
             && CMControl::IsValidPartSlot(PressedPartSlot))
         {
@@ -885,6 +956,8 @@ void ACMControlBody::ClearPressedControlSlots()
             );
         }
         PressedPartSlot = FCMPartSlotAddress();
+        PressedControlSlotStartTimes[SlotIndex] = 0.0;
+        bPressedControlSlotReverseMovement[SlotIndex] = false;
     }
 }
 

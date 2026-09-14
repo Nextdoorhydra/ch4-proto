@@ -6,19 +6,48 @@
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
+#include "Stage/Device/Component/CMInteractionHighlightComponent.h"
 
 ACMDroppedPartActor::ACMDroppedPartActor()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
+    PrimaryActorTick.TickGroup = TG_PostPhysics;
     bReplicates = true;
     SetReplicateMovement(true);
+    SetNetUpdateFrequency(30.0f);
+    SetMinNetUpdateFrequency(10.0f);
 
     PartMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("PartMesh"));
     SetRootComponent(PartMesh);
     PartMesh->SetIsReplicated(true);
     PartMesh->SetGenerateOverlapEvents(true);
+    InteractionHighlight = CreateDefaultSubobject<UCMInteractionHighlightComponent>(
+        TEXT("InteractionHighlight"));
     Tags.AddUnique(
         ACMTentacleSegmentActor::TentacleInteractiveActorTag);
+}
+
+void ACMDroppedPartActor::BeginPlay()
+{
+    Super::BeginPlay();
+    InteractionHighlight->AddHighlightTarget(PartMesh);
+    ApplyPickupHighlightMaterial();
+    RefreshPickupHighlight();
+}
+
+void ACMDroppedPartActor::Tick(const float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    if (HasAuthority()
+        && !bConsumed
+        && !bTentaclePulled
+        && PartMesh
+        && PartMesh->IsSimulatingPhysics())
+    {
+        UpdateAuthoritativePickupLocation();
+    }
 }
 
 void ACMDroppedPartActor::GetLifetimeReplicatedProps(
@@ -32,6 +61,7 @@ void ACMDroppedPartActor::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMDroppedPartActor, DroppedPhysicsAsset);
     DOREPLIFETIME(ACMDroppedPartActor, DroppedCollisionProfile);
     DOREPLIFETIME(ACMDroppedPartActor, bTentaclePulled);
+    DOREPLIFETIME(ACMDroppedPartActor, AuthoritativePickupLocation);
 }
 
 void ACMDroppedPartActor::InitializeDroppedPart(
@@ -53,16 +83,49 @@ void ACMDroppedPartActor::InitializeDroppedPart(
     DroppedMesh = InMesh;
     DroppedPhysicsAsset = InPhysicsAsset;
     DroppedCollisionProfile = CollisionProfile;
+    ApplyPickupHighlightMaterial();
     ApplyVisualDefinition();
+    RefreshPickupHighlight();
     if (!Impulse.IsNearlyZero())
     {
         PartMesh->AddImpulse(Impulse);
     }
+    UpdateAuthoritativePickupLocation();
     ForceNetUpdate();
+}
+
+void ACMDroppedPartActor::ApplyPickupHighlightMaterial()
+{
+    if (!InteractionHighlight || !UsablePartClass)
+    {
+        return;
+    }
+
+    if (const ACMPartActorBase* PartDefaults =
+            UsablePartClass->GetDefaultObject<ACMPartActorBase>())
+    {
+        InteractionHighlight->HighlightMaterial =
+            PartDefaults->GetPickupHighlightMaterial();
+    }
+}
+
+void ACMDroppedPartActor::RefreshPickupHighlight()
+{
+    if (!HasAuthority() || !InteractionHighlight)
+    {
+        return;
+    }
+
+    const bool bIsArmOrLeg = BodyPart == ECMBodyPart::ArmLeft
+        || BodyPart == ECMBodyPart::ArmRight
+        || BodyPart == ECMBodyPart::LegLeft
+        || BodyPart == ECMBodyPart::LegRight;
+    InteractionHighlight->SetHighlighted(!bConsumed && bIsArmOrLeg);
 }
 
 void ACMDroppedPartActor::OnRep_VisualDefinition()
 {
+    ApplyPickupHighlightMaterial();
     ApplyVisualDefinition();
 }
 
@@ -75,21 +138,75 @@ void ACMDroppedPartActor::ApplyVisualDefinition()
     PartMesh->SetSkeletalMeshAsset(DroppedMesh);
     PartMesh->SetPhysicsAsset(DroppedPhysicsAsset, false);
     PartMesh->SetCollisionProfileName(DroppedCollisionProfile);
-    PartMesh->SetCollisionEnabled(
-        bTentaclePulled
-            ? ECollisionEnabled::NoCollision
-            : ECollisionEnabled::QueryAndPhysics);
-    PartMesh->SetAllBodiesSimulatePhysics(!bTentaclePulled);
-    PartMesh->SetSimulatePhysics(!bTentaclePulled);
-    if (!bTentaclePulled)
+    const bool bServerSimulatesLoosePart = HasAuthority()
+        && !bTentaclePulled;
+    if (bServerSimulatesLoosePart)
     {
+        PartMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PartMesh->SetGenerateOverlapEvents(true);
+        PartMesh->SetAllBodiesSimulatePhysics(true);
+        PartMesh->SetSimulatePhysics(true);
+        SetReplicateMovement(false);
         PartMesh->WakeAllRigidBodies();
+        UpdateAuthoritativePickupLocation();
+        SetActorTickEnabled(true);
+    }
+    else
+    {
+        PartMesh->SetAllBodiesSimulatePhysics(false);
+        PartMesh->SetSimulatePhysics(false);
+        PartMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        PartMesh->SetGenerateOverlapEvents(false);
+        SetActorTickEnabled(false);
+        if (!HasAuthority())
+        {
+            ApplyAuthoritativePickupLocation();
+        }
     }
 }
 
 void ACMDroppedPartActor::OnRep_TentaclePulled()
 {
     ApplyVisualDefinition();
+}
+
+void ACMDroppedPartActor::OnRep_AuthoritativePickupLocation()
+{
+    ApplyAuthoritativePickupLocation();
+}
+
+FVector ACMDroppedPartActor::GetAuthoritativePickupLocation() const
+{
+    return bTentaclePulled
+        ? GetActorLocation()
+        : FVector(AuthoritativePickupLocation);
+}
+
+void ACMDroppedPartActor::UpdateAuthoritativePickupLocation()
+{
+    if (!HasAuthority() || !PartMesh)
+    {
+        return;
+    }
+
+    PartMesh->UpdateBounds();
+    AuthoritativePickupLocation = PartMesh->Bounds.Origin;
+}
+
+void ACMDroppedPartActor::ApplyAuthoritativePickupLocation()
+{
+    if (HasAuthority() || bTentaclePulled || !PartMesh)
+    {
+        return;
+    }
+
+    PartMesh->UpdateBounds();
+    PartMesh->AddWorldOffset(
+        FVector(AuthoritativePickupLocation) - PartMesh->Bounds.Origin,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    PartMesh->UpdateBounds();
 }
 
 bool ACMDroppedPartActor::TryReserveForTentacle(AActor* Requester)
@@ -139,10 +256,17 @@ bool ACMDroppedPartActor::BeginTentaclePull(AActor* Requester)
         return false;
     }
 
-    bTentaclePulled = true;
     PartMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
     PartMesh->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+    UpdateAuthoritativePickupLocation();
+    bTentaclePulled = true;
     ApplyVisualDefinition();
+    SetReplicateMovement(true);
+    SetActorLocation(
+        AuthoritativePickupLocation,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
     ForceNetUpdate();
     return true;
 }
@@ -154,6 +278,7 @@ void ACMDroppedPartActor::EndTentaclePull(AActor* Requester)
         return;
     }
     bTentaclePulled = false;
+    AuthoritativePickupLocation = GetActorLocation();
     ApplyVisualDefinition();
     ForceNetUpdate();
 }

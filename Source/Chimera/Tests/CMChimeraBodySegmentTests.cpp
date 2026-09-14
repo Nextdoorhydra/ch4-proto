@@ -112,6 +112,7 @@ bool FCMChimeraVisualDefinitionContractTest::RunTest(
         &Definition->GetPreset(ECMChimeraSegmentVisualRole::Tail)
             == &Definition->Tail);
 
+#if WITH_EDITOR
     FDataValidationContext ValidationContext;
     TestEqual(TEXT("An unconfigured definition is invalid"),
         Definition->IsDataValid(ValidationContext),
@@ -119,6 +120,7 @@ bool FCMChimeraVisualDefinitionContractTest::RunTest(
     TestEqual(TEXT("Each missing role mesh has a precise error"),
         ValidationContext.GetNumErrors(),
         static_cast<uint32>(3));
+#endif
     return true;
 }
 

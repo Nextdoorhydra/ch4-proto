@@ -22,8 +22,10 @@ public class AI : ModuleRules
 			"LearningTraining",
 			"MotionWarping",
 			"NavigationSystem",
+			"PhysicsCore",
 			"Shared",
-			"Chimera"
+			"Chimera",
+			"CMSound"
 		});
 	}
 }

@@ -24,6 +24,12 @@ enum class ECMAggressiveBehaviorProfile : uint8
     Centipede
 };
 
+namespace CMAggressiveBehaviorRules
+{
+    AI_API bool HasMadeGoalProgress(float PreviousDistance, float CurrentDistance, float RequiredProgressDistance);
+    AI_API bool IsRipperAttackReady(double CurrentTime, double NextAttackTime);
+}
+
 /** Server-authoritative high-level behavior shared by the three hostile AI. */
 UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
 class AI_API UCMAggressiveBehaviorComponent : public UActorComponent
@@ -58,6 +64,7 @@ private:
     void UpdateAttacking(double CurrentTime);
     void UpdateWaiting(double CurrentTime);
     void UpdateTetraSightScan(double CurrentTime);
+    bool RecoverToNavigation();
     bool UpdateStuckRecovery(double CurrentTime);
     bool UpdateStuckDetection(double CurrentTime);
     void BeginStuckRecovery(double CurrentTime);
@@ -76,9 +83,11 @@ private:
     ICMAggressiveMovementAgent* GetMovementAgent() const;
     FVector GetNavigationLocation() const;
     FVector GetAttackOriginLocation() const;
+    FVector GetAttackTargetLocation(const AActor& Target) const;
     UPrimitiveComponent* GetMovementBody() const;
     AActor* FindVisibleTarget() const;
     ACMSacrificeCharacter* FindCloserVisibleSacrifice(const ACMSacrificeCharacter& CurrentSacrifice) const;
+    bool CanPursueTarget(const AActor& Target) const;
     bool CanSeeActor(const AActor& Target) const;
     bool IsValidTarget(const AActor* Target) const;
     bool PerformRipperAttack(AActor& Target);
@@ -90,6 +99,9 @@ private:
 
     UFUNCTION()
     void HandleOwnerHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit);
+
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayTargetSpottedSound();
 
     UPROPERTY(EditAnywhere, Category = "Aggressive AI|Behavior")
     bool bAutoStartBehavior = true;
@@ -133,6 +145,7 @@ private:
     FVector StuckProgressLocation = FVector::ZeroVector;
     FVector StuckReverseDirection = FVector::ZeroVector;
     double NextActionTime = 0.0;
+    double NextRipperAttackTime = 0.0;
     double DashEndTime = 0.0;
     double NextTetraSightTurnTime = 0.0;
     double StuckProgressStartTime = 0.0;

@@ -10,6 +10,7 @@
 
 class UBoxComponent;
 class UCMAggressiveBehaviorComponent;
+class UCMAIProceduralLegComponent;
 class UCMAIFixedLegActuatorComponent;
 class UCMAggressiveMovementCommandComponent;
 class UCMAggressiveOmnidirectionalPathComponent;
@@ -87,6 +88,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Body")
     TArray<TObjectPtr<UStaticMeshComponent>> LegMeshes;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Animation")
+    TArray<TObjectPtr<UCMAIProceduralLegComponent>> ProceduralLegMeshes;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Ripper|Body")
     TArray<TObjectPtr<UBoxComponent>> LegCollisions;
 
@@ -112,6 +116,7 @@ protected:
     FCMAIFixedLegActuationSettings LegActuationSettings;
 
 private:
+    void ApplyPeerCollisionProfile();
     void BalanceLegYawImpulse(int32 LegIndex, const FCMAIFixedLegActuationResult& Result);
     void AddBodyCube(const TCHAR* Name, const FVector& RelativeLocation, UStaticMesh* CubeMesh);
     void AddLeg(const TCHAR* Name, const FVector& RelativeLocation, UStaticMesh* CubeMesh);

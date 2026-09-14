@@ -6,6 +6,7 @@
 #include "Combat/CMCombatHitTarget.h"
 #include "Common/Core/CMThreatSource.h"
 #include "GameFramework/Pawn.h"
+#include "Stage/Checkpoint/CMCheckpointAIResettable.h"
 
 #include "CMAggressivePawnBase.generated.h"
 
@@ -15,15 +16,17 @@ class UCMAggressiveKnockbackComponent;
 
 /** Shared GAS/threat/hit foundation; concrete pawns retain their movement code. */
 UCLASS(Abstract)
-class AI_API ACMAggressivePawnBase : public APawn, public IAbilitySystemInterface, public ICMThreatSource, public ICMCombatHitTarget
+class AI_API ACMAggressivePawnBase : public APawn, public IAbilitySystemInterface, public ICMThreatSource, public ICMCombatHitTarget, public ICMCheckpointAIResettable
 {
     GENERATED_BODY()
 
 public:
     ACMAggressivePawnBase();
     virtual void BeginPlay() override;
+    virtual void SpawnDefaultController() override;
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
     virtual bool ReceiveCombatHit_Implementation(const FCMCombatHitRequest& Request) override;
+    virtual bool ResetAIForCheckpoint() override;
 
     UCMAggressiveKnockbackComponent* GetKnockbackComponent() const
     {
@@ -52,4 +55,5 @@ private:
     FVector PendingKnockbackDirection = FVector::ForwardVector;
     TArray<FGuid> RecentAttackIds;
     FActiveGameplayEffectHandle KnockbackStateHandle;
+    FTransform InitialCheckpointTransform = FTransform::Identity;
 };

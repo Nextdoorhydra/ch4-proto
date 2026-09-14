@@ -5,6 +5,8 @@
 
 #include "CMStageDoorBase.generated.h"
 
+class UCameraShakeBase;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
     FCMDoorTransitionFinishedSignature,
     bool, bIsOpen);
@@ -22,6 +24,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Mechanism|Door")
     void NotifyDoorTransitionFinished(bool bIsOpen);
 
+    /** Toggles this door while running PIE for quick presentation testing. */
+    UFUNCTION(CallInEditor, Category = "Chimera|Mechanism|Door|Test")
+    void TestToggleDoor();
+
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Mechanism|Door")
     FCMDoorTransitionFinishedSignature OnDoorTransitionFinished;
 
@@ -36,4 +42,28 @@ protected:
     // 초기 위치와 문 애니메이션을 레벨 시작 상태로 복원
     UFUNCTION(BlueprintImplementableEvent, Category = "Chimera|Mechanism|Door")
     void OnDoorReset();
+
+    /** Sound played once whenever the door starts moving in either direction. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Mechanism|Door|Presentation")
+    FGameplayTag MovementSoundTag;
+
+    /** Optional shake played when this door starts opening. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Mechanism|Door|Presentation")
+    TSubclassOf<UCameraShakeBase> OpeningCameraShake;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Mechanism|Door|Presentation",
+        meta = (ClampMin = "0.0"))
+    float CameraShakeInnerRadius = 0.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Mechanism|Door|Presentation",
+        meta = (ClampMin = "0.0"))
+    float CameraShakeOuterRadius = 2500.0f;
+
+private:
+    bool bHasObservedOpenState = false;
+    bool bLastObservedOpenState = false;
 };

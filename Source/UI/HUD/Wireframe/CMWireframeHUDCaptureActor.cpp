@@ -21,6 +21,11 @@ namespace
 {
 const FName WireColorParameter(TEXT("Color"));
 constexpr float CaptureDistance = 2000.0f;
+
+FRotator MakeTopDownRotation(const float Yaw)
+{
+    return FRotator(-90.0f, Yaw, 0.0f);
+}
 }
 
 ACMWireframeHUDCaptureActor::ACMWireframeHUDCaptureActor()
@@ -68,7 +73,7 @@ void ACMWireframeHUDCaptureActor::Initialize(
 {
     Chimera = InChimera;
     HealthColorCurve = InHealthColorCurve;
-    CaptureRotation = InCaptureRotation;
+    CaptureRotation = MakeTopDownRotation(InCaptureRotation.Yaw);
 
     const int32 ClampedSize = FMath::Clamp(RenderTargetSize, 128, 1024);
     RenderTarget = NewObject<UTextureRenderTarget2D>(this);
@@ -119,7 +124,7 @@ void ACMWireframeHUDCaptureActor::SetCameraView(
     float InZoom
 )
 {
-    CaptureRotation = InRotation;
+    CaptureRotation = MakeTopDownRotation(InRotation.Yaw);
     CaptureZoom = FMath::Max(InZoom, 0.01f);
 }
 
@@ -310,6 +315,12 @@ void ACMWireframeHUDCaptureActor::SynchronizePartProxies()
             SceneCapture->ShowOnlyComponent(Proxy.Mesh);
         }
 
+        // A Part can leave and return to the same slot between capture ticks.
+        // Force-refresh the leader map so a previous ragdoll pose cannot stay
+        // cached in the HUD-only follower mesh.
+        Proxy.Mesh->SetLeaderPoseComponent(SourceMesh, true, false);
+        Proxy.Mesh->RefreshBoneTransforms();
+        Proxy.Mesh->UpdateBounds();
         Proxy.Mesh->SetVisibility(true);
         Proxy.Mesh->SetWorldTransform(SourceMesh->GetComponentTransform());
         if (Proxy.Material)

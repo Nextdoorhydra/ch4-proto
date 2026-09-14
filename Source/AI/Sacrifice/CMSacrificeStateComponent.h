@@ -13,7 +13,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCMSacrificeBleedingChangedSignature
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FCMSacrificeDiedSignature);
 
 class UCMDismembermentComponent;
-struct FCMSacrificeRewardPart;
+class ACMPartActorBase;
+struct FCMSacrificeAttackPartRule;
 
 /** Server-authoritative injury, bleeding, and death state for a Sacrifice. */
 UCLASS(ClassGroup = (Chimera), meta = (BlueprintSpawnableComponent))
@@ -30,7 +31,7 @@ public:
 
     int32 ResolveDismembermentHit(const FCMDismembermentHitRequest& Request);
 
-    /** Centipede fatal attack: severs every attached part before death. */
+    /** Centipede fatal attack: severs every attached part regardless of acquisition rules, then kills the victim. */
     int32 ResolveFatalDismembermentHit(const FCMDismembermentHitRequest& Request);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Sacrifice")
@@ -84,9 +85,6 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Chimera|Sacrifice")
     FCMSacrificeDiedSignature OnSacrificeDied;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Sacrifice|Dismemberment", meta = (ClampMin = "0.0"))
-    float DismembermentImpulse = 1200.0f;
-
 private:
     UFUNCTION()
     void OnRep_MissingPartMask(uint8 PreviousMask);
@@ -100,9 +98,9 @@ private:
     void StartOrUpdateBleeding(int32 PreviousMissingCount, int32 NewlyMissingCount);
     void HandleBleedExpired();
     void Die();
-    void DropRemainingRewards();
-    void ValidateRewards() const;
-    const FCMSacrificeRewardPart* FindReward(ECMBodyPart BodyPart) const;
+    void ValidateAttackPartRules() const;
+    const FCMSacrificeAttackPartRule* FindAttackPartRule(ECMBodyPart BodyPart) const;
+    TSubclassOf<ACMPartActorBase> ResolveCollectiblePartClass(ECMBodyPart BodyPart) const;
     bool WasAttackAlreadyResolved(const FGuid& AttackId) const;
     void RememberResolvedAttack(const FGuid& AttackId);
 
@@ -111,8 +109,6 @@ private:
 
     UPROPERTY(ReplicatedUsing = OnRep_Dead)
     bool bDead = false;
-
-    bool bSuppressRewardDrops = false;
 
     UPROPERTY(ReplicatedUsing = OnRep_Bleeding)
     bool bBleeding = false;

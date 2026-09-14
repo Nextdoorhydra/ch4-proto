@@ -23,6 +23,9 @@ bool FCMGoreResponseWiringTest::RunTest(const FString& Parameters)
     TestNotNull(TEXT("Chimera body owns a gore response"), BodyGore);
     if (BodyGore)
     {
+        TestTrue(
+            TEXT("Chimera body gore response replicates"),
+            BodyGore->GetIsReplicated());
         TestEqual(
             TEXT("Chimera body reuses the Sacrifice blood definition"),
             BodyGore->BloodDefinitionId,
@@ -36,10 +39,43 @@ bool FCMGoreResponseWiringTest::RunTest(const FString& Parameters)
     TestNotNull(TEXT("Chimera Part owns a gore response"), PartGore);
     if (PartGore)
     {
+        TestTrue(
+            TEXT("Chimera Part gore response replicates"),
+            PartGore->GetIsReplicated());
         TestEqual(
             TEXT("Chimera Part reuses the Sacrifice blood definition"),
             PartGore->BloodDefinitionId,
             FName(TEXT("Human.Red")));
+    }
+
+    const UFunction* HitMulticast =
+        UCMGoreResponseComponent::StaticClass()->FindFunctionByName(
+            TEXT("MulticastSpawnHitEffects"));
+    TestNotNull(TEXT("Hit gore multicast is registered"), HitMulticast);
+    if (HitMulticast)
+    {
+        TestTrue(
+            TEXT("Hit gore presentation is multicast"),
+            HitMulticast->HasAnyFunctionFlags(FUNC_NetMulticast));
+        TestFalse(
+            TEXT("Frequent hit gore presentation remains unreliable"),
+            HitMulticast->HasAnyFunctionFlags(FUNC_NetReliable));
+    }
+
+    const UFunction* DestructionMulticast =
+        UCMGoreResponseComponent::StaticClass()->FindFunctionByName(
+            TEXT("MulticastSpawnDestructionEffects"));
+    TestNotNull(
+        TEXT("Destruction gore multicast is registered"),
+        DestructionMulticast);
+    if (DestructionMulticast)
+    {
+        TestTrue(
+            TEXT("Destruction gore presentation is multicast"),
+            DestructionMulticast->HasAnyFunctionFlags(FUNC_NetMulticast));
+        TestTrue(
+            TEXT("One-shot destruction gore presentation is reliable"),
+            DestructionMulticast->HasAnyFunctionFlags(FUNC_NetReliable));
     }
 
     const UCMBloodTransferComponent* BloodTransfer = Leg

@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "Parts/Arm/CMArmPart.h"
 #include "Player/CMChimera.h"
+#include "Stage/Obstacle/CMArmHoldableBox.h"
 #include "Stage/Obstacle/CMPushBox.h"
 #include "Stage/Trigger/Component/CMMechanismWeightComponent.h"
 
@@ -86,6 +87,29 @@ bool FCMPushBoxMovementTest::RunTest(const FString& Parameters)
     PushBox->Tick(1.0f);
     TestTrue(TEXT("Fixed push distance is 100 cm"), FMath::IsNearlyEqual(PushBox->GetActorLocation().X, 100.0f, 0.1f));
     TestFalse(TEXT("Push source ignore is cleared after movement"), BoxMesh->GetMoveIgnoreActors().Contains(Attacker));
+    PushBox->ResetForCheckpoint();
+    TestTrue(TEXT("Checkpoint reset restores push box location"),
+        PushBox->GetActorLocation().Equals(FVector(0.0f, 0.0f, 100.0f), 0.1f));
+
+    ACMArmHoldableBox* HoldableBox = World->SpawnActor<ACMArmHoldableBox>(
+        FVector(0.0f, -400.0f, 100.0f), FRotator::ZeroRotator);
+    HoldableBox->DispatchBeginPlay();
+    HoldableBox->SetActorLocation(FVector(250.0f, -400.0f, 100.0f));
+    HoldableBox->ResetForCheckpoint();
+    TestTrue(TEXT("Checkpoint reset restores holdable box location"),
+        HoldableBox->GetActorLocation().Equals(
+            FVector(0.0f, -400.0f, 100.0f), 0.1f));
+
+    ACMPushBox* CardinalPushBox = World->SpawnActor<ACMPushBox>(FVector(0.0f, -200.0f, 100.0f), FRotator::ZeroRotator);
+    CardinalPushBox->DispatchBeginPlay();
+    FCMCombatHitRequest CardinalRequest = Request;
+    CardinalRequest.AttackId = FGuid::NewGuid();
+    CardinalRequest.ImpactPoint = FVector(-50.0f, -190.0f, 100.0f);
+    CardinalRequest.ImpactDirection = FVector(0.25f, 1.0f, 0.0f);
+    TestTrue(TEXT("Diagonal arm hit accepted"), ICMCombatHitTarget::Execute_ReceiveCombatHit(CardinalPushBox, CardinalRequest));
+    CardinalPushBox->Tick(0.1f);
+    TestTrue(TEXT("Push direction follows the opposite of the hit face"), FMath::IsNearlyEqual(CardinalPushBox->GetActorLocation().X, 30.0f, 0.1f));
+    TestTrue(TEXT("Push direction has no diagonal movement"), FMath::IsNearlyEqual(CardinalPushBox->GetActorLocation().Y, -200.0f, 0.1f));
 
     AActor* EnvironmentBlocker = World->SpawnActor<AActor>(FVector(180.0f, 0.0f, 100.0f), FRotator::ZeroRotator);
     UBoxComponent* EnvironmentCollision = NewObject<UBoxComponent>(EnvironmentBlocker);

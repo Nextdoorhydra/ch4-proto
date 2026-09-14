@@ -13,6 +13,8 @@
 #include "Stage/Trigger/Component/CMPowerSocketComponent.h"
 #include "Stage/Trigger/Component/CMPowerSourceComponent.h"
 #include "Stage/Trigger/Subsystem/CMPowerSubsystem.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
 
 ACMPowerCableActor::ACMPowerCableActor()
 {
@@ -31,6 +33,12 @@ ACMPowerCableActor::ACMPowerCableActor()
     CablePhysics->bEnableCollision = true;
     CablePhysics->CollisionFriction = 0.05f;
     CablePhysics->bUseSubstepping = true;
+    // UE 5.7 reinitializes every particle along a straight line when an
+    // endpoint moves farther than this threshold. A grabbed cable must keep
+    // its settled shape and let the solver pull only the held endpoint.
+    CablePhysics->TeleportDistanceThreshold = 0.0f;
+    CablePhysics->TeleportRotationThreshold = 0.0f;
+    CablePhysics->bTeleportAfterReattach = false;
     CablePhysics->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     CablePhysics->SetCollisionResponseToAllChannels(ECR_Ignore);
     CablePhysics->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
@@ -45,6 +53,8 @@ ACMPowerCableActor::ACMPowerCableActor()
     GrabVolume->SetBoxExtent(FVector(50.0f, 15.0f, 15.0f));
     bReplicates = true;
     SetReplicateMovement(true);
+    SetNetUpdateFrequency(30.0f);
+    SetMinNetUpdateFrequency(10.0f);
 }
 
 void ACMPowerCableActor::BeginPlay()
@@ -137,9 +147,25 @@ void ACMPowerCableActor::BeginPlay()
                     *GetNameSafe(OutputActor));
             }
         }
+
+        InitialTransform = GetActorTransform();
+        InitialCableStartLocation = CableStartLocation;
+        InitialConnectedSocket = ConnectedSocket;
+        InitialConnectedSource = ConnectedSource;
+        InitialConnectedSourceSocket = ConnectedSourceSocket;
+        bInitialSocketAtStart = bSocketAtStart;
+        bInitialSourceAtStart = bSourceAtStart;
+        bInitialStateCaptured = true;
+        bConnectionSoundEnabled = true;
     }
-    InitializeRope();
-    UpdateCablePhysics();
+    const bool bCanInitializeCable = HasAuthority()
+        && CableDefinition.IsNull();
+    CablePhysics->SetComponentTickEnabled(bCanInitializeCable);
+    if (bCanInitializeCable)
+    {
+        InitializeRope();
+        UpdateCablePhysics();
+    }
 
     if (UGameInstance* GameInstance = GetWorld()
         ? GetWorld()->GetGameInstance() : nullptr)
@@ -192,9 +218,10 @@ void ACMPowerCableActor::Tick(float DeltaSeconds)
         bHasCachedVisualEndpoint = false;
     }
 
-    UpdateCablePhysics();
-    if (CablePhysics)
+    if (HasAuthority() && CablePhysics
+        && CablePhysics->IsComponentTickEnabled())
     {
+        UpdateCablePhysics();
         TArray<FVector> ParticleLocations;
         CablePhysics->GetCableParticleLocations(ParticleLocations);
         if (ParticleLocations.Num() >= 2)
@@ -202,6 +229,7 @@ void ACMPowerCableActor::Tick(float DeltaSeconds)
             RopePositions = MoveTemp(ParticleLocations);
             RopePreviousPositions = RopePositions;
             bRopeInitialized = true;
+            CaptureAuthoritativeRopePositions();
         }
     }
     UpdateCableVisual();
@@ -617,6 +645,20 @@ void ACMPowerCableActor::UpdateCablePhysics()
             CablePhysics->SetAttachEndToComponent(nullptr);
             CablePhysics->bAttachEnd = false;
         }
+    }
+}
+
+void ACMPowerCableActor::CaptureAuthoritativeRopePositions()
+{
+    if (!HasAuthority() || RopePositions.Num() < 2)
+    {
+        return;
+    }
+
+    ReplicatedRopePositions.Reset(RopePositions.Num());
+    for (const FVector& Position : RopePositions)
+    {
+        ReplicatedRopePositions.Add(Position);
     }
 }
 
@@ -1291,6 +1333,133 @@ void ACMPowerCableActor::EndArmHold_Implementation(ACMArmPart* ArmPart)
     ReleaseGrab();
 }
 
+void ACMPowerCableActor::ResetForCheckpoint()
+{
+    if (!HasAuthority() || !bInitialStateCaptured)
+    {
+        return;
+    }
+
+    if (ACMArmPart* HoldingArm = Cast<ACMArmPart>(Grabber))
+    {
+        HoldingArm->EndGroundAnchor();
+    }
+    Grabber = nullptr;
+    bGrabAtStart = false;
+
+    UCMPowerSocketComponent* PreviousSocket = ConnectedSocket;
+    UCMPowerSourceComponent* PreviousSource = ConnectedSource;
+    UCMPowerSocketComponent* PreviousSourceSocket = ConnectedSourceSocket;
+    if (PreviousSocket)
+    {
+        PreviousSocket->ConnectedCables.Remove(this);
+        PreviousSocket->OnConnectionChanged.Broadcast(
+            !PreviousSocket->ConnectedCables.IsEmpty());
+    }
+    if (PreviousSource)
+    {
+        PreviousSource->ConnectedCables.Remove(this);
+        PreviousSource->OnConnectionChanged.Broadcast(
+            !PreviousSource->ConnectedCables.IsEmpty());
+    }
+    if (PreviousSourceSocket)
+    {
+        PreviousSourceSocket->RemovePowerOutputCable(this);
+    }
+
+    ConnectedSocket = InitialConnectedSocket;
+    ConnectedSource = InitialConnectedSource;
+    ConnectedSourceSocket = InitialConnectedSourceSocket;
+    bSocketAtStart = bInitialSocketAtStart;
+    bSourceAtStart = bInitialSourceAtStart;
+
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->ConnectedCables.AddUnique(this);
+        ConnectedSocket->OnConnectionChanged.Broadcast(true);
+    }
+    if (ConnectedSource)
+    {
+        ConnectedSource->ConnectedCables.AddUnique(this);
+        ConnectedSource->OnConnectionChanged.Broadcast(true);
+    }
+    if (ConnectedSourceSocket)
+    {
+        ConnectedSourceSocket->AddPowerOutputCable(this);
+    }
+
+    MulticastResetRopeSimulation(
+        InitialTransform, InitialCableStartLocation);
+
+    if (PreviousSocket && PreviousSocket != ConnectedSocket)
+    {
+        PreviousSocket->NotifyPowerStateChanged();
+    }
+    if (ConnectedSocket)
+    {
+        ConnectedSocket->NotifyPowerStateChanged();
+    }
+    OnConnectionChanged.Broadcast(IsFullyConnected());
+
+    if (PreviousSocket && PreviousSocket->GetOwner())
+    {
+        PreviousSocket->GetOwner()->ForceNetUpdate();
+    }
+    if (PreviousSource && PreviousSource->GetOwner())
+    {
+        PreviousSource->GetOwner()->ForceNetUpdate();
+    }
+    if (ConnectedSocket && ConnectedSocket->GetOwner())
+    {
+        ConnectedSocket->GetOwner()->ForceNetUpdate();
+    }
+    if (ConnectedSource && ConnectedSource->GetOwner())
+    {
+        ConnectedSource->GetOwner()->ForceNetUpdate();
+    }
+    ForceNetUpdate();
+}
+
+void ACMPowerCableActor::MulticastResetRopeSimulation_Implementation(
+    const FTransform ResetTransform,
+    const FVector ResetStartLocation)
+{
+    SetActorTransform(
+        ResetTransform,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    CableStartLocation = ResetStartLocation;
+    bCableStartLocationInitialized = true;
+    bCableHasBeenMoved = false;
+    bHasCachedVisualEndpoint = false;
+    CachedVisualEndpoint = FVector::ZeroVector;
+    bRopeInitialized = false;
+    bCablePhysicsRegistered = false;
+    bRopeSleeping = false;
+    RopeStableFrameCount = 0;
+    RopePositions.Reset();
+    RopePreviousPositions.Reset();
+    RopeConstraintStartPositions.Reset();
+    CollisionLockedNodes.Reset();
+    RopeContactPoints.Reset();
+    bHasLastWallHitNormal = false;
+    bWallHitThisFrame = false;
+
+    if (CablePhysics)
+    {
+        CablePhysics->SetAttachEndToComponent(nullptr);
+        CablePhysics->bAttachEnd = false;
+        CablePhysics->EndLocation = FVector::ZeroVector;
+    }
+
+    InitializeRope();
+    WakeRopeSimulation();
+    UpdateCablePhysics();
+    UpdateCableVisual();
+    UpdateGrabVolume();
+}
+
 bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
 {
     if (!HasAuthority() || !InGrabber || IsGrabbed())
@@ -1312,6 +1481,8 @@ bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
         ? false : bEndOccupied && !bStartOccupied
             ? true : FVector::DistSquared(GrabLocation, StartLocation)
                 <= FVector::DistSquared(GrabLocation, EndLocation);
+    const FVector GrabbedEndpointLocation = bGrabStart
+        ? StartLocation : EndLocation;
 
     // Detach only the endpoint that the player is actually grabbing. This
     // prevents a non-detachable endpoint on the opposite side from being
@@ -1346,6 +1517,7 @@ bool ACMPowerCableActor::BeginGrab(AActor* InGrabber)
     Grabber = InGrabber;
     bRopeSleeping = false;
     RopeStableFrameCount = 0;
+    MulticastPlayGrabSound(GrabbedEndpointLocation);
     ForceNetUpdate();
     return true;
 }
@@ -1464,6 +1636,7 @@ void ACMPowerCableActor::SetConnectedSocket(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     UCMPowerSocketComponent* PreviousSocket = ConnectedSocket;
     if (Socket)
@@ -1508,6 +1681,9 @@ void ACMPowerCableActor::SetConnectedSocket(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Socket ? Socket->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
 }
 
@@ -1549,6 +1725,7 @@ void ACMPowerCableActor::SetConnectedSource(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     UCMPowerSourceComponent* PreviousSource = ConnectedSource;
     if (Source)
@@ -1577,6 +1754,9 @@ void ACMPowerCableActor::SetConnectedSource(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Source ? Source->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
 }
 
@@ -1589,6 +1769,7 @@ void ACMPowerCableActor::SetConnectedSourceSocket(
         return;
     }
 
+    const bool bWasTransmittingPower = IsTransmittingPower();
     WakeRopeSimulation();
     if (ConnectedSourceSocket && ConnectedSourceSocket != Socket)
     {
@@ -1618,7 +1799,40 @@ void ACMPowerCableActor::SetConnectedSourceSocket(
         ConnectedSocket->NotifyPowerStateChanged();
     }
     OnConnectionChanged.Broadcast(IsFullyConnected());
+    PlayConnectionSoundIfPowered(
+        bWasTransmittingPower,
+        Socket ? Socket->GetComponentLocation() : FVector::ZeroVector);
     ForceNetUpdate();
+}
+
+void ACMPowerCableActor::PlayConnectionSoundIfPowered(
+    const bool bWasTransmittingPower,
+    const FVector& ConnectionLocation)
+{
+    if (bConnectionSoundEnabled
+        && !bWasTransmittingPower
+        && IsTransmittingPower())
+    {
+        MulticastPlayConnectionSound(ConnectionLocation);
+    }
+}
+
+void ACMPowerCableActor::MulticastPlayConnectionSound_Implementation(
+    const FVector_NetQuantize10 SoundLocation)
+{
+    FCMSoundPlayback::PlaySFXAtLocation(
+        this,
+        SoundLocation,
+        CMSoundTags::Stage_PowerCable_Connected);
+}
+
+void ACMPowerCableActor::MulticastPlayGrabSound_Implementation(
+    const FVector_NetQuantize10 SoundLocation)
+{
+    FCMSoundPlayback::PlaySFXAtLocation(
+        this,
+        SoundLocation,
+        CMSoundTags::Stage_PowerCable_Grabbed);
 }
 
 void ACMPowerCableActor::NotifyPowerStateChanged()
@@ -1679,6 +1893,24 @@ void ACMPowerCableActor::OnRep_CableStartLocation()
         InitializeRope();
     }
     UpdateCableVisual();
+}
+
+void ACMPowerCableActor::OnRep_ReplicatedRopePositions()
+{
+    if (ReplicatedRopePositions.Num() < 2)
+    {
+        return;
+    }
+
+    RopePositions.Reset(ReplicatedRopePositions.Num());
+    for (const FVector_NetQuantize10& Position : ReplicatedRopePositions)
+    {
+        RopePositions.Add(Position);
+    }
+    RopePreviousPositions = RopePositions;
+    bRopeInitialized = true;
+    UpdateCableVisual();
+    UpdateGrabVolume();
 }
 
 void ACMPowerCableActor::HandleLoadGroupFinished(
@@ -1773,12 +2005,49 @@ bool ACMPowerCableActor::TryBuildCableVisual()
     }
 
     bCableVisualReady = true;
-    if (!IsGrabbed() && !HasAnyEndpointConnected())
+    if (!IsGrabbed() && !HasAnyEndpointConnected()
+        && (HasAuthority() || ReplicatedRopePositions.Num() < 2))
     {
         bRopeInitialized = false;
         RopePositions.Reset();
         RopePreviousPositions.Reset();
         InitializeRope();
+    }
+
+    if (HasAuthority() && CablePhysics
+        && !CablePhysics->IsComponentTickEnabled())
+    {
+        UpdateCablePhysics();
+
+        if (!IsGrabbed() && !HasAnyEndpointConnected())
+        {
+            // CableComponent initializes every particle inside EndLocation's
+            // short default span. Grow long loose cables one node at a time
+            // before displaying them so constraint correction cannot launch
+            // the initial particles through the floor.
+            const float TargetLength = CablePhysics->CableLength;
+            CablePhysics->CableLength = FMath::Min(
+                TargetLength,
+                FMath::Max(CablePhysics->EndLocation.Size(),
+                    GetRopeNodeSpacing()));
+            CablePhysics->ReregisterComponent();
+
+            while (CablePhysics->CableLength < TargetLength)
+            {
+                CablePhysics->CableLength = FMath::Min(
+                    CablePhysics->CableLength + GetRopeNodeSpacing(),
+                    TargetLength);
+                CablePhysics->TickComponent(
+                    1.0f / 60.0f, LEVELTICK_All, nullptr);
+            }
+            for (int32 SettleStep = 0; SettleStep < 60; ++SettleStep)
+            {
+                CablePhysics->TickComponent(
+                    1.0f / 60.0f, LEVELTICK_All, nullptr);
+            }
+        }
+
+        CablePhysics->SetComponentTickEnabled(true);
     }
 
     CableMeshes.Reserve(GetVisualSegmentCount());
@@ -1939,4 +2208,5 @@ void ACMPowerCableActor::GetLifetimeReplicatedProps(
     DOREPLIFETIME(ACMPowerCableActor, bSocketAtStart);
     DOREPLIFETIME(ACMPowerCableActor, bSourceAtStart);
     DOREPLIFETIME(ACMPowerCableActor, CableStartLocation);
+    DOREPLIFETIME(ACMPowerCableActor, ReplicatedRopePositions);
 }
