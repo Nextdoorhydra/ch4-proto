@@ -56,6 +56,9 @@ ACMRipperPawn::ACMRipperPawn()
     PathMovement->SetNavigationAgentName(TEXT("RipperAI"));
     PathMovement->SetIntermediatePathPointTolerances(130.0f, 220.0f);
     PathMovement->SetMaximumPathSegmentLength(600.0f);
+    PathMovement->SetIntermediatePathPointWallClearance(200.0f);
+    PathMovement->SetIntermediatePathPointNavigationClearance(50.0f);
+    PathMovement->SetMinimumPathPointSpacing(200.0f);
     PathMovement->SetRebuildPathWhenIntermediatePointPassed(true);
 
     Sight = CreateDefaultSubobject<UCMAggressiveSightComponent>(TEXT("Sight"));

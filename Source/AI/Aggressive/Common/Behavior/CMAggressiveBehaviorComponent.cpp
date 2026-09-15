@@ -51,11 +51,12 @@ namespace CMAggressiveBehavior
     constexpr float TetraPlayerKnockbackDistance = 150.0f;
     constexpr float StuckDetectionSeconds = 3.0f;
     constexpr float StuckMovementDistance = 15.0f;
-    constexpr float RipperStuckDetectionSeconds = 3.0f;
+    constexpr float RipperStuckDetectionSeconds = 2.0f;
     constexpr float RipperStuckMovementDistance = 20.0f;
     constexpr float StuckReverseDuration = 0.75f;
     constexpr float StuckReverseSpeed = 250.0f;
     constexpr float FailedMoveRetryInterval = 1.0f;
+    constexpr float RipperBlockingHitMemorySeconds = 2.5f;
     constexpr float RipperAttackCooldownSeconds = 10.0f;
 
 #if !UE_BUILD_SHIPPING
@@ -202,6 +203,10 @@ void UCMAggressiveBehaviorComponent::SetBehaviorEnabled(const bool bEnabled)
         CurrentTarget = nullptr;
         bReversingFromStuck = false;
         bCompletingStuckRecoveryMove = false;
+        bEscapingFromStuckTarget = false;
+        StuckEscapeStartLocation = FVector::ZeroVector;
+        RipperMoveFailureStartTime = 0.0;
+        LastRipperBlockingHitTime = 0.0;
         StuckProgressStartTime = 0.0;
         return;
     }
@@ -216,6 +221,10 @@ void UCMAggressiveBehaviorComponent::SetBehaviorEnabled(const bool bEnabled)
     bHasWanderGoal = false;
     bReversingFromStuck = false;
     bCompletingStuckRecoveryMove = false;
+    bEscapingFromStuckTarget = false;
+    StuckEscapeStartLocation = FVector::ZeroVector;
+    RipperMoveFailureStartTime = 0.0;
+    LastRipperBlockingHitTime = 0.0;
     ResetStuckTracking();
     OwnerPawn->OnActorHit.AddUniqueDynamic(this, &ThisClass::HandleOwnerHit);
     if (UPrimitiveComponent* Body = GetMovementBody())
@@ -252,7 +261,7 @@ void UCMAggressiveBehaviorComponent::InitializeRuntimeBehavior()
     SetBehaviorEnabled(true);
 }
 
-// 새 타깃 감지를 우선 처리한 뒤 정체 복구와 현재 탐색·추격·공격 행동을 갱신한다.
+// 진행 중인 정체 복구를 우선 처리한 뒤 현재 탐색·추격·공격 행동을 갱신한다.
 void UCMAggressiveBehaviorComponent::UpdateBehavior()
 {
     UWorld* World = GetWorld();
@@ -262,10 +271,16 @@ void UCMAggressiveBehaviorComponent::UpdateBehavior()
     }
 
     const double CurrentTime = World->GetTimeSeconds();
-    RecoverToNavigation();
+    if (UpdateStuckRecovery(CurrentTime))
+    {
+        return;
+    }
+    if (!bCompletingStuckRecoveryMove)
+    {
+        RecoverToNavigation();
+    }
     UpdateTetraSightScan(CurrentTime);
-    // 정체 복구 중에도 새 타깃 감지는 우선 처리해 눈앞의 희생양을 놓치지 않는다.
-    if (State == ECMAggressiveAIState::Searching)
+    if (State == ECMAggressiveAIState::Searching && !bEscapingFromStuckTarget)
     {
         if (AActor* SeenTarget = FindVisibleTarget())
         {
@@ -276,8 +291,7 @@ void UCMAggressiveBehaviorComponent::UpdateBehavior()
             return;
         }
     }
-    // 복구 동작 중에는 일반 상태 머신이 새 이동 명령으로 복구를 덮어쓰지 않게 한다.
-    if (UpdateStuckRecovery(CurrentTime) || UpdateStuckDetection(CurrentTime))
+    if (UpdateStuckDetection(CurrentTime))
     {
         return;
     }
@@ -303,6 +317,8 @@ void UCMAggressiveBehaviorComponent::UpdateBehavior()
 // 물리 몸체가 전용 NavMesh 밖으로 밀리면 전체 몸체를 가장 가까운 유효 위치로 복귀시킨다.
 bool UCMAggressiveBehaviorComponent::RecoverToNavigation()
 {
+    const bool bPreserveRipperEscape = Profile == ECMAggressiveBehaviorProfile::Ripper && bEscapingFromStuckTarget;
+    const FVector PreservedEscapeStartLocation = StuckEscapeStartLocation;
     UCMAggressiveOmnidirectionalPathComponent* PathMovement = OwnerPawn ? OwnerPawn->FindComponentByClass<UCMAggressiveOmnidirectionalPathComponent>() : nullptr;
     FVector RecoveryLocation;
     if (!PathMovement || !PathMovement->FindNavigationRecoveryLocation(RecoveryLocation))
@@ -348,13 +364,17 @@ bool UCMAggressiveBehaviorComponent::RecoverToNavigation()
     bMoveIssued = false;
     bReversingFromStuck = false;
     bCompletingStuckRecoveryMove = false;
+    bEscapingFromStuckTarget = bPreserveRipperEscape;
+    StuckEscapeStartLocation = bPreserveRipperEscape ? PreservedEscapeStartLocation : FVector::ZeroVector;
+    RipperMoveFailureStartTime = 0.0;
+    LastRipperBlockingHitTime = 0.0;
     NextActionTime = 0.0;
     ResetStuckTracking();
     OwnerPawn->ForceNetUpdate();
     return true;
 }
 
-// 후진과 새 임의 이동으로 구성된 정체 복구 단계를 진행한다.
+// 후진 뒤 새 임의 이동으로 정체 복구 단계를 진행한다.
 bool UCMAggressiveBehaviorComponent::UpdateStuckRecovery(const double CurrentTime)
 {
     if (bReversingFromStuck)
@@ -366,36 +386,49 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckRecovery(const double CurrentTim
         }
 
         bReversingFromStuck = false;
-        if (Profile == ECMAggressiveBehaviorProfile::Ripper && State == ECMAggressiveAIState::Chasing && IsValidTarget(CurrentTarget))
-        {
-            if (!CanPursueTarget(*CurrentTarget))
-            {
-                BeginReturningHome();
-                ResetStuckTracking();
-                return true;
-            }
-            bMoveIssued = StartMove(CurrentTarget->GetActorLocation(), GetAttackDistance());
-            bCompletingStuckRecoveryMove = false;
-            ResetStuckTracking();
-            return bMoveIssued;
-        }
         bMoveIssued = BeginRandomMove();
         bCompletingStuckRecoveryMove = bMoveIssued;
+        if (!bMoveIssued && bEscapingFromStuckTarget)
+        {
+            NextActionTime = CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
+        }
         ResetStuckTracking();
 
-        return bCompletingStuckRecoveryMove;
+        return bCompletingStuckRecoveryMove || bEscapingFromStuckTarget;
     }
 
     if (!bCompletingStuckRecoveryMove)
     {
+        if (bEscapingFromStuckTarget)
+        {
+            if (CurrentTime >= NextActionTime)
+            {
+                RecoverToNavigation();
+                bMoveIssued = BeginRandomMove();
+                bCompletingStuckRecoveryMove = bMoveIssued;
+                NextActionTime = bMoveIssued ? 0.0 : CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
+                ResetStuckTracking();
+            }
+            return true;
+        }
         return false;
     }
     if (IsMoveRunning())
     {
-        return true;
+        return false;
     }
 
     bCompletingStuckRecoveryMove = false;
+    if (bEscapingFromStuckTarget && FVector::DistSquared2D(StuckEscapeStartLocation, GetNavigationLocation()) < FMath::Square(CMAggressiveBehavior::MinimumWanderTravelDistance))
+    {
+        bMoveIssued = false;
+        NextActionTime = CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
+        ResetStuckTracking();
+
+        return true;
+    }
+    bEscapingFromStuckTarget = false;
+    StuckEscapeStartLocation = FVector::ZeroVector;
     bMoveIssued = false;
     NextActionTime = CurrentTime;
     ResetStuckTracking();
@@ -403,9 +436,16 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckRecovery(const double CurrentTim
     return false;
 }
 
-// 이동 명령 중 목적지까지의 거리 감소가 일정 시간 부족하면 정체 복구를 시작한다.
+// 이동 명령 중 목적지까지의 거리 감소가 일정 시간 부족하면 후진 정체 복구를 시작한다.
 bool UCMAggressiveBehaviorComponent::UpdateStuckDetection(const double CurrentTime)
 {
+    if (Profile == ECMAggressiveBehaviorProfile::Ripper && RipperMoveFailureStartTime > 0.0 && CurrentTime - RipperMoveFailureStartTime >= CMAggressiveBehavior::RipperStuckDetectionSeconds)
+    {
+        BeginRipperEscape(CurrentTime, HasRecentRipperBlockingHit(CurrentTime));
+
+        return true;
+    }
+
     const bool bShouldTrack = bMoveIssued && IsMoveRunning() && (State == ECMAggressiveAIState::Searching || State == ECMAggressiveAIState::Chasing);
     if (!bShouldTrack)
     {
@@ -433,6 +473,14 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckDetection(const double CurrentTi
         return false;
     }
 
+    if (Profile == ECMAggressiveBehaviorProfile::Ripper)
+    {
+        const bool bBlockedByObstacle = HasRecentRipperBlockingHit(CurrentTime);
+        BeginRipperEscape(CurrentTime, bBlockedByObstacle);
+
+        return true;
+    }
+
     BeginStuckRecovery(CurrentTime);
 
     return true;
@@ -450,7 +498,7 @@ void UCMAggressiveBehaviorComponent::BeginStuckRecovery(const double CurrentTime
     }
 
     StopMove();
-    const bool bKeepCombatTarget = (Profile == ECMAggressiveBehaviorProfile::Ripper || Profile == ECMAggressiveBehaviorProfile::Centipede) && IsValidTarget(CurrentTarget);
+    const bool bKeepCombatTarget = Profile == ECMAggressiveBehaviorProfile::Centipede && IsValidTarget(CurrentTarget);
     if (!bKeepCombatTarget)
     {
         CurrentTarget = nullptr;
@@ -463,6 +511,41 @@ void UCMAggressiveBehaviorComponent::BeginStuckRecovery(const double CurrentTime
     StuckReverseEndTime = CurrentTime + CMAggressiveBehavior::StuckReverseDuration;
     ApplyStuckRecoveryReverseVelocity();
 
+}
+
+// Ripper 추적과 현재 이동점을 버리고 필요할 때 몸체 후방 이탈 후 다른 임의 지점으로 이동한다.
+void UCMAggressiveBehaviorComponent::BeginRipperEscape(const double CurrentTime, const bool bReverseFirst)
+{
+    const FVector CurrentLocation = GetNavigationLocation();
+    if (!bEscapingFromStuckTarget)
+    {
+        StuckEscapeStartLocation = CurrentLocation;
+    }
+
+    StopMove();
+    CurrentTarget = nullptr;
+    State = ECMAggressiveAIState::Searching;
+    bEscapingFromStuckTarget = true;
+    RipperMoveFailureStartTime = 0.0;
+    LastRipperBlockingHitTime = 0.0;
+    bReturningHome = false;
+    bHasWanderGoal = false;
+    bCompletingStuckRecoveryMove = false;
+    bReversingFromStuck = bReverseFirst;
+    if (bReverseFirst)
+    {
+        const UPrimitiveComponent* Body = GetMovementBody();
+        StuckReverseDirection = -(Body ? Body->GetForwardVector() : OwnerPawn->GetActorForwardVector()).GetSafeNormal2D();
+        StuckReverseEndTime = CurrentTime + CMAggressiveBehavior::StuckReverseDuration;
+        ApplyStuckRecoveryReverseVelocity();
+    }
+    else
+    {
+        bMoveIssued = BeginRandomMove();
+        bCompletingStuckRecoveryMove = bMoveIssued;
+        NextActionTime = bMoveIssued ? 0.0 : CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
+    }
+    ResetStuckTracking();
 }
 
 void UCMAggressiveBehaviorComponent::ApplyStuckRecoveryReverseVelocity() const
@@ -478,6 +561,7 @@ void UCMAggressiveBehaviorComponent::ApplyStuckRecoveryReverseVelocity() const
         Velocity.X = PlanarVelocity.X;
         Velocity.Y = PlanarVelocity.Y;
         Body->SetPhysicsLinearVelocity(Velocity);
+        Body->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
         Body->WakeAllRigidBodies();
     };
 
@@ -499,14 +583,22 @@ void UCMAggressiveBehaviorComponent::ResetStuckTracking()
     StuckProgressStartTime = World ? World->GetTimeSeconds() : 0.0;
 }
 
+bool UCMAggressiveBehaviorComponent::HasRecentRipperBlockingHit(const double CurrentTime) const
+{
+    return LastRipperBlockingHitTime > 0.0 && CurrentTime - LastRipperBlockingHitTime <= CMAggressiveBehavior::RipperBlockingHitMemorySeconds;
+}
+
 // 시야에 들어온 타깃을 추격하거나 배회와 귀환 행동을 이어간다.
 void UCMAggressiveBehaviorComponent::UpdateSearching(const double CurrentTime)
 {
-    if (AActor* SeenTarget = FindVisibleTarget())
+    if (!bEscapingFromStuckTarget)
     {
-        BeginChasing(SeenTarget);
+        if (AActor* SeenTarget = FindVisibleTarget())
+        {
+            BeginChasing(SeenTarget);
 
-        return;
+            return;
+        }
     }
 
     if (bReturningHome && FVector::DistSquared2D(GetNavigationLocation(), SpawnLocation) <= FMath::Square(CMAggressiveBehavior::ReturnAcceptanceRadius))
@@ -788,6 +880,7 @@ void UCMAggressiveBehaviorComponent::BeginReturningHome()
     State = ECMAggressiveAIState::Searching;
     bReturningHome = true;
     bMoveIssued = false;
+    RipperMoveFailureStartTime = 0.0;
     NextActionTime = 0.0;
 }
 
@@ -810,12 +903,13 @@ bool UCMAggressiveBehaviorComponent::BeginRandomMove()
     const float Radius = Profile == ECMAggressiveBehaviorProfile::Centipede ? CMAggressiveBehavior::CentipedeWanderRadius : Profile == ECMAggressiveBehaviorProfile::Ripper ? CMAggressiveBehavior::RipperWanderRadius : CMAggressiveBehavior::TetraWanderRadius;
 
     const FVector CurrentLocation = GetNavigationLocation();
+    const FVector RandomOrigin = bEscapingFromStuckTarget ? CurrentLocation : SpawnLocation;
     const float MinimumGoalDistance = CMAggressiveBehavior::MinimumWanderTravelDistance + CMAggressiveBehavior::WanderAcceptanceRadius;
     FVector RandomLocation = FVector::ZeroVector;
     bool bFoundGoal = false;
     for (int32 Attempt = 0; Attempt < CMAggressiveBehavior::WanderGoalSampleAttempts; ++Attempt)
     {
-        if (PathMovement->FindRandomReachableLocation(SpawnLocation, Radius, RandomLocation) && FVector::DistSquared2D(CurrentLocation, RandomLocation) >= FMath::Square(MinimumGoalDistance))
+        if (PathMovement->FindRandomReachableLocation(RandomOrigin, Radius, RandomLocation) && FVector::DistSquared2D(CurrentLocation, RandomLocation) >= FMath::Square(MinimumGoalDistance))
         {
             bFoundGoal = true;
             break;
@@ -854,17 +948,34 @@ bool UCMAggressiveBehaviorComponent::StartMove(const FVector Goal, const float A
 {
     StopMove();
     LastMoveGoal = Goal;
+    bool bMoveStarted = false;
     switch (Profile)
     {
     case ECMAggressiveBehaviorProfile::Tetra:
-        return TetraCoordinator && TetraCoordinator->StartInferencePath(Cast<ACMTetraPawn>(OwnerPawn), Goal, AcceptanceRadius);
+        bMoveStarted = TetraCoordinator && TetraCoordinator->StartInferencePath(Cast<ACMTetraPawn>(OwnerPawn), Goal, AcceptanceRadius);
+        break;
     case ECMAggressiveBehaviorProfile::Ripper:
-        return RipperCoordinator && RipperCoordinator->StartInferencePath(Cast<ACMRipperPawn>(OwnerPawn), Goal, AcceptanceRadius);
+        bMoveStarted = RipperCoordinator && RipperCoordinator->StartInferencePath(Cast<ACMRipperPawn>(OwnerPawn), Goal, AcceptanceRadius);
+        break;
     case ECMAggressiveBehaviorProfile::Centipede:
-        return CentipedeCoordinator && CentipedeCoordinator->StartInferencePath(Cast<ACMCentipedePawn>(OwnerPawn), Goal, AcceptanceRadius);
+        bMoveStarted = CentipedeCoordinator && CentipedeCoordinator->StartInferencePath(Cast<ACMCentipedePawn>(OwnerPawn), Goal, AcceptanceRadius);
+        break;
     default:
-        return false;
+        break;
     }
+    if (Profile == ECMAggressiveBehaviorProfile::Ripper)
+    {
+        if (bMoveStarted)
+        {
+            RipperMoveFailureStartTime = 0.0;
+        }
+        else if (RipperMoveFailureStartTime <= 0.0)
+        {
+            const UWorld* World = GetWorld();
+            RipperMoveFailureStartTime = World ? World->GetTimeSeconds() : 0.0;
+        }
+    }
+    return bMoveStarted;
 }
 
 bool UCMAggressiveBehaviorComponent::UpdateMoveGoal(const FVector Goal)
@@ -1091,6 +1202,11 @@ bool UCMAggressiveBehaviorComponent::IsValidTarget(const AActor* Target) const
 // Ripper가 희생자의 신체나 플레이어의 가장 가까운 부착 파츠를 절단해 소비한다.
 bool UCMAggressiveBehaviorComponent::PerformRipperAttack(AActor& Target)
 {
+    if (!CanSeeActor(Target))
+    {
+        return false;
+    }
+
     if (ACMSacrificeCharacter* Sacrifice = Cast<ACMSacrificeCharacter>(&Target))
     {
         FCMDismembermentHitRequest Request;
@@ -1235,6 +1351,19 @@ void UCMAggressiveBehaviorComponent::HandleTetraKnockbackFinished()
 // Tetra 돌진이 플레이어와 충돌하면 양쪽 넉백을 적용하고 대기 상태로 전환한다.
 void UCMAggressiveBehaviorComponent::HandleOwnerHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit)
 {
+    if (Profile == ECMAggressiveBehaviorProfile::Ripper)
+    {
+        const UPrimitiveComponent* Body = GetMovementBody();
+        const FVector PlanarHitNormal = Hit.ImpactNormal.GetSafeNormal2D();
+        const FVector PlanarForward = Body ? Body->GetForwardVector().GetSafeNormal2D() : FVector::ZeroVector;
+        if (Hit.bBlockingHit && !PlanarHitNormal.IsNearlyZero() && FVector::DotProduct(PlanarForward, PlanarHitNormal) < -UE_KINDA_SMALL_NUMBER)
+        {
+            const UWorld* World = GetWorld();
+            LastRipperBlockingHitTime = World ? World->GetTimeSeconds() : 0.0;
+        }
+        return;
+    }
+
     if (Profile != ECMAggressiveBehaviorProfile::Tetra || State != ECMAggressiveAIState::Attacking || OtherActor != CurrentTarget)
     {
         return;
