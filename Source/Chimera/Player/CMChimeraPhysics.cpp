@@ -621,7 +621,7 @@ void ACMChimera::ConfigureSegments()
             BodyCollisionHalfHeight
         ));
         SegmentBody->SetWorldScale3D(FVector::OneVector);
-        SegmentBody->SetHiddenInGame(!bIsActive);
+        SegmentBody->SetHiddenInGame(true);
         SegmentBody->SetCollisionEnabled(
             bIsActive
                 ? ECollisionEnabled::QueryAndPhysics

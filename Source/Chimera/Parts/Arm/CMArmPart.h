@@ -191,7 +191,7 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Arm|Debug")
-    bool bDrawSwingDebug = true;
+    bool bDrawSwingDebug = false;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Arm|Debug", meta = (ClampMin = "0.0"))
