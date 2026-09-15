@@ -88,11 +88,6 @@ void ACMPlayerState::SetPlayerColorIndex(int32 NewPlayerColorIndex)
 
 FLinearColor ACMPlayerState::GetPlayerColor() const
 {
-    return GetPlayerColorForIndex(PlayerColorIndex);
-}
-
-FLinearColor ACMPlayerState::GetPlayerColorForIndex(int32 ColorIndex)
-{
     static const FLinearColor PlayerColors[] =
     {
         FLinearColor(0.906f, 0.224f, 0.208f),
@@ -105,9 +100,9 @@ FLinearColor ACMPlayerState::GetPlayerColorForIndex(int32 ColorIndex)
         FLinearColor(0.427f, 0.298f, 0.255f)
     };
 
-    return ColorIndex >= 0
-        && ColorIndex < UE_ARRAY_COUNT(PlayerColors)
-        ? PlayerColors[ColorIndex]
+    return PlayerColorIndex >= 0
+        && PlayerColorIndex < UE_ARRAY_COUNT(PlayerColors)
+        ? PlayerColors[PlayerColorIndex]
         : FLinearColor::White;
 }
 

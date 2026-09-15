@@ -56,8 +56,6 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Player")
     FLinearColor GetPlayerColor() const;
 
-    static FLinearColor GetPlayerColorForIndex(int32 ColorIndex);
-
     UFUNCTION(BlueprintPure, Category = "Chimera|Player")
     int32 GetPlayerColorIndex() const;
 

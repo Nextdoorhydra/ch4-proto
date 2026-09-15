@@ -65,9 +65,6 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category="Session")
 	bool bAllowJoinInProgress = true;
 
-	UPROPERTY(Config, EditAnywhere, Category="Session")
-	bool bUseFrontendLobby = false;
-
 	UPROPERTY(Config, EditAnywhere, Category="Diagnostics")
 	bool bEnableVerboseLogging = false;
 };

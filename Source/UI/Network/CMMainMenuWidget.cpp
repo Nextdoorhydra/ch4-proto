@@ -140,7 +140,7 @@ void UCMMainMenuWidget::NativeConstruct()
 
     RecoverStaleSessionIfNeeded();
     UpdateControls();
-    ShowFrontendLobbyIfReady();
+    ShowLobbyIfReady();
 }
 
 void UCMMainMenuWidget::NativeDestruct()
@@ -258,10 +258,9 @@ void UCMMainMenuWidget::UpdateControls()
     }
 }
 
-void UCMMainMenuWidget::ShowFrontendLobbyIfReady()
+void UCMMainMenuWidget::ShowLobbyIfReady()
 {
     if (!NetworkSubsystem
-        || !NetworkSubsystem->IsFrontendLobbyEnabled()
         || NetworkSubsystem->GetConnectionState()
             != EListenServerConnectionState::Lobby
         || NetworkSubsystem->GetCurrentOperation()
@@ -301,7 +300,7 @@ void UCMMainMenuWidget::HandleNetworkStateChanged(
 )
 {
     UpdateControls();
-    ShowFrontendLobbyIfReady();
+    ShowLobbyIfReady();
 }
 
 void UCMMainMenuWidget::HandleOperationCompleted(

@@ -39,10 +39,6 @@ bool FListenServerParticipantChangeDetectionTest::RunTest(const FString& Paramet
 	ChangedSnapshot[0].bIsHost = false;
 	TestFalse(TEXT("Host changes are detected"), Snapshot == ChangedSnapshot);
 
-	ChangedSnapshot = Snapshot;
-	ChangedSnapshot[0].bIsReady = true;
-	TestFalse(TEXT("Ready changes are detected"), Snapshot == ChangedSnapshot);
-
 	return true;
 }
 

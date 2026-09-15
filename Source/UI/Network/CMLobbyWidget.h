@@ -8,9 +8,7 @@
 
 class ACMGameState;
 class UButton;
-class UCMMainMenuWidget;
 class UCMLobbyPlayerRowWidget;
-class UCMStageRouteDefinition;
 class UListenServerSessionSubsystem;
 class UScrollBox;
 class UTextBlock;
@@ -26,15 +24,6 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Lobby")
     TSubclassOf<UCMLobbyPlayerRowWidget> LobbyPlayerRowClass;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Lobby")
-    TSoftClassPtr<UCMMainMenuWidget> MainMenuWidgetClass;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Lobby")
-    TSoftObjectPtr<UCMStageRouteDefinition> StageRouteDefinition;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Lobby")
-    TSoftObjectPtr<UCMStageRouteDefinition> TestStageRouteDefinition;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UButton> Btn_StartGame;
@@ -72,8 +61,6 @@ private:
     void RefreshLobbyRoster();
     void UpdateControls();
     void SetResultText(const FText& Message);
-    void ShowFrontendMainMenuIfReady();
-    bool StartFrontendStageRoute(bool bTestRoute);
 
     UFUNCTION()
     void HandleNetworkStateChanged(
