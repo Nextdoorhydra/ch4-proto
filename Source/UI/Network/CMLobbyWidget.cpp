@@ -1,7 +1,6 @@
 #include "CMLobbyWidget.h"
 
 #include "CMLobbyPlayerRowWidget.h"
-#include "CMMainMenuWidget.h"
 #include "CMRoomId.h"
 #include "Components/Button.h"
 #include "Components/ScrollBox.h"
@@ -9,9 +8,6 @@
 #include "Components/TextBlock.h"
 #include "GameMode/CMGameState.h"
 #include "GameMode/Lobby/CMLobbyGameState.h"
-#include "GameMode/StageRoute/CMStageRouteDefinition.h"
-#include "GameMode/StageRoute/CMStageRouteSubsystem.h"
-#include "ListenServerNetworkSettings.h"
 #include "ListenServerSessionSubsystem.h"
 #include "Player/CMPlayerController.h"
 #include "Player/CMPlayerState.h"
@@ -21,22 +17,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogChimeraLobbyUI, Log, All);
 void UCMLobbyWidget::NativeConstruct()
 {
     Super::NativeConstruct();
-
-    if (MainMenuWidgetClass.IsNull())
-    {
-        MainMenuWidgetClass = TSoftClassPtr<UCMMainMenuWidget>(
-            FSoftObjectPath(TEXT("/Game/Chimera/UI/WBP_Main.WBP_Main_C")));
-    }
-    if (StageRouteDefinition.IsNull())
-    {
-        StageRouteDefinition = TSoftObjectPtr<UCMStageRouteDefinition>(
-            FSoftObjectPath(TEXT("/Game/Chimera/Environment/DA_CMStageRouteDefinition.DA_CMStageRouteDefinition")));
-    }
-    if (TestStageRouteDefinition.IsNull())
-    {
-        TestStageRouteDefinition = TSoftObjectPtr<UCMStageRouteDefinition>(
-            FSoftObjectPath(TEXT("/Game/Chimera/Environment/DA_CMTestDefinition.DA_CMTestDefinition")));
-    }
 
     NetworkSubsystem = GetGameInstance()
         ? GetGameInstance()->GetSubsystem<UListenServerSessionSubsystem>()
@@ -50,10 +30,6 @@ void UCMLobbyWidget::NativeConstruct()
         NetworkSubsystem->OnOperationCompleted.AddUniqueDynamic(
             this,
             &UCMLobbyWidget::HandleOperationCompleted
-        );
-        NetworkSubsystem->OnParticipantsChanged.AddUniqueDynamic(
-            this,
-            &UCMLobbyWidget::HandleLobbyRosterChanged
         );
     }
 
@@ -110,10 +86,6 @@ void UCMLobbyWidget::NativeDestruct()
         NetworkSubsystem->OnOperationCompleted.RemoveDynamic(
             this,
             &UCMLobbyWidget::HandleOperationCompleted
-        );
-        NetworkSubsystem->OnParticipantsChanged.RemoveDynamic(
-            this,
-            &UCMLobbyWidget::HandleLobbyRosterChanged
         );
     }
     if (BoundGameState.IsValid())
@@ -176,56 +148,6 @@ void UCMLobbyWidget::RefreshRoomId()
 
 void UCMLobbyWidget::RefreshLobbyRoster()
 {
-    if (NetworkSubsystem && NetworkSubsystem->IsFrontendLobbyEnabled())
-    {
-        const TArray<FListenServerParticipant> Participants =
-            NetworkSubsystem->GetParticipants();
-        if (Txt_PlayerCount)
-        {
-            const UListenServerNetworkSettings* Settings =
-                GetDefault<UListenServerNetworkSettings>();
-            Txt_PlayerCount->SetText(FText::Format(
-                NSLOCTEXT("ChimeraUI", "LobbyPlayerCount", "{0} / {1}"),
-                FText::AsNumber(Participants.Num()),
-                FText::AsNumber(Settings->DefaultMaxPlayers)));
-        }
-        if (!SB_LobbyPlayers)
-        {
-            return;
-        }
-        SB_LobbyPlayers->ClearChildren();
-        if (!LobbyPlayerRowClass)
-        {
-            return;
-        }
-        APlayerController* OwningPlayer = GetOwningPlayer();
-        int32 ParticipantColorIndex = 0;
-        for (const FListenServerParticipant& Participant : Participants)
-        {
-            UCMLobbyPlayerRowWidget* PlayerRow = OwningPlayer
-                ? CreateWidget<UCMLobbyPlayerRowWidget>(
-                    OwningPlayer, LobbyPlayerRowClass)
-                : nullptr;
-            if (!PlayerRow)
-            {
-                continue;
-            }
-            PlayerRow->SetPlayerLobbyState(
-                Participant.DisplayName,
-                ACMPlayerState::GetPlayerColorForIndex(
-                    ParticipantColorIndex++),
-                Participant.bIsReady);
-            if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(
-                SB_LobbyPlayers->AddChild(PlayerRow)))
-            {
-                RowSlot->SetPadding(FMargin(0.0f));
-                RowSlot->SetHorizontalAlignment(HAlign_Fill);
-                RowSlot->SetVerticalAlignment(VAlign_Center);
-            }
-        }
-        return;
-    }
-
     BindCurrentGameState();
     if (!BoundGameState.IsValid())
     {
@@ -309,26 +231,12 @@ void UCMLobbyWidget::UpdateControls()
     const ACMLobbyGameState* LobbyState = GetWorld()
         ? GetWorld()->GetGameState<ACMLobbyGameState>()
         : nullptr;
-    bool bCanStartGame = LobbyState && LobbyState->CanStartGame();
-    bool bCanStartTestGame = LobbyState && LobbyState->CanStartTestGame();
+    const bool bCanStartGame = LobbyState && LobbyState->CanStartGame();
+    const bool bCanStartTestGame =
+        LobbyState && LobbyState->CanStartTestGame();
     const ACMPlayerState* LocalPlayerState = GetOwningPlayer()
         ? GetOwningPlayer()->GetPlayerState<ACMPlayerState>()
         : nullptr;
-    bool bLocalPlayerReady = LocalPlayerState && LocalPlayerState->IsReady();
-    if (NetworkSubsystem && NetworkSubsystem->IsFrontendLobbyEnabled())
-    {
-        const TArray<FListenServerParticipant> Participants =
-            NetworkSubsystem->GetParticipants();
-        const bool bAllReady = !Participants.IsEmpty()
-            && Participants.ContainsByPredicate(
-                [](const FListenServerParticipant& Participant)
-                {
-                    return !Participant.bIsReady;
-                }) == false;
-        bCanStartGame = Participants.Num() >= 2 && bAllReady;
-        bCanStartTestGame = Participants.Num() >= 1 && bAllReady;
-        bLocalPlayerReady = NetworkSubsystem->IsLocalParticipantReady();
-    }
 
     if (Btn_StartGame)
     {
@@ -348,13 +256,12 @@ void UCMLobbyWidget::UpdateControls()
     }
     if (Btn_Ready)
     {
-        Btn_Ready->SetIsEnabled(bLobby && bIdle
-            && (LocalPlayerState
-                || (NetworkSubsystem
-                    && NetworkSubsystem->IsFrontendLobbyEnabled())));
+        Btn_Ready->SetIsEnabled(bLobby && bIdle && LocalPlayerState);
     }
     if (Txt_ReadyState)
     {
+        const bool bLocalPlayerReady =
+            LocalPlayerState && LocalPlayerState->IsReady();
         Txt_ReadyState->SetText(
             bLocalPlayerReady
                 ? NSLOCTEXT("ChimeraUI", "CancelReady", "Unready")
@@ -387,7 +294,6 @@ void UCMLobbyWidget::HandleNetworkStateChanged(
     EListenServerOperation
 )
 {
-    ShowFrontendMainMenuIfReady();
     RefreshRoomId();
     RefreshLobbyRoster();
     UpdateControls();
@@ -412,11 +318,6 @@ void UCMLobbyWidget::HandleLobbyRosterChanged()
 // 정식 시작 버튼을 서버의 StageRoute 검증 흐름으로 전달
 void UCMLobbyWidget::HandleStartGameClicked()
 {
-    if (NetworkSubsystem && NetworkSubsystem->IsFrontendLobbyEnabled())
-    {
-        StartFrontendStageRoute(false);
-        return;
-    }
     if (ACMPlayerController* PlayerController =
         Cast<ACMPlayerController>(GetOwningPlayer()))
     {
@@ -427,11 +328,6 @@ void UCMLobbyWidget::HandleStartGameClicked()
 // 테스트 시작 버튼을 서버의 TestRoute 검증 흐름으로 전달
 void UCMLobbyWidget::HandleStartTestGameClicked()
 {
-    if (NetworkSubsystem && NetworkSubsystem->IsFrontendLobbyEnabled())
-    {
-        StartFrontendStageRoute(true);
-        return;
-    }
     if (ACMPlayerController* PlayerController =
         Cast<ACMPlayerController>(GetOwningPlayer()))
     {
@@ -442,12 +338,6 @@ void UCMLobbyWidget::HandleStartTestGameClicked()
 // 현재 로컬 플레이어의 Ready 상태를 반전해 서버에 요청
 void UCMLobbyWidget::HandleReadyClicked()
 {
-    if (NetworkSubsystem && NetworkSubsystem->IsFrontendLobbyEnabled())
-    {
-        NetworkSubsystem->SetLocalParticipantReady(
-            !NetworkSubsystem->IsLocalParticipantReady());
-        return;
-    }
     ACMPlayerController* PlayerController =
         Cast<ACMPlayerController>(GetOwningPlayer());
     const ACMPlayerState* PlayerState = PlayerController
@@ -471,82 +361,6 @@ void UCMLobbyWidget::HandleLeaveClicked()
 {
     if (NetworkSubsystem)
     {
-        if (NetworkSubsystem->IsFrontendLobbyEnabled())
-        {
-            NetworkSubsystem->LeaveSession();
-        }
-        else
-        {
-            NetworkSubsystem->LeaveAndReturnToMenu();
-        }
+        NetworkSubsystem->LeaveAndReturnToMenu();
     }
-}
-
-void UCMLobbyWidget::ShowFrontendMainMenuIfReady()
-{
-    if (!NetworkSubsystem
-        || !NetworkSubsystem->IsFrontendLobbyEnabled()
-        || NetworkSubsystem->GetConnectionState()
-            != EListenServerConnectionState::Offline
-        || NetworkSubsystem->GetCurrentOperation()
-            != EListenServerOperation::None)
-    {
-        return;
-    }
-
-    UClass* LoadedMainMenuClass = MainMenuWidgetClass.LoadSynchronous();
-    APlayerController* OwningPlayer = GetOwningPlayer();
-    UCMMainMenuWidget* MainMenuWidget = LoadedMainMenuClass && OwningPlayer
-        ? CreateWidget<UCMMainMenuWidget>(OwningPlayer, LoadedMainMenuClass)
-        : nullptr;
-    if (!MainMenuWidget)
-    {
-        UE_LOG(LogChimeraLobbyUI, Error,
-            TEXT("Could not restore the frontend main menu widget."));
-        return;
-    }
-    MainMenuWidget->AddToViewport();
-    RemoveFromParent();
-}
-
-bool UCMLobbyWidget::StartFrontendStageRoute(bool bTestRoute)
-{
-    if (!NetworkSubsystem
-        || NetworkSubsystem->GetCurrentRole() != EListenServerRole::Host
-        || NetworkSubsystem->GetCurrentOperation()
-            != EListenServerOperation::None)
-    {
-        return false;
-    }
-
-    UCMStageRouteDefinition* RouteDefinition = bTestRoute
-        ? TestStageRouteDefinition.LoadSynchronous()
-        : StageRouteDefinition.LoadSynchronous();
-    UCMStageRouteSubsystem* StageRoute = GetGameInstance()
-        ? GetGameInstance()->GetSubsystem<UCMStageRouteSubsystem>()
-        : nullptr;
-    if (!RouteDefinition || !StageRoute
-        || !StageRoute->StartStageRoute(RouteDefinition))
-    {
-        SetResultText(NSLOCTEXT(
-            "ChimeraUI", "FrontendRouteFailed",
-            "The stage route could not be prepared."));
-        return false;
-    }
-
-    const int32 PlayerCount = NetworkSubsystem->GetParticipantCount();
-    StageRoute->SetExpectedPlayerCount(PlayerCount);
-    StageRoute->SetSoloTestMode(bTestRoute && PlayerCount == 1);
-    const FCMStageRouteEntry* FirstStage = StageRoute->GetCurrentStage();
-    if (!FirstStage
-        || !NetworkSubsystem->HostTravelToMap(
-            FirstStage->StageMap.ToSoftObjectPath()))
-    {
-        StageRoute->ResetStageRoute();
-        SetResultText(NSLOCTEXT(
-            "ChimeraUI", "FrontendGameStartFailed",
-            "The game could not be started."));
-        return false;
-    }
-    return true;
 }

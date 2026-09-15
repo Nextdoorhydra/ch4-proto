@@ -73,7 +73,7 @@ protected:
 private:
     bool CanStartSessionOperation() const;
     void RecoverStaleSessionIfNeeded();
-    void ShowFrontendLobbyIfReady();
+    void ShowLobbyIfReady();
     void UpdateControls();
     void SetResultText(const FText& Message);
 
