@@ -9,14 +9,17 @@
 class ACMDroppedPartActor;
 class ACMChimera;
 class UAudioComponent;
+class UCMPartSlotComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UNiagaraComponent;
 class UNiagaraSystem;
+class UProceduralMeshComponent;
 class UPrimitiveComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
 class USphereComponent;
+class USplineComponent;
 class USplineMeshComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
@@ -27,6 +30,30 @@ enum class ECMTentacleState : uint8
     Idle,
     Extended,
     Pulling
+};
+
+USTRUCT()
+struct FCMMountedHeadTentacleRuntime
+{
+    GENERATED_BODY()
+
+    UPROPERTY(Transient)
+    TObjectPtr<USplineComponent> Spline;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UProceduralMeshComponent> TubeMesh;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> TubeMaterial;
+
+    /** Visual mesh moved by the hanging idle. The Actor root stays network-stable. */
+    UPROPERTY(Transient)
+    TObjectPtr<USkeletalMeshComponent> AnimatedHeadMesh;
+
+    FTransform HeadMeshBaseRelativeTransform = FTransform::Identity;
+    bool bHasHeadMeshBaseTransform = false;
+    bool bLoggedConnectorFailure = false;
+    bool bLoggedConnectorReady = false;
 };
 
 /**
@@ -83,6 +110,10 @@ public:
     {
         return TetheredTentacleWidth;
     }
+
+    /** Number of visible cosmetic tethers supporting mounted Head Parts. */
+    UFUNCTION(BlueprintPure, Category = "Chimera|Tentacle")
+    int32 GetMountedHeadTentacleCount() const;
 
     static const FName TentacleInteractiveActorTag;
 
@@ -174,6 +205,56 @@ protected:
         meta = (ClampMin = "0.01"))
     float TetheredTentacleWidth = 1.8f;
 
+    /** Idle-tentacle width used by the persistent mounted-Head tether. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Visual",
+        meta = (ClampMin = "0.01"))
+    float MountedHeadTentacleWidth = 1.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Visual",
+        meta = (ClampMin = "2"))
+    int32 MountedHeadSplinePointCount = 5;
+
+    /** Upward arch that keeps the mounted-Head connector clear of the ground. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Visual",
+        meta = (ClampMin = "0.0"))
+    float MountedHeadTentacleSag = 45.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Visual",
+        meta = (ClampMin = "0.0"))
+    float MountedHeadWaveAmplitude = 8.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Visual",
+        meta = (ClampMin = "0.0"))
+    float MountedHeadWaveSpeed = 2.4f;
+
+    /** Raises the mounted Head above its authored slot before idle movement. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Mounted Head Idle",
+        meta = (ClampMin = "0.0"))
+    float MountedHeadIdleHeightOffset = 80.0f;
+
+    /** Vertical travel of a mounted Head hanging from its idle tentacle. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Mounted Head Idle",
+        meta = (ClampMin = "0.0"))
+    float MountedHeadIdleVerticalAmplitude = 10.0f;
+
+    /** Side-to-side travel of a mounted Head hanging from its idle tentacle. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Mounted Head Idle",
+        meta = (ClampMin = "0.0"))
+    float MountedHeadIdleHorizontalAmplitude = 6.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Tentacle|Mounted Head Idle",
+        meta = (ClampMin = "0.0"))
+    float MountedHeadIdleSpeed = 1.25f;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Tentacle|Attachment",
         meta = (ClampMin = "0.01"))
@@ -213,6 +294,23 @@ private:
     void UpdateVisual(float DeltaTime);
     void EnsureVisualComponents();
     void DestroyVisualComponents();
+    void UpdateMountedHeadTentacles(float DeltaTime);
+    void EnsureMountedHeadTentacle(int32 PartSlotIndex);
+    void UpdateMountedHeadIdleAnimation(
+        FCMMountedHeadTentacleRuntime& Runtime,
+        USkeletalMeshComponent& HeadMesh,
+        int32 PartSlotIndex);
+    void RestoreMountedHeadIdleAnimation(
+        FCMMountedHeadTentacleRuntime& Runtime);
+    void HideMountedHeadTentacle(int32 PartSlotIndex);
+    void DestroyMountedHeadTentacles();
+    bool ResolveMountedHeadNeckLocation(
+        const UCMPartSlotComponent& PartSlot,
+        const USkeletalMeshComponent& HeadMesh,
+        FVector& OutWorldLocation,
+        FName* OutBoneName = nullptr) const;
+    FVector ResolveMountedHeadSourceLocation(
+        const FVector& HeadTargetLocation) const;
     USkeletalMeshComponent* ResolveTargetPartMesh(AActor* Target) const;
     FVector ResolveAuthoritativePickupLocation(AActor* Target) const;
     FVector ResolveVisualTargetLocation(AActor* Target) const;
@@ -235,10 +333,14 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UAudioComponent> PullLoopSoundComponent;
 
+    UPROPERTY(Transient)
+    TArray<FCMMountedHeadTentacleRuntime> MountedHeadTentacles;
+
     FCMPartSlotAddress PendingPartSlot;
     FTransform PullStartTransform;
     FVector LastVisualTargetLocation = FVector::ZeroVector;
     float PullElapsedSeconds = 0.0f;
     float VisualAlpha = 0.0f;
+    float MountedHeadTentacleElapsedSeconds = 0.0f;
     bool bSegmentActive = true;
 };

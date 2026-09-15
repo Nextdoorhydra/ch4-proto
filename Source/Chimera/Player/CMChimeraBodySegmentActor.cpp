@@ -88,7 +88,7 @@ void ACMChimeraBodySegmentActor::SetTentacleActorClass(
 
     if (ACMTentacleSegmentActor* SegmentTentacle = GetTentacleActor())
     {
-        if (HasAuthority() && ChimeraOwner && BodySegment)
+        if (ChimeraOwner && BodySegment)
         {
             SegmentTentacle->InitializeForSegment(
                 ChimeraOwner,
@@ -122,7 +122,7 @@ void ACMChimeraBodySegmentActor::InitializeForSegment(
 
     if (ACMTentacleSegmentActor* SegmentTentacle = GetTentacleActor())
     {
-        if (HasAuthority() && InChimera && InBodySegment)
+        if (InChimera && InBodySegment)
         {
             SegmentTentacle->InitializeForSegment(
                 InChimera,
@@ -192,6 +192,7 @@ void ACMChimeraBodySegmentActor::OnRep_PresentationState()
     bHasPresentationState = false;
     SetSegmentPresentation(bSegmentActive, VisualRole);
     RefreshIdleTentacleSource();
+    RefreshWrapTentacleTarget();
 }
 
 void ACMChimeraBodySegmentActor::ApplyVisualPreset()
@@ -228,9 +229,30 @@ void ACMChimeraBodySegmentActor::SetWrapTentacleTarget(
     }
 }
 
+UMeshComponent* ACMChimeraBodySegmentActor::GetWrapTentacleTarget() const
+{
+    return WrapTentacles ? WrapTentacles->GetTargetMesh() : nullptr;
+}
+
 void ACMChimeraBodySegmentActor::RefreshWrapTentacleTarget()
 {
-    if (!WrapTentacles || !BodySegment)
+    if (!WrapTentacles)
+    {
+        return;
+    }
+
+    if (!BodySegment)
+    {
+        USceneComponent* Parent = GetRootComponent()
+            ? GetRootComponent()->GetAttachParent()
+            : nullptr;
+        while (Parent && !BodySegment)
+        {
+            BodySegment = Cast<UPrimitiveComponent>(Parent);
+            Parent = Parent->GetAttachParent();
+        }
+    }
+    if (!BodySegment)
     {
         return;
     }

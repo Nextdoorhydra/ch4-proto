@@ -74,6 +74,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Chimera|Body Segment")
     void SetWrapTentacleTarget(UMeshComponent* InTargetMesh);
 
+    UFUNCTION(BlueprintPure, Category = "Chimera|Body Segment")
+    UMeshComponent* GetWrapTentacleTarget() const;
+
     /** Rebinds local tentacle VFX to this segment's GooBody static mesh. */
     void RefreshIdleTentacleSource();
 
@@ -114,6 +117,8 @@ protected:
     void K2_SetSegmentVisualActive(bool bInActive);
 
 private:
+    friend class FCMTentacleBlueprintIntegrationTest;
+
     void ApplyVisualPreset();
     void RefreshWrapTentacleTarget();
 

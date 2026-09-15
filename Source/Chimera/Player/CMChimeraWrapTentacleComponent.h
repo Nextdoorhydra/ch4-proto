@@ -30,6 +30,12 @@ namespace CMChimeraWrapTentacle
         const FVector& SourcePosition,
         const FBoxSphereBounds& TargetBounds,
         float ActivationDistance);
+
+    /** Builds the same continuous tube geometry used by surface tentacles. */
+    CHIMERA_API void UpdateTubeMeshFromSpline(
+        const USplineComponent& Spline,
+        UProceduralMeshComponent& TubeMesh,
+        float TentacleWidth);
 }
 
 USTRUCT()
@@ -81,6 +87,9 @@ public:
     void ConfigureSource(UMeshComponent* InSourceMesh, int32 SegmentIndex);
     void SetEffectActive(bool bInActive);
 
+    /** Surface-only paths omit the lead span from the Chimera source. */
+    void SetConnectSourceToSurface(bool bInConnectSourceToSurface);
+
     UFUNCTION(BlueprintCallable, Category = "Chimera|Wrap Tentacle")
     void SetTargetMesh(UMeshComponent* InTargetMesh);
 
@@ -126,6 +135,12 @@ protected:
         meta = (ClampMin = "0.1"))
     float SamplingRetryInterval = 0.5f;
 
+    /** Low-frequency range check used after the surface mesh is complete. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Wrap Tentacle|Activation",
+        meta = (ClampMin = "0.05"))
+    float SettledCheckInterval = 0.25f;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Wrap Tentacle|Shape",
         meta = (ClampMin = "1"))
@@ -135,6 +150,11 @@ protected:
         Category = "Chimera|Wrap Tentacle|Shape",
         meta = (ClampMin = "3"))
     int32 SplinePointCount = 32;
+
+    /** Include the lead segment from the Chimera source to the target surface. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Chimera|Wrap Tentacle|Shape")
+    bool bConnectSourceToSurface = true;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Wrap Tentacle|Shape",
@@ -173,12 +193,14 @@ private:
     bool BuildSurfaceCandidates();
     bool BuildSkeletalSurfaceCandidates(
         USkeletalMeshComponent& SkeletalTarget);
+    bool BuildSkeletalPhysicsSurfaceCandidates(
+        USkeletalMeshComponent& SkeletalTarget);
     bool BuildStaticSurfaceCandidates(UStaticMeshComponent& StaticTarget);
     void AddSurfaceCandidate(
         const FVector& TargetLocalPosition,
         const FVector& TargetLocalNormal,
         USkeletalMeshComponent* SkeletalTarget);
-    bool AssignDistanceOrderedPaths();
+    bool AssignCoverageOrderedPaths();
     void EnsurePool();
     void DestroyPool();
     void HidePool();
@@ -192,6 +214,7 @@ private:
     bool IsTargetInRange() const;
     void ResetTargetState();
     void RefreshTickEnabled();
+    int32 GetTargetAnchorCount() const;
 
     UPROPERTY(Transient)
     TObjectPtr<UMeshComponent> SourceMesh;

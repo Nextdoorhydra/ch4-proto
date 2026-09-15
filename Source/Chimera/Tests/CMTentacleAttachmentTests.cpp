@@ -19,6 +19,7 @@
 #include "Parts/Core/CMDroppedPartActor.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Arm/CMArmPart.h"
+#include "Parts/Head/CMHeadPartActor.h"
 #include "Parts/Tentacle/CMTentacleSegmentActor.h"
 #include "Player/CMChimera.h"
 #include "Player/CMChimeraBodySegmentActor.h"
@@ -532,6 +533,31 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                 UCMChimeraWrapTentacleComponent>();
         }
     }
+    if (Chimera && RuntimeTentacle && RuntimePresentation)
+    {
+        const int32 ExpectedSegmentIndex =
+            RuntimePresentation->GetSegmentIndex();
+        UPrimitiveComponent* PresentationBody =
+            RuntimePresentation->BodySegment;
+        RuntimePresentation->SetRole(ROLE_SimulatedProxy);
+        RuntimeTentacle->SetRole(ROLE_SimulatedProxy);
+        RuntimeTentacle->SegmentIndex = INDEX_NONE;
+        RuntimeTentacle->ChimeraOwner = nullptr;
+        RuntimePresentation->InitializeForSegment(
+            Chimera,
+            ExpectedSegmentIndex,
+            PresentationBody);
+        TestEqual(
+            TEXT("Client cosmetic Tentacle receives its replicated segment address"),
+            RuntimeTentacle->GetSegmentIndex(),
+            ExpectedSegmentIndex);
+        TestEqual(
+            TEXT("Client cosmetic Tentacle resolves the owning Chimera"),
+            RuntimeTentacle->ChimeraOwner.Get(),
+            Chimera);
+        RuntimeTentacle->SetRole(ROLE_Authority);
+        RuntimePresentation->SetRole(ROLE_Authority);
+    }
     TestNotNull(
         TEXT("Active segment contains IdleTentacles"),
         RuntimeIdleTentacles);
@@ -696,6 +722,32 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
     TestNotNull(
         TEXT("Active segment contains WrapTentacles"),
         RuntimeWrapTentacles);
+    if (RuntimeWrapTentacles && RuntimePresentation)
+    {
+        UMeshComponent* ExpectedClientWrapTarget =
+            RuntimeWrapTentacles->GetTargetMesh();
+        RuntimePresentation->SetRole(ROLE_SimulatedProxy);
+        RuntimeWrapTentacles->SetTargetMesh(nullptr);
+        RuntimePresentation->OnRep_PresentationState();
+        TestEqual(
+            TEXT("Client presentation replication rebinds the TORSO wrap target"),
+            RuntimeWrapTentacles->GetTargetMesh(),
+            ExpectedClientWrapTarget);
+        RuntimeWrapTentacles->TickComponent(
+            1.2f,
+            LEVELTICK_All,
+            nullptr);
+        TestEqual(
+            TEXT("Client presentation renders three TORSO surface tentacles"),
+            RuntimeWrapTentacles->GetActiveTentacleCount(),
+            3);
+        TestTrue(
+            TEXT("Completed surface tentacles switch to a throttled range check"),
+            RuntimeWrapTentacles->IsComponentTickEnabled()
+                && RuntimeWrapTentacles->GetComponentTickInterval()
+                    >= 0.2f);
+        RuntimePresentation->SetRole(ROLE_Authority);
+    }
     if (RuntimeWrapTentacles)
     {
         const USkeletalMeshComponent* RuntimeTorso =
@@ -723,7 +775,33 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
         int32 VisibleConnectedTubeCount = 0;
         int32 ConnectedTubeVertexCount = 0;
         int32 ConnectedTubeIndexCount = 0;
+        int32 TentaclesCoveringFullTorso = 0;
         float MaximumSurfaceSpanLength = 0.0f;
+        const FVector TargetExtent = RuntimeWrapTentacles->GetTargetMesh()
+            ->CalcBounds(FTransform::Identity).BoxExtent;
+        int32 CoverageAxis = 0;
+        if (TargetExtent.Y > TargetExtent.X)
+        {
+            CoverageAxis = 1;
+        }
+        if (TargetExtent.Z > TargetExtent[CoverageAxis])
+        {
+            CoverageAxis = 2;
+        }
+        float MinimumCandidateProjection = TNumericLimits<float>::Max();
+        float MaximumCandidateProjection = TNumericLimits<float>::Lowest();
+        for (const FCMChimeraWrapSurfaceAnchor& Candidate
+            : RuntimeWrapTentacles->SurfaceCandidates)
+        {
+            const float Projection =
+                Candidate.TargetLocalPosition[CoverageAxis];
+            MinimumCandidateProjection = FMath::Min(
+                MinimumCandidateProjection,
+                Projection);
+            MaximumCandidateProjection = FMath::Max(
+                MaximumCandidateProjection,
+                Projection);
+        }
         for (const FCMChimeraWrapTentacleRuntime& RuntimeTentacleState
             : RuntimeWrapTentacles->RuntimeTentacles)
         {
@@ -778,6 +856,20 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                             AnchorWorld));
                 }
             }
+            if (!RuntimeTentacleState.TargetAnchors.IsEmpty())
+            {
+                const float FirstProjection = RuntimeTentacleState
+                    .TargetAnchors[0].TargetLocalPosition[CoverageAxis];
+                const float LastProjection = RuntimeTentacleState
+                    .TargetAnchors.Last().TargetLocalPosition[CoverageAxis];
+                const float CandidateRange = MaximumCandidateProjection
+                    - MinimumCandidateProjection;
+                if (FMath::Abs(LastProjection - FirstProjection)
+                    >= CandidateRange * 0.9f)
+                {
+                    ++TentaclesCoveringFullTorso;
+                }
+            }
         }
         TestEqual(
             TEXT("Three TORSO tentacles render as three connected tube meshes"),
@@ -796,6 +888,10 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                 TEXT("Adjacent TORSO anchors stay locally continuous (max %.2f cm)"),
                 MaximumSurfaceSpanLength),
             MaximumSurfaceSpanLength <= 15.0f);
+        TestEqual(
+            TEXT("All TORSO surface tentacles cover the mesh end to end"),
+            TentaclesCoveringFullTorso,
+            3);
     }
     UClass* RuntimeArmClass = LoadClass<ACMArmPart>(
         nullptr,
@@ -1074,6 +1170,165 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
             RuntimeHead && PullSlot->AttachPart(RuntimeHead));
         if (RuntimeHead)
         {
+            TestTrue(
+                TEXT("Runtime Head uses the Head Part actor class"),
+                RuntimeHead->IsA<ACMHeadPartActor>());
+            TestEqual(
+                TEXT("Mounted Head remains in the source segment slot"),
+                PullSlot->GetAttachedPart(),
+                static_cast<AActor*>(RuntimeHead));
+            TestNotEqual(
+                TEXT("Mounted Head cosmetic runs outside dedicated servers"),
+                RuntimeTentacle->GetNetMode(),
+                NM_DedicatedServer);
+            const FTransform MountedHeadBaseMeshTransform =
+                RuntimeHead->GetPartMesh()->GetRelativeTransform();
+            const FVector MountedHeadBaseWorldLocation =
+                RuntimeHead->GetPartMesh()->GetComponentLocation();
+            RuntimeTentacle->SetRole(ROLE_SimulatedProxy);
+            RuntimeTentacle->UpdateMountedHeadTentacles(0.0f);
+            RuntimeTentacle->UpdateMountedHeadTentacles(0.4f);
+            TestFalse(
+                TEXT("Mounted Head tether verification runs as a client cosmetic"),
+                RuntimeTentacle->HasAuthority());
+            TestFalse(
+                TEXT("Mounted Head position floats while hanging from the idle tentacle"),
+                RuntimeHead->GetPartMesh()->GetRelativeTransform().Equals(
+                    MountedHeadBaseMeshTransform,
+                    0.1f));
+            TestTrue(
+                TEXT("Mounted Head idle remains above its authored slot"),
+                FVector::DotProduct(
+                    RuntimeHead->GetPartMesh()->GetComponentLocation()
+                        - MountedHeadBaseWorldLocation,
+                    FVector::UpVector)
+                    >= RuntimeTentacle->MountedHeadIdleHeightOffset
+                        - RuntimeTentacle
+                            ->MountedHeadIdleVerticalAmplitude
+                        - 1.0f);
+            TestEqual(
+                TEXT("Mounted Head is supported by one persistent surface-style tube"),
+                RuntimeTentacle->GetMountedHeadTentacleCount(),
+                1);
+            const FCMMountedHeadTentacleRuntime* MountedHeadTentacle =
+                RuntimeTentacle->MountedHeadTentacles.IsValidIndex(
+                    PullSlotAddress.PartSlotIndex)
+                ? &RuntimeTentacle->MountedHeadTentacles[
+                    PullSlotAddress.PartSlotIndex]
+                : nullptr;
+            TestNotNull(
+                TEXT("Mounted Head creates a persistent spline runtime"),
+                MountedHeadTentacle);
+            TestEqual(
+                TEXT("Mounted Head connector uses five spline points"),
+                MountedHeadTentacle && MountedHeadTentacle->Spline
+                    ? MountedHeadTentacle->Spline
+                        ->GetNumberOfSplinePoints()
+                    : 0,
+                5);
+            if (MountedHeadTentacle
+                && MountedHeadTentacle->Spline
+                && MountedHeadTentacle->TubeMesh)
+            {
+                USkeletalMeshComponent* MountedHeadMesh =
+                    RuntimeHead->GetPartMesh();
+                const FVector ActualStart = MountedHeadTentacle->Spline
+                    ->GetLocationAtSplinePoint(
+                        0,
+                        ESplineCoordinateSpace::World);
+                const FVector ActualEnd = MountedHeadTentacle->Spline
+                    ->GetLocationAtSplinePoint(
+                        MountedHeadTentacle->Spline
+                            ->GetNumberOfSplinePoints() - 1,
+                        ESplineCoordinateSpace::World);
+                TestTrue(
+                    TEXT("Mounted Head connector starts at the tentacle segment"),
+                    ActualStart.Equals(
+                            RuntimeTentacle->ResolveMountedHeadSourceLocation(
+                                ActualEnd),
+                            1.0f));
+
+                FVector NeckWorldLocation = FVector::ZeroVector;
+                FName NeckBoneName = NAME_None;
+                const bool bFoundNeckBone =
+                    RuntimeTentacle->ResolveMountedHeadNeckLocation(
+                        *PullSlot,
+                        *MountedHeadMesh,
+                        NeckWorldLocation,
+                        &NeckBoneName);
+                TestTrue(
+                    TEXT("Mounted Head exposes its absolute neck bone"),
+                    bFoundNeckBone && !NeckBoneName.IsNone());
+                TestTrue(
+                    TEXT("Mounted Head connector ends exactly at the neck bone world position"),
+                    ActualEnd.Equals(NeckWorldLocation, 0.1f));
+                const FVector ConnectorMidpoint = MountedHeadTentacle
+                    ->Spline->GetLocationAtSplinePoint(
+                        MountedHeadTentacle->Spline
+                            ->GetNumberOfSplinePoints() / 2,
+                        ESplineCoordinateSpace::World);
+                const FVector ConnectorChordMidpoint =
+                    (ActualStart + ActualEnd) * 0.5f;
+                TestTrue(
+                    TEXT("Mounted Head connector arches upward above its chord"),
+                    FVector::DotProduct(
+                        ConnectorMidpoint - ConnectorChordMidpoint,
+                        FVector::UpVector)
+                        >= RuntimeTentacle->MountedHeadTentacleSag
+                            - 1.0f);
+
+                const FProcMeshSection* ConnectorSection =
+                    MountedHeadTentacle->TubeMesh->GetProcMeshSection(0);
+                TestTrue(
+                    TEXT("Mounted Head connector renders a continuous surface-style tube"),
+                    MountedHeadTentacle->TubeMesh->IsVisible()
+                        && !MountedHeadTentacle->TubeMesh->bHiddenInGame
+                        && !RuntimeTentacle->IsHidden()
+                        && MountedHeadTentacle->TubeMesh->GetMaterial(0)
+                        && ConnectorSection
+                        && ConnectorSection->ProcVertexBuffer.Num() == 45);
+                if (ConnectorSection
+                    && ConnectorSection->ProcVertexBuffer.Num() >= 9)
+                {
+                    FVector RenderedEndCenter = FVector::ZeroVector;
+                    const int32 FirstEndRingVertex =
+                        ConnectorSection->ProcVertexBuffer.Num() - 9;
+                    for (int32 VertexIndex = FirstEndRingVertex;
+                        VertexIndex < ConnectorSection
+                            ->ProcVertexBuffer.Num() - 1;
+                        ++VertexIndex)
+                    {
+                        RenderedEndCenter += ConnectorSection
+                            ->ProcVertexBuffer[VertexIndex].Position;
+                    }
+                    RenderedEndCenter /= 8.0f;
+                    RenderedEndCenter = MountedHeadTentacle->TubeMesh
+                        ->GetComponentTransform()
+                        .TransformPosition(RenderedEndCenter);
+                    TestTrue(
+                        TEXT("Rendered connector tube reaches the absolute neck position"),
+                        RenderedEndCenter.Equals(NeckWorldLocation, 0.1f));
+                }
+
+                UProceduralMeshComponent* PersistentConnector =
+                    MountedHeadTentacle->TubeMesh;
+                RuntimeTentacle->UpdateMountedHeadTentacles(2.0f);
+                TestTrue(
+                    TEXT("Head connector remains rendered while the Head stays mounted"),
+                    RuntimeTentacle->GetMountedHeadTentacleCount() == 1
+                        && MountedHeadTentacle->TubeMesh
+                            == PersistentConnector
+                        && PersistentConnector->IsVisible()
+                        && !PersistentConnector->bHiddenInGame);
+            }
+
+            TArray<UCMChimeraWrapTentacleComponent*> HeadSurfaceComponents;
+            RuntimeTentacle->GetComponents(HeadSurfaceComponents);
+            TestEqual(
+                TEXT("Tentacle segment no longer creates Head surface tentacles"),
+                HeadSurfaceComponents.Num(),
+                0);
+
             const FTransform ServerHeadRelativeTransform =
                 RuntimeHead->GetRootComponent()->GetRelativeTransform();
             RuntimeHead->SetRole(ROLE_SimulatedProxy);
@@ -1094,7 +1349,18 @@ bool FCMTentacleBlueprintIntegrationTest::RunTest(
                 RuntimeHead->GetRootComponent()->GetRelativeTransform().Equals(
                     ServerHeadRelativeTransform));
             RuntimeHead->SetRole(ROLE_Authority);
+            RuntimeTentacle->SetRole(ROLE_Authority);
             PullSlot->DetachPart();
+            RuntimeTentacle->UpdateMountedHeadTentacles(0.0f);
+            TestEqual(
+                TEXT("Mounted Head tentacle hides after detachment"),
+                RuntimeTentacle->GetMountedHeadTentacleCount(),
+                0);
+            TestTrue(
+                TEXT("Detached Head restores its authored mesh transform"),
+                RuntimeHead->GetPartMesh()->GetRelativeTransform().Equals(
+                    MountedHeadBaseMeshTransform,
+                    0.1f));
             RuntimeHead->Destroy();
         }
 

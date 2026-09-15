@@ -5,18 +5,24 @@
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/SplineComponent.h"
 #include "Components/SplineMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Parts/Core/CMDroppedPartActor.h"
 #include "Parts/Core/CMPartActorBase.h"
+#include "Parts/Head/CMHeadPartActor.h"
 #include "Player/CMChimera.h"
 #include "Player/CMChimeraBodySegmentActor.h"
+#include "Player/CMChimeraWrapTentacleComponent.h"
+#include "Player/CMPartInterface.h"
 #include "Player/CMPartSlotComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "Sound/CMSoundPlayback.h"
 #include "Sound/CMSoundTags.h"
 
@@ -70,6 +76,7 @@ ACMTentacleSegmentActor::ACMTentacleSegmentActor()
     GooDripsEffect->SetupAttachment(SceneRoot);
     GooDripsEffect->SetAutoActivate(true);
     GooDripsEffect->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
 }
 
 void ACMTentacleSegmentActor::BeginPlay()
@@ -130,6 +137,7 @@ void ACMTentacleSegmentActor::EndPlay(
     }
     StopPullLoopSound();
     DestroyVisualComponents();
+    DestroyMountedHeadTentacles();
     Super::EndPlay(EndPlayReason);
 }
 
@@ -163,6 +171,7 @@ void ACMTentacleSegmentActor::Tick(float DeltaTime)
     }
 
     UpdateVisual(DeltaTime);
+    UpdateMountedHeadTentacles(DeltaTime);
 }
 
 void ACMTentacleSegmentActor::GetLifetimeReplicatedProps(
@@ -181,14 +190,17 @@ void ACMTentacleSegmentActor::InitializeForSegment(
     UPrimitiveComponent* InBodySegment,
     const bool bAttachToBodySegment)
 {
-    if (!HasAuthority() || !InChimera || !InBodySegment)
+    if (!InChimera || !InBodySegment)
     {
         return;
     }
 
     ChimeraOwner = InChimera;
     SegmentIndex = InSegmentIndex;
-    SetOwner(InChimera);
+    if (HasAuthority())
+    {
+        SetOwner(InChimera);
+    }
     if (bAttachToBodySegment)
     {
         AttachToComponent(
@@ -197,7 +209,10 @@ void ACMTentacleSegmentActor::InitializeForSegment(
     }
     SetActorRelativeLocation(SourceRelativeOffset);
     DetectionSphere->SetSphereRadius(DetectionRadius);
-    ForceNetUpdate();
+    if (HasAuthority())
+    {
+        ForceNetUpdate();
+    }
 }
 
 void ACMTentacleSegmentActor::SetSegmentActive(const bool bInActive)
@@ -214,6 +229,15 @@ void ACMTentacleSegmentActor::SetSegmentActive(const bool bInActive)
     bSegmentActive = bInActive;
     SetActorTickEnabled(bInActive);
     SetActorHiddenInGame(!bInActive);
+    if (!bInActive)
+    {
+        for (int32 PartSlotIndex = 0;
+            PartSlotIndex < MountedHeadTentacles.Num();
+            ++PartSlotIndex)
+        {
+            HideMountedHeadTentacle(PartSlotIndex);
+        }
+    }
 
     if (DetectionSphere)
     {
@@ -241,6 +265,21 @@ bool ACMTentacleSegmentActor::HasAttachablePart() const
             || (UsablePart
                 && !UsablePart->GetAttachedPartSlot()
                 && !UsablePart->IsReservedForTentacle(this)));
+}
+
+int32 ACMTentacleSegmentActor::GetMountedHeadTentacleCount() const
+{
+    int32 VisibleCount = 0;
+    for (const FCMMountedHeadTentacleRuntime& Runtime
+        : MountedHeadTentacles)
+    {
+        VisibleCount += Runtime.TubeMesh
+                && Runtime.TubeMesh->IsVisible()
+                && !Runtime.TubeMesh->bHiddenInGame
+            ? 1
+            : 0;
+    }
+    return VisibleCount;
 }
 
 bool ACMTentacleSegmentActor::TryBeginPartAttachment(
@@ -656,6 +695,413 @@ void ACMTentacleSegmentActor::DestroyVisualComponents()
         TargetEffect->DestroyComponent();
         TargetEffect = nullptr;
     }
+}
+
+void ACMTentacleSegmentActor::UpdateMountedHeadTentacles(
+    const float DeltaTime)
+{
+    if (GetNetMode() == NM_DedicatedServer)
+    {
+        return;
+    }
+    if (!ChimeraOwner)
+    {
+        ChimeraOwner = Cast<ACMChimera>(GetOwner());
+    }
+
+    const int32 SlotCount = CMControl::PartSlotsPerSegment;
+    MountedHeadTentacles.SetNum(SlotCount);
+    MountedHeadTentacleElapsedSeconds += FMath::Max(DeltaTime, 0.0f);
+    for (int32 PartSlotIndex = 0;
+        PartSlotIndex < SlotCount;
+        ++PartSlotIndex)
+    {
+        FCMPartSlotAddress SlotAddress;
+        SlotAddress.SegmentIndex = SegmentIndex;
+        SlotAddress.PartSlotIndex = PartSlotIndex;
+        UCMPartSlotComponent* PartSlot = ChimeraOwner
+            ? ChimeraOwner->GetPartSlotComponent(SlotAddress)
+            : nullptr;
+        AActor* AttachedPart = PartSlot
+            ? PartSlot->GetAttachedPart()
+            : nullptr;
+        const bool bHasMountedHead = IsValid(AttachedPart)
+            && (AttachedPart->IsA<ACMHeadPartActor>()
+                || (AttachedPart->GetClass()->ImplementsInterface(
+                        UCMPartInterface::StaticClass())
+                    && ICMPartInterface::Execute_GetPartType(AttachedPart)
+                        == ECMPartSlotType::Head));
+        if (!bHasMountedHead)
+        {
+            HideMountedHeadTentacle(PartSlotIndex);
+            continue;
+        }
+
+        EnsureMountedHeadTentacle(PartSlotIndex);
+        FCMMountedHeadTentacleRuntime& Runtime =
+            MountedHeadTentacles[PartSlotIndex];
+        if (!Runtime.Spline)
+        {
+            continue;
+        }
+
+        USkeletalMeshComponent* HeadMesh = ResolveTargetPartMesh(
+            AttachedPart);
+        if (HeadMesh)
+        {
+            UpdateMountedHeadIdleAnimation(
+                Runtime,
+                *HeadMesh,
+                PartSlotIndex);
+        }
+        FVector TargetWorld = FVector::ZeroVector;
+        FName NeckBoneName = NAME_None;
+        if (!HeadMesh
+            || !ResolveMountedHeadNeckLocation(
+                *PartSlot,
+                *HeadMesh,
+                TargetWorld,
+                &NeckBoneName))
+        {
+            if (!Runtime.bLoggedConnectorFailure)
+            {
+                UE_LOG(LogChimeraTentacle, Warning,
+                    TEXT("[Mounted Head Connector Missing] "
+                        "Segment=%d Slot=%d Part=%s Mesh=%s Reason=NoNeckBone"),
+                    SegmentIndex,
+                    PartSlotIndex,
+                    *GetNameSafe(AttachedPart),
+                    *GetPathNameSafe(HeadMesh));
+                Runtime.bLoggedConnectorFailure = true;
+            }
+            if (Runtime.TubeMesh)
+            {
+                Runtime.TubeMesh->SetVisibility(false, true);
+                Runtime.TubeMesh->SetHiddenInGame(true, true);
+            }
+            continue;
+        }
+        const FVector SourceWorld = ResolveMountedHeadSourceLocation(
+            TargetWorld);
+        const FVector LocalSource = GetActorTransform()
+            .InverseTransformPosition(SourceWorld);
+        const FVector LocalTarget = GetActorTransform()
+            .InverseTransformPosition(TargetWorld);
+        const FVector LocalDelta = LocalTarget - LocalSource;
+        const FVector LocalUp = GetActorTransform()
+            .InverseTransformVectorNoScale(FVector::UpVector)
+            .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+        const FVector TargetDirection = LocalDelta.GetSafeNormal(
+            UE_SMALL_NUMBER,
+            FVector::ForwardVector);
+        const FVector WaveAxis = FVector::CrossProduct(
+            TargetDirection,
+            LocalUp).GetSafeNormal(
+                UE_SMALL_NUMBER,
+                FVector::RightVector);
+        const int32 PointCount = Runtime.Spline->GetNumberOfSplinePoints();
+        for (int32 PointIndex = 0;
+            PointIndex < PointCount;
+            ++PointIndex)
+        {
+            const float Alpha = static_cast<float>(PointIndex)
+                / static_cast<float>(FMath::Max(PointCount - 1, 1));
+            const float Envelope = FMath::Sin(PI * Alpha);
+            const float WavePhase = MountedHeadTentacleElapsedSeconds
+                    * MountedHeadWaveSpeed
+                + Alpha * 2.0f * PI
+                + static_cast<float>(PartSlotIndex) * PI;
+            const FVector Point = LocalSource + LocalDelta * Alpha
+                + LocalUp
+                    * MountedHeadTentacleSag
+                    * 4.0f
+                    * Alpha
+                    * (1.0f - Alpha)
+                + WaveAxis
+                    * FMath::Sin(WavePhase)
+                    * MountedHeadWaveAmplitude
+                    * Envelope;
+            Runtime.Spline->SetLocationAtSplinePoint(
+                PointIndex,
+                Point,
+                ESplineCoordinateSpace::Local,
+                false);
+        }
+        Runtime.Spline->UpdateSpline();
+
+        if (Runtime.TubeMesh)
+        {
+            CMChimeraWrapTentacle::UpdateTubeMeshFromSpline(
+                *Runtime.Spline,
+                *Runtime.TubeMesh,
+                MountedHeadTentacleWidth);
+            const FProcMeshSection* MeshSection =
+                Runtime.TubeMesh->GetProcMeshSection(0);
+            const bool bConnectorRenderable = MeshSection
+                && MeshSection->ProcVertexBuffer.Num() > 0
+                && FVector::DistSquared(SourceWorld, TargetWorld) > 1.0f
+                && Runtime.TubeMesh->IsVisible()
+                && !Runtime.TubeMesh->bHiddenInGame;
+            if (!bConnectorRenderable && !Runtime.bLoggedConnectorFailure)
+            {
+                UE_LOG(LogChimeraTentacle, Warning,
+                    TEXT("[Mounted Head Connector Missing] "
+                        "Segment=%d Slot=%d Part=%s Bone=%s "
+                        "Distance=%.1f Vertices=%d Visible=%s Hidden=%s"),
+                    SegmentIndex,
+                    PartSlotIndex,
+                    *GetNameSafe(AttachedPart),
+                    *NeckBoneName.ToString(),
+                    FVector::Distance(SourceWorld, TargetWorld),
+                    MeshSection ? MeshSection->ProcVertexBuffer.Num() : 0,
+                    Runtime.TubeMesh->IsVisible()
+                        ? TEXT("true") : TEXT("false"),
+                    Runtime.TubeMesh->bHiddenInGame
+                        ? TEXT("true") : TEXT("false"));
+                Runtime.bLoggedConnectorFailure = true;
+            }
+            else if (bConnectorRenderable && !Runtime.bLoggedConnectorReady)
+            {
+                UE_LOG(LogChimeraTentacle, Display,
+                    TEXT("[Mounted Head Connector Ready] "
+                        "Segment=%d Slot=%d Part=%s Bone=%s "
+                        "Source=%s Target=%s Distance=%.1f Vertices=%d"),
+                    SegmentIndex,
+                    PartSlotIndex,
+                    *GetNameSafe(AttachedPart),
+                    *NeckBoneName.ToString(),
+                    *SourceWorld.ToCompactString(),
+                    *TargetWorld.ToCompactString(),
+                    FVector::Distance(SourceWorld, TargetWorld),
+                    MeshSection->ProcVertexBuffer.Num());
+                Runtime.bLoggedConnectorReady = true;
+            }
+        }
+    }
+}
+
+void ACMTentacleSegmentActor::UpdateMountedHeadIdleAnimation(
+    FCMMountedHeadTentacleRuntime& Runtime,
+    USkeletalMeshComponent& HeadMesh,
+    const int32 PartSlotIndex)
+{
+    if (Runtime.AnimatedHeadMesh != &HeadMesh)
+    {
+        RestoreMountedHeadIdleAnimation(Runtime);
+        Runtime.AnimatedHeadMesh = &HeadMesh;
+        Runtime.HeadMeshBaseRelativeTransform =
+            HeadMesh.GetRelativeTransform();
+        Runtime.bHasHeadMeshBaseTransform = true;
+        Runtime.bLoggedConnectorFailure = false;
+        Runtime.bLoggedConnectorReady = false;
+    }
+    if (!Runtime.bHasHeadMeshBaseTransform)
+    {
+        return;
+    }
+
+    const float Phase = MountedHeadTentacleElapsedSeconds
+            * MountedHeadIdleSpeed
+        + static_cast<float>(PartSlotIndex) * PI;
+    const FTransform ParentTransform = HeadMesh.GetAttachParent()
+        ? HeadMesh.GetAttachParent()->GetComponentTransform()
+        : FTransform::Identity;
+    const FVector ParentUp = ParentTransform
+        .InverseTransformVectorNoScale(FVector::UpVector)
+        .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+    const FVector ParentRight = ParentTransform
+        .InverseTransformVectorNoScale(FVector::RightVector)
+        .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+    const FVector ParentForward = ParentTransform
+        .InverseTransformVectorNoScale(FVector::ForwardVector)
+        .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+    const FVector PositionOffset = ParentUp
+            * (MountedHeadIdleHeightOffset
+                + FMath::Sin(Phase)
+                    * MountedHeadIdleVerticalAmplitude)
+        + ParentRight
+            * FMath::Sin(Phase * 0.79f)
+            * MountedHeadIdleHorizontalAmplitude
+        + ParentForward
+            * FMath::Sin(Phase * 0.61f)
+            * MountedHeadIdleHorizontalAmplitude
+            * 0.35f;
+    FTransform AnimatedTransform = Runtime.HeadMeshBaseRelativeTransform;
+    AnimatedTransform.SetLocation(
+        Runtime.HeadMeshBaseRelativeTransform.GetLocation()
+        + PositionOffset);
+    HeadMesh.SetRelativeTransform(
+        AnimatedTransform,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics);
+    HeadMesh.UpdateBounds();
+}
+
+void ACMTentacleSegmentActor::RestoreMountedHeadIdleAnimation(
+    FCMMountedHeadTentacleRuntime& Runtime)
+{
+    if (Runtime.bHasHeadMeshBaseTransform
+        && IsValid(Runtime.AnimatedHeadMesh))
+    {
+        Runtime.AnimatedHeadMesh->SetRelativeTransform(
+            Runtime.HeadMeshBaseRelativeTransform,
+            false,
+            nullptr,
+            ETeleportType::TeleportPhysics);
+        Runtime.AnimatedHeadMesh->UpdateBounds();
+    }
+    Runtime.AnimatedHeadMesh = nullptr;
+    Runtime.HeadMeshBaseRelativeTransform = FTransform::Identity;
+    Runtime.bHasHeadMeshBaseTransform = false;
+}
+
+void ACMTentacleSegmentActor::EnsureMountedHeadTentacle(
+    const int32 PartSlotIndex)
+{
+    if (!MountedHeadTentacles.IsValidIndex(PartSlotIndex))
+    {
+        return;
+    }
+
+    FCMMountedHeadTentacleRuntime& Runtime =
+        MountedHeadTentacles[PartSlotIndex];
+    if (!Runtime.Spline)
+    {
+        const int32 PointCount = FMath::Max(MountedHeadSplinePointCount, 2);
+        Runtime.Spline = NewObject<USplineComponent>(
+            this,
+            MakeUniqueObjectName(
+                this,
+                USplineComponent::StaticClass(),
+                TEXT("MountedHeadTentacleSpline")));
+        Runtime.Spline->SetMobility(EComponentMobility::Movable);
+        Runtime.Spline->SetupAttachment(SceneRoot);
+        AddInstanceComponent(Runtime.Spline);
+        Runtime.Spline->RegisterComponent();
+        Runtime.Spline->ClearSplinePoints(false);
+        for (int32 PointIndex = 0;
+            PointIndex < PointCount;
+            ++PointIndex)
+        {
+            Runtime.Spline->AddSplinePoint(
+                FVector::ZeroVector,
+                ESplineCoordinateSpace::Local,
+                false);
+            Runtime.Spline->SetSplinePointType(
+                PointIndex,
+                ESplinePointType::Curve,
+                false);
+        }
+        Runtime.Spline->UpdateSpline();
+    }
+    if (Runtime.TubeMesh)
+    {
+        return;
+    }
+
+    Runtime.TubeMesh = NewObject<UProceduralMeshComponent>(
+        this,
+        MakeUniqueObjectName(
+            this,
+            UProceduralMeshComponent::StaticClass(),
+            TEXT("MountedHeadConnectorTube")));
+    Runtime.TubeMesh->SetMobility(EComponentMobility::Movable);
+    Runtime.TubeMesh->SetupAttachment(SceneRoot);
+    Runtime.TubeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Runtime.TubeMesh->SetGenerateOverlapEvents(false);
+    Runtime.TubeMesh->SetCanEverAffectNavigation(false);
+    Runtime.TubeMesh->SetCastShadow(false);
+    Runtime.TubeMesh->bUseAttachParentBound = false;
+    Runtime.TubeMesh->SetBoundsScale(4.0f);
+    Runtime.TubeMesh->SetCullDistance(0.0f);
+    Runtime.TubeMesh->SetRenderInMainPass(true);
+    Runtime.TubeMesh->SetTranslucentSortPriority(10);
+    UMaterialInterface* RenderMaterial = TentacleMaterial
+        && TentacleMaterial->CheckMaterialUsage_Concurrent(
+            MATUSAGE_StaticMesh)
+        ? TentacleMaterial.Get()
+        : UMaterial::GetDefaultMaterial(MD_Surface);
+    Runtime.TubeMesh->SetMaterial(0, RenderMaterial);
+    Runtime.TubeMesh->SetVisibility(false, true);
+    Runtime.TubeMesh->SetHiddenInGame(true, true);
+    AddInstanceComponent(Runtime.TubeMesh);
+    Runtime.TubeMesh->RegisterComponent();
+    Runtime.TubeMaterial = Runtime.TubeMesh->CreateDynamicMaterialInstance(
+        0,
+        RenderMaterial);
+    if (Runtime.TubeMaterial && !CollapseMaterialParameter.IsNone())
+    {
+        Runtime.TubeMaterial->SetScalarParameterValue(
+            CollapseMaterialParameter,
+            0.0f);
+    }
+}
+
+void ACMTentacleSegmentActor::HideMountedHeadTentacle(
+    const int32 PartSlotIndex)
+{
+    if (!MountedHeadTentacles.IsValidIndex(PartSlotIndex))
+    {
+        return;
+    }
+    RestoreMountedHeadIdleAnimation(
+        MountedHeadTentacles[PartSlotIndex]);
+    if (UProceduralMeshComponent* TubeMesh =
+        MountedHeadTentacles[PartSlotIndex].TubeMesh)
+    {
+        TubeMesh->SetVisibility(false, true);
+        TubeMesh->SetHiddenInGame(true, true);
+    }
+}
+
+void ACMTentacleSegmentActor::DestroyMountedHeadTentacles()
+{
+    for (FCMMountedHeadTentacleRuntime& Runtime : MountedHeadTentacles)
+    {
+        RestoreMountedHeadIdleAnimation(Runtime);
+        if (Runtime.TubeMesh)
+        {
+            Runtime.TubeMesh->DestroyComponent();
+        }
+        if (Runtime.Spline)
+        {
+            Runtime.Spline->DestroyComponent();
+        }
+    }
+    MountedHeadTentacles.Reset();
+}
+
+bool ACMTentacleSegmentActor::ResolveMountedHeadNeckLocation(
+    const UCMPartSlotComponent& PartSlot,
+    const USkeletalMeshComponent& HeadMesh,
+    FVector& OutWorldLocation,
+    FName* OutBoneName) const
+{
+    FName NeckBoneName = NAME_None;
+    if (!PartSlot.ResolveHeadMountBoneName(HeadMesh, NeckBoneName))
+    {
+        return false;
+    }
+    const int32 BoneIndex = HeadMesh.GetBoneIndex(NeckBoneName);
+    if (BoneIndex == INDEX_NONE)
+    {
+        return false;
+    }
+    OutWorldLocation = HeadMesh.GetBoneLocation(
+        NeckBoneName,
+        EBoneSpaces::WorldSpace);
+    if (OutBoneName)
+    {
+        *OutBoneName = NeckBoneName;
+    }
+    return true;
+}
+
+FVector ACMTentacleSegmentActor::ResolveMountedHeadSourceLocation(
+    const FVector&) const
+{
+    return GetActorLocation();
 }
 
 void ACMTentacleSegmentActor::UpdateVisual(float DeltaTime)

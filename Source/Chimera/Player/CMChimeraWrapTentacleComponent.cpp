@@ -1,5 +1,6 @@
 #include "Player/CMChimeraWrapTentacleComponent.h"
 
+#include "Algo/Reverse.h"
 #include "Components/MeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SplineComponent.h"
@@ -18,6 +19,7 @@
 namespace
 {
 constexpr int32 WrapSurfaceCandidateMultiplier = 12;
+constexpr int32 WrapPhysicsCandidateMultiplier = 2;
 constexpr int32 WrapTubeSideCount = 8;
 constexpr float WrapTubeBaseRadius = 4.0f;
 constexpr float WrapTubeUVTileLength = 20.0f;
@@ -109,6 +111,149 @@ bool CMChimeraWrapTentacle::IsWithinActivationDistance(
         <= FMath::Square(FMath::Max(ActivationDistance, 0.0f));
 }
 
+void CMChimeraWrapTentacle::UpdateTubeMeshFromSpline(
+    const USplineComponent& Spline,
+    UProceduralMeshComponent& TubeMesh,
+    const float TentacleWidth)
+{
+    const int32 PointCount = Spline.GetNumberOfSplinePoints();
+    if (PointCount < 2)
+    {
+        return;
+    }
+
+    TArray<FVector> Points;
+    Points.Reserve(PointCount);
+    for (int32 PointIndex = 0; PointIndex < PointCount; ++PointIndex)
+    {
+        Points.Add(Spline.GetLocationAtSplinePoint(
+            PointIndex,
+            ESplineCoordinateSpace::Local));
+    }
+
+    const int32 RingVertexCount = WrapTubeSideCount + 1;
+    TArray<FVector> Vertices;
+    TArray<int32> Triangles;
+    TArray<FVector> Normals;
+    TArray<FVector2D> UVs;
+    TArray<FLinearColor> Colors;
+    TArray<FProcMeshTangent> Tangents;
+    Vertices.Reserve(PointCount * RingVertexCount);
+    Normals.Reserve(PointCount * RingVertexCount);
+    UVs.Reserve(PointCount * RingVertexCount);
+    Colors.Reserve(PointCount * RingVertexCount);
+    Tangents.Reserve(PointCount * RingVertexCount);
+    Triangles.Reserve((PointCount - 1) * WrapTubeSideCount * 6);
+
+    FVector FrameX = FVector::RightVector;
+    FVector FrameY = FVector::UpVector;
+    FVector PreviousTangent = FVector::ForwardVector;
+    float AccumulatedLength = 0.0f;
+    for (int32 PointIndex = 0; PointIndex < PointCount; ++PointIndex)
+    {
+        if (PointIndex > 0)
+        {
+            AccumulatedLength += FVector::Distance(
+                Points[PointIndex - 1],
+                Points[PointIndex]);
+        }
+
+        FVector PathTangent;
+        if (PointIndex == 0)
+        {
+            PathTangent = Points[1] - Points[0];
+        }
+        else if (PointIndex == PointCount - 1)
+        {
+            PathTangent = Points[PointIndex] - Points[PointIndex - 1];
+        }
+        else
+        {
+            PathTangent = Points[PointIndex + 1] - Points[PointIndex - 1];
+        }
+        PathTangent = PathTangent.GetSafeNormal(
+            UE_SMALL_NUMBER,
+            PreviousTangent);
+        PreviousTangent = PathTangent;
+
+        if (PointIndex == 0)
+        {
+            PathTangent.FindBestAxisVectors(FrameX, FrameY);
+        }
+        else
+        {
+            FrameX = (FrameX
+                - PathTangent * FVector::DotProduct(FrameX, PathTangent))
+                .GetSafeNormal();
+            if (FrameX.IsNearlyZero())
+            {
+                PathTangent.FindBestAxisVectors(FrameX, FrameY);
+            }
+            else
+            {
+                FrameY = FVector::CrossProduct(PathTangent, FrameX)
+                    .GetSafeNormal();
+                FrameX = FVector::CrossProduct(FrameY, PathTangent)
+                    .GetSafeNormal();
+            }
+        }
+
+        const float LengthAlpha = static_cast<float>(PointIndex)
+            / static_cast<float>(PointCount - 1);
+        const float Radius = WrapTubeBaseRadius
+            * TentacleWidth
+            * FMath::Lerp(1.0f, 0.7f, LengthAlpha);
+        for (int32 SideIndex = 0;
+            SideIndex <= WrapTubeSideCount;
+            ++SideIndex)
+        {
+            const float SideAlpha = static_cast<float>(SideIndex)
+                / static_cast<float>(WrapTubeSideCount);
+            const float Angle = SideAlpha * 2.0f * PI;
+            const FVector Radial = FrameX * FMath::Cos(Angle)
+                + FrameY * FMath::Sin(Angle);
+            Vertices.Add(Points[PointIndex] + Radial * Radius);
+            Normals.Add(Radial);
+            UVs.Add(FVector2D(
+                AccumulatedLength / WrapTubeUVTileLength,
+                SideAlpha));
+            Colors.Add(FLinearColor::White);
+            Tangents.Add(FProcMeshTangent(PathTangent, false));
+        }
+    }
+
+    for (int32 RingIndex = 1; RingIndex < PointCount; ++RingIndex)
+    {
+        const int32 PreviousRing = (RingIndex - 1) * RingVertexCount;
+        const int32 CurrentRing = RingIndex * RingVertexCount;
+        for (int32 SideIndex = 0;
+            SideIndex < WrapTubeSideCount;
+            ++SideIndex)
+        {
+            Triangles.Add(PreviousRing + SideIndex);
+            Triangles.Add(PreviousRing + SideIndex + 1);
+            Triangles.Add(CurrentRing + SideIndex);
+            Triangles.Add(PreviousRing + SideIndex + 1);
+            Triangles.Add(CurrentRing + SideIndex + 1);
+            Triangles.Add(CurrentRing + SideIndex);
+        }
+    }
+
+    TubeMesh.CreateMeshSection_LinearColor(
+        0,
+        Vertices,
+        Triangles,
+        Normals,
+        UVs,
+        Colors,
+        Tangents,
+        false);
+    TubeMesh.UpdateBounds();
+    TubeMesh.MarkRenderStateDirty();
+    TubeMesh.SetHiddenInGame(false, true);
+    TubeMesh.SetVisibility(true, true);
+}
+
 UCMChimeraWrapTentacleComponent::UCMChimeraWrapTentacleComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
@@ -158,12 +303,20 @@ void UCMChimeraWrapTentacleComponent::TickComponent(
         && TargetMesh
         && IsTargetInRange();
     if (bShouldExtend
+        && bPathsReady
+        && ExtensionAlpha >= 1.0f - UE_KINDA_SMALL_NUMBER)
+    {
+        SetComponentTickInterval(FMath::Max(SettledCheckInterval, 0.05f));
+        return;
+    }
+    SetComponentTickInterval(0.0f);
+    if (bShouldExtend
         && !bPathsReady
         && ElapsedTime >= NextSamplingTime)
     {
         const bool bBuiltCandidates = BuildSurfaceCandidates();
         const bool bAssignedPaths = bBuiltCandidates
-            && AssignDistanceOrderedPaths();
+            && AssignCoverageOrderedPaths();
         bPathsReady = bAssignedPaths;
         if (!bPathsReady)
         {
@@ -197,6 +350,11 @@ void UCMChimeraWrapTentacleComponent::TickComponent(
         return;
     }
     UpdateTentacleMeshes();
+    if (bShouldExtend
+        && ExtensionAlpha >= 1.0f - UE_KINDA_SMALL_NUMBER)
+    {
+        SetComponentTickInterval(FMath::Max(SettledCheckInterval, 0.05f));
+    }
 }
 
 void UCMChimeraWrapTentacleComponent::ConfigureSource(
@@ -222,6 +380,17 @@ void UCMChimeraWrapTentacleComponent::SetEffectActive(
         HidePool();
     }
     RefreshTickEnabled();
+}
+
+void UCMChimeraWrapTentacleComponent::SetConnectSourceToSurface(
+    const bool bInConnectSourceToSurface)
+{
+    if (bConnectSourceToSurface == bInConnectSourceToSurface)
+    {
+        return;
+    }
+    bConnectSourceToSurface = bInConnectSourceToSurface;
+    ResetTargetState();
 }
 
 void UCMChimeraWrapTentacleComponent::SetTargetMesh(
@@ -269,6 +438,11 @@ bool UCMChimeraWrapTentacleComponent::BuildSurfaceCandidates()
 bool UCMChimeraWrapTentacleComponent::BuildSkeletalSurfaceCandidates(
     USkeletalMeshComponent& SkeletalTarget)
 {
+    if (!bConnectSourceToSurface)
+    {
+        return BuildSkeletalPhysicsSurfaceCandidates(SkeletalTarget);
+    }
+
     if (!SkeletalTarget.GetMeshObject())
     {
         return false;
@@ -328,7 +502,7 @@ bool UCMChimeraWrapTentacleComponent::BuildSkeletalSurfaceCandidates(
     }
 
     const int32 CandidateCount = FMath::Max(
-        TentacleCount * FMath::Max(SplinePointCount - 1, 1)
+        TentacleCount * GetTargetAnchorCount()
             * WrapSurfaceCandidateMultiplier,
         TentacleCount);
     SurfaceCandidates.Reserve(CandidateCount);
@@ -363,6 +537,67 @@ bool UCMChimeraWrapTentacleComponent::BuildSkeletalSurfaceCandidates(
             &SkeletalTarget);
     }
     return !SurfaceCandidates.IsEmpty();
+}
+
+bool UCMChimeraWrapTentacleComponent::BuildSkeletalPhysicsSurfaceCandidates(
+    USkeletalMeshComponent& SkeletalTarget)
+{
+    const int32 RequiredCandidateCount = FMath::Max(
+        TentacleCount * GetTargetAnchorCount(),
+        TentacleCount);
+    const int32 CandidateCount = RequiredCandidateCount
+        * WrapPhysicsCandidateMultiplier;
+    SurfaceCandidates.Reserve(CandidateCount);
+
+    const FBoxSphereBounds TargetBounds = SkeletalTarget.Bounds;
+    const FBox TargetBox = TargetBounds.GetBox();
+    const float QueryRadius = FMath::Max(
+        TargetBounds.SphereRadius + 10.0f,
+        10.0f);
+    const float PhaseOffset = RandomStream.FRandRange(0.0f, 2.0f * PI);
+    constexpr float GoldenAngle = 2.39996323f;
+    for (int32 CandidateIndex = 0;
+        CandidateIndex < CandidateCount;
+        ++CandidateIndex)
+    {
+        const float Alpha = (static_cast<float>(CandidateIndex) + 0.5f)
+            / static_cast<float>(CandidateCount);
+        const float Z = 1.0f - 2.0f * Alpha;
+        const float Radial = FMath::Sqrt(FMath::Max(1.0f - Z * Z, 0.0f));
+        const float Angle = GoldenAngle * static_cast<float>(CandidateIndex)
+            + PhaseOffset;
+        const FVector Direction(
+            Radial * FMath::Cos(Angle),
+            Radial * FMath::Sin(Angle),
+            Z);
+        const FVector QueryPosition = TargetBounds.Origin
+            + Direction * QueryRadius;
+
+        FVector SurfacePosition = FVector::ZeroVector;
+        FVector SurfaceNormal = FVector::ZeroVector;
+        FName SurfaceBone = NAME_None;
+        float SurfaceDistance = 0.0f;
+        if (!SkeletalTarget.K2_GetClosestPointOnPhysicsAsset(
+            QueryPosition,
+            SurfacePosition,
+            SurfaceNormal,
+            SurfaceBone,
+            SurfaceDistance))
+        {
+            SurfacePosition = TargetBox.GetClosestPointTo(QueryPosition);
+            SurfaceNormal = (SurfacePosition - TargetBounds.Origin)
+                .GetSafeNormal(UE_SMALL_NUMBER, Direction);
+        }
+
+        const FTransform& TargetTransform =
+            SkeletalTarget.GetComponentTransform();
+        AddSurfaceCandidate(
+            TargetTransform.InverseTransformPosition(SurfacePosition),
+            TargetTransform.InverseTransformVectorNoScale(SurfaceNormal)
+                .GetSafeNormal(),
+            &SkeletalTarget);
+    }
+    return SurfaceCandidates.Num() >= RequiredCandidateCount;
 }
 
 bool UCMChimeraWrapTentacleComponent::BuildStaticSurfaceCandidates(
@@ -425,7 +660,7 @@ bool UCMChimeraWrapTentacleComponent::BuildStaticSurfaceCandidates(
     }
 
     const int32 CandidateCount = FMath::Max(
-        TentacleCount * FMath::Max(SplinePointCount - 1, 1)
+        TentacleCount * GetTargetAnchorCount()
             * WrapSurfaceCandidateMultiplier,
         TentacleCount);
     SurfaceCandidates.Reserve(CandidateCount);
@@ -506,23 +741,41 @@ void UCMChimeraWrapTentacleComponent::AddSurfaceCandidate(
     }
 }
 
-bool UCMChimeraWrapTentacleComponent::AssignDistanceOrderedPaths()
+bool UCMChimeraWrapTentacleComponent::AssignCoverageOrderedPaths()
 {
-    if (SurfaceCandidates.IsEmpty())
+    if (SurfaceCandidates.IsEmpty() || !TargetMesh)
     {
         return false;
     }
 
     const FVector SourceWorld = GetSourceWorldPosition();
-    SurfaceCandidates.Sort([this, &SourceWorld](
+    const FVector TargetExtent = TargetMesh
+        ->CalcBounds(FTransform::Identity).BoxExtent;
+    int32 CoverageAxis = 0;
+    if (TargetExtent.Y > TargetExtent.X)
+    {
+        CoverageAxis = 1;
+    }
+    if (TargetExtent.Z > TargetExtent[CoverageAxis])
+    {
+        CoverageAxis = 2;
+    }
+    SurfaceCandidates.Sort([CoverageAxis](
         const FCMChimeraWrapSurfaceAnchor& A,
         const FCMChimeraWrapSurfaceAnchor& B)
     {
-        return FVector::DistSquared(
-                ResolveAnchorWorldPosition(A), SourceWorld)
-            < FVector::DistSquared(
-                ResolveAnchorWorldPosition(B), SourceWorld);
+        return A.TargetLocalPosition[CoverageAxis]
+            < B.TargetLocalPosition[CoverageAxis];
     });
+    if (FVector::DistSquared(
+            ResolveAnchorWorldPosition(SurfaceCandidates.Last()),
+            SourceWorld)
+        < FVector::DistSquared(
+            ResolveAnchorWorldPosition(SurfaceCandidates[0]),
+            SourceWorld))
+    {
+        Algo::Reverse(SurfaceCandidates);
+    }
 
     EnsurePool();
     if (RuntimeTentacles.IsEmpty())
@@ -530,8 +783,7 @@ bool UCMChimeraWrapTentacleComponent::AssignDistanceOrderedPaths()
         return false;
     }
 
-    const int32 AnchorCountPerTentacle =
-        FMath::Max(SplinePointCount, 3) - 1;
+    const int32 AnchorCountPerTentacle = GetTargetAnchorCount();
     TArray<TArray<int32>> PathIndices;
     PathIndices.SetNum(RuntimeTentacles.Num());
     TArray<int32> SelectedIndices;
@@ -586,6 +838,21 @@ bool UCMChimeraWrapTentacleComponent::AssignDistanceOrderedPaths()
         AnchorIndex < AnchorCountPerTentacle;
         ++AnchorIndex)
     {
+        const float PathAlpha = static_cast<float>(AnchorIndex)
+            / static_cast<float>(
+                FMath::Max(AnchorCountPerTentacle - 1, 1));
+        const int32 DesiredCandidateIndex = FMath::RoundToInt(
+            PathAlpha * static_cast<float>(SurfaceCandidates.Num() - 1));
+        const int32 CandidateBandHalfWidth = FMath::Max(
+            SurfaceCandidates.Num()
+                / FMath::Max(AnchorCountPerTentacle, 1),
+            RuntimeTentacles.Num());
+        const int32 FirstCandidateIndex = FMath::Max(
+            DesiredCandidateIndex - CandidateBandHalfWidth,
+            0);
+        const int32 LastCandidateIndex = FMath::Min(
+            DesiredCandidateIndex + CandidateBandHalfWidth,
+            SurfaceCandidates.Num() - 1);
         for (int32 TentacleIndex = 0;
             TentacleIndex < RuntimeTentacles.Num();
             ++TentacleIndex)
@@ -597,9 +864,13 @@ bool UCMChimeraWrapTentacleComponent::AssignDistanceOrderedPaths()
                 SurfaceCandidates[PreviousIndex]);
             int32 BestIndex = INDEX_NONE;
             float BestDistanceSquared = TNumericLimits<float>::Max();
-            for (int32 CandidateIndex = 0;
-                CandidateIndex < SurfaceCandidates.Num();
-                ++CandidateIndex)
+            const auto ConsiderCandidate = [
+                this,
+                &IsAvailable,
+                &PreviousWorld,
+                &PreviousNormal,
+                &BestIndex,
+                &BestDistanceSquared](const int32 CandidateIndex)
             {
                 if (!IsAvailable(CandidateIndex)
                     || FVector::DotProduct(
@@ -607,7 +878,7 @@ bool UCMChimeraWrapTentacleComponent::AssignDistanceOrderedPaths()
                         ResolveAnchorWorldNormal(
                             SurfaceCandidates[CandidateIndex])) < 0.0f)
                 {
-                    continue;
+                    return;
                 }
                 const float DistanceSquared = FVector::DistSquared(
                     PreviousWorld,
@@ -617,6 +888,21 @@ bool UCMChimeraWrapTentacleComponent::AssignDistanceOrderedPaths()
                 {
                     BestDistanceSquared = DistanceSquared;
                     BestIndex = CandidateIndex;
+                }
+            };
+            for (int32 CandidateIndex = FirstCandidateIndex;
+                CandidateIndex <= LastCandidateIndex;
+                ++CandidateIndex)
+            {
+                ConsiderCandidate(CandidateIndex);
+            }
+            if (BestIndex == INDEX_NONE)
+            {
+                for (int32 CandidateIndex = 0;
+                    CandidateIndex < SurfaceCandidates.Num();
+                    ++CandidateIndex)
+                {
+                    ConsiderCandidate(CandidateIndex);
                 }
             }
             if (BestIndex == INDEX_NONE)
@@ -751,27 +1037,45 @@ void UCMChimeraWrapTentacleComponent::HidePool()
 void UCMChimeraWrapTentacleComponent::UpdateTentacleMeshes()
 {
     const int32 PointCount = FMath::Max(SplinePointCount, 3);
+    const int32 TargetAnchorCount = GetTargetAnchorCount();
+    const int32 FirstTargetPointIndex = bConnectSourceToSurface ? 1 : 0;
     const FVector SourceLocal = GetComponentTransform()
         .InverseTransformPosition(GetSourceWorldPosition());
     for (FCMChimeraWrapTentacleRuntime& Runtime : RuntimeTentacles)
     {
         if (!Runtime.Spline
-            || Runtime.TargetAnchors.Num() != PointCount - 1)
+            || Runtime.TargetAnchors.Num() != TargetAnchorCount)
         {
             continue;
         }
 
-        Runtime.Spline->SetLocationAtSplinePoint(
-            0,
-            SourceLocal,
-            ESplineCoordinateSpace::Local,
-            false);
-        for (int32 PointIndex = 1;
+        FVector RevealOriginLocal = SourceLocal;
+        if (!bConnectSourceToSurface)
+        {
+            const FCMChimeraWrapSurfaceAnchor& FirstAnchor =
+                Runtime.TargetAnchors[0];
+            RevealOriginLocal = GetComponentTransform()
+                .InverseTransformPosition(
+                    ResolveAnchorWorldPosition(FirstAnchor)
+                    + ResolveAnchorWorldNormal(FirstAnchor)
+                        * SurfaceOffset);
+        }
+        else
+        {
+            Runtime.Spline->SetLocationAtSplinePoint(
+                0,
+                SourceLocal,
+                ESplineCoordinateSpace::Local,
+                false);
+        }
+
+        for (int32 PointIndex = FirstTargetPointIndex;
             PointIndex < PointCount;
             ++PointIndex)
         {
+            const int32 AnchorIndex = PointIndex - FirstTargetPointIndex;
             const FCMChimeraWrapSurfaceAnchor& Anchor =
-                Runtime.TargetAnchors[PointIndex - 1];
+                Runtime.TargetAnchors[AnchorIndex];
             const FVector AnchorWorld = ResolveAnchorWorldPosition(Anchor);
             const FVector NormalWorld = ResolveAnchorWorldNormal(Anchor);
             FVector AxisX;
@@ -799,7 +1103,7 @@ void UCMChimeraWrapTentacleComponent::UpdateTentacleMeshes()
             Runtime.Spline->SetLocationAtSplinePoint(
                 PointIndex,
                 FMath::Lerp(
-                    SourceLocal,
+                    RevealOriginLocal,
                     GetComponentTransform().InverseTransformPosition(
                         TargetWorld),
                     RevealAlpha),
@@ -818,141 +1122,10 @@ void UCMChimeraWrapTentacleComponent::UpdateTubeMesh(
     {
         return;
     }
-
-    const int32 PointCount = Runtime.Spline->GetNumberOfSplinePoints();
-    if (PointCount < 2)
-    {
-        return;
-    }
-
-    TArray<FVector> Points;
-    Points.Reserve(PointCount);
-    for (int32 PointIndex = 0; PointIndex < PointCount; ++PointIndex)
-    {
-        Points.Add(Runtime.Spline->GetLocationAtSplinePoint(
-            PointIndex,
-            ESplineCoordinateSpace::Local));
-    }
-
-    const int32 RingVertexCount = WrapTubeSideCount + 1;
-    TArray<FVector> Vertices;
-    TArray<int32> Triangles;
-    TArray<FVector> Normals;
-    TArray<FVector2D> UVs;
-    TArray<FLinearColor> Colors;
-    TArray<FProcMeshTangent> Tangents;
-    Vertices.Reserve(PointCount * RingVertexCount);
-    Normals.Reserve(PointCount * RingVertexCount);
-    UVs.Reserve(PointCount * RingVertexCount);
-    Colors.Reserve(PointCount * RingVertexCount);
-    Tangents.Reserve(PointCount * RingVertexCount);
-    Triangles.Reserve((PointCount - 1) * WrapTubeSideCount * 6);
-
-    FVector FrameX = FVector::RightVector;
-    FVector FrameY = FVector::UpVector;
-    FVector PreviousTangent = FVector::ForwardVector;
-    float AccumulatedLength = 0.0f;
-    for (int32 PointIndex = 0; PointIndex < PointCount; ++PointIndex)
-    {
-        if (PointIndex > 0)
-        {
-            AccumulatedLength += FVector::Distance(
-                Points[PointIndex - 1],
-                Points[PointIndex]);
-        }
-
-        FVector PathTangent;
-        if (PointIndex == 0)
-        {
-            PathTangent = Points[1] - Points[0];
-        }
-        else if (PointIndex == PointCount - 1)
-        {
-            PathTangent = Points[PointIndex] - Points[PointIndex - 1];
-        }
-        else
-        {
-            PathTangent = Points[PointIndex + 1] - Points[PointIndex - 1];
-        }
-        PathTangent = PathTangent.GetSafeNormal(
-            UE_SMALL_NUMBER,
-            PreviousTangent);
-        PreviousTangent = PathTangent;
-
-        if (PointIndex == 0)
-        {
-            PathTangent.FindBestAxisVectors(FrameX, FrameY);
-        }
-        else
-        {
-            FrameX = (FrameX
-                - PathTangent * FVector::DotProduct(FrameX, PathTangent))
-                .GetSafeNormal();
-            if (FrameX.IsNearlyZero())
-            {
-                PathTangent.FindBestAxisVectors(FrameX, FrameY);
-            }
-            else
-            {
-                FrameY = FVector::CrossProduct(PathTangent, FrameX)
-                    .GetSafeNormal();
-                FrameX = FVector::CrossProduct(FrameY, PathTangent)
-                    .GetSafeNormal();
-            }
-        }
-
-        const float LengthAlpha = static_cast<float>(PointIndex)
-            / static_cast<float>(PointCount - 1);
-        const float Radius = WrapTubeBaseRadius
-            * TentacleWidth
-            * FMath::Lerp(1.0f, 0.7f, LengthAlpha);
-        for (int32 SideIndex = 0;
-            SideIndex <= WrapTubeSideCount;
-            ++SideIndex)
-        {
-            const float SideAlpha = static_cast<float>(SideIndex)
-                / static_cast<float>(WrapTubeSideCount);
-            const float Angle = SideAlpha * 2.0f * PI;
-            const FVector Radial = FrameX * FMath::Cos(Angle)
-                + FrameY * FMath::Sin(Angle);
-            Vertices.Add(Points[PointIndex] + Radial * Radius);
-            Normals.Add(Radial);
-            UVs.Add(FVector2D(
-                AccumulatedLength / WrapTubeUVTileLength,
-                SideAlpha));
-            Colors.Add(FLinearColor::White);
-            Tangents.Add(FProcMeshTangent(PathTangent, false));
-        }
-    }
-
-    for (int32 RingIndex = 1; RingIndex < PointCount; ++RingIndex)
-    {
-        const int32 PreviousRing = (RingIndex - 1) * RingVertexCount;
-        const int32 CurrentRing = RingIndex * RingVertexCount;
-        for (int32 SideIndex = 0;
-            SideIndex < WrapTubeSideCount;
-            ++SideIndex)
-        {
-            Triangles.Add(PreviousRing + SideIndex);
-            Triangles.Add(PreviousRing + SideIndex + 1);
-            Triangles.Add(CurrentRing + SideIndex);
-            Triangles.Add(PreviousRing + SideIndex + 1);
-            Triangles.Add(CurrentRing + SideIndex + 1);
-            Triangles.Add(CurrentRing + SideIndex);
-        }
-    }
-
-    Runtime.TubeMesh->CreateMeshSection_LinearColor(
-        0,
-        Vertices,
-        Triangles,
-        Normals,
-        UVs,
-        Colors,
-        Tangents,
-        false);
-    Runtime.TubeMesh->SetHiddenInGame(false, true);
-    Runtime.TubeMesh->SetVisibility(true, true);
+    CMChimeraWrapTentacle::UpdateTubeMeshFromSpline(
+        *Runtime.Spline,
+        *Runtime.TubeMesh,
+        TentacleWidth);
 }
 
 FVector UCMChimeraWrapTentacleComponent::ResolveAnchorWorldPosition(
@@ -1021,6 +1194,7 @@ void UCMChimeraWrapTentacleComponent::ResetTargetState()
     ExtensionAlpha = 0.0f;
     NextSamplingTime = 0.0f;
     bLoggedSamplingFailure = false;
+    SetComponentTickInterval(0.0f);
     for (FCMChimeraWrapTentacleRuntime& Runtime : RuntimeTentacles)
     {
         Runtime.TargetAnchors.Reset();
@@ -1033,4 +1207,10 @@ void UCMChimeraWrapTentacleComponent::RefreshTickEnabled()
     SetComponentTickEnabled(
         bEffectActive
         && IsValid(TargetMesh));
+}
+
+int32 UCMChimeraWrapTentacleComponent::GetTargetAnchorCount() const
+{
+    return FMath::Max(SplinePointCount, 3)
+        - (bConnectSourceToSurface ? 1 : 0);
 }
