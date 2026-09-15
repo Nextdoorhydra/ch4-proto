@@ -431,6 +431,11 @@ void UCMAggressiveOmnidirectionalPathComponent::SetIntermediatePathPointWallClea
     IntermediatePathPointWallClearance = FMath::Max(WallClearance, 0.0f);
 }
 
+void UCMAggressiveOmnidirectionalPathComponent::SetIntermediatePathPointNavigationClearance(float NavigationClearance)
+{
+    IntermediatePathPointNavigationClearance = FMath::Max(NavigationClearance, 0.0f);
+}
+
 void UCMAggressiveOmnidirectionalPathComponent::SetMinimumPathPointSpacing(float MinimumSpacing)
 {
     MinimumPathPointSpacing = FMath::Max(MinimumSpacing, 0.0f);
@@ -512,8 +517,12 @@ bool UCMAggressiveOmnidirectionalPathComponent::BuildNavigationPath(FVector Worl
         }
     }
 
-    // 연결 가능성을 검증하면서 몸체가 벽에 걸리지 않도록 중간점을 안쪽으로 민다.
-    AdjustIntermediatePathPointsAwayFromWalls(*World, *NavigationSystem, *NavigationData);
+    // 2점 경로와 최종점도 포함해 몸체가 벽과 NavMesh 경계에 붙지 않도록 안쪽으로 민다.
+    if (!AdjustPathPointsAwayFromBoundaries(*World, *NavigationSystem, *NavigationData))
+    {
+        ActivePathPoints.Reset();
+        return false;
+    }
 
     // 직선 연결이 막히지 않는 범위에서 지나치게 가까운 점을 제거한다.
     const float MinimumSpacing = FMath::Max(MinimumPathPointSpacing, 0.0f);
@@ -547,61 +556,162 @@ bool UCMAggressiveOmnidirectionalPathComponent::BuildNavigationPath(FVector Worl
         SpacedPathPoints.Add(FinalPathPoint);
         ActivePathPoints = MoveTemp(SpacedPathPoints);
     }
+    if (!HasPathClearance(*World, *NavigationData))
+    {
+        ActivePathPoints.Reset();
+        return false;
+    }
     ActiveNavigationData = NavigationData;
     return true;
 }
 
-// 정적 장애물의 반발 방향으로 중간 경로점을 옮기되 양쪽 경로 연결을 보존한다.
-void UCMAggressiveOmnidirectionalPathComponent::AdjustIntermediatePathPointsAwayFromWalls(UWorld& World, UNavigationSystemV1& NavigationSystem, const ANavigationData& NavigationData)
+// 정적 장애물과 NavMesh 경계의 반발 방향으로 모든 이동 경로점을 옮기되 경로 연결을 보존한다.
+bool UCMAggressiveOmnidirectionalPathComponent::AdjustPathPointsAwayFromBoundaries(UWorld& World, UNavigationSystemV1& NavigationSystem, const ANavigationData& NavigationData)
 {
     const float WallClearance = FMath::Max(IntermediatePathPointWallClearance, 0.0f);
-    if (WallClearance <= 0.0f || ActivePathPoints.Num() <= 2)
-        return;
+    const float NavigationClearance = FMath::Max(IntermediatePathPointNavigationClearance, 0.0f);
+    if (WallClearance <= 0.0f && NavigationClearance <= 0.0f)
+        return true;
+    if (ActivePathPoints.Num() < 2)
+        return false;
 
-    FCollisionObjectQueryParams StaticObjects;
-    StaticObjects.AddObjectTypesToQuery(ECC_WorldStatic);
-    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CMAggressivePathWallClearance), false, GetOwner());
-    const FVector ProjectionExtent(WallClearance, WallClearance, NavigationProjectionExtent.Z);
-    constexpr float CandidateScales[] = {1.0f, 0.5f, 0.25f};
-    for (int32 PathPointIndex = 1; PathPointIndex < ActivePathPoints.Num() - 1; ++PathPointIndex)
+    const float MaximumClearance = FMath::Max(WallClearance, NavigationClearance);
+    const FVector ProjectionExtent(MaximumClearance, MaximumClearance, NavigationProjectionExtent.Z);
+    constexpr float CandidateScales[] = {1.0f, 0.75f, 0.5f, 0.25f};
+    for (int32 PathPointIndex = 1; PathPointIndex < ActivePathPoints.Num(); ++PathPointIndex)
     {
         const FVector OriginalPoint = ActivePathPoints[PathPointIndex];
-        TArray<FOverlapResult> Overlaps;
-        World.OverlapMultiByObjectType(Overlaps, OriginalPoint, FQuat::Identity, StaticObjects, FCollisionShape::MakeSphere(WallClearance), QueryParams);
-
-        FVector Repulsion = FVector::ZeroVector;
-        for (const FOverlapResult& Overlap : Overlaps)
-        {
-            const UPrimitiveComponent* Obstacle = Overlap.GetComponent();
-            if (!Obstacle)
-                continue;
-            FVector ClosestPoint;
-            const float SurfaceDistance = Obstacle->GetClosestPointOnCollision(OriginalPoint, ClosestPoint);
-            FVector AwayFromSurface = OriginalPoint - ClosestPoint;
-            AwayFromSurface.Z = 0.0f;
-            const float PlanarDistance = AwayFromSurface.Size();
-            if (SurfaceDistance < 0.0f || PlanarDistance <= UE_SMALL_NUMBER || PlanarDistance >= WallClearance)
-                continue;
-            Repulsion += AwayFromSurface / PlanarDistance * (WallClearance - PlanarDistance);
-        }
-        Repulsion.Z = 0.0f;
-        Repulsion = Repulsion.GetClampedToMaxSize(WallClearance);
-        if (Repulsion.IsNearlyZero())
+        FVector StaticRepulsion;
+        FVector NavigationRepulsion;
+        const bool bHasStaticClearance = CalculateStaticObstacleRepulsion(World, OriginalPoint, StaticRepulsion);
+        const bool bHasNavigationClearance = CalculateNavigationBoundaryRepulsion(NavigationData, OriginalPoint, NavigationRepulsion);
+        if (bHasStaticClearance && bHasNavigationClearance)
             continue;
 
+        FVector Repulsion = StaticRepulsion + NavigationRepulsion;
+        Repulsion.Z = 0.0f;
+        Repulsion = Repulsion.GetClampedToMaxSize(MaximumClearance);
+        if (Repulsion.IsNearlyZero())
+            return false;
+
+        bool bAdjusted = false;
+        const bool bFinalPathPoint = PathPointIndex == ActivePathPoints.Num() - 1;
         for (const float CandidateScale : CandidateScales)
         {
             FNavLocation ProjectedPoint;
             if (!NavigationSystem.ProjectPointToNavigation(OriginalPoint + Repulsion * CandidateScale, ProjectedPoint, ProjectionExtent, &NavigationData))
                 continue;
+            if (bFinalPathPoint && FVector::DistSquared2D(ProjectedPoint.Location, ActiveWorldGoal) > FMath::Square(FinalAcceptanceRadius))
+                continue;
+
+            FVector RemainingStaticRepulsion;
+            FVector RemainingNavigationRepulsion;
+            if (!CalculateStaticObstacleRepulsion(World, ProjectedPoint.Location, RemainingStaticRepulsion) || !CalculateNavigationBoundaryRepulsion(NavigationData, ProjectedPoint.Location, RemainingNavigationRepulsion))
+                continue;
             FVector HitLocation;
-            if (NavigationData.Raycast(ActivePathPoints[PathPointIndex - 1], ProjectedPoint.Location, HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner()) ||
-                NavigationData.Raycast(ProjectedPoint.Location, ActivePathPoints[PathPointIndex + 1], HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner()))
+            if (NavigationData.Raycast(ActivePathPoints[PathPointIndex - 1], ProjectedPoint.Location, HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner()))
+                continue;
+            if (!bFinalPathPoint && NavigationData.Raycast(ProjectedPoint.Location, ActivePathPoints[PathPointIndex + 1], HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner()))
                 continue;
             ActivePathPoints[PathPointIndex] = ProjectedPoint.Location;
+            bAdjusted = true;
             break;
         }
+        if (!bAdjusted)
+            return false;
     }
+    return true;
+}
+
+// 실제 이동 선분을 짧게 샘플링해 조정 뒤에도 벽과 NavMesh 경계 여유가 유지되는지 확인한다.
+bool UCMAggressiveOmnidirectionalPathComponent::HasPathClearance(UWorld& World, const ANavigationData& NavigationData) const
+{
+    if (ActivePathPoints.Num() < 2)
+        return false;
+
+    const float SampleSpacing = FMath::Max(FMath::Min(IntermediatePathPointWallClearance, IntermediatePathPointNavigationClearance), 50.0f);
+    for (int32 PathPointIndex = 1; PathPointIndex < ActivePathPoints.Num(); ++PathPointIndex)
+    {
+        const FVector SegmentStart = ActivePathPoints[PathPointIndex - 1];
+        const FVector SegmentEnd = ActivePathPoints[PathPointIndex];
+        const int32 SampleCount = FMath::Max(FMath::CeilToInt(FVector::Dist2D(SegmentStart, SegmentEnd) / SampleSpacing), 1);
+        for (int32 SampleIndex = 1; SampleIndex <= SampleCount; ++SampleIndex)
+        {
+            const FVector SampleLocation = FMath::Lerp(SegmentStart, SegmentEnd, static_cast<float>(SampleIndex) / static_cast<float>(SampleCount));
+            FVector StaticRepulsion;
+            FVector NavigationRepulsion;
+            if (!CalculateStaticObstacleRepulsion(World, SampleLocation, StaticRepulsion) || !CalculateNavigationBoundaryRepulsion(NavigationData, SampleLocation, NavigationRepulsion))
+                return false;
+        }
+    }
+    return true;
+}
+
+// 한 위치가 정적 장애물에서 충분히 떨어졌는지와 부족한 경우 바깥쪽 반발 방향을 계산한다.
+bool UCMAggressiveOmnidirectionalPathComponent::CalculateStaticObstacleRepulsion(UWorld& World, const FVector Location, FVector& OutRepulsion) const
+{
+    OutRepulsion = FVector::ZeroVector;
+    const float Clearance = FMath::Max(IntermediatePathPointWallClearance, 0.0f);
+    if (Clearance <= 0.0f)
+        return true;
+
+    FCollisionObjectQueryParams StaticObjects;
+    StaticObjects.AddObjectTypesToQuery(ECC_WorldStatic);
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CMAggressivePathWallClearance), false, GetOwner());
+    TArray<FOverlapResult> Overlaps;
+    World.OverlapMultiByObjectType(Overlaps, Location, FQuat::Identity, StaticObjects, FCollisionShape::MakeSphere(Clearance), QueryParams);
+
+    bool bHasClearance = true;
+    for (const FOverlapResult& Overlap : Overlaps)
+    {
+        const UPrimitiveComponent* Obstacle = Overlap.GetComponent();
+        if (!Obstacle)
+            continue;
+
+        FVector ClosestPoint;
+        const float SurfaceDistance = Obstacle->GetClosestPointOnCollision(Location, ClosestPoint);
+        if (SurfaceDistance < 0.0f)
+            continue;
+
+        FVector AwayFromSurface = Location - ClosestPoint;
+        AwayFromSurface.Z = 0.0f;
+        const float PlanarDistance = AwayFromSurface.Size();
+        if (PlanarDistance <= UE_SMALL_NUMBER || PlanarDistance >= Clearance)
+            continue;
+
+        bHasClearance = false;
+        OutRepulsion += AwayFromSurface / PlanarDistance * (Clearance - PlanarDistance);
+    }
+    OutRepulsion = OutRepulsion.GetClampedToMaxSize(Clearance);
+    return bHasClearance;
+}
+
+// 경유점 주변 8방향에서 가까운 NavMesh 경계를 찾아 NavMesh 안쪽 반발 벡터를 계산한다.
+bool UCMAggressiveOmnidirectionalPathComponent::CalculateNavigationBoundaryRepulsion(const ANavigationData& NavigationData, const FVector Location, FVector& OutRepulsion) const
+{
+    OutRepulsion = FVector::ZeroVector;
+    const float Clearance = FMath::Max(IntermediatePathPointNavigationClearance, 0.0f);
+    if (Clearance <= 0.0f)
+        return true;
+
+    bool bHasClearance = true;
+    constexpr int32 DirectionCount = 8;
+    for (int32 DirectionIndex = 0; DirectionIndex < DirectionCount; ++DirectionIndex)
+    {
+        const float Angle = UE_TWO_PI * static_cast<float>(DirectionIndex) / static_cast<float>(DirectionCount);
+        const FVector Direction(FMath::Cos(Angle), FMath::Sin(Angle), 0.0f);
+        FVector HitLocation;
+        if (!NavigationData.Raycast(Location, Location + Direction * Clearance, HitLocation, NavigationData.GetDefaultQueryFilter(), GetOwner()))
+            continue;
+
+        const float AvailableDistance = FVector::Dist2D(Location, HitLocation);
+        if (AvailableDistance + 1.0f >= Clearance)
+            continue;
+        OutRepulsion -= Direction * (Clearance - AvailableDistance);
+        bHasClearance = false;
+    }
+    OutRepulsion = OutRepulsion.GetClampedToMaxSize(Clearance);
+    return bHasClearance;
 }
 
 // 설정 이름과 일치하는 에이전트 구성 및 실제 NavData를 찾는다.

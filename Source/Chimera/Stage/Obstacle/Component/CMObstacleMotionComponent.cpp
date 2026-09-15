@@ -35,6 +35,9 @@ void UCMObstacleMotionComponent::TickComponent(
     case ECMObstacleMotionType::Rotation:
         TickRotation(DeltaTime);
         break;
+    case ECMObstacleMotionType::RotationToAngle:
+        TickRotationToAngle(DeltaTime);
+        break;
     case ECMObstacleMotionType::Linear:
         TickTranslation(DeltaTime, false);
         break;
@@ -55,6 +58,11 @@ void UCMObstacleMotionComponent::StartMotion()
         return;
     }
 
+    if (MotionType == ECMObstacleMotionType::RotationToAngle)
+    {
+        DirectionSign = 1.0f;
+    }
+
     bMotionRunning = true;
     SetComponentTickEnabled(true);
     OnMotionStateChanged(bMotionRunning, DirectionSign);
@@ -63,6 +71,17 @@ void UCMObstacleMotionComponent::StartMotion()
 // 이동 상태를 정지하고 하위 구현에 알림
 void UCMObstacleMotionComponent::StopMotion()
 {
+    if (MotionType == ECMObstacleMotionType::RotationToAngle
+        && GetOwner() && GetOwner()->HasAuthority()
+        && CurrentRotationAngle > KINDA_SMALL_NUMBER)
+    {
+        DirectionSign = -1.0f;
+        bMotionRunning = true;
+        SetComponentTickEnabled(true);
+        OnMotionStateChanged(bMotionRunning, DirectionSign);
+        return;
+    }
+
     bMotionRunning = false;
     SetComponentTickEnabled(false);
     OnMotionStateChanged(bMotionRunning, DirectionSign);
@@ -91,6 +110,7 @@ void UCMObstacleMotionComponent::ResetMotion()
     bMotionRunning = false;
     DirectionSign = 1.0f;
     TravelledDistance = 0.0f;
+    CurrentRotationAngle = 0.0f;
     SetComponentTickEnabled(false);
     if (AActor* Owner = GetOwner(); IsValid(Owner))
     {
@@ -118,6 +138,34 @@ void UCMObstacleMotionComponent::TickRotation(float DeltaTime)
     const float AngleRadians = FMath::DegreesToRadians(Speed * DirectionSign * DeltaTime);
     const FQuat DeltaRotation(WorldAxis, AngleRadians);
     Owner->SetActorRotation(DeltaRotation * Owner->GetActorQuat());
+}
+
+// 활성화 시 설정 각도까지 회전하고 비활성화 시 최초 배치 회전으로 복귀
+void UCMObstacleMotionComponent::TickRotationToAngle(float DeltaTime)
+{
+    AActor* Owner = GetOwner();
+    const FVector WorldAxis = GetWorldMotionAxis();
+    if (!IsValid(Owner) || WorldAxis.IsNearlyZero() || RotationAngle <= 0.0f || FMath::IsNearlyZero(Speed))
+    {
+        return;
+    }
+
+    const float TargetAngle = DirectionSign > 0.0f ? RotationAngle : 0.0f;
+    CurrentRotationAngle = FMath::FInterpConstantTo(
+        CurrentRotationAngle,
+        TargetAngle,
+        DeltaTime,
+        FMath::Abs(Speed));
+
+    const FQuat RotationOffset(WorldAxis, FMath::DegreesToRadians(CurrentRotationAngle));
+    Owner->SetActorRotation(RotationOffset * InitialTransform.GetRotation());
+
+    if (FMath::IsNearlyEqual(CurrentRotationAngle, TargetAngle, KINDA_SMALL_NUMBER))
+    {
+        bMotionRunning = false;
+        SetComponentTickEnabled(false);
+        OnMotionStateChanged(bMotionRunning, DirectionSign);
+    }
 }
 
 // 시작점과 설정 거리 사이에서 단방향 또는 왕복 이동 처리

@@ -238,7 +238,8 @@ void ACMStageObstacleBase::ApplyComponentActiveState(bool bIsActive)
         FlashComponent->SetFlashEnabled(bIsActive);
     }
 
-    if (PrimaryEffect && PrimaryEffect->GetAsset())
+    if (ShouldManagePrimaryEffectAutomatically()
+        && PrimaryEffect && PrimaryEffect->GetAsset())
     {
         if (bIsActive)
         {

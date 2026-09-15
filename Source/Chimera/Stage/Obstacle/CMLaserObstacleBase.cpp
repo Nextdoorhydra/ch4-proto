@@ -11,6 +11,7 @@
 #include "Stage/Obstacle/Component/CMHazardComponent.h"
 #include "Stage/Obstacle/Component/CMLaserBeamComponent.h"
 #include "TimerManager.h"
+#include "Misc/Crc.h"
 
 ACMLaserObstacleBase::ACMLaserObstacleBase()
 {
@@ -53,13 +54,32 @@ void ACMLaserObstacleBase::BeginPlay()
     BeamCollision->OnComponentEndOverlap.AddUniqueDynamic(
         this, &ThisClass::HandleBeamEndOverlap);
 
+    bInitialEffectActivationDeferred = IsObstacleActive()
+        && GetNetMode() != NM_DedicatedServer
+        && InitialEffectActivationSpread > 0.0f;
     HandleObstacleActiveStateChanged(IsObstacleActive());
+
+    if (bInitialEffectActivationDeferred)
+    {
+        const uint32 StableHash = FCrc::StrCrc32(*GetPathName());
+        const float NormalizedOffset = static_cast<float>(StableHash % 1000) / 999.0f;
+        const float Delay = FMath::Max(
+            KINDA_SMALL_NUMBER,
+            InitialEffectActivationSpread * NormalizedOffset);
+        GetWorldTimerManager().SetTimer(
+            InitialEffectActivationTimerHandle,
+            this,
+            &ThisClass::FinishInitialEffectActivationDelay,
+            Delay,
+            false);
+    }
 }
 
 // 레이저 갱신 Timer와 Collision Delegate 정리
 void ACMLaserObstacleBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     UpdateRefreshTimer(false);
+    GetWorldTimerManager().ClearTimer(InitialEffectActivationTimerHandle);
     BeamCollision->OnComponentBeginOverlap.RemoveAll(this);
     BeamCollision->OnComponentEndOverlap.RemoveAll(this);
     Super::EndPlay(EndPlayReason);
@@ -117,7 +137,8 @@ void ACMLaserObstacleBase::HandleObstacleActiveStateChanged(bool bIsActive)
         return;
     }
 
-    BeamPresentation->SetBeamVisible(bIsActive);
+    BeamPresentation->SetBeamVisible(
+        bIsActive, !bInitialEffectActivationDeferred);
     if (!bIsActive)
     {
         bPlayerImpactActive = false;
@@ -198,7 +219,8 @@ void ACMLaserObstacleBase::ApplyLaserGeometry()
 
     BeamPresentation->ApplyBeam(StartLocation, LaserEndLocation);
     BeamPresentation->SetPlayerImpactActive(bPlayerImpactActive);
-    BeamPresentation->SetBeamVisible(IsObstacleActive());
+    BeamPresentation->SetBeamVisible(
+        IsObstacleActive(), !bInitialEffectActivationDeferred);
 
     BeamCollision->SetWorldLocationAndRotation(
         FMath::Lerp(StartLocation, FVector(LaserEndLocation), 0.5f),
@@ -245,5 +267,15 @@ void ACMLaserObstacleBase::UpdateRefreshTimer(bool bShouldRun)
             &ThisClass::RefreshLaser,
             FMath::Max(RefreshInterval, 0.02f),
             true);
+    }
+}
+
+// 초기 분산 시간이 끝난 레이저만 현재 상태에 맞춰 Niagara를 활성화한다.
+void ACMLaserObstacleBase::FinishInitialEffectActivationDelay()
+{
+    bInitialEffectActivationDeferred = false;
+    if (BeamPresentation)
+    {
+        BeamPresentation->SetBeamVisible(IsObstacleActive());
     }
 }

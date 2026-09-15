@@ -131,7 +131,7 @@ void UCMMainMenuWidget::NativeConstruct()
             &UCMMainMenuWidget::HandleJoinCancelClicked
         );
     }
-
+    RecoverStaleSessionIfNeeded();
     UpdateControls();
 }
 
@@ -161,6 +161,11 @@ void UCMMainMenuWidget::NativeDestruct()
 
 void UCMMainMenuWidget::HandleJoinRoomClicked()
 {
+    if (!CanStartSessionOperation())
+    {
+        return;
+    }
+
     if (Panel_JoinRoomPopup)
     {
         Panel_JoinRoomPopup->SetVisibility(ESlateVisibility::Visible);
@@ -181,25 +186,63 @@ void UCMMainMenuWidget::HandleJoinCancelClicked()
     }
 }
 
-void UCMMainMenuWidget::UpdateControls()
+bool UCMMainMenuWidget::CanStartSessionOperation() const
 {
-    const bool bCanStartSessionOperation = NetworkSubsystem
+    return NetworkSubsystem
         && NetworkSubsystem->GetConnectionState()
             == EListenServerConnectionState::Offline
         && NetworkSubsystem->GetCurrentOperation()
             == EListenServerOperation::None;
+}
+
+void UCMMainMenuWidget::RecoverStaleSessionIfNeeded()
+{
+    UWorld* World = GetWorld();
+    if (!NetworkSubsystem
+        || !World
+        || World->GetNetMode() != NM_Standalone
+        || NetworkSubsystem->GetCurrentOperation()
+            != EListenServerOperation::None
+        || NetworkSubsystem->GetConnectionState()
+            == EListenServerConnectionState::Offline)
+    {
+        return;
+    }
+
+    UE_LOG(
+        LogChimeraMainMenuUI,
+        Warning,
+        TEXT("Cleaning up stale session state after returning to the standalone main menu.")
+    );
+    SetResultText(NSLOCTEXT(
+        "ChimeraUI",
+        "CleaningUpFailedConnection",
+        "Cleaning up the failed connection..."
+    ));
+    NetworkSubsystem->LeaveSession();
+}
+
+void UCMMainMenuWidget::UpdateControls()
+{
+    const bool bCanStartSessionOperation = CanStartSessionOperation();
+    const ESlateVisibility SessionButtonVisibility = bCanStartSessionOperation
+        ? ESlateVisibility::Visible
+        : ESlateVisibility::HitTestInvisible;
 
     if (Btn_CreateRoom)
     {
-        Btn_CreateRoom->SetIsEnabled(bCanStartSessionOperation);
+        Btn_CreateRoom->SetIsEnabled(true);
+        Btn_CreateRoom->SetVisibility(SessionButtonVisibility);
     }
     if (Btn_JoinRoom)
     {
-        Btn_JoinRoom->SetIsEnabled(bCanStartSessionOperation);
+        Btn_JoinRoom->SetIsEnabled(true);
+        Btn_JoinRoom->SetVisibility(SessionButtonVisibility);
     }
     if (Btn_QuickMatch)
     {
-        Btn_QuickMatch->SetIsEnabled(bCanStartSessionOperation);
+        Btn_QuickMatch->SetIsEnabled(true);
+        Btn_QuickMatch->SetVisibility(SessionButtonVisibility);
     }
     if (Edt_RoomId)
     {
@@ -346,7 +389,7 @@ void UCMMainMenuWidget::HandleOptionClosed()
 
 void UCMMainMenuWidget::HandleCreateRoomClicked()
 {
-    if (!NetworkSubsystem)
+    if (!CanStartSessionOperation())
     {
         return;
     }
@@ -422,7 +465,7 @@ void UCMMainMenuWidget::HandleJoinConfirmClicked()
 
 void UCMMainMenuWidget::HandleQuickMatchClicked()
 {
-    if (!NetworkSubsystem)
+    if (!CanStartSessionOperation())
     {
         return;
     }

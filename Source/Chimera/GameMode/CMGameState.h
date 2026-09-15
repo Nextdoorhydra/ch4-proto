@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameMode/CMGameFlowTypes.h"
 #include "GameFramework/GameStateBase.h"
 
 #include "CMGameState.generated.h"
@@ -26,10 +27,17 @@ public:
 
     void SetSharedChimera(ACMChimera* NewSharedChimera);
     void SetSoloTestMode(bool bEnabled);
+    void SetWorldPresentationState(ECMWorldPresentationState NewState);
     void NotifyLobbyRosterChanged();
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Testing")
     bool IsSoloTestMode() const { return bSoloTestMode; }
+
+    UFUNCTION(BlueprintPure, Category = "Chimera|Loading")
+    ECMWorldPresentationState GetWorldPresentationState() const
+    {
+        return WorldPresentationState;
+    }
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Lobby")
     int32 GetLobbyPlayerCount() const;
@@ -56,6 +64,10 @@ public:
 private:
     UPROPERTY(Replicated)
     bool bSoloTestMode = false;
+
+    UPROPERTY(Replicated)
+    ECMWorldPresentationState WorldPresentationState =
+        ECMWorldPresentationState::Ready;
 
     UFUNCTION()
     void OnRep_SharedChimera();

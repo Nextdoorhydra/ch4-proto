@@ -10,6 +10,7 @@
 #include "Player/CMPlayerState.h"
 #include "Player/CMPlayerController.h"
 #include "EngineUtils.h"
+#include "Engine/LevelStreaming.h"
 #include "GameFramework/PlayerStart.h"
 #include "Stage/Test/CMTestAreaManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -18,6 +19,7 @@
 #include "Sound/CMGameSoundBridgeSubsystem.h"
 #include "Sound/CMSoundTags.h"
 #include "Sound/NKMSoundSubsystem.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraMultiplayer, Log, All);
 
@@ -44,6 +46,23 @@ void ACMGameMode::BeginPlay()
 
     if (IsMainMenuMap())
     {
+        bMainMenuAssetsResolved = false;
+        bMainMenuAssetsLoaded = false;
+        bMainMenuPresentationReady = false;
+        bMainMenuFinishScheduled = false;
+        if (ACMGameState* CMGameState = GetGameState<ACMGameState>())
+        {
+            CMGameState->SetWorldPresentationState(
+                ECMWorldPresentationState::Loading);
+        }
+        MainMenuPresentationPollTimer = GetWorldTimerManager().SetTimerForNextTick(
+            this, &ThisClass::CheckMainMenuPresentationReady);
+        GetWorldTimerManager().SetTimer(
+            MainMenuPresentationTimeoutTimer,
+            this,
+            &ThisClass::HandleMainMenuLoadingTimeout,
+            MainMenuPresentationTimeoutSeconds,
+            false);
         StartMainMenuAudio();
     }
     else if (IsGameplayMap())
@@ -58,6 +77,9 @@ void ACMGameMode::BeginPlay()
 
 void ACMGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    GetWorldTimerManager().ClearTimer(MainMenuPresentationPollTimer);
+    GetWorldTimerManager().ClearTimer(MainMenuPresentationFinishTimer);
+    GetWorldTimerManager().ClearTimer(MainMenuPresentationTimeoutTimer);
     StopMainMenuAudio();
     Super::EndPlay(EndPlayReason);
 }
@@ -353,6 +375,9 @@ void ACMGameMode::StartMainMenuAudio()
         || !MainMenuLoadScheduleId.IsValid()
         || !GetGameInstance())
     {
+        bMainMenuAssetsResolved = true;
+        bMainMenuAssetsLoaded = false;
+        TryFinishMainMenuLoading();
         return;
     }
 
@@ -360,6 +385,9 @@ void ACMGameMode::StartMainMenuAudio()
         UCMStageLoadCoordinatorSubsystem>();
     if (!MainMenuLoadCoordinator)
     {
+        bMainMenuAssetsResolved = true;
+        bMainMenuAssetsLoaded = false;
+        TryFinishMainMenuLoading();
         return;
     }
 
@@ -375,6 +403,9 @@ void ACMGameMode::StartMainMenuAudio()
             TEXT("Main menu audio schedule failed to start. Schedule=%s"),
             *MainMenuLoadScheduleId.ToString());
         StopMainMenuAudio();
+        bMainMenuAssetsResolved = true;
+        bMainMenuAssetsLoaded = false;
+        TryFinishMainMenuLoading();
     }
 }
 
@@ -415,6 +446,9 @@ void ACMGameMode::HandleMainMenuLoadFinished(
             &ThisClass::HandleMainMenuLoadFinished);
     }
     MainMenuLoadRequestId.Invalidate();
+    bMainMenuAssetsResolved = true;
+    bMainMenuAssetsLoaded = bSucceeded;
+    TryFinishMainMenuLoading();
 
     if (!bSucceeded || !GetGameInstance())
     {
@@ -434,6 +468,106 @@ void ACMGameMode::HandleMainMenuLoadFinished(
     {
         SoundSubsystem->PlayBGM(CMSoundTags::BGM_Menu);
     }
+}
+
+void ACMGameMode::CheckMainMenuPresentationReady()
+{
+    if (!IsMainMenuMap() || bMainMenuPresentationReady)
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    ULevelStreaming* PresentationLevel = UGameplayStatics::GetStreamingLevel(
+        this, MainMenuPresentationLevelName);
+    bool bAllRequestedLevelsReady = World
+        && PresentationLevel
+        && PresentationLevel->IsLevelLoaded()
+        && PresentationLevel->IsLevelVisible()
+        && !World->IsVisibilityRequestPending();
+    if (bAllRequestedLevelsReady)
+    {
+        for (const ULevelStreaming* StreamingLevel : World->GetStreamingLevels())
+        {
+            if (!StreamingLevel)
+            {
+                continue;
+            }
+
+            if (StreamingLevel->IsStreamingStatePending()
+                || (StreamingLevel->ShouldBeLoaded()
+                    && !StreamingLevel->IsLevelLoaded())
+                || (StreamingLevel->ShouldBeVisible()
+                    && !StreamingLevel->IsLevelVisible()))
+            {
+                bAllRequestedLevelsReady = false;
+                break;
+            }
+        }
+    }
+
+    if (bAllRequestedLevelsReady)
+    {
+        bMainMenuPresentationReady = true;
+        TryFinishMainMenuLoading();
+        return;
+    }
+
+    MainMenuPresentationPollTimer = GetWorldTimerManager().SetTimerForNextTick(
+        this, &ThisClass::CheckMainMenuPresentationReady);
+}
+
+void ACMGameMode::TryFinishMainMenuLoading()
+{
+    if (bMainMenuFinishScheduled
+        || !bMainMenuAssetsResolved
+        || !bMainMenuPresentationReady)
+    {
+        return;
+    }
+
+    bMainMenuFinishScheduled = true;
+    MainMenuPresentationFinishTimer = GetWorldTimerManager().SetTimerForNextTick(
+        this, &ThisClass::FinishMainMenuLoading);
+}
+
+void ACMGameMode::FinishMainMenuLoading()
+{
+    GetWorldTimerManager().ClearTimer(MainMenuPresentationPollTimer);
+    GetWorldTimerManager().ClearTimer(MainMenuPresentationTimeoutTimer);
+
+    if (ACMGameState* CMGameState = GetGameState<ACMGameState>())
+    {
+        CMGameState->SetWorldPresentationState(
+            bMainMenuAssetsLoaded
+                ? ECMWorldPresentationState::Ready
+                : ECMWorldPresentationState::Failed);
+    }
+
+    UE_LOG(LogChimeraMultiplayer, Display,
+        TEXT("Main menu presentation finished. AssetsLoaded=%s Level=%s"),
+        bMainMenuAssetsLoaded ? TEXT("true") : TEXT("false"),
+        *MainMenuPresentationLevelName.ToString());
+}
+
+void ACMGameMode::HandleMainMenuLoadingTimeout()
+{
+    GetWorldTimerManager().ClearTimer(MainMenuPresentationPollTimer);
+    GetWorldTimerManager().ClearTimer(MainMenuPresentationFinishTimer);
+    bMainMenuFinishScheduled = true;
+
+    if (ACMGameState* CMGameState = GetGameState<ACMGameState>())
+    {
+        CMGameState->SetWorldPresentationState(
+            ECMWorldPresentationState::Failed);
+    }
+
+    UE_LOG(LogChimeraMultiplayer, Error,
+        TEXT("Main menu presentation timed out. AssetsResolved=%s AssetsLoaded=%s LevelReady=%s Level=%s"),
+        bMainMenuAssetsResolved ? TEXT("true") : TEXT("false"),
+        bMainMenuAssetsLoaded ? TEXT("true") : TEXT("false"),
+        bMainMenuPresentationReady ? TEXT("true") : TEXT("false"),
+        *MainMenuPresentationLevelName.ToString());
 }
 
 bool ACMGameMode::IsSoloTestMode() const

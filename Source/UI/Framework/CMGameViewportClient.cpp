@@ -2,9 +2,11 @@
 
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
-#include "GameMode/Play/CMPlayGameState.h"
 #include "InputCoreTypes.h"
 #include "InputKeyEventArgs.h"
+#include "Kismet/GameplayStatics.h"
+#include "ListenServerNetworkSettings.h"
+#include "Misc/PackageName.h"
 #include "UI/NKMUIActivatableWidget.h"
 #include "UI/NKMUITagList.h"
 
@@ -28,8 +30,20 @@ bool UCMGameViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
     }
 
     UWorld* CurrentWorld = GetWorld();
-    if (!CurrentWorld
-        || !CurrentWorld->GetGameState<ACMPlayGameState>())
+    if (!CurrentWorld)
+    {
+        return false;
+    }
+
+    const UListenServerNetworkSettings* NetworkSettings =
+        GetDefault<UListenServerNetworkSettings>();
+    const FString MainMenuPackage = NetworkSettings
+        ? NetworkSettings->MainMenuMap.GetLongPackageName()
+        : FString();
+    const FString MainMenuName = FPackageName::GetShortName(MainMenuPackage);
+    if (!MainMenuName.IsEmpty()
+        && UGameplayStatics::GetCurrentLevelName(CurrentWorld, true)
+            == MainMenuName)
     {
         return false;
     }

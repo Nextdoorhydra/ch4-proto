@@ -4,6 +4,7 @@
 #include "Common/CMAINavigationRules.h"
 #include "NavigationSystem.h"
 #include "NavigationData.h"
+#include "NavigationPath.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "Sacrifice/CMSacrificeActionAbilities.h"
 #include "Sacrifice/CMSacrificeCharacter.h"
@@ -11,6 +12,79 @@
 #include "Sacrifice/CMSacrificeStateComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "TimerManager.h"
+
+namespace CMSacrificePursuitNavigation
+{
+    constexpr float BoundaryClearanceCm = 50.0f;
+    constexpr float ProjectionToleranceCm = 25.0f;
+    constexpr float PathSampleSpacingCm = 50.0f;
+    const FName RipperAgentName(TEXT("RipperAI"));
+    const FName CentipedeAgentName(TEXT("CentipedeAI"));
+
+    const ANavigationData* FindNavigationData(const UNavigationSystemV1& NavigationSystem, const FName AgentName)
+    {
+        for (const FNavDataConfig& AgentConfig : NavigationSystem.GetSupportedAgents())
+        {
+            if (AgentConfig.Name == AgentName)
+                return NavigationSystem.GetNavDataForProps(AgentConfig);
+        }
+        return nullptr;
+    }
+
+    bool HasBoundaryClearance(const ANavigationData& NavigationData, const FVector Location, const UObject* Querier)
+    {
+        constexpr int32 DirectionCount = 16;
+        for (int32 DirectionIndex = 0; DirectionIndex < DirectionCount; ++DirectionIndex)
+        {
+            const float Angle = UE_TWO_PI * static_cast<float>(DirectionIndex) / static_cast<float>(DirectionCount);
+            const FVector Direction(FMath::Cos(Angle), FMath::Sin(Angle), 0.0f);
+            FVector HitLocation;
+            if (!NavigationData.Raycast(Location, Location + Direction * BoundaryClearanceCm, HitLocation, NavigationData.GetDefaultQueryFilter(), Querier))
+                continue;
+            if (FVector::Dist2D(Location, HitLocation) + 1.0f < BoundaryClearanceCm)
+                return false;
+        }
+        return true;
+    }
+
+    bool IsPathSupportedByAgent(UNavigationSystemV1& NavigationSystem, const TArray<FNavPathPoint>& SourcePathPoints, const FName AgentName, const UObject* Querier)
+    {
+        const ANavigationData* NavigationData = FindNavigationData(NavigationSystem, AgentName);
+        if (!NavigationData || SourcePathPoints.Num() < 2)
+            return false;
+
+        FNavLocation ProjectedStart;
+        const FVector StartProjectionExtent(200.0f, 200.0f, 300.0f);
+        if (!NavigationSystem.ProjectPointToNavigation(SourcePathPoints[0].Location, ProjectedStart, StartProjectionExtent, NavigationData))
+            return false;
+
+        FVector PreviousProjectedLocation = ProjectedStart.Location;
+        const FVector SampleProjectionExtent(ProjectionToleranceCm, ProjectionToleranceCm, 300.0f);
+        for (int32 PathPointIndex = 1; PathPointIndex < SourcePathPoints.Num(); ++PathPointIndex)
+        {
+            const FVector SegmentStart = SourcePathPoints[PathPointIndex - 1].Location;
+            const FVector SegmentEnd = SourcePathPoints[PathPointIndex].Location;
+            const int32 SampleCount = FMath::Max(FMath::CeilToInt(FVector::Dist2D(SegmentStart, SegmentEnd) / PathSampleSpacingCm), 1);
+            for (int32 SampleIndex = 1; SampleIndex <= SampleCount; ++SampleIndex)
+            {
+                const FVector SampleLocation = FMath::Lerp(SegmentStart, SegmentEnd, static_cast<float>(SampleIndex) / static_cast<float>(SampleCount));
+                FNavLocation ProjectedSample;
+                if (!NavigationSystem.ProjectPointToNavigation(SampleLocation, ProjectedSample, SampleProjectionExtent, NavigationData))
+                    return false;
+                if (!FCMAINavigationRules::IsWithinProjectionTolerance(SampleLocation, ProjectedSample.Location, ProjectionToleranceCm))
+                    return false;
+                if (!HasBoundaryClearance(*NavigationData, ProjectedSample.Location, Querier))
+                    return false;
+
+                FVector HitLocation;
+                if (NavigationData->Raycast(PreviousProjectedLocation, ProjectedSample.Location, HitLocation, NavigationData->GetDefaultQueryFilter(), Querier))
+                    return false;
+                PreviousProjectedLocation = ProjectedSample.Location;
+            }
+        }
+        return true;
+    }
+} // namespace CMSacrificePursuitNavigation
 
 ACMSacrificeAIController::ACMSacrificeAIController()
 {
@@ -815,6 +889,33 @@ bool ACMSacrificeAIController::MoveToProjectedLocation(const FVector& Goal, cons
     {
         return false;
     }
+
+    if (Phase == ECMSacrificeBehaviorPhase::BackCrawl || Phase == ECMSacrificeBehaviorPhase::Escape)
+    {
+        TArray<FVector> ThreatLocations;
+        ThreatTracker.GatherRememberedLocations(ThreatLocations);
+        if (ThreatLocations.IsEmpty() && Sacrifice->GetCurrentThreat())
+            ThreatLocations.Add(Sacrifice->GetCurrentThreat()->GetActorLocation());
+        const FVector ProjectedMove = Projected.Location - Sacrifice->GetActorLocation();
+        if (!ThreatLocations.IsEmpty() && !FCMSacrificeRules::IsDirectionAwayFromAllThreats(Sacrifice->GetActorLocation(), ThreatLocations, ProjectedMove, ProjectedMove.Size2D()))
+            return false;
+    }
+
+    FNavLocation ProjectedStart;
+    if (!Nav->ProjectPointToNavigation(Sacrifice->GetActorLocation(), ProjectedStart, FVector(200.0f, 200.0f, 300.0f), NavigationData))
+        return false;
+    FPathFindingQuery Query(this, *NavigationData, ProjectedStart.Location, Projected.Location);
+    Query.SetAllowPartialPaths(false);
+    Query.SetNavAgentProperties(Sacrifice->GetNavAgentPropertiesRef());
+    const FPathFindingResult PathResult = Nav->FindPathSync(Sacrifice->GetNavAgentPropertiesRef(), Query);
+    if (!PathResult.IsSuccessful() || !PathResult.Path.IsValid() || PathResult.Path->IsPartial())
+        return false;
+
+    const TArray<FNavPathPoint>& PathPoints = PathResult.Path->GetPathPoints();
+    if (!CMSacrificePursuitNavigation::IsPathSupportedByAgent(*Nav, PathPoints, CMSacrificePursuitNavigation::RipperAgentName, this)
+        || !CMSacrificePursuitNavigation::IsPathSupportedByAgent(*Nav, PathPoints, CMSacrificePursuitNavigation::CentipedeAgentName, this))
+        return false;
+
     // 즉시 완료되는 Move 요청이 현재 상태 전환 도중 OnMoveCompleted를 재진입하지 않게 한다.
     TGuardValue<bool> IgnoreSynchronousCompletion(bIgnoreMoveCompletion, true);
 

@@ -68,8 +68,10 @@ private:
     bool UpdateStuckRecovery(double CurrentTime);
     bool UpdateStuckDetection(double CurrentTime);
     void BeginStuckRecovery(double CurrentTime);
+    void BeginRipperEscape(double CurrentTime, bool bReverseFirst);
     void ApplyStuckRecoveryReverseVelocity() const;
     void ResetStuckTracking();
+    bool HasRecentRipperBlockingHit(double CurrentTime) const;
     void BeginChasing(AActor* NewTarget);
     void BeginReturningHome();
     void BeginWaiting(float Seconds);
@@ -144,17 +146,21 @@ private:
     FVector DashDirection = FVector::ForwardVector;
     FVector StuckProgressLocation = FVector::ZeroVector;
     FVector StuckReverseDirection = FVector::ZeroVector;
+    FVector StuckEscapeStartLocation = FVector::ZeroVector;
     double NextActionTime = 0.0;
     double NextRipperAttackTime = 0.0;
     double DashEndTime = 0.0;
     double NextTetraSightTurnTime = 0.0;
     double StuckProgressStartTime = 0.0;
     double StuckReverseEndTime = 0.0;
+    double RipperMoveFailureStartTime = 0.0;
+    double LastRipperBlockingHitTime = 0.0;
     bool bBehaviorEnabled = false;
     bool bMoveIssued = false;
     bool bReturningHome = false;
     bool bReversingFromStuck = false;
     bool bCompletingStuckRecoveryMove = false;
+    bool bEscapingFromStuckTarget = false;
     UPROPERTY(Replicated)
     bool bHasWanderGoal = false;
 

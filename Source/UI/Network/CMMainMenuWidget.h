@@ -67,6 +67,8 @@ protected:
     void HandleJoinCancelClicked();
     
 private:
+    bool CanStartSessionOperation() const;
+    void RecoverStaleSessionIfNeeded();
     void UpdateControls();
     void SetResultText(const FText& Message);
 

@@ -90,6 +90,7 @@ public:
     void SetMaximumPathSegmentLength(float MaximumSegmentLength);
     void SetIntermediatePathPointJitterRadius(float JitterRadius);
     void SetIntermediatePathPointWallClearance(float WallClearance);
+    void SetIntermediatePathPointNavigationClearance(float NavigationClearance);
     void SetMinimumPathPointSpacing(float MinimumSpacing);
     void SetRebuildPathWhenIntermediatePointPassed(bool bEnabled);
     void SetLearningRequestedMoveDirection(ECMAggressiveMoveDirection Direction);
@@ -115,6 +116,10 @@ protected:
     /** 중간 경유지를 정적 벽 표면에서 밀어낼 목표 거리다. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement", meta = (ClampMin = "0.0"))
     float IntermediatePathPointWallClearance = 0.0f;
+
+    /** 중간 경유점을 전용 NavMesh 경계에서 안쪽으로 밀어낼 추가 거리다. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement", meta = (ClampMin = "0.0"))
+    float IntermediatePathPointNavigationClearance = 0.0f;
 
     /** NavMesh 직선 통과가 가능한 가까운 경유지를 병합할 최소 간격이다. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement", meta = (ClampMin = "0.0"))
@@ -144,7 +149,10 @@ protected:
 
 private:
     bool BuildNavigationPath(FVector WorldGoal);
-    void AdjustIntermediatePathPointsAwayFromWalls(UWorld& World, UNavigationSystemV1& NavigationSystem, const ANavigationData& NavigationData);
+    bool AdjustPathPointsAwayFromBoundaries(UWorld& World, UNavigationSystemV1& NavigationSystem, const ANavigationData& NavigationData);
+    bool HasPathClearance(UWorld& World, const ANavigationData& NavigationData) const;
+    bool CalculateStaticObstacleRepulsion(UWorld& World, FVector Location, FVector& OutRepulsion) const;
+    bool CalculateNavigationBoundaryRepulsion(const ANavigationData& NavigationData, FVector Location, FVector& OutRepulsion) const;
     bool FindNavigationAgent(const UNavigationSystemV1& NavigationSystem, FNavDataConfig& OutAgentConfig, const ANavigationData*& OutNavigationData) const;
     bool UpdateMovementDirection();
     void UpdatePathMove();

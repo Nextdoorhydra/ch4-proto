@@ -3,6 +3,7 @@
 #include "Loading/CMLoadingScreenWidget.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
+#include "GameMode/CMGameState.h"
 #include "GameMode/Play/CMPlayGameState.h"
 
 #define LOCTEXT_NAMESPACE "CMLoadingScreenSubsystem"
@@ -28,9 +29,14 @@ void UCMLoadingScreenSubsystem::Tick(float DeltaTime)
 
     const ACMPlayGameState* PlayState =
         World->GetGameState<ACMPlayGameState>();
-    if (!PlayState
-        || PlayState->GetPlayPhase() != ECMPlayPhase::Loading
-        || !PlayState->GetStageLoadRequest().IsValid())
+    const bool bStageLoading = PlayState
+        && PlayState->GetPlayPhase() == ECMPlayPhase::Loading
+        && PlayState->GetStageLoadRequest().IsValid();
+    const ACMGameState* GameState = World->GetGameState<ACMGameState>();
+    const bool bWorldPresentationLoading = GameState
+        && GameState->GetWorldPresentationState()
+            == ECMWorldPresentationState::Loading;
+    if (!bStageLoading && !bWorldPresentationLoading)
     {
         RemoveLoadingScreen();
         return;

@@ -1099,7 +1099,7 @@ FVector UCMVisionManagerSubsystem::ClipVisionRayToOccluder(
     );
     FCollisionQueryParams QueryParams(
         SCENE_QUERY_STAT(CMVisionOcclusion),
-        true
+        false
     );
     const AActor* SourceOwner = VisionSource.GetOwner();
     QueryParams.AddIgnoredActor(SourceOwner);

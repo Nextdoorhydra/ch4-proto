@@ -28,6 +28,7 @@ void ACMGameState::GetLifetimeReplicatedProps(
 
     DOREPLIFETIME(ACMGameState, SharedChimera);
     DOREPLIFETIME(ACMGameState, bSoloTestMode);
+    DOREPLIFETIME(ACMGameState, WorldPresentationState);
 }
 
 void ACMGameState::SetSoloTestMode(bool bEnabled)
@@ -38,6 +39,18 @@ void ACMGameState::SetSoloTestMode(bool bEnabled)
     }
 
     bSoloTestMode = bEnabled;
+    ForceNetUpdate();
+}
+
+void ACMGameState::SetWorldPresentationState(
+    ECMWorldPresentationState NewState)
+{
+    if (!HasAuthority() || WorldPresentationState == NewState)
+    {
+        return;
+    }
+
+    WorldPresentationState = NewState;
     ForceNetUpdate();
 }
 
