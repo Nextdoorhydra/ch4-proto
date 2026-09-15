@@ -142,6 +142,8 @@ protected:
     ) const override;
 
 private:
+    void ApplyReplicatedPartAttachment(AActor* PartActor);
+
     UFUNCTION()
     void OnRep_AttachedPart(AActor* PreviousPart);
 
@@ -172,4 +174,6 @@ private:
     TObjectPtr<USceneComponent> HeadRigControlAnchor;
 
     FGameplayAbilitySpecHandle GrantedAbilityHandle;
+
+    friend class ACMPartActorBase;
 };

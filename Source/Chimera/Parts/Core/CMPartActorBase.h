@@ -204,6 +204,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void OnRep_Owner() override;
 
     /** Lets Arm and Leg consume their type-specific columns after common data. */
     virtual void ApplyPartData(const FCMPartLegArmTableRow& PartRow);
@@ -294,6 +295,7 @@ private:
     void RefreshPickupHighlight();
     void UpdateReplicatedLoosePartLocation();
     void ApplyReplicatedLoosePartLocation();
+    void ReconcileReplicatedAttachment();
 
     UFUNCTION()
     void OnRep_MaxHealth();

@@ -30,6 +30,9 @@
 
 namespace
 {
+	constexpr int32 MaxHostListenRetryCount = 3;
+	constexpr float HostListenRetryDelaySeconds = 1.0f;
+
 	enum class EListenServerAsyncPurpose : uint8
 	{
 		None,
@@ -169,6 +172,9 @@ struct FListenServerSessionSubsystemImpl
 	bool bQuickMatchActive = false;
 	int32 QuickSearchAttempt = 0;
 	int32 QuickJoinIndex = INDEX_NONE;
+	bool bHostListenRetryPending = false;
+	int32 HostListenRetryCount = 0;
+	float HostListenRetryDelayRemaining = 0.0f;
 	EListenServerConnectionState PendingJoinConnectionState = EListenServerConnectionState::Lobby;
 
 	TUniquePtr<FOnlineSessionSearchResult> PendingInvite;
@@ -253,6 +259,7 @@ struct FListenServerSessionSubsystemImpl
 	void ClearParticipants();
 	bool TickConnectionDiagnostics(float DeltaTime);
 	void RefreshConnectionDiagnostics();
+	void RetryPendingHostListen(float DeltaTime);
 
 	bool ValidateOnlineAccess(EListenServerOperation RequestedOperation);
 	bool Reject(EListenServerOperation RequestedOperation, EListenServerError Error, const TCHAR* UserMessage, const FString& InternalError);
@@ -304,6 +311,7 @@ struct FListenServerSessionSubsystemImpl
 	void StartHostGameSession(uint64 OperationId);
 	void HandleStartComplete(uint64 CallbackOperationId, FName SessionName, bool bWasSuccessful);
 	bool BeginTravel(uint64 OperationId, const FSoftObjectPath& Map, EListenServerRole TravelRole, EListenServerConnectionState TargetState, bool bListenOpenLevel, bool bReturnToMenu);
+	bool StartHostListenTravel();
 	bool BeginClientTravel(uint64 OperationId, const FString& ConnectString, EListenServerConnectionState TargetState);
 	void HandlePreLoadMap(const FString& MapName);
 	void HandlePostLoadMap(UWorld* LoadedWorld);
@@ -315,7 +323,7 @@ struct FListenServerSessionSubsystemImpl
 	void HandleInviteAccepted(bool bWasSuccessful, int32 ControllerId, FUniqueNetIdPtr UserId, const FOnlineSessionSearchResult& InviteResult);
 	void QueueOrJoinInvite(const FOnlineSessionSearchResult& InviteResult);
 
-	void HandleNetworkFailure(UWorld* FailedWorld, ENetworkFailure::Type FailureType, const FString& ErrorString);
+	void HandleNetworkFailure(UWorld* FailedWorld, UNetDriver* FailedNetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);
 	void HandleTravelFailure(UWorld* FailedWorld, ETravelFailure::Type FailureType, const FString& ErrorString);
 	void HandleSessionFailure(const FUniqueNetId& PlayerId, ESessionFailure::Type FailureType);
 	void BeginRecovery(EListenServerError Error, const TCHAR* UserMessage, const FString& InternalMessage);
@@ -358,11 +366,11 @@ void FListenServerSessionSubsystemImpl::Initialize()
 	TWeakObjectPtr<UListenServerSessionSubsystem> WeakOwner = Owner;
 	if (GEngine != nullptr)
 	{
-		NetworkFailureHandle = GEngine->OnNetworkFailure().AddLambda([WeakOwner](UWorld* World, UNetDriver*, ENetworkFailure::Type FailureType, const FString& ErrorString)
+		NetworkFailureHandle = GEngine->OnNetworkFailure().AddLambda([WeakOwner](UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
 		{
 			if (UListenServerSessionSubsystem* Subsystem = WeakOwner.Get())
 			{
-				Subsystem->Impl->HandleNetworkFailure(World, FailureType, ErrorString);
+				Subsystem->Impl->HandleNetworkFailure(World, NetDriver, FailureType, ErrorString);
 			}
 		});
 		TravelFailureHandle = GEngine->OnTravelFailure().AddLambda([WeakOwner](UWorld* World, ETravelFailure::Type FailureType, const FString& ErrorString)
@@ -552,10 +560,45 @@ void FListenServerSessionSubsystemImpl::ClearParticipants()
 	}
 }
 
-bool FListenServerSessionSubsystemImpl::TickConnectionDiagnostics(float)
+bool FListenServerSessionSubsystemImpl::TickConnectionDiagnostics(float DeltaTime)
 {
+	if (PendingTravel.IsValid())
+	{
+		HandlePostLoadMap(GetWorld());
+	}
+	RetryPendingHostListen(DeltaTime);
 	RefreshConnectionDiagnostics();
 	return true;
+}
+
+void FListenServerSessionSubsystemImpl::RetryPendingHostListen(float DeltaTime)
+{
+	if (!bHostListenRetryPending || !PendingTravel.IsValid())
+	{
+		return;
+	}
+	HostListenRetryDelayRemaining -= DeltaTime;
+	if (HostListenRetryDelayRemaining > 0.0f)
+	{
+		return;
+	}
+
+	bHostListenRetryPending = false;
+	UWorld* World = GetWorld();
+	const FString CurrentPackage = World != nullptr && World->GetPackage() != nullptr ? World->GetPackage()->GetName() : FString();
+	const bool bExpectedSourceWorld = World != nullptr && PackageNamesMatch(CurrentPackage, PendingTravel->PreviousPackage);
+	if (!bExpectedSourceWorld || World->GetNetMode() != NM_Standalone)
+	{
+		BeginRecovery(EListenServerError::TravelFailed, TEXT("The lobby network listener could not start."), TEXT("Host listen retry found an unexpected world state"));
+		return;
+	}
+
+	++HostListenRetryCount;
+	UE_LOG(LogListenServerNetwork, Warning, TEXT("Retrying host listen startup. Attempt=%d/%d"), HostListenRetryCount, MaxHostListenRetryCount);
+	if (!StartHostListenTravel() && !bHostListenRetryPending)
+	{
+		BeginRecovery(EListenServerError::TravelFailed, TEXT("The lobby network listener could not start."), TEXT("Host listen retry failed without a retryable network error"));
+	}
 }
 
 void FListenServerSessionSubsystemImpl::RefreshConnectionDiagnostics()
@@ -2119,13 +2162,15 @@ bool FListenServerSessionSubsystemImpl::BeginTravel(uint64 OperationId, const FS
 	PendingTravel->Role = TravelRole;
 	PendingTravel->ConnectionState = TargetState;
 	PendingTravel->bReturnToMenu = bReturnToMenu;
+	bHostListenRetryPending = false;
+	HostListenRetryCount = 0;
+	HostListenRetryDelayRemaining = 0.0f;
 	StartTimeout(GetSettings()->TravelTimeoutSeconds, EListenServerOperation::Traveling);
 	UE_LOG(LogListenServerNetwork, Log, TEXT("Travel started. Id=%llu Target=%s Role=%d"), OperationId, *MapPackage, static_cast<int32>(TravelRole));
 
 	if (TravelRole == EListenServerRole::Host && bListenOpenLevel)
 	{
-		UGameplayStatics::OpenLevel(World, FName(*MapPackage), true, TEXT("listen"));
-		return true;
+		return StartHostListenTravel() || bHostListenRetryPending;
 	}
 	if (TravelRole == EListenServerRole::Host)
 	{
@@ -2134,6 +2179,32 @@ bool FListenServerSessionSubsystemImpl::BeginTravel(uint64 OperationId, const FS
 	}
 	UGameplayStatics::OpenLevel(World, FName(*MapPackage), true);
 	return true;
+}
+
+bool FListenServerSessionSubsystemImpl::StartHostListenTravel()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || !PendingTravel.IsValid())
+	{
+		return false;
+	}
+	if (World->GetNetMode() != NM_ListenServer)
+	{
+		FURL ListenURL = World->URL;
+		if (!World->Listen(ListenURL))
+		{
+			return false;
+		}
+	}
+	if (World->ServerTravel(PendingTravel->ExpectedPackage + TEXT("?SeamlessTravel"), true))
+	{
+		return true;
+	}
+	if (GEngine != nullptr && World->GetNetDriver() != nullptr)
+	{
+		GEngine->DestroyNamedNetDriver(World, NAME_GameNetDriver);
+	}
+	return false;
 }
 
 bool FListenServerSessionSubsystemImpl::BeginClientTravel(uint64 OperationId, const FString& ConnectString, EListenServerConnectionState TargetState)
@@ -2209,6 +2280,7 @@ void FListenServerSessionSubsystemImpl::HandlePostLoadMap(UWorld* LoadedWorld)
 	const EListenServerConnectionState CompletedConnection = PendingTravel->ConnectionState;
 	const bool bReturnedToMenu = PendingTravel->bReturnToMenu;
 	PendingTravel.Reset();
+	bHostListenRetryPending = false;
 	ClearTimeout();
 	SetRoleAndConnection(CompletedRole, CompletedConnection, TEXT("map travel completed"));
 	UE_LOG(LogListenServerNetwork, Log, TEXT("Travel completed. Id=%llu Map=%s NetMode=%d"), TravelOperationId, *LoadedPackage, static_cast<int32>(NetMode));
@@ -2408,10 +2480,27 @@ void FListenServerSessionSubsystemImpl::ProcessPendingInvite()
 	QueueOrJoinInvite(InviteCopy);
 }
 
-void FListenServerSessionSubsystemImpl::HandleNetworkFailure(UWorld* FailedWorld, ENetworkFailure::Type FailureType, const FString& ErrorString)
+void FListenServerSessionSubsystemImpl::HandleNetworkFailure(UWorld* FailedWorld, UNetDriver* FailedNetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
 {
 	if (FailedWorld == nullptr || FailedWorld->GetGameInstance() != GetGameInstance())
 	{
+		return;
+	}
+	const bool bPendingHostTravel = Operation == EListenServerOperation::Traveling && PendingTravel.IsValid();
+	const bool bPendingHostRole = bPendingHostTravel && PendingTravel->Role == EListenServerRole::Host;
+	const bool bPendingHostLobbyTravel = bPendingHostRole && PendingTravel->ConnectionState == EListenServerConnectionState::Lobby;
+	const bool bCanRetryHostListen = bPendingHostLobbyTravel && ListenServerNetworkPolicy::IsRetryableHostListenFailure(FailureType);
+	if (bCanRetryHostListen && HostListenRetryCount < MaxHostListenRetryCount)
+	{
+		bHostListenRetryPending = true;
+		HostListenRetryDelayRemaining = HostListenRetryDelaySeconds;
+		UE_LOG(LogListenServerNetwork, Warning, TEXT("Host listen startup failed; retry scheduled. Type=%s Attempt=%d/%d"), ENetworkFailure::ToString(FailureType), HostListenRetryCount + 1, MaxHostListenRetryCount);
+		return;
+	}
+	const ENetMode FailedNetMode = FailedNetDriver != nullptr ? FailedNetDriver->GetNetMode() : NM_Standalone;
+	if (!ListenServerNetworkPolicy::ShouldRecoverFromNetworkFailure(FailureType, FailedNetMode))
+	{
+		UE_LOG(LogListenServerNetwork, Log, TEXT("Ignored host-side connection failure. Type=%s"), ENetworkFailure::ToString(FailureType));
 		return;
 	}
 	const EListenServerError Error = Role == EListenServerRole::Client ? EListenServerError::HostDisconnected : EListenServerError::ConnectionLost;
@@ -2446,6 +2535,7 @@ void FListenServerSessionSubsystemImpl::BeginRecovery(EListenServerError Error, 
 	ClearTimeout();
 	ClearOperationDelegates();
 	PendingTravel.Reset();
+	bHostListenRetryPending = false;
 	ActiveOperationId = ListenServerNetworkPolicy::AdvanceOperationId(OperationCounter);
 	bOperationCancelled = false;
 	SetOperation(EListenServerOperation::Recovering, TEXT("recovering from network/session failure"));

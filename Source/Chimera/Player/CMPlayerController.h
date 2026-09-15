@@ -85,6 +85,9 @@ public:
 
     void RequestCheatGoToCheckpoint(int32 OneBasedCheckpointNumber);
 
+    void RequestCheatSaveLoadout(int32 OneBasedSlotNumber);
+    void RequestCheatLoadLoadout(int32 OneBasedSlotNumber);
+
     /** Console-command entry point using the zero-based body-segment index. */
     void RequestCheatKillSegment(int32 SegmentIndex);
 
@@ -241,6 +244,12 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCheatGoToCheckpoint(int32 OneBasedCheckpointNumber);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatSaveLoadout(int32 OneBasedSlotNumber);
+
+    UFUNCTION(Server, Reliable)
+    void ServerCheatLoadLoadout(int32 OneBasedSlotNumber);
 
     UFUNCTION(Server, Reliable)
     void ServerCheatKillSegment(int32 SegmentIndex);

@@ -48,9 +48,13 @@ private:
     void ScanForThreats();
     void RefreshFleeMovement();
     void UpdateForwardMovementFacing();
+    bool RecoverToNavigation();
+    void UpdateMovementProgress(float DeltaSeconds);
+    void RecoverStalledMovement();
     void AcquireThreat(AActor* Threat, bool bFromHit);
     void StartThreatReaction();
     void StartBackCrawl();
+    void RetryBackCrawlMovement();
     void StartEscapeLeg();
     void StartInjuredCrawl();
     void FinishHitReaction();
@@ -79,6 +83,7 @@ private:
     bool bResumeInjuredCrawlAfterHit = false;
     bool bResumeEscapeAfterGettingUp = false;
     float ThreatScanAccumulator = 0.0f;
+    float StationaryMovementSeconds = 0.0f;
     FTimerHandle AmbientActionTimer;
     FTimerHandle BackFallTimer;
     FTimerHandle VigilanceTimer;
@@ -86,7 +91,13 @@ private:
     FTimerHandle HitReactionTimer;
     FTimerHandle GettingUpTimer;
     FVector LastFleeDirection = FVector::ZeroVector;
+    FVector LastValidNavigationLocation = FVector::ZeroVector;
     FCMSacrificeThreatTracker ThreatTracker;
+    bool bHasLastValidNavigationLocation = false;
 
     static constexpr float FleeDirectionRefreshDegrees = 1.0f;
+    static constexpr float MinimumMovingSpeedCmPerSecond = 5.0f;
+    static constexpr float MinimumMovementGoalDistanceCm = 100.0f;
+    static constexpr float MovementStallTimeoutSeconds = 0.75f;
+    static constexpr float NavigationContainmentToleranceCm = 25.0f;
 };

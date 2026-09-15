@@ -28,6 +28,8 @@
 #include "Ping/CMPingTypes.h"
 #include "Engine/World.h"
 #include "Engine/EngineTypes.h"
+#include "Engine/GameInstance.h"
+#include "Stage/Device/CMPartLoadoutStorageSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraPlayerController, Log, All);
 
@@ -283,6 +285,76 @@ void ACMPlayerController::ServerCheatGoToCheckpoint_Implementation(int32 OneBase
             TEXT("[Cheat Failed] CM.GoToCheckpoint %d: requires Playing, a valid one-based Rooms array number, one room controller and a unique checkpoint."),
             OneBasedCheckpointNumber);
     }
+#endif
+}
+
+void ACMPlayerController::RequestCheatSaveLoadout(int32 OneBasedSlotNumber)
+{
+#if !UE_BUILD_SHIPPING
+    if (IsLocalController())
+    {
+        ServerCheatSaveLoadout(OneBasedSlotNumber);
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatSaveLoadout_Implementation(
+    int32 OneBasedSlotNumber)
+{
+#if !UE_BUILD_SHIPPING
+    UGameInstance* GameInstance = GetGameInstance();
+    UCMPartLoadoutStorageSubsystem* Storage = GameInstance
+        ? GameInstance->GetSubsystem<UCMPartLoadoutStorageSubsystem>()
+        : nullptr;
+    ACMChimera* SharedChimera = GetSharedChimera();
+    const int32 SlotIndex = OneBasedSlotNumber - 1;
+    if (!Storage || !SharedChimera
+        || !Storage->SavePersistentLoadout(SharedChimera, SlotIndex))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.SavePreset %d could not save the current Parts."),
+            OneBasedSlotNumber);
+        return;
+    }
+
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] Saved current Parts to persistent loadout slot %d. Parts=%d"),
+        OneBasedSlotNumber, Storage->GetStoredPartCount(SlotIndex));
+#endif
+}
+
+void ACMPlayerController::RequestCheatLoadLoadout(int32 OneBasedSlotNumber)
+{
+#if !UE_BUILD_SHIPPING
+    if (IsLocalController())
+    {
+        ServerCheatLoadLoadout(OneBasedSlotNumber);
+    }
+#endif
+}
+
+void ACMPlayerController::ServerCheatLoadLoadout_Implementation(
+    int32 OneBasedSlotNumber)
+{
+#if !UE_BUILD_SHIPPING
+    UGameInstance* GameInstance = GetGameInstance();
+    UCMPartLoadoutStorageSubsystem* Storage = GameInstance
+        ? GameInstance->GetSubsystem<UCMPartLoadoutStorageSubsystem>()
+        : nullptr;
+    ACMChimera* SharedChimera = GetSharedChimera();
+    const int32 SlotIndex = OneBasedSlotNumber - 1;
+    if (!Storage || !SharedChimera
+        || !Storage->LoadPersistentLoadout(SharedChimera, SlotIndex))
+    {
+        UE_LOG(LogChimeraPlayerController, Warning,
+            TEXT("[Cheat Failed] CM.LoadPreset %d could not load a persistent Part preset."),
+            OneBasedSlotNumber);
+        return;
+    }
+
+    UE_LOG(LogChimeraPlayerController, Warning,
+        TEXT("[Cheat] Loaded persistent Part loadout slot %d. Parts=%d"),
+        OneBasedSlotNumber, Storage->GetStoredPartCount(SlotIndex));
 #endif
 }
 

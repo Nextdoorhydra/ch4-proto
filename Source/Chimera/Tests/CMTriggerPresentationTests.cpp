@@ -172,9 +172,11 @@ bool FCMTriggerPresentationTest::RunTest(const FString& Parameters)
     PuzzleController->PuzzleChannels[0].AcceptedSignal = ECMPuzzleAcceptedSignal::Any;
     PuzzleController->NormalizeAcceptedSignals();
     TestEqual(TEXT("Legacy Any migrates to ON/OFF"), PuzzleController->PuzzleChannels[0].AcceptedSignal, ECMPuzzleAcceptedSignal::StateChanged);
+#if WITH_METADATA
     const UEnum* SignalEnum = StaticEnum<ECMPuzzleAcceptedSignal>();
     TestTrue(TEXT("Legacy Pulse option is hidden"), SignalEnum->HasMetaData(TEXT("Hidden"), SignalEnum->GetIndexByValue(0)));
     TestTrue(TEXT("Legacy Any option is hidden"), SignalEnum->HasMetaData(TEXT("Hidden"), SignalEnum->GetIndexByValue(3)));
+#endif
 
     ACMBasicButtonBase* BasicButton = World->SpawnActor<ACMBasicButtonBase>();
     BasicButton->FindComponentByClass<UCMStageElementComponent>()->PlacementId = TEXT("Test.Basic.State");

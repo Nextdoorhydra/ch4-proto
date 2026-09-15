@@ -3,6 +3,7 @@
 #include "Aggressive/Tetra/CMTetraPawn.h"
 #include "Aggressive/Common/Behavior/CMAggressiveBehaviorComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "Aggressive/Tetra/Learning/CMTetraLearningInteractor.h"
 #include "Aggressive/Common/Learning/CMAggressiveLearningSnapshot.h"
@@ -314,10 +315,30 @@ void ACMTetraLearningCoordinator::RunTrainingStep()
     }
 
     PPOTrainer->RunTraining();
+    DrawTrainingGoals();
     TotalAgentDecisionCount += TrainingAgentIds.Num();
     RefreshPolicyUpdateState();
     SaveTrainingSnapshotsIfNeeded();
     SaveTrainingCheckpointIfNeeded();
+}
+
+// 학습 중 각 Tetra AI가 현재 향하는 목적지와 도착 허용 반경을 표시한다.
+void ACMTetraLearningCoordinator::DrawTrainingGoals() const
+{
+    UWorld* World = GetWorld();
+    if (!bDrawTrainingGoal || !World)
+        return;
+
+    const float Lifetime = FMath::Max(DecisionInterval * 1.5f, 0.05f);
+    for (const ACMTetraPawn* Agent : TrainingAgents)
+    {
+        const UCMAggressiveMovementCommandComponent* MovementCommand = Agent ? Agent->FindComponentByClass<UCMAggressiveMovementCommandComponent>() : nullptr;
+        if (!MovementCommand || !MovementCommand->HasMovementGoal())
+            continue;
+
+        const FCMAggressiveMovementGoal Goal = MovementCommand->GetMovementGoal();
+        DrawDebugSphere(World, Goal.WorldLocation, FMath::Max(Goal.AcceptanceRadius, 10.0f), 24, FColor::Green, false, Lifetime, 0, 4.0f);
+    }
 }
 
 // 설정된 시간이 되면 이어서 학습할 최신 네트워크를 저장한다.

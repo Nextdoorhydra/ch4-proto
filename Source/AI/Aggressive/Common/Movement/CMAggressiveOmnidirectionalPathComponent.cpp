@@ -1,6 +1,7 @@
 #include "Aggressive/Common/Movement/CMAggressiveOmnidirectionalPathComponent.h"
 
 #include "Aggressive/Common/Core/CMAggressiveMovementAgent.h"
+#include "Common/CMAINavigationRules.h"
 #include "Components/LineBatchComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/OverlapResult.h"
@@ -258,6 +259,50 @@ bool UCMAggressiveOmnidirectionalPathComponent::FindRandomReachableLocation(FVec
     return true;
 }
 
+// 전용 NavMesh 경계 안의 마지막 위치를 기억하고 이탈 시 가장 가까운 복귀 위치를 찾는다.
+bool UCMAggressiveOmnidirectionalPathComponent::FindNavigationRecoveryLocation(FVector& OutLocation)
+{
+    OutLocation = FVector::ZeroVector;
+    UWorld* World = GetWorld();
+    ICMAggressiveMovementAgent* Agent = CachedMovementAgent;
+    UNavigationSystemV1* NavigationSystem = World ? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World) : nullptr;
+    if (!World || !Agent || !NavigationSystem)
+    {
+        return false;
+    }
+
+    FNavDataConfig AgentConfig;
+    const ANavigationData* NavigationData = nullptr;
+    if (!FindNavigationAgent(*NavigationSystem, AgentConfig, NavigationData))
+    {
+        return false;
+    }
+
+    const FVector CurrentLocation = Agent->GetAggressiveNavigationReferenceLocation();
+    const float ContainmentTolerance = FMath::Max(NavigationContainmentTolerance, 0.0f);
+    FNavLocation ProjectedLocation;
+    const FVector ContainmentExtent(ContainmentTolerance, ContainmentTolerance, NavigationProjectionExtent.Z);
+    if (NavigationSystem->ProjectPointToNavigation(CurrentLocation, ProjectedLocation, ContainmentExtent, NavigationData)
+        && FCMAINavigationRules::IsWithinProjectionTolerance(CurrentLocation, ProjectedLocation.Location, ContainmentTolerance))
+    {
+        LastValidNavigationLocation = CurrentLocation;
+        bHasLastValidNavigationLocation = true;
+        return false;
+    }
+
+    if (bHasLastValidNavigationLocation)
+    {
+        OutLocation = FVector(LastValidNavigationLocation.X, LastValidNavigationLocation.Y, CurrentLocation.Z);
+        return true;
+    }
+    if (NavigationSystem->ProjectPointToNavigation(CurrentLocation, ProjectedLocation, NavigationRecoveryProjectionExtent, NavigationData))
+    {
+        OutLocation = FVector(ProjectedLocation.Location.X, ProjectedLocation.Location.Y, CurrentLocation.Z);
+        return true;
+    }
+    return false;
+}
+
 // 지정한 시작점과 목적지 사이의 완전한 전용 NavMesh 경로 길이를 계산한다.
 bool UCMAggressiveOmnidirectionalPathComponent::CalculateNavigationPathLength(FVector StartLocation, FVector WorldGoal, float& OutPathLength)
 {
@@ -292,6 +337,45 @@ bool UCMAggressiveOmnidirectionalPathComponent::CalculateNavigationPathLength(FV
         OutPathLength += FVector::Dist2D(PathPoints[PointIndex - 1].Location, PathPoints[PointIndex].Location);
 
     return true;
+}
+
+// NavMesh 밖 목표는 허용 반경 안에서 접근할 수 있는 경우에만 추적 대상으로 인정한다.
+bool UCMAggressiveOmnidirectionalPathComponent::IsNavigationGoalReachable(const FVector WorldGoal, const float GoalTolerance) const
+{
+    AActor* Owner = GetOwner();
+    const ICMAggressiveMovementAgent* Agent = Cast<ICMAggressiveMovementAgent>(Owner);
+    UWorld* World = GetWorld();
+    UNavigationSystemV1* NavigationSystem = World ? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World) : nullptr;
+    if (!Owner || !Agent || !NavigationSystem)
+    {
+        return false;
+    }
+
+    FNavDataConfig AgentConfig;
+    const ANavigationData* NavigationData = nullptr;
+    if (!FindNavigationAgent(*NavigationSystem, AgentConfig, NavigationData))
+    {
+        return false;
+    }
+
+    FNavLocation ProjectedStart;
+    FNavLocation ProjectedGoal;
+    if (!NavigationSystem->ProjectPointToNavigation(Agent->GetAggressiveNavigationReferenceLocation(), ProjectedStart, NavigationProjectionExtent, NavigationData)
+        || !NavigationSystem->ProjectPointToNavigation(WorldGoal, ProjectedGoal, NavigationProjectionExtent, NavigationData))
+    {
+        return false;
+    }
+    const float ProjectionTolerance = FMath::Max(GoalTolerance, NavigationContainmentTolerance);
+    if (!FCMAINavigationRules::IsWithinProjectionTolerance(WorldGoal, ProjectedGoal.Location, ProjectionTolerance))
+    {
+        return false;
+    }
+
+    FPathFindingQuery Query(Owner, *NavigationData, ProjectedStart.Location, ProjectedGoal.Location);
+    Query.SetAllowPartialPaths(false);
+    Query.SetNavAgentProperties(AgentConfig);
+    const FPathFindingResult PathResult = NavigationSystem->FindPathSync(AgentConfig, Query);
+    return PathResult.IsSuccessful() && PathResult.Path.IsValid() && !PathResult.Path->IsPartial();
 }
 
 // 정책 제어 여부를 바꾸고 비활성화할 때 실행 중인 경로 이동을 취소한다.

@@ -1,7 +1,10 @@
 #include "Sound/CMSoundPlayback.h"
 
 #include "Components/SceneComponent.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Sound/CMGameSoundBridgeSubsystem.h"
 #include "Sound/NKMSoundHelper.h"
 #include "Sound/NKMSoundSubsystem.h"
 
@@ -49,7 +52,19 @@ UAudioComponent* FCMSoundPlayback::PlayAttachedSFX(
 
     if (UNKMSoundSubsystem* Sound = FNKMSoundHelper::Get(AttachToComponent))
     {
-        return Sound->PlayAttachedSFX(SoundTag, AttachToComponent);
+        UAudioComponent* AudioComponent = Sound->PlayAttachedSFX(SoundTag, AttachToComponent);
+        if (AudioComponent)
+        {
+            if (UGameInstance* GameInstance = AttachToComponent->GetWorld()->GetGameInstance())
+            {
+                if (UCMGameSoundBridgeSubsystem* SoundBridge =
+                    GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+                {
+                    SoundBridge->RegisterPersistentSFX(AudioComponent, SoundTag);
+                }
+            }
+        }
+        return AudioComponent;
     }
     return nullptr;
 }

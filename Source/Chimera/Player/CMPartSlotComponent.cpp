@@ -326,6 +326,7 @@ bool UCMPartSlotComponent::AttachPart(AActor* PartActor)
     }
 
     ACMPartActorBase* NativePart = Cast<ACMPartActorBase>(PartActor);
+    PartActor->SetOwner(ChimeraOwner);
     if (NativePart)
     {
         NativePart->PrepareForPartSlotAttachment();
@@ -565,21 +566,32 @@ void UCMPartSlotComponent::OnRep_AttachedPart(AActor* PreviousPart)
 
     if (IsValid(AttachedPart))
     {
-        if (ACMPartActorBase* NativePart =
-            Cast<ACMPartActorBase>(AttachedPart))
-        {
-            NativePart->PrepareForPartSlotAttachment();
-        }
-        AttachedPart->AttachToComponent(
-            this,
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale
-        );
-        const ECMPartSlotType PartType =
-            ICMPartInterface::Execute_GetPartType(AttachedPart);
-        ApplyMountedPartTransform(*AttachedPart, *this, PartType);
+        ApplyReplicatedPartAttachment(AttachedPart);
     }
 
     OnAttachedPartChanged.Broadcast(this, AttachedPart);
+}
+
+void UCMPartSlotComponent::ApplyReplicatedPartAttachment(AActor* PartActor)
+{
+    if (!IsValid(PartActor)
+        || !PartActor->GetClass()->ImplementsInterface(
+            UCMPartInterface::StaticClass()))
+    {
+        return;
+    }
+
+    if (ACMPartActorBase* NativePart = Cast<ACMPartActorBase>(PartActor))
+    {
+        NativePart->PrepareForPartSlotAttachment();
+    }
+    PartActor->AttachToComponent(
+        this,
+        FAttachmentTransformRules::SnapToTargetNotIncludingScale
+    );
+    const ECMPartSlotType PartType =
+        ICMPartInterface::Execute_GetPartType(PartActor);
+    ApplyMountedPartTransform(*PartActor, *this, PartType);
 }
 
 void UCMPartSlotComponent::HandleAttachedPartDestroyed(AActor* DestroyedPart)

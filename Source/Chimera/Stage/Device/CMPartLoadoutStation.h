@@ -2,47 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Player/CMControlTypes.h"
 
 #include "CMPartLoadoutStation.generated.h"
 
 class ACMChimera;
-class ACMPartActorBase;
 class UBoxComponent;
+class UCMPartLoadoutStorageSubsystem;
 class UCMPartLoadoutStationWidget;
 class UPrimitiveComponent;
 class USceneComponent;
 class UStaticMeshComponent;
-
-USTRUCT()
-struct FCMStoredPartLoadoutRecord
-{
-    GENERATED_BODY()
-
-    UPROPERTY()
-    FCMPartSlotAddress SlotAddress;
-
-    UPROPERTY()
-    TSubclassOf<ACMPartActorBase> PartClass;
-
-    UPROPERTY()
-    FName PartRowName = NAME_None;
-
-    UPROPERTY()
-    FName TierRowName = NAME_None;
-};
-
-USTRUCT()
-struct FCMStoredPartLoadout
-{
-    GENERATED_BODY()
-
-    UPROPERTY()
-    bool bOccupied = false;
-
-    UPROPERTY()
-    TArray<FCMStoredPartLoadoutRecord> Parts;
-};
 
 /** 서버/호스트가 근처에서 현재 파츠 구성을 10개 슬롯에 저장하고 복원하는 장치다. */
 UCLASS(Blueprintable)
@@ -62,7 +31,7 @@ public:
     bool LoadSavedLoadout(int32 SlotIndex);
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Loadout Station")
-    int32 GetStorageSlotCount() const { return StorageSlotCount; }
+    int32 GetStorageSlotCount() const;
 
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Loadout Station")
     bool IsStorageSlotOccupied(int32 SlotIndex) const;
@@ -91,8 +60,6 @@ protected:
     TSubclassOf<UCMPartLoadoutStationWidget> StationWidgetClass;
 
 private:
-    static constexpr int32 StorageSlotCount = 10;
-
     UFUNCTION()
     void HandleInteractionBeginOverlap(
         UPrimitiveComponent* OverlappedComponent,
@@ -111,10 +78,7 @@ private:
 
     void ShowStationUI();
     void HideStationUI();
-    bool IsValidStorageSlot(int32 SlotIndex) const;
-
-    UPROPERTY(Transient)
-    TArray<FCMStoredPartLoadout> StoredLoadouts;
+    UCMPartLoadoutStorageSubsystem* GetStorageSubsystem() const;
 
     UPROPERTY(Transient)
     TObjectPtr<UCMPartLoadoutStationWidget> StationWidget;

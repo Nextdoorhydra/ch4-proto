@@ -4,6 +4,7 @@
 #include "GameMode/CMGameState.h"
 #include "GameMode/Play/CMPlayGameState.h"
 #include "HUD/Wireframe/CMWireframeHUDCaptureActor.h"
+#include "Parts/Arm/CMArmPart.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Parts/Core/CMPartStatusComponent.h"
 #include "Parts/Core/CMPartStatusTags.h"
@@ -172,6 +173,24 @@ FText GetControlKeyText(
             KeyText,
             PartTypeText);
 }
+
+FText GetArmHoldText(const ACMArmPart* ArmPart)
+{
+    if (!ArmPart)
+    {
+        return FText::GetEmpty();
+    }
+
+    switch (ArmPart->GetHoldType())
+    {
+    case ECMArmHoldType::Ground:
+        return LOCTEXT("ArmGroundHold", "hold");
+    case ECMArmHoldType::Interactable:
+        return LOCTEXT("ArmInteractableHold", "interact");
+    default:
+        return FText::GetEmpty();
+    }
+}
 }
 
 UCMControlHUDWidget::UCMControlHUDWidget(
@@ -205,6 +224,7 @@ void UCMControlHUDWidget::NativeOnInitialized()
 
     SetVisibility(ESlateVisibility::HitTestInvisible);
     RuntimeWireframeZoom = 1.0f;
+    bShowAllPlayerLabels = false;
     InitializeWireframeHUD();
     InitializeRetryVoteHUD();
     InitializeApmHUD();
@@ -222,6 +242,12 @@ void UCMControlHUDWidget::NativeTick(
 )
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
+    if (const APlayerController* OwningPlayer = GetOwningPlayer();
+        OwningPlayer
+        && OwningPlayer->WasInputKeyJustPressed(EKeys::Tab))
+    {
+        bShowAllPlayerLabels = !bShowAllPlayerLabels;
+    }
     UpdateWireframeCameraInput();
     UpdateWireframePanelLayout(MyGeometry);
     RefreshWireframeCallouts(MyGeometry, InDeltaTime);
@@ -351,6 +377,16 @@ int32 UCMControlHUDWidget::NativePaint(
         }
 
         FVector2D TextAreaSize = Callout.LabelSize;
+        constexpr float ContextTextHeight = 12.0f;
+        constexpr float ContextTextPadding = 1.0f;
+        if (!Callout.ContextText.IsEmpty())
+        {
+            TextAreaSize.Y = FMath::Max(
+                Callout.LabelSize.Y
+                    - ContextTextHeight
+                    - ContextTextPadding,
+                1.0f);
+        }
         if (Callout.bShowLegChargeGauge)
         {
             constexpr float GaugeHeight = 5.0f;
@@ -456,11 +492,6 @@ int32 UCMControlHUDWidget::NativePaint(
                 true,
                 1.0f);
         }
-        if (TextOpacity <= 0.0f)
-        {
-            continue;
-        }
-
         FSlateFontInfo Font = WireframeLabelFont;
         Font.Size = Callout.FontSize;
         FVector2D TextPosition = Callout.LabelPosition;
@@ -473,16 +504,49 @@ int32 UCMControlHUDWidget::NativePaint(
                 Callout.LabelSize.X - TextSize.X,
                 0.0f);
         }
-        FSlateDrawElement::MakeText(
-            OutDrawElements,
-            ++CurrentLayer,
-            AllottedGeometry.ToPaintGeometry(
-                TextAreaSize,
-                FSlateLayoutTransform(TextPosition)),
-            DisplayText,
-            Font,
-            ESlateDrawEffect::None,
-            Callout.PlayerColor.CopyWithNewOpacity(TextOpacity));
+        if (TextOpacity > 0.0f)
+        {
+            FSlateDrawElement::MakeText(
+                OutDrawElements,
+                ++CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(
+                    TextAreaSize,
+                    FSlateLayoutTransform(TextPosition)),
+                DisplayText,
+                Font,
+                ESlateDrawEffect::None,
+                Callout.PlayerColor.CopyWithNewOpacity(TextOpacity));
+        }
+
+        if (!Callout.ContextText.IsEmpty())
+        {
+            FSlateFontInfo ContextFont = WireframeLabelFont;
+            ContextFont.Size = FMath::Max(Callout.FontSize - 2, 8);
+            FVector2D ContextPosition(
+                Callout.LabelPosition.X,
+                Callout.LabelPosition.Y
+                    + TextAreaSize.Y
+                    + ContextTextPadding);
+            if (!Callout.bRightSide && FSlateApplication::IsInitialized())
+            {
+                const FVector2D ContextSize = FSlateApplication::Get()
+                    .GetRenderer()->GetFontMeasureService()
+                    ->Measure(Callout.ContextText, ContextFont);
+                ContextPosition.X += FMath::Max(
+                    Callout.LabelSize.X - ContextSize.X,
+                    0.0f);
+            }
+            FSlateDrawElement::MakeText(
+                OutDrawElements,
+                ++CurrentLayer,
+                AllottedGeometry.ToPaintGeometry(
+                    FVector2D(Callout.LabelSize.X, ContextTextHeight),
+                    FSlateLayoutTransform(ContextPosition)),
+                Callout.ContextText,
+                ContextFont,
+                ESlateDrawEffect::None,
+                Callout.PlayerColor.CopyWithNewOpacity(0.82f));
+        }
     }
 
     return CurrentLayer;
@@ -1184,6 +1248,8 @@ void UCMControlHUDWidget::TeardownWireframeHUD()
     WireframeCallouts.Reset();
     SmoothedCalloutPositions.Reset();
     CalloutRightSideById.Reset();
+    CachedWireframeOwnerBySlot.Reset();
+    bShowAllPlayerLabels = false;
     for (int32 ControlIndex = 0;
         ControlIndex < CMControl::MaxKeysPerPlayer;
         ++ControlIndex)
@@ -1564,8 +1630,7 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         WireframeCallouts.Reset();
         return;
     }
-    const bool bShowPlayerLabels =
-        OwningPlayer->IsInputKeyDown(EKeys::Tab);
+    const bool bShowPlayerLabels = bShowAllPlayerLabels;
 
     TMap<FCMPartSlotAddress, FText> LocalKeyBySlot;
     TMap<FCMPartSlotAddress, int32> LocalControlIndexBySlot;
@@ -1608,7 +1673,15 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         }
     }
 
-    TMap<FCMPartSlotAddress, ACMPlayerState*> OwnerBySlot;
+    for (auto It = CachedWireframeOwnerBySlot.CreateIterator(); It; ++It)
+    {
+        if (!It.Value().IsValid())
+        {
+            It.RemoveCurrent();
+        }
+    }
+
+    TSet<ACMPlayerState*> RefreshedOwners;
     TMap<ACMPlayerState*, TArray<FText>> StatusesByOwner;
     for (TActorIterator<ACMControlBody> It(GetWorld()); It; ++It)
     {
@@ -1622,9 +1695,24 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             continue;
         }
 
+        if (!RefreshedOwners.Contains(PlayerState))
+        {
+            for (auto CachedOwnerIt =
+                    CachedWireframeOwnerBySlot.CreateIterator();
+                CachedOwnerIt;
+                ++CachedOwnerIt)
+            {
+                if (CachedOwnerIt.Value().Get() == PlayerState)
+                {
+                    CachedOwnerIt.RemoveCurrent();
+                }
+            }
+            RefreshedOwners.Add(PlayerState);
+        }
+
         for (const FCMPartSlotAddress& Address : Body->GetControlSlots())
         {
-            OwnerBySlot.FindOrAdd(Address) = PlayerState;
+            CachedWireframeOwnerBySlot.FindOrAdd(Address) = PlayerState;
         }
         if (Body->IsConfused())
         {
@@ -1637,6 +1725,16 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
             AddStatusTextUnique(
                 StatusesByOwner.FindOrAdd(PlayerState),
                 LOCTEXT("WireStatusDelirious", "착란"));
+        }
+    }
+
+    TMap<FCMPartSlotAddress, ACMPlayerState*> OwnerBySlot;
+    for (const TPair<FCMPartSlotAddress, TWeakObjectPtr<ACMPlayerState>>& Pair
+        : CachedWireframeOwnerBySlot)
+    {
+        if (ACMPlayerState* PlayerState = Pair.Value.Get())
+        {
+            OwnerBySlot.Add(Pair.Key, PlayerState);
         }
     }
 
@@ -1682,6 +1780,7 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         const FName StableId,
         const FVector& WorldAnchor,
         const FText& LabelText,
+        const FText& ContextText,
         const FLinearColor& LabelColor,
         ACMPlayerState* StatusOwner,
         const bool bShowLegChargeGauge,
@@ -1707,6 +1806,7 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         Callout.AnchorPosition =
             WireframeImageTopLeft + ClampedAnchor * WireframeImageSize;
         Callout.PlayerName = LabelText;
+        Callout.ContextText = ContextText;
         if (StatusOwner)
         {
             if (const TArray<FText>* StatusTexts =
@@ -1763,6 +1863,9 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
 
         const ACMLegPart* LegPart =
             Cast<ACMLegPart>(PartSlot->GetAttachedPart());
+        const ACMArmPart* ArmPart =
+            Cast<ACMArmPart>(PartSlot->GetAttachedPart());
+        const FText ArmHoldText = GetArmHoldText(ArmPart);
         const int32* LocalControlIndex =
             LocalControlIndexBySlot.Find(Address);
         const int32 LegControlIndex = LegPart && LocalControlIndex
@@ -1785,6 +1888,7 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
                     StableId,
                     PartSlot->GetComponentLocation(),
                     FText::FromString(Owner->GetPlayerName()),
+                    ArmHoldText,
                     Owner->GetPlayerColor(),
                     Owner,
                     LegPart != nullptr,
@@ -1800,6 +1904,7 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
                 StableId,
                 PartSlot->GetComponentLocation(),
                 *ControlKey,
+                ArmHoldText,
                 LocalPlayerState
                     ? LocalPlayerState->GetPlayerColor()
                     : FLinearColor::White,
@@ -1837,7 +1942,7 @@ void UCMControlHUDWidget::RefreshWireframeCallouts(
         }
         const float Step = WireframeImageSize.Y
             / static_cast<float>(Indices.Num());
-        const float LabelHeight = FMath::Clamp(Step - 2.0f, 13.0f, 24.0f);
+        const float LabelHeight = FMath::Clamp(Step - 2.0f, 13.0f, 36.0f);
         const int32 DefaultFontSize = FMath::Clamp(
             FMath::FloorToInt(LabelHeight - 6.0f), 10, 14);
         const float LabelX = bRight

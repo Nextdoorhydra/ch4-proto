@@ -52,6 +52,56 @@ void RestartGame(const TArray<FString>& Args, UWorld* World)
     }
 }
 
+bool TryParseLoadoutSlot(
+    const TArray<FString>& Args,
+    int32& OutOneBasedSlotNumber)
+{
+    int64 SlotNumber = 0;
+    if (Args.Num() != 1 || Args[0].IsEmpty() || Args[0].Len() > 2
+        || Args[0].GetCharArray().ContainsByPredicate([](TCHAR C)
+            { return C != 0 && (C < TEXT('0') || C > TEXT('9')); })
+        || (SlotNumber = FCString::Atoi64(*Args[0])) < 1
+        || SlotNumber > 10)
+    {
+        return false;
+    }
+
+    OutOneBasedSlotNumber = static_cast<int32>(SlotNumber);
+    return true;
+}
+
+void SaveLoadout(const TArray<FString>& Args, UWorld* World)
+{
+    int32 SlotNumber = 0;
+    if (!TryParseLoadoutSlot(Args, SlotNumber))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("Usage: CM.SavePreset <1-10>, e.g. CM.SavePreset 1"));
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatSaveLoadout(SlotNumber);
+    }
+}
+
+void LoadLoadout(const TArray<FString>& Args, UWorld* World)
+{
+    int32 SlotNumber = 0;
+    if (!TryParseLoadoutSlot(Args, SlotNumber))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("Usage: CM.LoadPreset <1-10>, e.g. CM.LoadPreset 1"));
+        return;
+    }
+
+    if (ACMPlayerController* Controller = FindLocalController(World))
+    {
+        Controller->RequestCheatLoadLoadout(SlotNumber);
+    }
+}
+
 void KillSegment(UWorld* World, int32 SegmentIndex)
 {
     if (ACMPlayerController* Controller = FindLocalController(World))
@@ -319,6 +369,18 @@ FAutoConsoleCommandWithWorldAndArgs NextStageCommand(
                 Controller->RequestCheatNextStage();
             }
         }),
+    ECVF_Cheat);
+
+FAutoConsoleCommandWithWorldAndArgs SaveLoadoutCommand(
+    TEXT("CM.SavePreset"),
+    TEXT("Permanently overwrites one Part preset slot with the current shared Chimera Parts. Usage: CM.SavePreset 1"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SaveLoadout),
+    ECVF_Cheat);
+
+FAutoConsoleCommandWithWorldAndArgs LoadLoadoutCommand(
+    TEXT("CM.LoadPreset"),
+    TEXT("Loads a persistent Part preset slot onto the shared Chimera. Usage: CM.LoadPreset 1"),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&LoadLoadout),
     ECVF_Cheat);
 #endif
 

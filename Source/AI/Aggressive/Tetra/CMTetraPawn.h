@@ -11,9 +11,11 @@
 class UBoxComponent;
 class UCMAggressiveBehaviorComponent;
 class UCMAggressiveAccelerationMovementComponent;
+class UCMAIProceduralLegComponent;
 class UCMAggressiveMovementCommandComponent;
 class UCMAggressiveOmnidirectionalPathComponent;
 class UCMAggressiveSightComponent;
+class UPhysicalMaterial;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
@@ -75,6 +77,12 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Body")
     TArray<TObjectPtr<UStaticMeshComponent>> LegMeshes;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Animation")
+    TArray<TObjectPtr<UCMAIProceduralLegComponent>> ProceduralLegMeshes;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Animation")
+    TArray<TObjectPtr<USceneComponent>> LegContactPoints;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Movement")
     TObjectPtr<UCMAggressiveAccelerationMovementComponent> AccelerationMovement;
 
@@ -86,6 +94,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Aggressive AI|Tetra|Sight")
     TObjectPtr<UCMAggressiveSightComponent> Sight;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UPhysicalMaterial> RuntimeGroundPhysicalMaterial;
 
 private:
     void AddVisualLeg(const TCHAR* Name, const FVector& RelativeContactLocation, UStaticMesh* CubeMesh);

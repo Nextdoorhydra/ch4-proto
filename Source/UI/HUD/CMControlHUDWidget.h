@@ -132,6 +132,7 @@ private:
         FVector2D LabelPosition = FVector2D::ZeroVector;
         FVector2D LabelSize = FVector2D(140.0f, 22.0f);
         FText PlayerName;
+        FText ContextText;
         TArray<FText> StatusTexts;
         FLinearColor PlayerColor = FLinearColor::White;
         bool bRightSide = false;
@@ -244,12 +245,15 @@ private:
     TArray<FWireframeCallout> WireframeCallouts;
     TMap<FName, FVector2D> SmoothedCalloutPositions;
     TMap<FName, bool> CalloutRightSideById;
+    TMap<FCMPartSlotAddress, TWeakObjectPtr<ACMPlayerState>>
+        CachedWireframeOwnerBySlot;
     FVector2D WireframeImageTopLeft = FVector2D::ZeroVector;
     FVector2D WireframeImageSize = FVector2D::ZeroVector;
     float RuntimeWireframeZoom = 1.0f;
     float ApmRefreshElapsed = 0.0f;
     double LocalControlPressStartTimes[CMControl::MaxKeysPerPlayer] = {};
     bool bLocalControlPressed[CMControl::MaxKeysPerPlayer] = {};
+    bool bShowAllPlayerLabels = false;
     TArray<TWeakObjectPtr<UCMPartSlotComponent>> ObservedPartSlots;
     TArray<TWeakObjectPtr<ACMPartActorBase>> ObservedParts;
     FDelegateHandle StaminaChangedHandle;

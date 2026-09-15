@@ -59,12 +59,12 @@ void ACMPowerTriggerBase::Tick(float DeltaSeconds)
 
     if (!bPendingInitialEvaluation)
     {
-        SetActorTickEnabled(false);
+        SetActorTickEnabled(HasBillboardIndicator());
         return;
     }
 
     bPendingInitialEvaluation = false;
-    SetActorTickEnabled(false);
+    SetActorTickEnabled(HasBillboardIndicator());
     EvaluatePowerState();
 }
 

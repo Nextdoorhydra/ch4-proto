@@ -8,6 +8,7 @@
 #include "CMMainMenuWidget.generated.h"
 
 class UButton;
+class UCMMenuButtonWidget;
 class UEditableText;
 class UListenServerSessionSubsystem;
 class UTextBlock;
@@ -24,19 +25,19 @@ protected:
     virtual void NativeDestruct() override;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UButton> Btn_CreateRoom;
+    TObjectPtr<UCMMenuButtonWidget> Btn_CreateRoom;
     
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UButton> Btn_JoinRoom;
+    TObjectPtr<UCMMenuButtonWidget> Btn_JoinRoom;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UButton> Btn_QuickMatch;
+    TObjectPtr<UCMMenuButtonWidget> Btn_QuickMatch;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UButton> Btn_Options;
+    TObjectPtr<UCMMenuButtonWidget> Btn_Options;
     
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UButton> Btn_Quit;
+    TObjectPtr<UCMMenuButtonWidget> Btn_Quit;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> Txt_Result;

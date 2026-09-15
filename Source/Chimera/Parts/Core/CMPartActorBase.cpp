@@ -13,6 +13,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Parts/Combat/CMBattleComponent.h"
 #include "Parts/Core/CMPartStatusComponent.h"
+#include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
 #include "Stage/Device/Component/CMInteractionHighlightComponent.h"
 
@@ -140,8 +141,15 @@ void ACMPartActorBase::BeginPlay()
         bDisabled = false;
         ForceNetUpdate();
     }
+    ReconcileReplicatedAttachment();
     ApplyAttachmentPhysicsState();
     RefreshPickupHighlight();
+}
+
+void ACMPartActorBase::OnRep_Owner()
+{
+    Super::OnRep_Owner();
+    ReconcileReplicatedAttachment();
 }
 
 void ACMPartActorBase::Tick(const float DeltaSeconds)
@@ -250,8 +258,15 @@ void ACMPartActorBase::PrepareForPartSlotAttachment()
     {
         return;
     }
+    if (bDead)
+    {
+        ApplyDestroyedState();
+        return;
+    }
 
     ResetMeshFromRagdoll();
+    PartMesh->SetVisibility(true, true);
+    PartMesh->SetHiddenInGame(false, true);
     SetActorTickEnabled(false);
     if (HasAuthority())
     {
@@ -803,8 +818,33 @@ void ACMPartActorBase::OnRep_Disabled()
 
 void ACMPartActorBase::OnRep_AttachmentPhysicsState()
 {
+    ReconcileReplicatedAttachment();
+    if (!CMControl::IsValidPartSlot(AttachedSlotAddress)
+        && GetAttachedPartSlot())
+    {
+        DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+    }
+
     CaptureMountedPhysicsState();
     ApplyAttachmentPhysicsState();
+}
+
+void ACMPartActorBase::ReconcileReplicatedAttachment()
+{
+    if (HasAuthority()
+        || !CMControl::IsValidPartSlot(AttachedSlotAddress))
+    {
+        return;
+    }
+
+    ACMChimera* Chimera = Cast<ACMChimera>(GetOwner());
+    UCMPartSlotComponent* PartSlot = Chimera
+        ? Chimera->GetPartSlotComponent(AttachedSlotAddress)
+        : nullptr;
+    if (PartSlot)
+    {
+        PartSlot->ApplyReplicatedPartAttachment(this);
+    }
 }
 
 void ACMPartActorBase::OnRep_ReplicatedLoosePartLocation()

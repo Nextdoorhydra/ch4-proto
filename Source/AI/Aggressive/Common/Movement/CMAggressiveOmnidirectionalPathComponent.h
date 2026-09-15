@@ -67,8 +67,14 @@ public:
     /** 지정한 시작점에서 목적지까지 완전한 NavMesh 경로 길이를 계산한다. */
     bool CalculateNavigationPathLength(FVector StartLocation, FVector WorldGoal, float& OutPathLength);
 
+    /** 목표가 허용 반경 안의 NavMesh에 투영되고 현재 위치에서 완전한 경로로 연결되는지 반환한다. */
+    bool IsNavigationGoalReachable(FVector WorldGoal, float GoalTolerance) const;
+
     /** 이 AI에 지정된 전용 NavMesh에서 도달 가능한 임의 위치를 찾는다. */
     bool FindRandomReachableLocation(FVector Origin, float Radius, FVector& OutLocation) const;
+
+    /** 현재 위치가 전용 NavMesh 밖이면 가장 가까운 복귀 위치를 반환한다. */
+    bool FindNavigationRecoveryLocation(FVector& OutLocation);
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Aggressive AI|Path Movement")
     void SetPolicyControlEnabled(bool bEnabled);
@@ -121,6 +127,12 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement")
     FVector NavigationProjectionExtent = FVector(200.0f, 200.0f, 200.0f);
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement", meta = (ClampMin = "0.0"))
+    float NavigationContainmentTolerance = 25.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement")
+    FVector NavigationRecoveryProjectionExtent = FVector(1000.0f, 1000.0f, 500.0f);
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Aggressive AI|Path Movement")
     FName NavigationAgentName = NAME_None;
 
@@ -142,9 +154,11 @@ private:
 
     TArray<FVector> ActivePathPoints;
     FVector ActiveWorldGoal = FVector::ZeroVector;
+    FVector LastValidNavigationLocation = FVector::ZeroVector;
     int32 ActivePathPointIndex = INDEX_NONE;
     float FinalAcceptanceRadius = 50.0f;
     bool bPathMoving = false;
+    bool bHasLastValidNavigationLocation = false;
     uint32 PathDebugBatchId = 0;
     const ANavigationData* ActiveNavigationData = nullptr;
 
