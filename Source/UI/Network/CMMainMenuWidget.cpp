@@ -1,6 +1,7 @@
 #include "CMMainMenuWidget.h"
 
 #include "CMRoomId.h"
+#include "CMLobbyWidget.h"
 #include "Components/Button.h"
 #include "Components/EditableText.h"
 #include "Components/TextBlock.h"
@@ -131,8 +132,15 @@ void UCMMainMenuWidget::NativeConstruct()
             &UCMMainMenuWidget::HandleJoinCancelClicked
         );
     }
+    if (LobbyWidgetClass.IsNull())
+    {
+        LobbyWidgetClass = TSoftClassPtr<UCMLobbyWidget>(FSoftObjectPath(
+            TEXT("/Game/Chimera/UI/WBP_Lobby.WBP_Lobby_C")));
+    }
 
+    RecoverStaleSessionIfNeeded();
     UpdateControls();
+    ShowFrontendLobbyIfReady();
 }
 
 void UCMMainMenuWidget::NativeDestruct()
@@ -161,6 +169,11 @@ void UCMMainMenuWidget::NativeDestruct()
 
 void UCMMainMenuWidget::HandleJoinRoomClicked()
 {
+    if (!CanStartSessionOperation())
+    {
+        return;
+    }
+
     if (Panel_JoinRoomPopup)
     {
         Panel_JoinRoomPopup->SetVisibility(ESlateVisibility::Visible);
@@ -181,30 +194,96 @@ void UCMMainMenuWidget::HandleJoinCancelClicked()
     }
 }
 
-void UCMMainMenuWidget::UpdateControls()
+bool UCMMainMenuWidget::CanStartSessionOperation() const
 {
-    const bool bCanStartSessionOperation = NetworkSubsystem
+    return NetworkSubsystem
         && NetworkSubsystem->GetConnectionState()
             == EListenServerConnectionState::Offline
         && NetworkSubsystem->GetCurrentOperation()
             == EListenServerOperation::None;
+}
+
+void UCMMainMenuWidget::RecoverStaleSessionIfNeeded()
+{
+    UWorld* World = GetWorld();
+    if (!NetworkSubsystem
+        || !World
+        || World->GetNetMode() != NM_Standalone
+        || NetworkSubsystem->GetCurrentOperation()
+            != EListenServerOperation::None
+        || NetworkSubsystem->GetConnectionState()
+            == EListenServerConnectionState::Offline)
+    {
+        return;
+    }
+
+    UE_LOG(
+        LogChimeraMainMenuUI,
+        Warning,
+        TEXT("Cleaning up stale session state after returning to the standalone main menu.")
+    );
+    SetResultText(NSLOCTEXT(
+        "ChimeraUI",
+        "CleaningUpFailedConnection",
+        "Cleaning up the failed connection..."
+    ));
+    NetworkSubsystem->LeaveSession();
+}
+
+void UCMMainMenuWidget::UpdateControls()
+{
+    const bool bCanStartSessionOperation = CanStartSessionOperation();
+    const ESlateVisibility SessionButtonVisibility = bCanStartSessionOperation
+        ? ESlateVisibility::Visible
+        : ESlateVisibility::HitTestInvisible;
 
     if (Btn_CreateRoom)
     {
-        Btn_CreateRoom->SetIsEnabled(bCanStartSessionOperation);
+        Btn_CreateRoom->SetIsEnabled(true);
+        Btn_CreateRoom->SetVisibility(SessionButtonVisibility);
     }
     if (Btn_JoinRoom)
     {
-        Btn_JoinRoom->SetIsEnabled(bCanStartSessionOperation);
+        Btn_JoinRoom->SetIsEnabled(true);
+        Btn_JoinRoom->SetVisibility(SessionButtonVisibility);
     }
     if (Btn_QuickMatch)
     {
-        Btn_QuickMatch->SetIsEnabled(bCanStartSessionOperation);
+        Btn_QuickMatch->SetIsEnabled(true);
+        Btn_QuickMatch->SetVisibility(SessionButtonVisibility);
     }
     if (Edt_RoomId)
     {
         Edt_RoomId->SetIsEnabled(bCanStartSessionOperation);
     }
+}
+
+void UCMMainMenuWidget::ShowFrontendLobbyIfReady()
+{
+    if (!NetworkSubsystem
+        || !NetworkSubsystem->IsFrontendLobbyEnabled()
+        || NetworkSubsystem->GetConnectionState()
+            != EListenServerConnectionState::Lobby
+        || NetworkSubsystem->GetCurrentOperation()
+            != EListenServerOperation::None)
+    {
+        return;
+    }
+
+    UClass* LoadedLobbyClass = LobbyWidgetClass.LoadSynchronous();
+    APlayerController* OwningPlayer = GetOwningPlayer();
+    UCMLobbyWidget* LobbyWidget = LoadedLobbyClass && OwningPlayer
+        ? CreateWidget<UCMLobbyWidget>(OwningPlayer, LoadedLobbyClass)
+        : nullptr;
+    if (!LobbyWidget)
+    {
+        UE_LOG(LogChimeraMainMenuUI, Error,
+            TEXT("Could not create the frontend lobby widget."));
+        return;
+    }
+
+    LobbyWidget->AddToViewport();
+    RemoveFromParent();
 }
 
 void UCMMainMenuWidget::SetResultText(const FText& Message)
@@ -222,6 +301,7 @@ void UCMMainMenuWidget::HandleNetworkStateChanged(
 )
 {
     UpdateControls();
+    ShowFrontendLobbyIfReady();
 }
 
 void UCMMainMenuWidget::HandleOperationCompleted(
@@ -346,7 +426,7 @@ void UCMMainMenuWidget::HandleOptionClosed()
 
 void UCMMainMenuWidget::HandleCreateRoomClicked()
 {
-    if (!NetworkSubsystem)
+    if (!CanStartSessionOperation())
     {
         return;
     }
@@ -422,7 +502,7 @@ void UCMMainMenuWidget::HandleJoinConfirmClicked()
 
 void UCMMainMenuWidget::HandleQuickMatchClicked()
 {
-    if (!NetworkSubsystem)
+    if (!CanStartSessionOperation())
     {
         return;
     }

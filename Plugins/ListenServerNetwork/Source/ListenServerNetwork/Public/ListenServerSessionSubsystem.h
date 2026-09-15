@@ -30,6 +30,9 @@ public:
 	bool StartQuickMatch(const FListenServerQuickMatchRequest& Request);
 	bool LeaveSession();
 	bool HostTravelToMap(const FSoftObjectPath& Map);
+	bool SetLocalParticipantReady(bool bReady);
+	bool IsLocalParticipantReady() const;
+	bool IsFrontendLobbyEnabled() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Listen Server Network")
 	bool UpdateHostedSessionState(EListenServerAdvertisedSessionState NewState, bool bAllowNewParticipants);

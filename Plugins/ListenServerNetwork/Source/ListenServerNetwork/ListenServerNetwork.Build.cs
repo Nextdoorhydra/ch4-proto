@@ -21,5 +21,14 @@ public class ListenServerNetwork : ModuleRules
 			"OnlineSubsystemUtils",
 			"Projects"
 		});
+
+		bool bSteamworksSupported = Target.Platform == UnrealTargetPlatform.Win64
+			|| Target.Platform == UnrealTargetPlatform.Linux
+			|| Target.Platform == UnrealTargetPlatform.Mac;
+		PrivateDefinitions.Add("WITH_STEAMWORKS=" + (bSteamworksSupported ? "1" : "0"));
+		if (bSteamworksSupported)
+		{
+			AddEngineThirdPartyPrivateStaticDependencies(Target, "Steamworks");
+		}
 	}
 }

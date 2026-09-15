@@ -287,6 +287,9 @@ struct LISTENSERVERNETWORK_API FListenServerParticipant
 	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
 	bool bIsLocalPlayer = false;
 
+	UPROPERTY(BlueprintReadOnly, Category="Listen Server Network")
+	bool bIsReady = false;
+
 	bool operator==(const FListenServerParticipant& Other) const
 	{
 		return PlayerId == Other.PlayerId
@@ -294,7 +297,8 @@ struct LISTENSERVERNETWORK_API FListenServerParticipant
 			&& PlatformUserId == Other.PlatformUserId
 			&& PingMilliseconds == Other.PingMilliseconds
 			&& bIsHost == Other.bIsHost
-			&& bIsLocalPlayer == Other.bIsLocalPlayer;
+			&& bIsLocalPlayer == Other.bIsLocalPlayer
+			&& bIsReady == Other.bIsReady;
 	}
 };
 

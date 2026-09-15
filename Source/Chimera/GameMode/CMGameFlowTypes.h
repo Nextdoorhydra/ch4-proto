@@ -12,3 +12,12 @@ enum class ECMLobbyPhase : uint8
     Waiting,
     Loading
 };
+
+UENUM(BlueprintType)
+// 월드가 로컬 플레이어에게 표시 가능한 상태인지 구분
+enum class ECMWorldPresentationState : uint8
+{
+    Ready,
+    Loading,
+    Failed
+};

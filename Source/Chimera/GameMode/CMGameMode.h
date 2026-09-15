@@ -56,9 +56,20 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Chimera|Main Menu")
     FPrimaryAssetId MainMenuLoadScheduleId;
 
+    // 메인 메뉴에서 화면 구성을 담당하는 동적 스트리밍 레벨
+    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Main Menu")
+    FName MainMenuPresentationLevelName = TEXT("L_MainMenuSub");
+
+    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Main Menu", meta = (ClampMin = "1.0"))
+    float MainMenuPresentationTimeoutSeconds = 30.0f;
+
 private:
     void StartMainMenuAudio();
     void StopMainMenuAudio();
+    void CheckMainMenuPresentationReady();
+    void TryFinishMainMenuLoading();
+    void FinishMainMenuLoading();
+    void HandleMainMenuLoadingTimeout();
 
     UFUNCTION()
     void HandleMainMenuLoadFinished(FGuid RequestId, bool bSucceeded);
@@ -67,5 +78,12 @@ private:
     TObjectPtr<UCMStageLoadCoordinatorSubsystem> MainMenuLoadCoordinator;
 
     FGuid MainMenuLoadRequestId;
+    FTimerHandle MainMenuPresentationPollTimer;
+    FTimerHandle MainMenuPresentationFinishTimer;
+    FTimerHandle MainMenuPresentationTimeoutTimer;
+    bool bMainMenuAssetsResolved = false;
+    bool bMainMenuAssetsLoaded = false;
+    bool bMainMenuPresentationReady = false;
+    bool bMainMenuFinishScheduled = false;
     bool bRetryInProgress = false;
 };

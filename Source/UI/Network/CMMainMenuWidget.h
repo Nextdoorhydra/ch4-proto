@@ -9,6 +9,7 @@
 
 class UButton;
 class UCMMenuButtonWidget;
+class UCMLobbyWidget;
 class UEditableText;
 class UListenServerSessionSubsystem;
 class UTextBlock;
@@ -60,6 +61,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Chimera|Main Menu")
     TSoftClassPtr<UCMOptionWidget> OptionWidgetClass;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Chimera|Main Menu")
+    TSoftClassPtr<UCMLobbyWidget> LobbyWidgetClass;
+
     UFUNCTION()
     void HandleJoinConfirmClicked();
 
@@ -67,6 +71,9 @@ protected:
     void HandleJoinCancelClicked();
     
 private:
+    bool CanStartSessionOperation() const;
+    void RecoverStaleSessionIfNeeded();
+    void ShowFrontendLobbyIfReady();
     void UpdateControls();
     void SetResultText(const FText& Message);
 

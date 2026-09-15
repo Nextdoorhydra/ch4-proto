@@ -28,6 +28,12 @@
 #include "OnlineSubsystemNames.h"
 #include "UObject/UObjectGlobals.h"
 
+#if WITH_STEAMWORKS
+THIRD_PARTY_INCLUDES_START
+#include "steam/steam_api.h"
+THIRD_PARTY_INCLUDES_END
+#endif
+
 namespace
 {
 	constexpr int32 MaxHostListenRetryCount = 3;
@@ -257,6 +263,10 @@ struct FListenServerSessionSubsystemImpl
 	bool TickParticipantObservation(float DeltaTime);
 	void RefreshParticipants();
 	void ClearParticipants();
+	bool SetLocalParticipantReady(bool bReady);
+	bool IsLocalParticipantReady() const;
+	void TryStartFrontendClientTravel();
+	void CompleteFrontendLeave(bool bFromRecovery);
 	bool TickConnectionDiagnostics(float DeltaTime);
 	void RefreshConnectionDiagnostics();
 	void RetryPendingHostListen(float DeltaTime);
@@ -310,6 +320,8 @@ struct FListenServerSessionSubsystemImpl
 	void HandleUpdateComplete(uint64 CallbackOperationId, FName SessionName, bool bWasSuccessful);
 	void StartHostGameSession(uint64 OperationId);
 	void HandleStartComplete(uint64 CallbackOperationId, FName SessionName, bool bWasSuccessful);
+	bool PrepareFrontendHostListener();
+	void SignalFrontendGameStarted();
 	bool BeginTravel(uint64 OperationId, const FSoftObjectPath& Map, EListenServerRole TravelRole, EListenServerConnectionState TargetState, bool bListenOpenLevel, bool bReturnToMenu);
 	bool StartHostListenTravel();
 	bool BeginClientTravel(uint64 OperationId, const FString& ConnectString, EListenServerConnectionState TargetState);
@@ -462,15 +474,75 @@ void FListenServerSessionSubsystemImpl::Deinitialize()
 bool FListenServerSessionSubsystemImpl::TickParticipantObservation(float)
 {
 	RefreshParticipants();
+	TryStartFrontendClientTravel();
 	return true;
 }
 
 void FListenServerSessionSubsystemImpl::RefreshParticipants()
 {
 	TArray<FListenServerParticipant> NewParticipants;
+
+#if WITH_STEAMWORKS
+	if (GetSettings()->bUseFrontendLobby
+		&& ConnectionState == EListenServerConnectionState::Lobby)
+	{
+		IOnlineSessionPtr Sessions = GetSessionInterface();
+		const FNamedOnlineSession* NamedSession = Sessions.IsValid()
+			? Sessions->GetNamedSession(NAME_GameSession)
+			: nullptr;
+		const FString SessionId = NamedSession && NamedSession->SessionInfo.IsValid()
+			? NamedSession->SessionInfo->GetSessionId().ToString()
+			: FString();
+		const CSteamID LobbyId(FCString::Strtoui64(*SessionId, nullptr, 10));
+		ISteamMatchmaking* Matchmaking = SteamMatchmaking();
+		ISteamFriends* Friends = SteamFriends();
+		ISteamUser* User = SteamUser();
+		if (LobbyId.IsValid() && Matchmaking && Friends && User)
+		{
+			const CSteamID OwnerId = Matchmaking->GetLobbyOwner(LobbyId);
+			const CSteamID LocalId = User->GetSteamID();
+			const IOnlineIdentityPtr Identity = GetIdentityInterface();
+			const int32 MemberCount = Matchmaking->GetNumLobbyMembers(LobbyId);
+			NewParticipants.Reserve(MemberCount);
+			for (int32 Index = 0; Index < MemberCount; ++Index)
+			{
+				const CSteamID MemberId = Matchmaking->GetLobbyMemberByIndex(LobbyId, Index);
+				if (!MemberId.IsValid())
+				{
+					continue;
+				}
+				FListenServerParticipant& Participant = NewParticipants.AddDefaulted_GetRef();
+				Participant.PlayerId = static_cast<int32>(MemberId.GetAccountID());
+				const char* PersonaName = MemberId == LocalId
+					? Friends->GetPersonaName()
+					: Friends->GetFriendPersonaName(MemberId);
+				Participant.DisplayName = PersonaName != nullptr ? UTF8_TO_TCHAR(PersonaName) : FString();
+				Participant.DisplayName.TrimStartAndEndInline();
+				if (MemberId == LocalId && Participant.DisplayName.IsEmpty() && Identity.IsValid())
+				{
+					Participant.DisplayName = Identity->GetPlayerNickname(0);
+				}
+				if (Participant.DisplayName.IsEmpty() || Participant.DisplayName == TEXT("[unknown]"))
+				{
+					Friends->RequestUserInformation(MemberId, true);
+					Participant.DisplayName = FString::Printf(TEXT("Steam User %u"), MemberId.GetAccountID());
+				}
+				Participant.PlatformUserId = FString::Printf(TEXT("%llu"), MemberId.ConvertToUint64());
+				Participant.PingMilliseconds = INDEX_NONE;
+				Participant.bIsHost = MemberId == OwnerId;
+				Participant.bIsLocalPlayer = MemberId == LocalId;
+				Participant.bIsReady = FCStringAnsi::Stricmp(
+					Matchmaking->GetLobbyMemberData(LobbyId, MemberId, "CM_READY"), "1") == 0;
+			}
+		}
+	}
+#endif
+
 	UWorld* World = GetWorld();
 	AGameStateBase* GameState = World != nullptr ? World->GetGameState() : nullptr;
-	if (ConnectionState != EListenServerConnectionState::Offline && GameState != nullptr)
+	if (NewParticipants.IsEmpty()
+		&& ConnectionState != EListenServerConnectionState::Offline
+		&& GameState != nullptr)
 	{
 		FString HostPlatformUserId;
 		IOnlineSessionPtr Sessions = GetSessionInterface();
@@ -518,6 +590,7 @@ void FListenServerSessionSubsystemImpl::RefreshParticipants()
 			Participant.bIsHost = !HostPlatformUserId.IsEmpty()
 				? Participant.PlatformUserId == HostPlatformUserId
 				: Role == EListenServerRole::Host && Participant.bIsLocalPlayer;
+			Participant.bIsReady = false;
 		}
 	}
 
@@ -543,6 +616,97 @@ void FListenServerSessionSubsystemImpl::RefreshParticipants()
 	if (UListenServerSessionSubsystem* Subsystem = Owner.Get())
 	{
 		Subsystem->OnParticipantsChanged.Broadcast();
+	}
+}
+
+bool FListenServerSessionSubsystemImpl::SetLocalParticipantReady(bool bReady)
+{
+#if WITH_STEAMWORKS
+	if (!GetSettings()->bUseFrontendLobby
+		|| ConnectionState != EListenServerConnectionState::Lobby)
+	{
+		return false;
+	}
+	IOnlineSessionPtr Sessions = GetSessionInterface();
+	const FNamedOnlineSession* NamedSession = Sessions.IsValid()
+		? Sessions->GetNamedSession(NAME_GameSession)
+		: nullptr;
+	const FString SessionId = NamedSession && NamedSession->SessionInfo.IsValid()
+		? NamedSession->SessionInfo->GetSessionId().ToString()
+		: FString();
+	const CSteamID LobbyId(FCString::Strtoui64(*SessionId, nullptr, 10));
+	if (!LobbyId.IsValid() || !SteamMatchmaking())
+	{
+		return false;
+	}
+	SteamMatchmaking()->SetLobbyMemberData(
+		LobbyId, "CM_READY", bReady ? "1" : "0");
+	RefreshParticipants();
+	return true;
+#else
+	return false;
+#endif
+}
+
+bool FListenServerSessionSubsystemImpl::IsLocalParticipantReady() const
+{
+	const FListenServerParticipant* LocalParticipant = Participants.FindByPredicate(
+		[](const FListenServerParticipant& Participant)
+		{
+			return Participant.bIsLocalPlayer;
+		});
+	return LocalParticipant && LocalParticipant->bIsReady;
+}
+
+void FListenServerSessionSubsystemImpl::TryStartFrontendClientTravel()
+{
+#if WITH_STEAMWORKS
+	if (!GetSettings()->bUseFrontendLobby
+		|| Role != EListenServerRole::Client
+		|| ConnectionState != EListenServerConnectionState::Lobby
+		|| Operation != EListenServerOperation::None)
+	{
+		return;
+	}
+	IOnlineSessionPtr Sessions = GetSessionInterface();
+	const FNamedOnlineSession* NamedSession = Sessions.IsValid()
+		? Sessions->GetNamedSession(NAME_GameSession)
+		: nullptr;
+	const FString SessionId = NamedSession && NamedSession->SessionInfo.IsValid()
+		? NamedSession->SessionInfo->GetSessionId().ToString()
+		: FString();
+	const CSteamID LobbyId(FCString::Strtoui64(*SessionId, nullptr, 10));
+	if (!LobbyId.IsValid() || !SteamMatchmaking()
+		|| FCStringAnsi::Stricmp(SteamMatchmaking()->GetLobbyData(
+			LobbyId, "CM_GAME_STARTED"), "1") != 0)
+	{
+		return;
+	}
+	FString ConnectString;
+	if (!Sessions->GetResolvedConnectString(NAME_GameSession, ConnectString)
+		|| ConnectString.IsEmpty()
+		|| !BeginOperation(EListenServerOperation::Traveling)
+		|| !BeginClientTravel(ActiveOperationId, ConnectString,
+			EListenServerConnectionState::InGame))
+	{
+		FinishFailure(EListenServerError::TravelFailed,
+			TEXT("The game connection could not start."),
+			TEXT("Frontend lobby received the game-start signal but ClientTravel failed"));
+	}
+#endif
+}
+
+void FListenServerSessionSubsystemImpl::CompleteFrontendLeave(bool bFromRecovery)
+{
+	CompleteLocalCleanup();
+	if (bFromRecovery)
+	{
+		FinishFailure(RecoveryError, *RecoveryUserMessage, RecoveryInternalMessage);
+	}
+	else
+	{
+		FinishSuccess(TEXT("The Steam lobby was left."),
+			bLeaveEndFailed ? TEXT("EndSession failed; local cleanup and DestroySession were still attempted") : FString());
 	}
 }
 
@@ -962,8 +1126,16 @@ void FListenServerSessionSubsystemImpl::HandleTimeout(uint64 TimedOperationId, E
 		{
 			Sessions->RemoveNamedSession(NAME_GameSession);
 		}
-		CompleteLocalCleanup();
-		ReturnToMainMenu(TimedOperationId, true);
+		if (GetSettings()->bUseFrontendLobby
+			&& ConnectionState == EListenServerConnectionState::Lobby)
+		{
+			CompleteFrontendLeave(true);
+		}
+		else
+		{
+			CompleteLocalCleanup();
+			ReturnToMainMenu(TimedOperationId, true);
+		}
 		return;
 	}
 	if (TimedOperation == EListenServerOperation::Traveling || Operation == EListenServerOperation::Traveling)
@@ -998,8 +1170,16 @@ void FListenServerSessionSubsystemImpl::HandleTimeout(uint64 TimedOperationId, E
 		{
 			Sessions->RemoveNamedSession(NAME_GameSession);
 		}
-		CompleteLocalCleanup();
-		ReturnToMainMenu(TimedOperationId, false);
+		if (GetSettings()->bUseFrontendLobby
+			&& ConnectionState == EListenServerConnectionState::Lobby)
+		{
+			CompleteFrontendLeave(false);
+		}
+		else
+		{
+			CompleteLocalCleanup();
+			ReturnToMainMenu(TimedOperationId, false);
+		}
 		return;
 	}
 	if (Operation == EListenServerOperation::Leaving || Operation == EListenServerOperation::Destroying || Operation == EListenServerOperation::Ending)
@@ -1126,6 +1306,29 @@ void FListenServerSessionSubsystemImpl::HandleCreateComplete(uint64 CallbackOper
 		FinishFailure(EListenServerError::CreateFailed, TEXT("Steam could not create the lobby."), TEXT("CreateSession completion reported failure"));
 		return;
 	}
+	if (GetSettings()->bUseFrontendLobby)
+	{
+		SetRoleAndConnection(EListenServerRole::Host,
+			EListenServerConnectionState::Lobby,
+			TEXT("frontend Steam lobby created"));
+#if WITH_STEAMWORKS
+		IOnlineSessionPtr FrontendSessions = GetSessionInterface();
+		const FNamedOnlineSession* NamedSession = FrontendSessions.IsValid()
+			? FrontendSessions->GetNamedSession(NAME_GameSession)
+			: nullptr;
+		const FString SessionId = NamedSession && NamedSession->SessionInfo.IsValid()
+			? NamedSession->SessionInfo->GetSessionId().ToString()
+			: FString();
+		const CSteamID LobbyId(FCString::Strtoui64(*SessionId, nullptr, 10));
+		if (LobbyId.IsValid() && SteamMatchmaking())
+		{
+			SteamMatchmaking()->SetLobbyData(LobbyId, "CM_GAME_STARTED", "0");
+		}
+#endif
+		SetLocalParticipantReady(false);
+		FinishSuccess(TEXT("The Steam frontend lobby is ready."));
+		return;
+	}
 	if (!BeginTravel(CallbackOperationId, ActiveHostRequest.LobbyMap, EListenServerRole::Host, EListenServerConnectionState::Lobby, true, false))
 	{
 		CleanupStaleCreatedOrJoinedSession(TEXT("listen travel request failed"));
@@ -1140,8 +1343,17 @@ void FListenServerSessionSubsystemImpl::StartDestroy(uint64 OperationId, EListen
 	{
 		if (DestroyPurpose == EListenServerAsyncPurpose::LeaveDestroy || DestroyPurpose == EListenServerAsyncPurpose::RecoveryDestroy)
 		{
-			CompleteLocalCleanup();
-			ReturnToMainMenu(OperationId, DestroyPurpose == EListenServerAsyncPurpose::RecoveryDestroy);
+			const bool bFromRecovery = DestroyPurpose == EListenServerAsyncPurpose::RecoveryDestroy;
+			if (GetSettings()->bUseFrontendLobby
+				&& ConnectionState == EListenServerConnectionState::Lobby)
+			{
+				CompleteFrontendLeave(bFromRecovery);
+			}
+			else
+			{
+				CompleteLocalCleanup();
+				ReturnToMainMenu(OperationId, bFromRecovery);
+			}
 			return;
 		}
 		FinishFailure(EListenServerError::SessionInterfaceUnavailable, TEXT("Steam sessions became unavailable."), TEXT("Session interface invalid before DestroySession"));
@@ -1232,12 +1444,28 @@ void FListenServerSessionSubsystemImpl::HandleDestroyComplete(uint64 CallbackOpe
 		}
 		break;
 	case EListenServerAsyncPurpose::LeaveDestroy:
-		CompleteLocalCleanup();
-		ReturnToMainMenu(CallbackOperationId, false);
+		if (GetSettings()->bUseFrontendLobby
+			&& ConnectionState == EListenServerConnectionState::Lobby)
+		{
+			CompleteFrontendLeave(false);
+		}
+		else
+		{
+			CompleteLocalCleanup();
+			ReturnToMainMenu(CallbackOperationId, false);
+		}
 		break;
 	case EListenServerAsyncPurpose::RecoveryDestroy:
-		CompleteLocalCleanup();
-		ReturnToMainMenu(CallbackOperationId, true);
+		if (GetSettings()->bUseFrontendLobby
+			&& ConnectionState == EListenServerConnectionState::Lobby)
+		{
+			CompleteFrontendLeave(true);
+		}
+		else
+		{
+			CompleteLocalCleanup();
+			ReturnToMainMenu(CallbackOperationId, true);
+		}
 		break;
 	default:
 		if (bWasSuccessful)
@@ -1669,6 +1897,16 @@ void FListenServerSessionSubsystemImpl::HandleJoinComplete(uint64 CallbackOperat
 		}
 		return;
 	}
+	if (GetSettings()->bUseFrontendLobby
+		&& PendingJoinConnectionState == EListenServerConnectionState::Lobby)
+	{
+		SetRoleAndConnection(EListenServerRole::Client,
+			EListenServerConnectionState::Lobby,
+			TEXT("frontend Steam lobby joined"));
+		SetLocalParticipantReady(false);
+		FinishSuccess(TEXT("Joined the Steam frontend lobby."));
+		return;
+	}
 
 	FString ConnectString;
 	if (!Sessions.IsValid() || !Sessions->GetResolvedConnectString(NAME_GameSession, ConnectString) || ConnectString.IsEmpty())
@@ -1793,8 +2031,16 @@ bool FListenServerSessionSubsystemImpl::Leave()
 	bLeaveEndFailed = false;
 	if (!Sessions.IsValid() || Sessions->GetNamedSession(NAME_GameSession) == nullptr)
 	{
-		CompleteLocalCleanup();
-		ReturnToMainMenu(ActiveOperationId, false);
+		if (GetSettings()->bUseFrontendLobby
+			&& ConnectionState == EListenServerConnectionState::Lobby)
+		{
+			CompleteFrontendLeave(false);
+		}
+		else
+		{
+			CompleteLocalCleanup();
+			ReturnToMainMenu(ActiveOperationId, false);
+		}
 		return true;
 	}
 	if (Sessions->GetSessionState(NAME_GameSession) == EOnlineSessionState::InProgress)
@@ -2075,9 +2321,14 @@ void FListenServerSessionSubsystemImpl::HandleUpdateComplete(uint64 CallbackOper
 	}
 	if (Sessions->GetSessionState(NAME_GameSession) == EOnlineSessionState::InProgress)
 	{
-		if (!BeginTravel(CallbackOperationId, PendingHostGameMap, EListenServerRole::Host, EListenServerConnectionState::InGame, false, false))
+		if (!PrepareFrontendHostListener()
+			|| !BeginTravel(CallbackOperationId, PendingHostGameMap, EListenServerRole::Host, EListenServerConnectionState::InGame, false, false))
 		{
 			FinishFailure(EListenServerError::TravelFailed, TEXT("Server travel could not start."), TEXT("ServerTravel validation or dispatch failed"));
+		}
+		else
+		{
+			SignalFrontendGameStarted();
 		}
 	}
 	else
@@ -2140,10 +2391,56 @@ void FListenServerSessionSubsystemImpl::HandleStartComplete(uint64 CallbackOpera
 		FinishFailure(EListenServerError::StartFailed, TEXT("The host Steam session could not start."), TEXT("StartSession completion reported failure"));
 		return;
 	}
-	if (!BeginTravel(CallbackOperationId, PendingHostGameMap, EListenServerRole::Host, EListenServerConnectionState::InGame, false, false))
+	if (!PrepareFrontendHostListener()
+		|| !BeginTravel(CallbackOperationId, PendingHostGameMap, EListenServerRole::Host, EListenServerConnectionState::InGame, false, false))
 	{
 		FinishFailure(EListenServerError::TravelFailed, TEXT("Server travel could not start."), TEXT("ServerTravel validation or dispatch failed"));
 	}
+	else
+	{
+		SignalFrontendGameStarted();
+	}
+}
+
+bool FListenServerSessionSubsystemImpl::PrepareFrontendHostListener()
+{
+	if (!GetSettings()->bUseFrontendLobby)
+	{
+		return true;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	if (World->GetNetMode() == NM_ListenServer)
+	{
+		return true;
+	}
+	FURL ListenURL = World->URL;
+	return World->Listen(ListenURL);
+}
+
+void FListenServerSessionSubsystemImpl::SignalFrontendGameStarted()
+{
+#if WITH_STEAMWORKS
+	if (!GetSettings()->bUseFrontendLobby || !SteamMatchmaking())
+	{
+		return;
+	}
+	IOnlineSessionPtr Sessions = GetSessionInterface();
+	const FNamedOnlineSession* NamedSession = Sessions.IsValid()
+		? Sessions->GetNamedSession(NAME_GameSession)
+		: nullptr;
+	const FString SessionId = NamedSession && NamedSession->SessionInfo.IsValid()
+		? NamedSession->SessionInfo->GetSessionId().ToString()
+		: FString();
+	const CSteamID LobbyId(FCString::Strtoui64(*SessionId, nullptr, 10));
+	if (LobbyId.IsValid())
+	{
+		SteamMatchmaking()->SetLobbyData(LobbyId, "CM_GAME_STARTED", "1");
+	}
+#endif
 }
 
 bool FListenServerSessionSubsystemImpl::BeginTravel(uint64 OperationId, const FSoftObjectPath& Map, EListenServerRole TravelRole, EListenServerConnectionState TargetState, bool bListenOpenLevel, bool bReturnToMenu)
@@ -2552,8 +2849,16 @@ void FListenServerSessionSubsystemImpl::BeginRecovery(EListenServerError Error, 
 	}
 	else
 	{
-		CompleteLocalCleanup();
-		ReturnToMainMenu(ActiveOperationId, true);
+		if (GetSettings()->bUseFrontendLobby
+			&& ConnectionState == EListenServerConnectionState::Lobby)
+		{
+			CompleteFrontendLeave(true);
+		}
+		else
+		{
+			CompleteLocalCleanup();
+			ReturnToMainMenu(ActiveOperationId, true);
+		}
 	}
 }
 
@@ -2745,6 +3050,21 @@ bool UListenServerSessionSubsystem::StartQuickMatch(const FListenServerQuickMatc
 bool UListenServerSessionSubsystem::LeaveSession()
 {
 	return Impl->Leave();
+}
+
+bool UListenServerSessionSubsystem::SetLocalParticipantReady(bool bReady)
+{
+	return Impl->SetLocalParticipantReady(bReady);
+}
+
+bool UListenServerSessionSubsystem::IsLocalParticipantReady() const
+{
+	return Impl->IsLocalParticipantReady();
+}
+
+bool UListenServerSessionSubsystem::IsFrontendLobbyEnabled() const
+{
+	return GetDefault<UListenServerNetworkSettings>()->bUseFrontendLobby;
 }
 
 bool UListenServerSessionSubsystem::HostTravelToMap(const FSoftObjectPath& Map)
