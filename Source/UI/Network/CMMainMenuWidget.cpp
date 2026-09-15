@@ -1,7 +1,6 @@
 #include "CMMainMenuWidget.h"
 
 #include "CMRoomId.h"
-#include "CMLobbyWidget.h"
 #include "Components/Button.h"
 #include "Components/EditableText.h"
 #include "Components/TextBlock.h"
@@ -132,15 +131,8 @@ void UCMMainMenuWidget::NativeConstruct()
             &UCMMainMenuWidget::HandleJoinCancelClicked
         );
     }
-    if (LobbyWidgetClass.IsNull())
-    {
-        LobbyWidgetClass = TSoftClassPtr<UCMLobbyWidget>(FSoftObjectPath(
-            TEXT("/Game/Chimera/UI/WBP_Lobby.WBP_Lobby_C")));
-    }
-
     RecoverStaleSessionIfNeeded();
     UpdateControls();
-    ShowLobbyIfReady();
 }
 
 void UCMMainMenuWidget::NativeDestruct()
@@ -258,33 +250,6 @@ void UCMMainMenuWidget::UpdateControls()
     }
 }
 
-void UCMMainMenuWidget::ShowLobbyIfReady()
-{
-    if (!NetworkSubsystem
-        || NetworkSubsystem->GetConnectionState()
-            != EListenServerConnectionState::Lobby
-        || NetworkSubsystem->GetCurrentOperation()
-            != EListenServerOperation::None)
-    {
-        return;
-    }
-
-    UClass* LoadedLobbyClass = LobbyWidgetClass.LoadSynchronous();
-    APlayerController* OwningPlayer = GetOwningPlayer();
-    UCMLobbyWidget* LobbyWidget = LoadedLobbyClass && OwningPlayer
-        ? CreateWidget<UCMLobbyWidget>(OwningPlayer, LoadedLobbyClass)
-        : nullptr;
-    if (!LobbyWidget)
-    {
-        UE_LOG(LogChimeraMainMenuUI, Error,
-            TEXT("Could not create the frontend lobby widget."));
-        return;
-    }
-
-    LobbyWidget->AddToViewport();
-    RemoveFromParent();
-}
-
 void UCMMainMenuWidget::SetResultText(const FText& Message)
 {
     if (Txt_Result)
@@ -300,7 +265,6 @@ void UCMMainMenuWidget::HandleNetworkStateChanged(
 )
 {
     UpdateControls();
-    ShowLobbyIfReady();
 }
 
 void UCMMainMenuWidget::HandleOperationCompleted(
