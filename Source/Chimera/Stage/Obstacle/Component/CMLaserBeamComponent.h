@@ -29,7 +29,7 @@ public:
 
     // Mesh와 Niagara를 함께 표시하거나 숨김
     UFUNCTION(BlueprintCallable, Category = "Chimera|Beam Presentation")
-    void SetBeamVisible(bool bVisible);
+    void SetBeamVisible(bool bVisible, bool bAllowEffectActivation = true);
 
     // 플레이어 타격 여부에 따라 끝점 스파크 발생량을 Niagara에 전달
     UFUNCTION(BlueprintCallable, Category = "Chimera|Beam Presentation")

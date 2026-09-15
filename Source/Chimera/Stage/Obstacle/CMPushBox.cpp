@@ -57,7 +57,7 @@ void ACMPushBox::BeginPlay()
 
     SetActorTickEnabled(true);
     ApplyEditorSettings();
-    BoxMesh->OnComponentHit.AddDynamic(this, &ThisClass::HandleBoxHit);
+    BoxMesh->OnComponentHit.AddUniqueDynamic(this, &ThisClass::HandleBoxHit);
     UE_LOG(LogChimeraPushBox, Log, TEXT("[PushBox Ready] Box=%s Weight=%.1f GenerateOverlap=%s Location=%s Extent=%s"), *GetName(), MechanismWeight ? MechanismWeight->GetMechanismWeight() : 0.0f, BoxMesh && BoxMesh->GetGenerateOverlapEvents() ? TEXT("true") : TEXT("false"), *GetActorLocation().ToCompactString(), BoxMesh ? *BoxMesh->Bounds.BoxExtent.ToCompactString() : TEXT("None"));
 }
 

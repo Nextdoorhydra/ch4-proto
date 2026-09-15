@@ -10,6 +10,7 @@ enum class ECMObstacleMotionType : uint8
 {
     None,
     Rotation,
+    RotationToAngle,
     Linear,
     PingPong
 };
@@ -57,6 +58,10 @@ public:
         meta = (ClampMin = "0.0", EditCondition = "MotionType == ECMObstacleMotionType::Linear || MotionType == ECMObstacleMotionType::PingPong", EditConditionHides))
     float MoveDistance = 500.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Chimera|Obstacle|Motion",
+        meta = (ClampMin = "0.0", EditCondition = "MotionType == ECMObstacleMotionType::RotationToAngle", EditConditionHides))
+    float RotationAngle = 90.0f;
+
 protected:
     virtual void BeginPlay() override;
 
@@ -68,8 +73,10 @@ private:
     bool bMotionRunning = false;
     float DirectionSign = 1.0f;
     float TravelledDistance = 0.0f;
+    float CurrentRotationAngle = 0.0f;
 
     FVector GetWorldMotionAxis() const;
     void TickRotation(float DeltaTime);
+    void TickRotationToAngle(float DeltaTime);
     void TickTranslation(float DeltaTime, bool bShouldPingPong);
 };

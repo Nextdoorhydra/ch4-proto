@@ -56,7 +56,9 @@ void UCMLaserBeamComponent::ApplyBeam(
 }
 
 // 연결된 모든 Beam 표현의 활성 상태 통일
-void UCMLaserBeamComponent::SetBeamVisible(bool bVisible)
+void UCMLaserBeamComponent::SetBeamVisible(
+    bool bVisible,
+    bool bAllowEffectActivation)
 {
     if (BeamMesh)
     {
@@ -64,12 +66,14 @@ void UCMLaserBeamComponent::SetBeamVisible(bool bVisible)
     }
     if (BeamEffect)
     {
-        BeamEffect->SetVisibility(bVisible, true);
-        if (bVisible && !BeamEffect->IsActive())
+        const bool bShowEffect = bVisible && bAllowEffectActivation
+            && GetOwner() && GetOwner()->GetNetMode() != NM_DedicatedServer;
+        BeamEffect->SetVisibility(bShowEffect, true);
+        if (bShowEffect && !BeamEffect->IsActive())
         {
             BeamEffect->Activate(true);
         }
-        else if (!bVisible)
+        else if (!bShowEffect)
         {
             BeamEffect->Deactivate();
         }
