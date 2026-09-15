@@ -9,7 +9,9 @@ class ACMChimera;
 class ACMTentacleSegmentActor;
 class UChildActorComponent;
 class UCMChimeraIdleTentacleComponent;
+class UCMChimeraWrapTentacleComponent;
 class UCMChimeraVisualDefinition;
+class UMeshComponent;
 class UPrimitiveComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
@@ -68,7 +70,11 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Body Segment")
     ACMTentacleSegmentActor* GetTentacleActor() const;
 
-    /** Rebinds IdleTentacles to this segment's GooBody static mesh. */
+    /** Assigns the external mesh that this segment's vine tentacles wrap. */
+    UFUNCTION(BlueprintCallable, Category = "Chimera|Body Segment")
+    void SetWrapTentacleTarget(UMeshComponent* InTargetMesh);
+
+    /** Rebinds local tentacle VFX to this segment's GooBody static mesh. */
     void RefreshIdleTentacleSource();
 
 protected:
@@ -88,6 +94,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UCMChimeraIdleTentacleComponent> IdleTentacles;
 
+    /** Local cosmetic vines that grow over a nearby target mesh surface. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UCMChimeraWrapTentacleComponent> WrapTentacles;
+
     /** Head/Body/Tail meshes and their import-validation contract. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
         Category = "Chimera|Body Segment")
@@ -105,6 +115,7 @@ protected:
 
 private:
     void ApplyVisualPreset();
+    void RefreshWrapTentacleTarget();
 
     UFUNCTION()
     void OnRep_PresentationState();

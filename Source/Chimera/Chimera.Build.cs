@@ -24,7 +24,8 @@ public class Chimera : ModuleRules
 			"Niagara",
 			"Shared",
 			"OnlineSubsystem",
-			"OnlineSubsystemUtils"
+			"OnlineSubsystemUtils",
+			"ProceduralMeshComponent"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[]
