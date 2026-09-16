@@ -20,9 +20,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogChimeraWireframeHUD, Log, All);
 namespace
 {
 const FName WireColorParameter(TEXT("Color"));
-const TCHAR* WireframeMaterialPath =
-    TEXT("/Engine/EngineDebugMaterials/WireframeMaterial."
-         "WireframeMaterial");
+const TCHAR* WireframeMaterialPath = TEXT("/Game/Chimera/UI/HUD/M_HUDWireframe.M_HUDWireframe");
 constexpr float CaptureDistance = 2000.0f;
 
 FRotator MakeTopDownRotation(const float Yaw)
@@ -78,11 +76,9 @@ void ACMWireframeHUDCaptureActor::Initialize(
     HealthColorCurve = InHealthColorCurve;
     CaptureRotation = MakeTopDownRotation(InCaptureRotation.Yaw);
 
-    // Use the same gameplay material path in editor and cooked builds. This
-    // keeps the HUD independent of whether debug view modes are initialized.
-    WireframeMaterial = LoadObject<UMaterialInterface>(
-        nullptr,
-        WireframeMaterialPath);
+    // Project-owned material includes its cooked skeletal-mesh shader and
+    // wireframe rasterizer state, independent of debug view modes.
+    WireframeMaterial = LoadObject<UMaterialInterface>(nullptr, WireframeMaterialPath);
 
     const int32 ClampedSize = FMath::Clamp(RenderTargetSize, 128, 1024);
     RenderTarget = NewObject<UTextureRenderTarget2D>(this);
@@ -212,7 +208,6 @@ void ACMWireframeHUDCaptureActor::SynchronizeBodyProxies()
                 SourceMesh->GetSkeletalMeshAsset());
             Proxy->Mesh->RegisterComponent();
             ConfigureProxy(*Proxy->Mesh);
-            Proxy->Mesh->SetForceWireframe(true);
             Proxy->Mesh->SetLeaderPoseComponent(SourceMesh, true, false);
             Proxy->Material = CreateWireframeMaterial(Proxy->Mesh);
             if (Proxy->Material)
@@ -285,8 +280,8 @@ void ACMWireframeHUDCaptureActor::SynchronizePartProxies()
         USkeletalMeshComponent* SourceMesh = Part
             ? Part->GetPartMesh()
             : nullptr;
-        if (!Part || !Part->IsAlive() || !SourceMesh
-            || !SourceMesh->GetSkeletalMeshAsset())
+        if (!IsValid(Part) || Part->IsActorBeingDestroyed() || !Part->IsAlive()
+            || !IsValid(SourceMesh) || !SourceMesh->IsRegistered() || !SourceMesh->GetSkeletalMeshAsset())
         {
             RemovePartProxy(FlatSlotIndex);
             continue;
@@ -307,7 +302,6 @@ void ACMWireframeHUDCaptureActor::SynchronizePartProxies()
                 SourceMesh->GetSkeletalMeshAsset());
             Proxy.Mesh->RegisterComponent();
             ConfigureProxy(*Proxy.Mesh);
-            Proxy.Mesh->SetForceWireframe(true);
             Proxy.Mesh->SetLeaderPoseComponent(SourceMesh, true, false);
             Proxy.Material = CreateWireframeMaterial(Proxy.Mesh);
             if (Proxy.Material)
@@ -324,10 +318,6 @@ void ACMWireframeHUDCaptureActor::SynchronizePartProxies()
             SceneCapture->ShowOnlyComponent(Proxy.Mesh);
         }
 
-        // A Part can leave and return to the same slot between capture ticks.
-        // Force-refresh the leader map so a previous ragdoll pose cannot stay
-        // cached in the HUD-only follower mesh.
-        Proxy.Mesh->SetLeaderPoseComponent(SourceMesh, true, false);
         Proxy.Mesh->RefreshBoneTransforms();
         Proxy.Mesh->UpdateBounds();
         Proxy.Mesh->SetVisibility(true);
