@@ -452,6 +452,9 @@ void UCMVisionManagerSubsystem::DisableVisionSystem()
     bVisionSystemEnabled = false;
     RemovePostProcessBinding();
     RestoreOccluderRenderStates();
+    UE_LOG(LogChimeraVisionManager, Log,
+        TEXT("Vision system disabled for world %s."),
+        *GetNameSafe(GetWorld()));
 }
 
 void UCMVisionManagerSubsystem::EnableVisionSystem()
@@ -463,6 +466,9 @@ void UCMVisionManagerSubsystem::EnableVisionSystem()
 
     bVisionSystemEnabled = true;
     TimeUntilMaskUpdate = 0.0f;
+    UE_LOG(LogChimeraVisionManager, Log,
+        TEXT("Vision system enabled for world %s."),
+        *GetNameSafe(GetWorld()));
 }
 
 bool UCMVisionManagerSubsystem::IsVisionSystemEnabled() const

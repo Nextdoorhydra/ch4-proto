@@ -21,6 +21,7 @@
 #include "Sound/CMSoundTags.h"
 #include "Sound/NKMSoundSubsystem.h"
 #include "TimerManager.h"
+#include "Vision/CMVisionManagerSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChimeraMultiplayer, Log, All);
 
@@ -47,6 +48,12 @@ void ACMGameMode::BeginPlay()
 
     if (IsMainMenuMap())
     {
+        if (UCMVisionManagerSubsystem* VisionManager =
+                GetWorld()->GetSubsystem<UCMVisionManagerSubsystem>())
+        {
+            VisionManager->DisableVisionSystem();
+        }
+
         bMainMenuAssetsResolved = false;
         bMainMenuAssetsLoaded = false;
         bMainMenuPresentationReady = false;
@@ -68,6 +75,12 @@ void ACMGameMode::BeginPlay()
     }
     else if (IsGameplayMap())
     {
+        if (UCMVisionManagerSubsystem* VisionManager =
+                GetWorld()->GetSubsystem<UCMVisionManagerSubsystem>())
+        {
+            VisionManager->EnableVisionSystem();
+        }
+
         if (ACMGameState* CMGameState = GetGameState<ACMGameState>())
         {
             CMGameState->SetSoloTestMode(IsSoloTestMode());
@@ -186,6 +199,12 @@ void ACMGameMode::GenericPlayerInitialization(AController* C)
 
     AssignPlayerSlots();
     AssignPlayerColors();
+
+    if (ACMPlayerState* CMPlayerState =
+            C ? C->GetPlayerState<ACMPlayerState>() : nullptr)
+    {
+        CMPlayerState->SetVisionSystemEnabled(IsGameplayMap());
+    }
 
     if (!IsGameplayMap())
     {
