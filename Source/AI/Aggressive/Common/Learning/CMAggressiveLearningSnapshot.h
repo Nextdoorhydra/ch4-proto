@@ -21,6 +21,9 @@ namespace CMAggressiveLearningSnapshot
     /** 이어서 학습하고 추론에 사용할 최신 네트워크 폴더를 반환한다. */
     AI_API FString GetLatestDirectory(ECMAggressiveLearningSnapshotProfile Profile);
 
+    /** cooked 빌드에서는 패키지에 포함된 배포용 네트워크 폴더를 반환한다. */
+    AI_API FString GetInferenceDirectory(ECMAggressiveLearningSnapshotProfile Profile);
+
     /** 이전 버전 정책으로 초기화할 폴더를 반환한다. 프로필에 없으면 빈 문자열이다. */
     AI_API FString GetBootstrapDirectory(ECMAggressiveLearningSnapshotProfile Profile);
 

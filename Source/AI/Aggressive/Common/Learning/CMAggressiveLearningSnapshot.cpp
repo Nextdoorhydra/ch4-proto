@@ -5,9 +5,12 @@
 #include "LearningAgentsNeuralNetwork.h"
 #include "LearningAgentsPolicy.h"
 #include "LearningNeuralNetwork.h"
+#include "HAL/PlatformProperties.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "UObject/Package.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogCMAggressiveLearningSnapshot, Log, All);
 
 namespace
 {
@@ -82,19 +85,29 @@ namespace
     bool LoadCompatibleNetworkSnapshot(ULearningAgentsNeuralNetwork* Network, const FString& FilePath)
     {
         if (!Network || !Network->NeuralNetworkData)
+        {
+            UE_LOG(LogCMAggressiveLearningSnapshot, Error, TEXT("Inference network object is invalid. File=%s"), *FilePath);
             return false;
+        }
 
         TArray<uint8> SnapshotBytes;
         if (!FFileHelper::LoadFileToArray(SnapshotBytes, *FilePath))
+        {
+            UE_LOG(LogCMAggressiveLearningSnapshot, Error, TEXT("Inference snapshot could not be read. File=%s"), *FilePath);
             return false;
+        }
 
         ULearningNeuralNetworkData* SnapshotData = NewObject<ULearningNeuralNetworkData>(GetTransientPackage());
         if (!SnapshotData || !SnapshotData->LoadFromSnapshot(SnapshotBytes))
+        {
+            UE_LOG(LogCMAggressiveLearningSnapshot, Error, TEXT("Inference snapshot is invalid. File=%s"), *FilePath);
             return false;
+        }
 
         const ULearningNeuralNetworkData* CurrentData = Network->NeuralNetworkData;
         if (SnapshotData->GetInputSize() != CurrentData->GetInputSize() || SnapshotData->GetOutputSize() != CurrentData->GetOutputSize() || SnapshotData->GetCompatibilityHash() != CurrentData->GetCompatibilityHash())
         {
+            UE_LOG(LogCMAggressiveLearningSnapshot, Error, TEXT("Inference snapshot is incompatible with the runtime network. File=%s"), *FilePath);
             return false;
         }
 
@@ -102,7 +115,12 @@ namespace
         SnapshotFile.FilePath = FilePath;
         Network->LoadNetworkFromSnapshot(SnapshotFile);
 
-        return Network->NeuralNetworkData->GetContentHash() == SnapshotData->GetContentHash();
+        const bool bContentMatches = Network->NeuralNetworkData->GetContentHash() == SnapshotData->GetContentHash();
+        if (!bContentMatches)
+        {
+            UE_LOG(LogCMAggressiveLearningSnapshot, Error, TEXT("Inference snapshot content verification failed. File=%s"), *FilePath);
+        }
+        return bContentMatches;
     }
 } // namespace
 
@@ -114,6 +132,15 @@ FString CMAggressiveLearningSnapshot::GetRootDirectory(ECMAggressiveLearningSnap
 FString CMAggressiveLearningSnapshot::GetLatestDirectory(ECMAggressiveLearningSnapshotProfile Profile)
 {
     return FPaths::Combine(GetRootDirectory(Profile), TEXT("TrainingLatest"));
+}
+
+FString CMAggressiveLearningSnapshot::GetInferenceDirectory(ECMAggressiveLearningSnapshotProfile Profile)
+{
+    if (!FPlatformProperties::RequiresCookedData())
+    {
+        return GetLatestDirectory(Profile);
+    }
+    return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectContentDir(), TEXT("AI/Models"), GetSnapshotProfile(Profile).RootRelativePath, TEXT("TrainingLatest")));
 }
 
 FString CMAggressiveLearningSnapshot::GetBootstrapDirectory(ECMAggressiveLearningSnapshotProfile Profile)
@@ -173,12 +200,15 @@ bool CMAggressiveLearningSnapshot::LoadTrainingNetworks(ECMAggressiveLearningSna
 // 최신 정책을 우선 사용하고 필요하면 호환 가능한 부트스트랩 정책으로 추론을 초기화한다.
 bool CMAggressiveLearningSnapshot::LoadInferenceNetworks(ECMAggressiveLearningSnapshotProfile Profile, ULearningAgentsPolicy& Policy)
 {
-    const FString Directory = GetLatestDirectory(Profile);
+    const FString Directory = GetInferenceDirectory(Profile);
     const bool bEncoderLoaded = LoadCompatibleNetworkSnapshot(Policy.GetEncoderNetworkAsset(), GetEncoderFilePath(Profile, Directory));
     const bool bPolicyLoaded = LoadCompatibleNetworkSnapshot(Policy.GetPolicyNetworkAsset(), GetPolicyFilePath(Profile, Directory));
     const bool bDecoderLoaded = LoadCompatibleNetworkSnapshot(Policy.GetDecoderNetworkAsset(), GetDecoderFilePath(Profile, Directory));
     if (!bEncoderLoaded || !bPolicyLoaded || !bDecoderLoaded)
+    {
+        UE_LOG(LogCMAggressiveLearningSnapshot, Error, TEXT("%s inference networks failed to load. Directory=%s"), GetSnapshotProfile(Profile).DisplayName, *Directory);
         return false;
+    }
 
     return true;
 }

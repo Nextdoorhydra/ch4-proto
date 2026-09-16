@@ -134,7 +134,7 @@ void ACMCentipedeLearningInferenceCoordinator::StopInference()
 
 FString ACMCentipedeLearningInferenceCoordinator::GetSnapshotDirectory() const
 {
-    return CMAggressiveLearningSnapshot::GetLatestDirectory(ECMAggressiveLearningSnapshotProfile::Centipede);
+    return CMAggressiveLearningSnapshot::GetInferenceDirectory(ECMAggressiveLearningSnapshotProfile::Centipede);
 }
 
 // Centipede 관측·다리 행동 Interactor와 저장 정책을 단일 에이전트용으로 생성한다.

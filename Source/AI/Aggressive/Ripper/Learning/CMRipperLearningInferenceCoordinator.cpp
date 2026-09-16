@@ -139,7 +139,7 @@ bool ACMRipperLearningInferenceCoordinator::IsInferenceRunning() const
 // 추론에 사용하는 Ripper AI 최신 스냅샷 폴더를 반환한다.
 FString ACMRipperLearningInferenceCoordinator::GetSnapshotDirectory() const
 {
-    return CMAggressiveLearningSnapshot::GetLatestDirectory(ECMAggressiveLearningSnapshotProfile::Ripper);
+    return CMAggressiveLearningSnapshot::GetInferenceDirectory(ECMAggressiveLearningSnapshotProfile::Ripper);
 }
 
 // 세 다리 Interactor와 저장된 Ripper AI 정책을 생성한다.

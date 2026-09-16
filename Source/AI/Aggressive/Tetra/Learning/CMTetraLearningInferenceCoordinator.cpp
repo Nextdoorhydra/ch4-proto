@@ -207,7 +207,7 @@ ECMTetraInterferenceState ACMTetraLearningInferenceCoordinator::GetInterferenceS
 
 FString ACMTetraLearningInferenceCoordinator::GetSnapshotDirectory() const
 {
-    return CMAggressiveLearningSnapshot::GetLatestDirectory(ECMAggressiveLearningSnapshotProfile::Tetra);
+    return CMAggressiveLearningSnapshot::GetInferenceDirectory(ECMAggressiveLearningSnapshotProfile::Tetra);
 }
 
 // Tetra 관측·행동 Interactor와 저장 정책을 단일 추론 에이전트용으로 생성한다.
