@@ -3,8 +3,10 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/DataValidation.h"
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -456,6 +458,41 @@ bool FCMChimeraWrapTentacleRuntimeTest::RunTest(
                 Wrap->RuntimeTentacles.IsValidIndex(0)
                 && Wrap->RuntimeTentacles[0].TubeMesh == FirstPooledMesh);
         }
+    }
+
+    USkeletalMesh* SkeletalCube = LoadObject<USkeletalMesh>(
+        nullptr,
+        TEXT("/Engine/EngineMeshes/SkeletalCube.SkeletalCube"));
+    USkeletalMeshComponent* TransitioningMesh = Owner
+        ? NewObject<USkeletalMeshComponent>(
+            Owner,
+            TEXT("TransitioningTentacleSource"))
+        : nullptr;
+    UCMChimeraIdleTentacleComponent* Idle = Owner
+        ? NewObject<UCMChimeraIdleTentacleComponent>(
+            Owner,
+            TEXT("IdleTeardownSafetyComponent"))
+        : nullptr;
+    TestNotNull(TEXT("Engine skeletal cube mesh is available"), SkeletalCube);
+    if (Owner && Root && Wrap && Idle && TransitioningMesh && SkeletalCube)
+    {
+        Owner->AddInstanceComponent(TransitioningMesh);
+        TransitioningMesh->SetupAttachment(Root);
+        TransitioningMesh->SetSkeletalMeshAsset(SkeletalCube);
+        TransitioningMesh->RegisterComponent();
+        if (FApp::CanEverRender())
+        {
+            TestNotNull(TEXT("Registered skeletal mesh has a render mesh object"),
+                TransitioningMesh->GetMeshObject());
+        }
+
+        TransitioningMesh->SetVisibility(false);
+        TestFalse(TEXT("Hidden transition mesh should not be added to the scene"),
+            TransitioningMesh->ShouldComponentAddToScene());
+        TestFalse(TEXT("Wrap sampling skips a transitioning skeletal mesh"),
+            Wrap->BuildSkeletalSurfaceCandidates(*TransitioningMesh));
+        TestFalse(TEXT("Idle sampling skips a transitioning skeletal mesh"),
+            Idle->BuildSkeletalSurfaceCandidates(*TransitioningMesh));
     }
 
     World->DestroyWorld(false);

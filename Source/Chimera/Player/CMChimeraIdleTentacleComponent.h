@@ -200,6 +200,8 @@ protected:
     TObjectPtr<UMaterialInterface> TentacleMaterial;
 
 private:
+    friend class FCMChimeraWrapTentacleRuntimeTest;
+
     struct FSurfaceCandidate
     {
         FVector Position = FVector::ZeroVector;

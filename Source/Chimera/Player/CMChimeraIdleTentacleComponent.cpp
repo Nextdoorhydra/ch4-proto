@@ -277,6 +277,10 @@ void UCMChimeraIdleTentacleComponent::OnComponentDestroyed(
 
 bool UCMChimeraIdleTentacleComponent::BuildSurfaceCandidates()
 {
+    if (!IsValid(SourceMesh) || !SourceMesh->IsRegistered())
+    {
+        return false;
+    }
     if (UStaticMeshComponent* StaticSource =
         Cast<UStaticMeshComponent>(SourceMesh))
     {
@@ -293,7 +297,13 @@ bool UCMChimeraIdleTentacleComponent::BuildSurfaceCandidates()
 bool UCMChimeraIdleTentacleComponent::BuildSkeletalSurfaceCandidates(
     USkeletalMeshComponent& SkeletalSource)
 {
-    if (!SkeletalSource.GetMeshObject())
+    const USkinnedMeshComponent* LeaderPose =
+        SkeletalSource.LeaderPoseComponent.Get();
+    if (!SkeletalSource.IsRenderStateCreated()
+        || !SkeletalSource.ShouldComponentAddToScene()
+        || SkeletalSource.LeaderPoseComponent.IsStale()
+        || (LeaderPose && !LeaderPose->IsRegistered())
+        || !SkeletalSource.GetMeshObject())
     {
         return false;
     }

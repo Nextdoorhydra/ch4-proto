@@ -162,7 +162,8 @@ void ACMWireframeHUDCaptureActor::SynchronizeBodyProxies()
     TSet<USkeletalMeshComponent*> ActiveSourceMeshes;
     for (USkeletalMeshComponent* SourceMesh : SourceMeshes)
     {
-        if (!SourceMesh || !SourceMesh->GetSkeletalMeshAsset())
+        if (!IsValid(SourceMesh) || !SourceMesh->IsRegistered()
+            || !SourceMesh->GetSkeletalMeshAsset())
         {
             continue;
         }
@@ -290,7 +291,8 @@ void ACMWireframeHUDCaptureActor::SynchronizePartProxies()
         FPartProxy& Proxy = PartProxies[FlatSlotIndex];
         if (Proxy.SourcePart.Get() != Part || !Proxy.Mesh
             || Proxy.Mesh->GetSkeletalMeshAsset()
-                != SourceMesh->GetSkeletalMeshAsset())
+                != SourceMesh->GetSkeletalMeshAsset()
+            || Proxy.Mesh->LeaderPoseComponent.Get() != SourceMesh)
         {
             RemovePartProxy(FlatSlotIndex);
             Proxy.Address = Address;

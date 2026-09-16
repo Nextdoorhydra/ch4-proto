@@ -422,6 +422,10 @@ void UCMChimeraWrapTentacleComponent::OnComponentDestroyed(
 bool UCMChimeraWrapTentacleComponent::BuildSurfaceCandidates()
 {
     SurfaceCandidates.Reset();
+    if (!IsValid(TargetMesh) || !TargetMesh->IsRegistered())
+    {
+        return false;
+    }
     if (UStaticMeshComponent* StaticTarget =
         Cast<UStaticMeshComponent>(TargetMesh))
     {
@@ -443,7 +447,13 @@ bool UCMChimeraWrapTentacleComponent::BuildSkeletalSurfaceCandidates(
         return BuildSkeletalPhysicsSurfaceCandidates(SkeletalTarget);
     }
 
-    if (!SkeletalTarget.GetMeshObject())
+    const USkinnedMeshComponent* LeaderPose =
+        SkeletalTarget.LeaderPoseComponent.Get();
+    if (!SkeletalTarget.IsRenderStateCreated()
+        || !SkeletalTarget.ShouldComponentAddToScene()
+        || SkeletalTarget.LeaderPoseComponent.IsStale()
+        || (LeaderPose && !LeaderPose->IsRegistered())
+        || !SkeletalTarget.GetMeshObject())
     {
         return false;
     }
