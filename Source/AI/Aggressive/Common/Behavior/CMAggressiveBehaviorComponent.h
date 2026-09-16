@@ -27,6 +27,7 @@ enum class ECMAggressiveBehaviorProfile : uint8
 namespace CMAggressiveBehaviorRules
 {
     AI_API bool HasMadeGoalProgress(float PreviousDistance, float CurrentDistance, float RequiredProgressDistance);
+    AI_API bool HasMovedMinimumDistance(const FVector& PreviousLocation, const FVector& CurrentLocation, float RequiredMovementDistance);
     AI_API bool IsRipperAttackReady(double CurrentTime, double NextAttackTime);
 }
 
@@ -68,7 +69,7 @@ private:
     bool UpdateStuckRecovery(double CurrentTime);
     bool UpdateStuckDetection(double CurrentTime);
     void BeginStuckRecovery(double CurrentTime);
-    void BeginRipperEscape(double CurrentTime, bool bReverseFirst);
+    void BeginStuckEscape(double CurrentTime, bool bReverseFirst);
     void ApplyStuckRecoveryReverseVelocity() const;
     void ResetStuckTracking();
     bool HasRecentRipperBlockingHit(double CurrentTime) const;
@@ -95,6 +96,9 @@ private:
     bool PerformRipperAttack(AActor& Target);
     bool PerformCentipedeAttack(AActor& Target);
     void BeginTetraDash();
+    bool BeginTetraRepositioning(double CurrentTime);
+    bool IsTetraDashPathClear(FVector StartLocation, FVector TargetLocation) const;
+    void CancelTetraDashForRepositioning(double CurrentTime);
     void FinishTetraDashWithoutHit();
     void HandleTetraKnockbackFinished();
     void DestroyInferenceCoordinator();
@@ -161,6 +165,7 @@ private:
     bool bReversingFromStuck = false;
     bool bCompletingStuckRecoveryMove = false;
     bool bEscapingFromStuckTarget = false;
+    bool bTetraRepositioning = false;
     UPROPERTY(Replicated)
     bool bHasWanderGoal = false;
 

@@ -22,6 +22,8 @@ bool FCMAggressiveStuckProgressRulesTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("Small progress toward the goal remains stuck"), CMAggressiveBehaviorRules::HasMadeGoalProgress(1000.0f, 950.0f, 75.0f));
     TestTrue(TEXT("Required progress toward the goal resets stuck tracking"), CMAggressiveBehaviorRules::HasMadeGoalProgress(1000.0f, 925.0f, 75.0f));
     TestFalse(TEXT("Movement away from the goal never counts as progress"), CMAggressiveBehaviorRules::HasMadeGoalProgress(1000.0f, 1100.0f, 75.0f));
+    TestFalse(TEXT("Tetra jitter below the movement threshold remains stuck"), CMAggressiveBehaviorRules::HasMovedMinimumDistance(FVector::ZeroVector, FVector(14.9f, 0.0f, 20.0f), 15.0f));
+    TestTrue(TEXT("Tetra planar movement at the threshold resets stuck tracking"), CMAggressiveBehaviorRules::HasMovedMinimumDistance(FVector::ZeroVector, FVector(15.0f, 0.0f, 20.0f), 15.0f));
     TestFalse(TEXT("Ripper attack stays on cooldown before its ready time"), CMAggressiveBehaviorRules::IsRipperAttackReady(9.9, 10.0));
     TestTrue(TEXT("Ripper attack becomes ready at its ready time"), CMAggressiveBehaviorRules::IsRipperAttackReady(10.0, 10.0));
     return true;

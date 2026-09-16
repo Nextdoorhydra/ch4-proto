@@ -47,9 +47,13 @@ namespace CMAggressiveBehavior
     constexpr float TetraSightTurnDegrees = 90.0f;
     constexpr float TetraDashDuration = 1.0f;
     constexpr float TetraDashSpeedMultiplier = 3.0f;
+    constexpr float TetraRepositionMinimumDistance = 250.0f;
+    constexpr float TetraRepositionRadius = 600.0f;
+    constexpr int32 TetraRepositionSampleAttempts = 16;
     constexpr float TetraSelfKnockbackDistance = 300.0f;
     constexpr float TetraPlayerKnockbackDistance = 150.0f;
     constexpr float StuckDetectionSeconds = 3.0f;
+    constexpr float TetraStuckDetectionSeconds = 1.0f;
     constexpr float StuckMovementDistance = 15.0f;
     constexpr float RipperStuckDetectionSeconds = 2.0f;
     constexpr float RipperStuckMovementDistance = 20.0f;
@@ -117,6 +121,11 @@ namespace CMAggressiveBehavior
 bool CMAggressiveBehaviorRules::HasMadeGoalProgress(const float PreviousDistance, const float CurrentDistance, const float RequiredProgressDistance)
 {
     return PreviousDistance - CurrentDistance >= FMath::Max(RequiredProgressDistance, 0.0f);
+}
+
+bool CMAggressiveBehaviorRules::HasMovedMinimumDistance(const FVector& PreviousLocation, const FVector& CurrentLocation, const float RequiredMovementDistance)
+{
+    return FVector::DistSquared2D(PreviousLocation, CurrentLocation) >= FMath::Square(FMath::Max(RequiredMovementDistance, 0.0f));
 }
 
 bool CMAggressiveBehaviorRules::IsRipperAttackReady(const double CurrentTime, const double NextAttackTime)
@@ -204,6 +213,7 @@ void UCMAggressiveBehaviorComponent::SetBehaviorEnabled(const bool bEnabled)
         bReversingFromStuck = false;
         bCompletingStuckRecoveryMove = false;
         bEscapingFromStuckTarget = false;
+        bTetraRepositioning = false;
         StuckEscapeStartLocation = FVector::ZeroVector;
         RipperMoveFailureStartTime = 0.0;
         LastRipperBlockingHitTime = 0.0;
@@ -222,6 +232,7 @@ void UCMAggressiveBehaviorComponent::SetBehaviorEnabled(const bool bEnabled)
     bReversingFromStuck = false;
     bCompletingStuckRecoveryMove = false;
     bEscapingFromStuckTarget = false;
+    bTetraRepositioning = false;
     StuckEscapeStartLocation = FVector::ZeroVector;
     RipperMoveFailureStartTime = 0.0;
     LastRipperBlockingHitTime = 0.0;
@@ -317,6 +328,12 @@ void UCMAggressiveBehaviorComponent::UpdateBehavior()
 // 물리 몸체가 전용 NavMesh 밖으로 밀리면 전체 몸체를 가장 가까운 유효 위치로 복귀시킨다.
 bool UCMAggressiveBehaviorComponent::RecoverToNavigation()
 {
+    // Ripper의 물리 임펄스 이동 중 NavMesh 경계 오차를 이탈로 오인해 직전 위치로 반복 스냅하지 않는다.
+    if (Profile == ECMAggressiveBehaviorProfile::Ripper && IsMoveRunning())
+    {
+        return false;
+    }
+
     const bool bPreserveRipperEscape = Profile == ECMAggressiveBehaviorProfile::Ripper && bEscapingFromStuckTarget;
     const FVector PreservedEscapeStartLocation = StuckEscapeStartLocation;
     UCMAggressiveOmnidirectionalPathComponent* PathMovement = OwnerPawn ? OwnerPawn->FindComponentByClass<UCMAggressiveOmnidirectionalPathComponent>() : nullptr;
@@ -441,12 +458,13 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckDetection(const double CurrentTi
 {
     if (Profile == ECMAggressiveBehaviorProfile::Ripper && RipperMoveFailureStartTime > 0.0 && CurrentTime - RipperMoveFailureStartTime >= CMAggressiveBehavior::RipperStuckDetectionSeconds)
     {
-        BeginRipperEscape(CurrentTime, HasRecentRipperBlockingHit(CurrentTime));
+        BeginStuckEscape(CurrentTime, HasRecentRipperBlockingHit(CurrentTime));
 
         return true;
     }
 
-    const bool bShouldTrack = bMoveIssued && IsMoveRunning() && (State == ECMAggressiveAIState::Searching || State == ECMAggressiveAIState::Chasing);
+    const bool bTetraDash = Profile == ECMAggressiveBehaviorProfile::Tetra && State == ECMAggressiveAIState::Attacking;
+    const bool bShouldTrack = bTetraDash || (bMoveIssued && IsMoveRunning() && (State == ECMAggressiveAIState::Searching || State == ECMAggressiveAIState::Chasing));
     if (!bShouldTrack)
     {
         StuckProgressStartTime = 0.0;
@@ -455,7 +473,7 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckDetection(const double CurrentTi
 
     const FVector CurrentLocation = GetNavigationLocation();
     const float RequiredProgressDistance = Profile == ECMAggressiveBehaviorProfile::Ripper ? CMAggressiveBehavior::RipperStuckMovementDistance : CMAggressiveBehavior::StuckMovementDistance;
-    const float DetectionSeconds = Profile == ECMAggressiveBehaviorProfile::Ripper ? CMAggressiveBehavior::RipperStuckDetectionSeconds : CMAggressiveBehavior::StuckDetectionSeconds;
+    const float DetectionSeconds = Profile == ECMAggressiveBehaviorProfile::Tetra ? CMAggressiveBehavior::TetraStuckDetectionSeconds : Profile == ECMAggressiveBehaviorProfile::Ripper ? CMAggressiveBehavior::RipperStuckDetectionSeconds : CMAggressiveBehavior::StuckDetectionSeconds;
     if (StuckProgressStartTime <= 0.0)
     {
         ResetStuckTracking();
@@ -463,7 +481,8 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckDetection(const double CurrentTi
     }
     const float PreviousGoalDistance = FVector::Dist2D(StuckProgressLocation, LastMoveGoal);
     const float CurrentGoalDistance = FVector::Dist2D(CurrentLocation, LastMoveGoal);
-    if (CMAggressiveBehaviorRules::HasMadeGoalProgress(PreviousGoalDistance, CurrentGoalDistance, RequiredProgressDistance))
+    const bool bMadeProgress = Profile == ECMAggressiveBehaviorProfile::Tetra ? CMAggressiveBehaviorRules::HasMovedMinimumDistance(StuckProgressLocation, CurrentLocation, RequiredProgressDistance) : CMAggressiveBehaviorRules::HasMadeGoalProgress(PreviousGoalDistance, CurrentGoalDistance, RequiredProgressDistance);
+    if (bMadeProgress)
     {
         ResetStuckTracking();
         return false;
@@ -476,7 +495,14 @@ bool UCMAggressiveBehaviorComponent::UpdateStuckDetection(const double CurrentTi
     if (Profile == ECMAggressiveBehaviorProfile::Ripper)
     {
         const bool bBlockedByObstacle = HasRecentRipperBlockingHit(CurrentTime);
-        BeginRipperEscape(CurrentTime, bBlockedByObstacle);
+        BeginStuckEscape(CurrentTime, bBlockedByObstacle);
+
+        return true;
+    }
+
+    if (Profile == ECMAggressiveBehaviorProfile::Tetra && (State == ECMAggressiveAIState::Chasing || State == ECMAggressiveAIState::Attacking))
+    {
+        CancelTetraDashForRepositioning(CurrentTime);
 
         return true;
     }
@@ -513,8 +539,8 @@ void UCMAggressiveBehaviorComponent::BeginStuckRecovery(const double CurrentTime
 
 }
 
-// Ripper 추적과 현재 이동점을 버리고 필요할 때 몸체 후방 이탈 후 다른 임의 지점으로 이동한다.
-void UCMAggressiveBehaviorComponent::BeginRipperEscape(const double CurrentTime, const bool bReverseFirst)
+// 막힘을 유발한 추적과 현재 이동점을 버리고 필요할 때 몸체 후방 이탈 후 다른 임의 지점으로 이동한다.
+void UCMAggressiveBehaviorComponent::BeginStuckEscape(const double CurrentTime, const bool bReverseFirst)
 {
     const FVector CurrentLocation = GetNavigationLocation();
     if (!bEscapingFromStuckTarget)
@@ -655,6 +681,22 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
         return;
     }
 
+    if (Profile == ECMAggressiveBehaviorProfile::Tetra && bTetraRepositioning)
+    {
+        if (IsMoveRunning())
+        {
+            return;
+        }
+        bTetraRepositioning = false;
+        bMoveIssued = false;
+        if (!CanSeeActor(*CurrentTarget))
+        {
+            BeginReturningHome();
+
+            return;
+        }
+    }
+
     if (Profile == ECMAggressiveBehaviorProfile::Ripper)
     {
         ACMSacrificeCharacter* CurrentSacrifice = Cast<ACMSacrificeCharacter>(CurrentTarget);
@@ -673,6 +715,16 @@ void UCMAggressiveBehaviorComponent::UpdateChasing()
     const float DistanceSquared = FVector::DistSquared2D(GetAttackOriginLocation(), GetAttackTargetLocation(*CurrentTarget));
     if (DistanceSquared <= FMath::Square(AttackDistance))
     {
+        if (Profile == ECMAggressiveBehaviorProfile::Tetra && !IsTetraDashPathClear(GetNavigationLocation(), TargetLocation))
+        {
+            const double CurrentTime = GetWorld()->GetTimeSeconds();
+            if (CurrentTime >= NextActionTime)
+            {
+                BeginTetraRepositioning(CurrentTime);
+            }
+            return;
+        }
+
         StopMove();
         if (Profile == ECMAggressiveBehaviorProfile::Ripper)
         {
@@ -852,6 +904,7 @@ void UCMAggressiveBehaviorComponent::BeginChasing(AActor* NewTarget)
         && !IsValidTarget(CurrentTarget);
     CurrentTarget = NewTarget;
     State = ECMAggressiveAIState::Chasing;
+    bTetraRepositioning = false;
     bReturningHome = false;
     NextActionTime = 0.0;
     bMoveIssued = StartMove(CurrentTarget->GetActorLocation(), GetAttackDistance());
@@ -878,6 +931,7 @@ void UCMAggressiveBehaviorComponent::BeginReturningHome()
     StopMove();
     CurrentTarget = nullptr;
     State = ECMAggressiveAIState::Searching;
+    bTetraRepositioning = false;
     bReturningHome = true;
     bMoveIssued = false;
     RipperMoveFailureStartTime = 0.0;
@@ -962,6 +1016,10 @@ bool UCMAggressiveBehaviorComponent::StartMove(const FVector Goal, const float A
         break;
     default:
         break;
+    }
+    if (bMoveStarted)
+    {
+        ResetStuckTracking();
     }
     if (Profile == ECMAggressiveBehaviorProfile::Ripper)
     {
@@ -1314,6 +1372,87 @@ void UCMAggressiveBehaviorComponent::BeginTetraDash()
     DashDirection = (CurrentTarget->GetActorLocation() - GetNavigationLocation()).GetSafeNormal2D(SMALL_NUMBER, OwnerPawn->GetActorForwardVector());
     CastChecked<ACMTetraPawn>(OwnerPawn)->GetAccelerationMovement()->SetMaximumSpeedMultiplier(CMAggressiveBehavior::TetraDashSpeedMultiplier);
     DashEndTime = GetWorld()->GetTimeSeconds() + CMAggressiveBehavior::TetraDashDuration;
+    ResetStuckTracking();
+}
+
+// 플레이어 주변에서 경로로 도달할 수 있고 돌진 통로가 열린 가장 가까운 위치를 선택한다.
+bool UCMAggressiveBehaviorComponent::BeginTetraRepositioning(const double CurrentTime)
+{
+    UCMAggressiveOmnidirectionalPathComponent* PathMovement = OwnerPawn ? OwnerPawn->FindComponentByClass<UCMAggressiveOmnidirectionalPathComponent>() : nullptr;
+    if (!PathMovement || !IsValidTarget(CurrentTarget))
+    {
+        return false;
+    }
+
+    const FVector CurrentLocation = GetNavigationLocation();
+    const FVector TargetLocation = CurrentTarget->GetActorLocation();
+    FVector BestGoal = FVector::ZeroVector;
+    float BestPathLength = TNumericLimits<float>::Max();
+    for (int32 Attempt = 0; Attempt < CMAggressiveBehavior::TetraRepositionSampleAttempts; ++Attempt)
+    {
+        FVector Candidate;
+        if (!PathMovement->FindRandomReachableLocation(TargetLocation, CMAggressiveBehavior::TetraRepositionRadius, Candidate))
+        {
+            continue;
+        }
+
+        const float TargetDistanceSquared = FVector::DistSquared2D(Candidate, TargetLocation);
+        if (TargetDistanceSquared < FMath::Square(CMAggressiveBehavior::TetraRepositionMinimumDistance) || TargetDistanceSquared > FMath::Square(CMAggressiveBehavior::TetraDashStartDistance))
+        {
+            continue;
+        }
+
+        const FVector CandidateDashStart(Candidate.X, Candidate.Y, CurrentLocation.Z);
+        float PathLength = 0.0f;
+        if (!IsTetraDashPathClear(CandidateDashStart, TargetLocation)
+            || !PathMovement->CalculateNavigationPathLength(CurrentLocation, Candidate, PathLength)
+            || PathLength >= BestPathLength)
+        {
+            continue;
+        }
+        BestGoal = Candidate;
+        BestPathLength = PathLength;
+    }
+
+    bMoveIssued = BestPathLength < TNumericLimits<float>::Max() && StartMove(BestGoal, CMAggressiveBehavior::WanderAcceptanceRadius);
+    bTetraRepositioning = bMoveIssued;
+    NextActionTime = bMoveIssued ? 0.0 : CurrentTime + CMAggressiveBehavior::FailedMoveRetryInterval;
+    return bMoveIssued;
+}
+
+// Tetra 몸체 크기의 평면 Sweep으로 플레이어까지의 직선 돌진 통로를 검사한다.
+bool UCMAggressiveBehaviorComponent::IsTetraDashPathClear(const FVector StartLocation, const FVector TargetLocation) const
+{
+    const UPrimitiveComponent* Body = GetMovementBody();
+    UWorld* World = GetWorld();
+    if (!Body || !World)
+    {
+        return false;
+    }
+
+    const FVector SweepExtent = Body->Bounds.BoxExtent * FVector(0.9f, 0.9f, 0.8f);
+    const FVector SweepEnd(TargetLocation.X, TargetLocation.Y, StartLocation.Z);
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CMTetraDashClearance), false, OwnerPawn);
+    QueryParams.AddIgnoredActor(CurrentTarget);
+    FHitResult Hit;
+    return !World->SweepSingleByProfile(Hit, StartLocation, SweepEnd, Body->GetComponentQuat(), Body->GetCollisionProfileName(), FCollisionShape::MakeBox(SweepExtent), QueryParams);
+}
+
+// 막힌 돌진을 종료하되 타깃을 유지하고 안전한 돌진 위치 재탐색으로 전환한다.
+void UCMAggressiveBehaviorComponent::CancelTetraDashForRepositioning(const double CurrentTime)
+{
+    CastChecked<ACMTetraPawn>(OwnerPawn)->GetAccelerationMovement()->SetMaximumSpeedMultiplier(1.0f);
+    if (UPrimitiveComponent* Body = GetMovementBody())
+    {
+        const float VerticalSpeed = Body->GetPhysicsLinearVelocity().Z;
+        Body->SetPhysicsLinearVelocity(FVector::UpVector * VerticalSpeed);
+    }
+    StopMove();
+    State = ECMAggressiveAIState::Chasing;
+    bTetraRepositioning = false;
+    bReturningHome = false;
+    bHasWanderGoal = false;
+    BeginTetraRepositioning(CurrentTime);
 }
 
 void UCMAggressiveBehaviorComponent::FinishTetraDashWithoutHit()
@@ -1348,7 +1487,7 @@ void UCMAggressiveBehaviorComponent::HandleTetraKnockbackFinished()
     BeginWaiting(10.0f);
 }
 
-// Tetra 돌진이 플레이어와 충돌하면 양쪽 넉백을 적용하고 대기 상태로 전환한다.
+// Tetra 돌진 충돌 시 장애물이면 타깃을 유지한 채 재배치하고 플레이어면 양쪽 넉백 후 대기한다.
 void UCMAggressiveBehaviorComponent::HandleOwnerHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit)
 {
     if (Profile == ECMAggressiveBehaviorProfile::Ripper)
@@ -1364,8 +1503,21 @@ void UCMAggressiveBehaviorComponent::HandleOwnerHit(AActor* SelfActor, AActor* O
         return;
     }
 
-    if (Profile != ECMAggressiveBehaviorProfile::Tetra || State != ECMAggressiveAIState::Attacking || OtherActor != CurrentTarget)
+    if (Profile != ECMAggressiveBehaviorProfile::Tetra || State != ECMAggressiveAIState::Attacking)
     {
+        return;
+    }
+
+    if (OtherActor != CurrentTarget)
+    {
+        const FVector PlanarHitNormal = Hit.ImpactNormal.GetSafeNormal2D();
+        if (Hit.bBlockingHit
+            && !PlanarHitNormal.IsNearlyZero()
+            && FVector::DotProduct(DashDirection, PlanarHitNormal) < -UE_KINDA_SMALL_NUMBER)
+        {
+            const UWorld* World = GetWorld();
+            CancelTetraDashForRepositioning(World ? World->GetTimeSeconds() : 0.0);
+        }
         return;
     }
 
