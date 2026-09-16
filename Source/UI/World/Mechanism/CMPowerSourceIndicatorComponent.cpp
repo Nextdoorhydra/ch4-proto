@@ -30,6 +30,7 @@ void UCMPowerSourceIndicatorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    FadeEndDistance = 0.0f;
     SetBlendMode(EWidgetBlendMode::Transparent);
     SetTwoSided(true);
     PowerSource = ResolvePowerSource();

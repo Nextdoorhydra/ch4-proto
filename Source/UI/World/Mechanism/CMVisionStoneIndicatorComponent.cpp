@@ -24,6 +24,7 @@ void UCMVisionStoneIndicatorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    FadeEndDistance = 0.0f;
     SetBlendMode(EWidgetBlendMode::Transparent);
     SetTwoSided(true);
     VisionStone = Cast<ACMVisionStoneBase>(GetOwner());

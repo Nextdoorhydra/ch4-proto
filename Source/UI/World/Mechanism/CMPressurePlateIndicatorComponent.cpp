@@ -25,6 +25,7 @@ void UCMPressurePlateIndicatorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    FadeEndDistance = 0.0f;
     // Keep pre-existing BP component templates from restoring the old default.
     SetBlendMode(EWidgetBlendMode::Transparent);
     SetTwoSided(true);
