@@ -39,7 +39,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|World UI|Pressure Plate|View",
         meta = (ClampMin = "0.0", Units = "cm"))
-    float FadeEndDistance = 1800.0f;
+    float FadeEndDistance = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly,
         Category = "Chimera|World UI|Pressure Plate|View",
