@@ -232,8 +232,10 @@ void UCMLobbyWidget::UpdateControls()
         ? GetWorld()->GetGameState<ACMLobbyGameState>()
         : nullptr;
     const bool bCanStartGame = LobbyState && LobbyState->CanStartGame();
+#if WITH_EDITOR
     const bool bCanStartTestGame =
         LobbyState && LobbyState->CanStartTestGame();
+#endif
     const ACMPlayerState* LocalPlayerState = GetOwningPlayer()
         ? GetOwningPlayer()->GetPlayerState<ACMPlayerState>()
         : nullptr;
@@ -248,11 +250,16 @@ void UCMLobbyWidget::UpdateControls()
     }
     if (Btn_StartTestGame)
     {
+#if WITH_EDITOR
         Btn_StartTestGame->SetVisibility(
             bHost ? ESlateVisibility::Visible : ESlateVisibility::Collapsed
         );
         Btn_StartTestGame->SetIsEnabled(
             bLobby && bHost && bIdle && bCanStartTestGame);
+#else
+        Btn_StartTestGame->SetVisibility(ESlateVisibility::Collapsed);
+        Btn_StartTestGame->SetIsEnabled(false);
+#endif
     }
     if (Btn_Ready)
     {

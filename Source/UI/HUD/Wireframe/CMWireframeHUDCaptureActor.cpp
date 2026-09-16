@@ -6,10 +6,10 @@
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Curves/CurveLinearColor.h"
-#include "Engine/Engine.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Parts/Core/CMPartActorBase.h"
 #include "Player/CMChimera.h"
 #include "Player/CMPartSlotComponent.h"
@@ -20,6 +20,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogChimeraWireframeHUD, Log, All);
 namespace
 {
 const FName WireColorParameter(TEXT("Color"));
+const TCHAR* WireframeMaterialPath =
+    TEXT("/Engine/EngineDebugMaterials/WireframeMaterial."
+         "WireframeMaterial");
 constexpr float CaptureDistance = 2000.0f;
 
 FRotator MakeTopDownRotation(const float Yaw)
@@ -75,6 +78,12 @@ void ACMWireframeHUDCaptureActor::Initialize(
     HealthColorCurve = InHealthColorCurve;
     CaptureRotation = MakeTopDownRotation(InCaptureRotation.Yaw);
 
+    // Use the same gameplay material path in editor and cooked builds. This
+    // keeps the HUD independent of whether debug view modes are initialized.
+    WireframeMaterial = LoadObject<UMaterialInterface>(
+        nullptr,
+        WireframeMaterialPath);
+
     const int32 ClampedSize = FMath::Clamp(RenderTargetSize, 128, 1024);
     RenderTarget = NewObject<UTextureRenderTarget2D>(this);
     RenderTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
@@ -84,7 +93,7 @@ void ACMWireframeHUDCaptureActor::Initialize(
     RenderTarget->UpdateResourceImmediate(true);
     SceneCapture->TextureTarget = RenderTarget;
 
-    if (!GEngine || !GEngine->WireframeMaterial)
+    if (!WireframeMaterial)
     {
         UE_LOG(LogChimeraWireframeHUD, Error,
             TEXT("Wireframe HUD is missing its engine wireframe material."));
@@ -401,9 +410,9 @@ void ACMWireframeHUDCaptureActor::ConfigureProxy(
 UMaterialInstanceDynamic*
 ACMWireframeHUDCaptureActor::CreateWireframeMaterial(UObject* Outer) const
 {
-    return GEngine && GEngine->WireframeMaterial
+    return WireframeMaterial
         ? UMaterialInstanceDynamic::Create(
-            GEngine->WireframeMaterial,
+            WireframeMaterial,
             Outer)
         : nullptr;
 }

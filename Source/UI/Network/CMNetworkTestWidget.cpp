@@ -379,8 +379,10 @@ void UCMNetworkTestWidget::ApplyConnectionUI(
         ? GetWorld()->GetGameState<ACMLobbyGameState>()
         : nullptr;
     const bool bCanStartGame = LobbyState && LobbyState->CanStartGame();
+#if WITH_EDITOR
     const bool bCanStartTestGame =
         LobbyState && LobbyState->CanStartTestGame();
+#endif
     const bool bIdle = !NetworkSubsystem
         || NetworkSubsystem->GetCurrentOperation()
             == EListenServerOperation::None;
@@ -441,6 +443,7 @@ void UCMNetworkTestWidget::ApplyConnectionUI(
     }
     if (Btn_StartTestGame)
     {
+#if WITH_EDITOR
         Btn_StartTestGame->SetVisibility(
             bLobby && bHost
                 ? ESlateVisibility::Visible
@@ -448,6 +451,10 @@ void UCMNetworkTestWidget::ApplyConnectionUI(
         );
         Btn_StartTestGame->SetIsEnabled(
             bLobby && bHost && bIdle && bCanStartTestGame);
+#else
+        Btn_StartTestGame->SetVisibility(ESlateVisibility::Collapsed);
+        Btn_StartTestGame->SetIsEnabled(false);
+#endif
     }
     if (Btn_Ready)
     {

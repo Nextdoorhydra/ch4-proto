@@ -9,6 +9,7 @@
 #include "Player/CMChimera.h"
 #include "Player/CMPlayerState.h"
 #include "Player/CMPlayerController.h"
+#include "Engine/AssetManager.h"
 #include "EngineUtils.h"
 #include "Engine/LevelStreaming.h"
 #include "GameFramework/PlayerStart.h"
@@ -466,7 +467,18 @@ void ACMGameMode::HandleMainMenuLoadFinished(
     if (UNKMSoundSubsystem* SoundSubsystem =
             GetGameInstance()->GetSubsystem<UNKMSoundSubsystem>())
     {
-        SoundSubsystem->PlayBGM(CMSoundTags::BGM_Menu);
+        const FPrimaryAssetId SharedBGMCatalogId(
+            FPrimaryAssetType(TEXT("NKMSoundDataAsset")),
+            TEXT("DA_CMSound_Stage01"));
+        if (const FSoftObjectPath CatalogPath =
+                UAssetManager::Get().GetPrimaryAssetPath(SharedBGMCatalogId);
+            CatalogPath.IsValid())
+        {
+            SoundSubsystem->RegisterSoundCatalog(CatalogPath.TryLoad());
+        }
+
+        // 현재 프로젝트는 하나의 공용 BGM을 메뉴와 모든 스테이지에서 사용한다.
+        SoundSubsystem->PlayBGM(CMSoundTags::BGM_Stage_Stage01);
     }
 }
 
@@ -480,6 +492,12 @@ void ACMGameMode::CheckMainMenuPresentationReady()
     UWorld* World = GetWorld();
     ULevelStreaming* PresentationLevel = UGameplayStatics::GetStreamingLevel(
         this, MainMenuPresentationLevelName);
+    if (PresentationLevel)
+    {
+        // 맵 재진입 시 이전 스트리밍 상태가 남아 있어도 메뉴 연출 레벨을 다시 요청한다.
+        PresentationLevel->SetShouldBeLoaded(true);
+        PresentationLevel->SetShouldBeVisible(true);
+    }
     bool bAllRequestedLevelsReady = World
         && PresentationLevel
         && PresentationLevel->IsLevelLoaded()
