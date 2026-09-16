@@ -57,7 +57,7 @@ ACMCentipedePawn::ACMCentipedePawn()
     PathMovement->SetIntermediatePathPointTolerances(80.0f, 130.0f);
     PathMovement->SetMaximumPathSegmentLength(250.0f);
     PathMovement->SetIntermediatePathPointJitterRadius(50.0f);
-    PathMovement->SetIntermediatePathPointWallClearance(250.0f);
+    PathMovement->SetIntermediatePathPointWallClearance(150.0f);
     PathMovement->SetMinimumPathPointSpacing(0.0f);
     PathMovement->SetRebuildPathWhenIntermediatePointPassed(true);
 
