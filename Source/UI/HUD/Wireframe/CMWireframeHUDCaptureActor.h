@@ -10,6 +10,7 @@ class ACMChimera;
 class ACMPartActorBase;
 class UCurveLinearColor;
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class USceneCaptureComponent2D;
 class USceneComponent;
 class USkeletalMeshComponent;
@@ -90,6 +91,9 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UCurveLinearColor> HealthColorCurve;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInterface> WireframeMaterial;
 
     TWeakObjectPtr<ACMChimera> Chimera;
     TArray<FBodyProxy> BodyProxies;
