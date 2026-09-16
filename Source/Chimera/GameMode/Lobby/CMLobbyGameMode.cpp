@@ -87,7 +87,7 @@ void ACMLobbyGameMode::RefreshLobbySummary()
         ReadyCount += CMPlayerState->IsReady() ? 1 : 0;
     }
 
-    const bool bCanStart = PlayerCount >= MinimumPlayersToStart
+    const bool bCanStart = PlayerCount >= FMath::Max(MinimumPlayersToStart, 2)
         && ReadyCount == PlayerCount;
     const bool bCanStartTest = PlayerCount >= 1
         && ReadyCount == PlayerCount;

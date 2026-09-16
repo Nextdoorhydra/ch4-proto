@@ -42,7 +42,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|StageRoute")
     TObjectPtr<UCMStageRouteDefinition> TestStageRouteDefinition;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Lobby", meta = (ClampMin = "1"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chimera|Lobby", meta = (ClampMin = "2"))
     int32 MinimumPlayersToStart = 2;
 
 private:
