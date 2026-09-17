@@ -39,6 +39,8 @@ public:
     UFUNCTION(BlueprintPure, Category = "Chimera|Part Loadout Station")
     int32 GetStoredPartCount(int32 SlotIndex) const;
 
+    void CloseStationUI();
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

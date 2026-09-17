@@ -24,6 +24,7 @@ protected:
 private:
     FReply HandleSaveClicked(int32 SlotIndex);
     FReply HandleLoadClicked(int32 SlotIndex);
+    FReply HandleCloseClicked();
 
     TWeakObjectPtr<ACMPartLoadoutStation> Station;
     TArray<TSharedPtr<STextBlock>> SlotStatusTexts;

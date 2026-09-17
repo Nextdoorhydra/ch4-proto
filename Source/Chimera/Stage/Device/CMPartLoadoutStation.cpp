@@ -117,6 +117,11 @@ int32 ACMPartLoadoutStation::GetStorageSlotCount() const
     return UCMPartLoadoutStorageSubsystem::StorageSlotCount;
 }
 
+void ACMPartLoadoutStation::CloseStationUI()
+{
+    HideStationUI();
+}
+
 void ACMPartLoadoutStation::HandleInteractionBeginOverlap(
     UPrimitiveComponent* OverlappedComponent,
     AActor* OtherActor,

@@ -96,6 +96,19 @@ TSharedRef<SWidget> UCMPartLoadoutStationWidget::RebuildWidget()
                             SlotList
                         ]
                     ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .HAlign(HAlign_Right)
+                    .Padding(0.0f, 16.0f, 0.0f, 0.0f)
+                    [
+                        SNew(SButton)
+                        .Text(NSLOCTEXT(
+                            "CMPartLoadoutStation", "Close", "Close"))
+                        .OnClicked_Lambda([this]()
+                        {
+                            return HandleCloseClicked();
+                        })
+                    ]
                 ]
             ]
         ];
@@ -154,6 +167,15 @@ FReply UCMPartLoadoutStationWidget::HandleLoadClicked(int32 SlotIndex)
     {
         Station->LoadSavedLoadout(SlotIndex);
         RefreshSlots();
+    }
+    return FReply::Handled();
+}
+
+FReply UCMPartLoadoutStationWidget::HandleCloseClicked()
+{
+    if (Station.IsValid())
+    {
+        Station->CloseStationUI();
     }
     return FReply::Handled();
 }
