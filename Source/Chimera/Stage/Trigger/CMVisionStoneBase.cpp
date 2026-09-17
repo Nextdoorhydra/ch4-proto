@@ -1,0 +1,199 @@
+#include "Stage/Trigger/CMVisionStoneBase.h"
+
+#include "Components/AudioComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/World.h"
+#include "Net/UnrealNetwork.h"
+#include "Sound/CMGameSoundBridgeSubsystem.h"
+#include "Sound/CMSoundPlayback.h"
+#include "Sound/CMSoundTags.h"
+#include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
+#include "TimerManager.h"
+#include "Vision/CMVisionManagerSubsystem.h"
+
+ACMVisionStoneBase::ACMVisionStoneBase()
+{
+    // 시야 조건을 계속 검사할 수 있도록 Element는 활성 상태로 유지하고 Trigger 상태만 퍼즐 입력으로 사용
+    bStartActive = true;
+    ActivationTrigger->bOneShot = false;
+
+    VisionPoint = CreateDefaultSubobject<USceneComponent>(TEXT("VisionPoint"));
+    VisionPoint->SetupAttachment(SceneRoot);
+}
+
+void ACMVisionStoneBase::GetLifetimeReplicatedProps(
+    TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ThisClass, VisionPresentationState);
+}
+
+void ACMVisionStoneBase::BeginPlay()
+{
+    Super::BeginPlay();
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge =
+                GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.AddUObject(
+                this,
+                &ThisClass::HandleSoundCatalogsRebuilt);
+        }
+    }
+
+    ActivationTrigger->OnActivated.AddUniqueDynamic(
+        this, &ThisClass::HandleVisionStoneActivated);
+    ActivationTrigger->OnDeactivated.AddUniqueDynamic(
+        this, &ThisClass::HandleVisionStoneDeactivated);
+
+    if (HasAuthority())
+    {
+        EvaluateVisionCondition();
+        GetWorld()->GetTimerManager().SetTimer(
+            EvaluationTimerHandle,
+            this,
+            &ThisClass::EvaluateVisionCondition,
+            FMath::Max(EvaluationInterval, 0.02f),
+            true);
+    }
+}
+
+void ACMVisionStoneBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    ActivationTrigger->OnActivated.RemoveDynamic(this, &ThisClass::HandleVisionStoneActivated);
+    ActivationTrigger->OnDeactivated.RemoveDynamic(this, &ThisClass::HandleVisionStoneDeactivated);
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(EvaluationTimerHandle);
+    }
+
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UCMGameSoundBridgeSubsystem* SoundBridge =
+                GameInstance->GetSubsystem<UCMGameSoundBridgeSubsystem>())
+        {
+            SoundBridge->OnSoundCatalogsRebuilt.RemoveAll(this);
+        }
+    }
+    StopVisionLoopSound();
+
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACMVisionStoneBase::EvaluateVisionCondition()
+{
+    if (!HasAuthority() || !VisionPoint)
+    {
+        return;
+    }
+
+    UCMVisionManagerSubsystem* VisionManager =
+        GetWorld()->GetSubsystem<UCMVisionManagerSubsystem>();
+    if (!VisionManager)
+    {
+        return;
+    }
+
+    TArray<UCMVisionComponent*> SeeingSources;
+    VisionManager->GetVisionSourcesSeeingLocation(
+        VisionPoint->GetComponentLocation(), SeeingSources);
+    WatchingPlayerCount = SeeingSources.Num();
+
+    const bool bConditionMet = VisionStoneMode ==
+        ECMVisionStoneMode::RequireNoWatchingPlayers
+        ? WatchingPlayerCount == 0
+        : WatchingPlayerCount >= FMath::Max(RequiredWatchingPlayers, 1);
+
+    if (bConditionMet && !ActivationTrigger->IsTriggered())
+    {
+        ActivateTrigger(nullptr);
+    }
+    else if (!bConditionMet && ActivationTrigger->IsTriggered())
+    {
+        DeactivateTrigger(nullptr);
+    }
+
+    RefreshVisionPresentationState(bConditionMet);
+}
+
+void ACMVisionStoneBase::RefreshVisionPresentationState(bool bConditionMet)
+{
+    FCMVisionStonePresentationState NewState;
+    NewState.bReady = true;
+    NewState.bConditionMet = bConditionMet;
+    NewState.Mode = VisionStoneMode;
+    NewState.WatchingPlayerCount = WatchingPlayerCount;
+    NewState.RequiredWatchingPlayers = FMath::Max(RequiredWatchingPlayers, 1);
+    if (NewState == VisionPresentationState)
+    {
+        return;
+    }
+
+    VisionPresentationState = NewState;
+    ForceNetUpdate();
+    OnRep_VisionPresentationState();
+}
+
+void ACMVisionStoneBase::OnRep_VisionPresentationState()
+{
+    OnVisionPresentationStateChanged.Broadcast(VisionPresentationState);
+    RefreshVisionLoopSound();
+}
+
+void ACMVisionStoneBase::HandleSoundCatalogsRebuilt()
+{
+    RefreshVisionLoopSound();
+}
+
+void ACMVisionStoneBase::RefreshVisionLoopSound()
+{
+    if (!VisionPresentationState.bReady)
+    {
+        return;
+    }
+
+    const bool bConditionMet = VisionPresentationState.bConditionMet;
+    if (bHasPlayingLoopState
+        && bPlayingLoopConditionMet == bConditionMet
+        && IsValid(VisionLoopSoundComponent)
+        && VisionLoopSoundComponent->IsPlaying())
+    {
+        return;
+    }
+
+    StopVisionLoopSound();
+    VisionLoopSoundComponent = FCMSoundPlayback::PlayAttachedSFX(
+        VisionPoint,
+        bConditionMet
+            ? CMSoundTags::Stage_VisionStone_OnLoop
+            : CMSoundTags::Stage_VisionStone_OffLoop);
+    if (IsValid(VisionLoopSoundComponent))
+    {
+        constexpr float VisionLoopFadeInDuration = 0.2f;
+        VisionLoopSoundComponent->FadeIn(VisionLoopFadeInDuration);
+        bHasPlayingLoopState = true;
+        bPlayingLoopConditionMet = bConditionMet;
+    }
+}
+
+void ACMVisionStoneBase::StopVisionLoopSound()
+{
+    if (IsValid(VisionLoopSoundComponent))
+    {
+        VisionLoopSoundComponent->Stop();
+        VisionLoopSoundComponent = nullptr;
+    }
+    bHasPlayingLoopState = false;
+}
+
+void ACMVisionStoneBase::HandleVisionStoneActivated(AActor* TriggeringActor)
+{
+    OnVisionStoneStateChanged(true, WatchingPlayerCount);
+}
+
+void ACMVisionStoneBase::HandleVisionStoneDeactivated(AActor* TriggeringActor)
+{
+    OnVisionStoneStateChanged(false, WatchingPlayerCount);
+}

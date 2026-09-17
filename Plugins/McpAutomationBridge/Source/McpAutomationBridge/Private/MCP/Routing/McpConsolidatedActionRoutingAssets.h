@@ -1,0 +1,122 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+namespace McpConsolidatedActions
+{
+inline const TArray<FString>& ManageAssetCore()
+{
+	static const TArray<FString> Actions = {
+		TEXT("list"), TEXT("import"), TEXT("duplicate"), TEXT("duplicate_asset"),
+		TEXT("rename"), TEXT("rename_asset"), TEXT("move"), TEXT("move_asset"),
+		TEXT("delete"), TEXT("delete_asset"), TEXT("delete_assets"),
+		TEXT("create_folder"), TEXT("search_assets"), TEXT("get_dependencies"),
+		TEXT("get_source_control_state"), TEXT("analyze_graph"),
+		TEXT("get_asset_graph"), TEXT("create_thumbnail"), TEXT("set_tags"),
+		TEXT("get_metadata"), TEXT("set_metadata"), TEXT("validate"),
+		TEXT("fixup_redirectors"), TEXT("find_by_tag"), TEXT("generate_report"),
+		TEXT("create_material"), TEXT("create_material_instance"),
+		TEXT("create_render_target"), TEXT("generate_lods"),
+		TEXT("add_material_parameter"), TEXT("list_instances"),
+		TEXT("reset_instance_parameters"), TEXT("exists"),
+		TEXT("get_material_stats"), TEXT("nanite_rebuild_mesh"),
+		TEXT("bulk_rename"), TEXT("bulk_delete"),
+		TEXT("source_control_checkout"), TEXT("source_control_submit"),
+		TEXT("add_material_node"), TEXT("connect_material_pins"),
+		TEXT("remove_material_node"), TEXT("break_material_connections"),
+		TEXT("get_material_node_details"), TEXT("rebuild_material")
+	};
+	return Actions;
+}
+
+inline const TArray<FString>& MaterialAuthoring()
+{
+	static const TArray<FString> Actions = {
+		TEXT("create_material"), TEXT("set_blend_mode"),
+		TEXT("set_shading_model"), TEXT("set_material_domain"),
+		TEXT("add_texture_sample"), TEXT("add_texture_coordinate"),
+		TEXT("add_scalar_parameter"), TEXT("add_vector_parameter"),
+		TEXT("add_static_switch_parameter"), TEXT("add_math_node"),
+		TEXT("add_world_position"), TEXT("add_vertex_normal"),
+		TEXT("add_pixel_depth"), TEXT("add_fresnel"),
+		TEXT("add_reflection_vector"), TEXT("add_panner"), TEXT("add_rotator"),
+		TEXT("add_noise"), TEXT("add_voronoi"), TEXT("add_if"),
+		TEXT("add_switch"), TEXT("add_custom_expression"),
+		TEXT("connect_nodes"), TEXT("connect_material_pins"),
+		TEXT("disconnect_nodes"), TEXT("break_material_connections"),
+		TEXT("create_material_function"), TEXT("add_function_input"),
+		TEXT("add_function_output"), TEXT("use_material_function"),
+		TEXT("get_material_function_info"), TEXT("create_material_instance"),
+		TEXT("set_scalar_parameter_value"), TEXT("set_vector_parameter_value"),
+		TEXT("set_texture_parameter_value"), TEXT("create_landscape_material"),
+		TEXT("create_decal_material"), TEXT("create_post_process_material"),
+		TEXT("add_landscape_layer"), TEXT("configure_layer_blend"),
+		TEXT("compile_material"), TEXT("get_material_info"), TEXT("find_node"),
+		TEXT("get_node_connections"), TEXT("get_node_properties"),
+		TEXT("set_static_switch_parameter_value"), TEXT("delete_node"),
+		TEXT("update_custom_expression"), TEXT("get_node_chain"),
+		TEXT("get_connected_subgraph"), TEXT("add_material_node"),
+		TEXT("rebuild_material"), TEXT("set_material_parameter"),
+		TEXT("get_material_node_details"), TEXT("remove_material_node"),
+		TEXT("set_two_sided")
+	};
+	return Actions;
+}
+
+inline const TArray<FString>& Texture()
+{
+	static const TArray<FString> Actions = {
+		TEXT("create_noise_texture"), TEXT("create_gradient_texture"),
+		TEXT("create_pattern_texture"), TEXT("create_normal_from_height"),
+		TEXT("create_ao_from_mesh"), TEXT("resize_texture"),
+		TEXT("adjust_levels"), TEXT("adjust_curves"), TEXT("blur"),
+		TEXT("sharpen"), TEXT("invert"), TEXT("desaturate"),
+		TEXT("channel_pack"), TEXT("channel_extract"), TEXT("combine_textures"),
+		TEXT("set_compression_settings"), TEXT("set_texture_group"),
+		TEXT("set_lod_bias"), TEXT("configure_virtual_texture"),
+		TEXT("set_streaming_priority"), TEXT("get_texture_info")
+	};
+	return Actions;
+}
+
+inline const TArray<FString>& StructAuthoring();
+
+inline TArray<FString> ManageAsset()
+{
+	TArray<FString> Actions = ManageAssetCore();
+	AppendUniqueActions(Actions, MaterialAuthoring());
+	AppendUniqueActions(Actions, Texture());
+	// Struct authoring (first-class Blueprint Struct support, issue #510)
+	AppendUniqueActions(Actions, StructAuthoring());
+	return Actions;
+}
+
+inline const TArray<FString>& StructAuthoring()
+{
+	static const TArray<FString> Actions = {
+		TEXT("create_struct"), TEXT("get_struct"), TEXT("read_struct"),
+		TEXT("list_struct_members"), TEXT("add_struct_member"),
+		TEXT("remove_struct_member"), TEXT("rename_struct_member"),
+		TEXT("set_struct_member_type"), TEXT("reorder_struct_members"),
+		TEXT("set_struct_member_default"), TEXT("set_struct_member_metadata"),
+		TEXT("compare_structs"), TEXT("search_struct_usage"),
+		TEXT("recompile_struct"),
+		TEXT("rename_struct"), TEXT("duplicate_struct"),
+		TEXT("delete_struct"), TEXT("refresh_struct_dependencies"),
+		TEXT("list_structs"), TEXT("export_struct"), TEXT("import_struct"),
+		// Struct ecosystem — DataTable (issue #struct-ecosystem)
+		TEXT("create_data_table"), TEXT("set_data_table_row_struct"), TEXT("create_row_struct"),
+		TEXT("get_row_struct"), TEXT("set_struct_as_row_struct"), TEXT("add_data_table_row"),
+		TEXT("get_data_table_row"), TEXT("update_data_table_row"), TEXT("delete_data_table_row"),
+		TEXT("list_data_table_rows"), TEXT("import_data_table_rows"), TEXT("clear_data_table_rows"),
+		// Struct ecosystem — Enum
+		TEXT("create_enum"), TEXT("delete_enum"), TEXT("get_enum"), TEXT("add_enum_value"),
+		TEXT("remove_enum_value"), TEXT("rename_enum_value"), TEXT("reorder_enum_values"),
+		TEXT("set_enum_value_metadata"), TEXT("split_enum"),
+		// Struct ecosystem — FInstancedStruct
+		TEXT("get_instanced_struct_property"), TEXT("set_instanced_struct_property")
+		};
+	return Actions;
+}
+
+} // namespace McpConsolidatedActions

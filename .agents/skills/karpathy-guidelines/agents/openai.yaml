@@ -1,0 +1,4 @@
+interface:
+  display_name: "Karpathy Guidelines"
+  short_description: "Keep coding changes simple, scoped, and verifiable"
+  default_prompt: "Use $karpathy-guidelines to make this coding change simple, surgical, and verifiable."

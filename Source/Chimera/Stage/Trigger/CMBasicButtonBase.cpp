@@ -1,0 +1,246 @@
+#include "Stage/Trigger/CMBasicButtonBase.h"
+
+#include "Components/BoxComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Parts/Arm/CMArmPart.h"
+#include "Stage/CMStageCommandTags.h"
+#include "Stage/Trigger/Component/CMActivationTriggerComponent.h"
+#include "TimerManager.h"
+
+ACMBasicButtonBase::ACMBasicButtonBase()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
+    bExposeDirectCommandTags = false;
+
+    HitVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("HitVolume"));
+    HitVolume->SetupAttachment(SceneRoot);
+    HitVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    HitVolume->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    HitVolume->SetGenerateOverlapEvents(true);
+
+    ButtonVisualRoot = CreateDefaultSubobject<USceneComponent>(TEXT("ButtonVisualRoot"));
+    ButtonVisualRoot->SetupAttachment(SceneRoot);
+    ButtonVisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ButtonVisualMesh"));
+    ButtonVisualMesh->SetupAttachment(ButtonVisualRoot);
+    ButtonVisualMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // 일반 버튼은 대상의 초기 상태와 관계없이 현재 활성 상태를 반전
+    TargetCommandTag = CMStageCommandTags::Mechanism_Toggle;
+    ReleaseCommandTag = CMStageCommandTags::Mechanism_Toggle;
+}
+
+// 일반 버튼의 토글 및 일회성 정책 초기화
+void ACMBasicButtonBase::BeginPlay()
+{
+    // 기존 BP나 레벨 인스턴스에 저장된 명시적 태그와 관계없이 일반 버튼은 토글로 통일
+    TargetCommandTag = CMStageCommandTags::Mechanism_Toggle;
+    ReleaseCommandTag = CMStageCommandTags::Mechanism_Toggle;
+    if (bToggleOnHit)
+    {
+        ActivationTrigger->bOneShot = false;
+    }
+    Super::BeginPlay();
+    ActivationTrigger->OnActivated.AddUniqueDynamic(this, &ThisClass::HandleBasicButtonActivated);
+
+    ReleasedVisualLocation = ButtonVisualRoot->GetRelativeLocation();
+    const FVector PressDirection = LocalPressDirection.GetSafeNormal(
+        SMALL_NUMBER, FVector(0.0f, 0.0f, -1.0f));
+    PressedVisualLocation = ReleasedVisualLocation
+        + PressDirection * FMath::Max(PressDepth, 0.0f);
+    ButtonMaterial = ButtonVisualMesh->CreateDynamicMaterialInstance(
+        FMath::Max(MaterialSlotIndex, 0));
+
+    OnPresentationStateChanged.AddUniqueDynamic(
+        this, &ThisClass::HandlePresentationStateChanged);
+    HandlePresentationStateChanged(GetPresentationState());
+    ApplyVisualState();
+}
+
+void ACMBasicButtonBase::EndPlay(
+    const EEndPlayReason::Type EndPlayReason)
+{
+    GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
+    OnPresentationStateChanged.RemoveDynamic(
+        this, &ThisClass::HandlePresentationStateChanged);
+    ActivationTrigger->OnActivated.RemoveDynamic(this, &ThisClass::HandleBasicButtonActivated);
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACMBasicButtonBase::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    const float Duration = TargetVisualAlpha > VisualAlpha
+        ? FMath::Max(PressDuration, 0.0f)
+        : FMath::Max(ReleaseDuration, 0.0f);
+    VisualAlpha = Duration > SMALL_NUMBER
+        ? FMath::FInterpConstantTo(
+            VisualAlpha, TargetVisualAlpha, DeltaSeconds, 1.0f / Duration)
+        : TargetVisualAlpha;
+    if (FMath::IsNearlyEqual(VisualAlpha, TargetVisualAlpha))
+    {
+        VisualAlpha = TargetVisualAlpha;
+    }
+
+    ApplyVisualState();
+    SetActorTickEnabled(!FMath::IsNearlyEqual(
+        VisualAlpha, TargetVisualAlpha));
+}
+
+void ACMBasicButtonBase::HandleElementReset_Implementation()
+{
+    Super::HandleElementReset_Implementation();
+    GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
+    SetVisualTarget(false);
+}
+
+void ACMBasicButtonBase::NotifySwingHit(
+    ACMArmPart* ArmPart, UPrimitiveComponent* HitComponent)
+{
+    if (!HasAuthority() || !IsValid(ArmPart) || !ArmPart->HasAuthority()
+        || !ArmPart->IsSwinging() || !ArmPart->IsOperational()
+        || HitComponent != HitVolume || !IsElementActive())
+    {
+        return;
+    }
+
+    const FGuid AttackId = ArmPart->GetCurrentSwingAttackId();
+    if (!AttackId.IsValid())
+    {
+        return;
+    }
+    for (auto It = LastSwingAttackIds.CreateIterator(); It; ++It)
+    {
+        if (!It.Key().IsValid())
+        {
+            It.RemoveCurrent();
+        }
+    }
+    FGuid& LastAttackId = LastSwingAttackIds.FindOrAdd(ArmPart);
+    if (LastAttackId == AttackId)
+    {
+        return;
+    }
+    LastAttackId = AttackId;
+    HandleValidButtonInput(ArmPart);
+}
+
+// 반복 버튼은 눌림과 해제를 교대하고 일회성 버튼은 최초 눌림만 전달
+void ACMBasicButtonBase::HandleValidButtonInput(AActor* TriggeringActor)
+{
+    if (bToggleOnHit && ActivationTrigger->IsTriggered())
+    {
+        ReleaseButton(TriggeringActor);
+    }
+    else
+    {
+        PressButton(TriggeringActor);
+    }
+}
+
+void ACMBasicButtonBase::HandleBasicButtonActivated(AActor* TriggeringActor)
+{
+    ScheduleMomentaryRelease();
+}
+
+void ACMBasicButtonBase::HandlePresentationStateChanged(
+    const FCMTriggerPresentationState& State)
+{
+    if (!State.bReady)
+    {
+        return;
+    }
+
+    bPresentationEnabled = State.bEnabled;
+    if (!bPresentationEnabled)
+    {
+        SetVisualTarget(false);
+    }
+    else
+    {
+        if (!State.bTriggered)
+        {
+            GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
+        }
+        SetVisualTarget(State.bTriggered);
+    }
+}
+
+void ACMBasicButtonBase::ScheduleMomentaryRelease()
+{
+    if (!HasAuthority() || bToggleOnHit || !ActivationTrigger->IsTriggered())
+    {
+        return;
+    }
+
+    GetWorldTimerManager().ClearTimer(PulseReturnTimerHandle);
+    const float ReturnDelay = FMath::Max(PressDuration, 0.0f)
+        + FMath::Max(PulseHoldDuration, 0.0f);
+    if (ReturnDelay <= SMALL_NUMBER)
+    {
+        ReturnPulseVisual();
+        return;
+    }
+    GetWorldTimerManager().SetTimer(
+        PulseReturnTimerHandle,
+        this,
+        &ThisClass::ReturnPulseVisual,
+        ReturnDelay,
+        false);
+}
+
+void ACMBasicButtonBase::SetVisualTarget(bool bPressed)
+{
+    TargetVisualAlpha = bPressed ? 1.0f : 0.0f;
+    if ((bPressed ? PressDuration : ReleaseDuration) <= SMALL_NUMBER)
+    {
+        VisualAlpha = TargetVisualAlpha;
+        ApplyVisualState();
+        return;
+    }
+    SetActorTickEnabled(true);
+}
+
+void ACMBasicButtonBase::ReturnPulseVisual()
+{
+    // 시각 효과만 복귀시키지 않고 서버 상태도 OFF로 바꿔 퍼즐에 해제를 전달한다.
+    if (HasAuthority())
+    {
+        ReleaseButton(nullptr);
+    }
+}
+
+void ACMBasicButtonBase::ApplyVisualState()
+{
+    if (ButtonVisualRoot)
+    {
+        ButtonVisualRoot->SetRelativeLocation(FMath::Lerp(
+            ReleasedVisualLocation, PressedVisualLocation, VisualAlpha));
+    }
+    if (!ButtonMaterial)
+    {
+        return;
+    }
+
+    const FLinearColor Color = bPresentationEnabled
+        ? FMath::Lerp(OffColor, OnColor, VisualAlpha)
+        : DisabledColor;
+    const float EmissiveIntensity = bPresentationEnabled
+        ? FMath::Lerp(
+            FMath::Max(OffEmissiveIntensity, 0.0f),
+            FMath::Max(OnEmissiveIntensity, 0.0f),
+            VisualAlpha)
+        : 0.0f;
+    if (!ColorParameterName.IsNone())
+    {
+        ButtonMaterial->SetVectorParameterValue(ColorParameterName, Color);
+    }
+    if (!EmissiveParameterName.IsNone())
+    {
+        ButtonMaterial->SetScalarParameterValue(
+            EmissiveParameterName, EmissiveIntensity);
+    }
+}

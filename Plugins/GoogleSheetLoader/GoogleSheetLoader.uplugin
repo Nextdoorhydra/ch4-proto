@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.1.2",
+	"FriendlyName": "GoogleSheetLoader",
+	"Description": "",
+	"Category": "Other",
+	"CreatedBy": "CBS",
+	"CreatedByURL": "https://github.com/y826855/UE5-GoogleSheetLoader",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EngineVersion": "5.7.0",
+	"CanContainContent": false,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "GoogleSheetLoader",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
+		}
+	]
+}

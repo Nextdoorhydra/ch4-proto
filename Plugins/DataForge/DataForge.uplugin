@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"Version": 14,
+	"VersionName": "1.4.0",
+	"FriendlyName": "DataForge",
+	"Description": "Adapter-driven editor automation for materializing canonical parsed data into Unreal assets.",
+	"Category": "Content Pipeline",
+	"CreatedBy": "Chimera",
+	"CanContainContent": false,
+	"EnabledByDefault": true,
+	"Modules": [
+		{
+			"Name": "DataForgeCore",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "DataForgeEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
+		}
+	]
+}
