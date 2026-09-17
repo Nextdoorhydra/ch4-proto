@@ -1,0 +1,1145 @@
+#include "CMChimera.h"
+
+#include "Ability/CMChimeraAttributeSet.h"
+#include "AbilitySystemComponent.h"
+#include "Collision/CMCollisionChannels.h"
+#include "Movement/CMLineBodyMovementCoordinator.h"
+#include "Gore/CMGoreResponseComponent.h"
+#include "Parts/Tentacle/CMTentacleSegmentActor.h"
+#include "Player/CMPartSlotComponent.h"
+#include "Player/CMChimeraTrailComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Components/BoxComponent.h"
+#include "Components/ChildActorComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Camera/CameraComponent.h"
+#include "Camera/CMCameraOcclusionComponent.h"
+#include "Components/TextRenderComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "PhysicsEngine/PhysicsConstraintComponent.h"
+#include "Engine/DataTable.h"
+#include "Net/UnrealNetwork.h"
+#include "Player/CMChimeraBodySegmentActor.h"
+
+// LineBody 데이터 흐름과 상태 변화만 모아 볼 수 있는 전용 로그 카테고리다.
+// 콘솔에서 `Log LogChimeraLineBody Verbose`로 상세 로그를 켤 수 있다.
+DEFINE_LOG_CATEGORY(LogChimeraLineBody);
+
+ACMChimera::ACMChimera()
+{
+    constexpr int32 MaxSegmentCount = CMControl::MaxSegments;
+    ReplicatedPartSlotPressStartTimes.Init(
+        -1.0f,
+        CMControl::MaxPartSlots
+    );
+    const float SlotZ = -BodyCollisionHalfHeight + InitialGroundClearance;
+    const FVector LeftSlotLocation(0.0f, -BodySlotLateralOffset, SlotZ);
+    const FVector RightSlotLocation(0.0f, BodySlotLateralOffset, SlotZ);
+
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> MarkerMeshAsset(
+        TEXT("/Engine/BasicShapes/Cylinder.Cylinder")
+    );
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface>
+        MarkerMaterialAsset(
+            TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")
+        );
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface>
+        MarkerTextMaterialAsset(
+            TEXT("/Engine/EngineMaterials/UnlitText.UnlitText")
+        );
+    static ConstructorHelpers::FClassFinder<ACMChimeraBodySegmentActor>
+        BodySegmentPresentationBlueprint(
+            TEXT("/Game/Chimera/Character/Chimera/Blueprint/"
+                "BP_CMChimeraBodySegment")
+        );
+
+    PrimaryActorTick.bCanEverTick = true;
+    bReplicates = true;
+    // 모든 몸통 마디는 ReplicatedSegmentStates 하나로 복제한다.
+    // 루트만 Actor 이동 복제를 함께 사용하면 클라이언트에서 서로 다른
+    // 물리 보정 기준이 섞이므로 기본 Actor 이동 복제는 사용하지 않는다.
+    SetReplicateMovement(false);
+    SetNetUpdateFrequency(30.0f);
+    SetMinNetUpdateFrequency(10.0f);
+    TentacleSegmentClass = ACMTentacleSegmentActor::StaticClass();
+    // Keep the project default independent from a serialized override in the
+    // legacy root Blueprint. Derived classes can still override the property.
+    BodySegmentPresentationClass = ACMChimeraBodySegmentActor::StaticClass();
+    if (BodySegmentPresentationBlueprint.Succeeded())
+    {
+        BodySegmentPresentationClass = BodySegmentPresentationBlueprint.Class;
+    }
+
+    AbilitySystemComponent = CreateDefaultSubobject<
+        UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
+    AbilitySystemComponent->SetIsReplicated(true);
+    // 현재는 공용 ASC의 모든 GameplayEffect/Tag 상태를 모든 참가자가 확인해야 하므로
+    // Full 모드를 사용한다. 최적화가 필요해지면 Mixed 모드를 별도로 검토한다.
+    AbilitySystemComponent->SetReplicationMode(
+        EGameplayEffectReplicationMode::Full
+    );
+
+    AttributeSet = CreateDefaultSubobject<UCMChimeraAttributeSet>(
+        TEXT("ChimeraAttributeSet")
+    );
+
+    MovementCoordinator =
+        CreateDefaultSubobject<UCMLineBodyMovementCoordinator>(
+            TEXT("LineBodyMovementCoordinator")
+        );
+
+    GoreResponseComponent = CreateDefaultSubobject<UCMGoreResponseComponent>(
+        TEXT("GoreResponseComponent")
+    );
+
+    TrailComponent = CreateDefaultSubobject<UCMChimeraTrailComponent>(
+        TEXT("ChimeraTrail")
+    );
+
+    BodyDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(
+        TEXT("/Game/Chimera/Data/Body/DT_BodyDataTable.DT_BodyDataTable")
+    ));
+
+    BodyMesh = CreateDefaultSubobject<UBoxComponent>(
+        TEXT("BodyMesh")
+    );
+    SetRootComponent(BodyMesh);
+
+    BodyMesh->SetBoxExtent(FVector(
+        BodyCollisionHalfLength,
+        BodyCollisionHalfWidth,
+        BodyCollisionHalfHeight
+    ));
+    BodyMesh->SetSimulatePhysics(false);
+    BodyMesh->SetEnableGravity(bEnableBodyGravity);
+    BodyMesh->SetLinearDamping(BodyLinearDamping);
+    BodyMesh->SetAngularDamping(BodyAngularDamping);
+    BodyMesh->SetCollisionProfileName(BodyCollisionProfile);
+    BodyMesh->SetCollisionResponseToChannel(
+        CMCollision::WeaponTrace,
+        ECR_Ignore
+    );
+    BodyMesh->SetUseCCD(bUseBodyCCD, NAME_None);
+    BodyMesh->SetIsReplicated(false);
+
+    LeftFootPoint = CreateDefaultSubobject<UCMPartSlotComponent>(
+        TEXT("LeftFootPoint")
+    );
+    LeftFootPoint->SetupAttachment(BodyMesh);
+    LeftFootPoint->SetRelativeLocation(LeftSlotLocation);
+    LeftFootPoint->InitializeSlotAddress(0, 0);
+
+    RightFootPoint = CreateDefaultSubobject<UCMPartSlotComponent>(
+        TEXT("RightFootPoint")
+    );
+    RightFootPoint->SetupAttachment(BodyMesh);
+    RightFootPoint->SetRelativeLocation(RightSlotLocation);
+    RightFootPoint->InitializeSlotAddress(0, 1);
+
+    USceneComponent* LeftLegRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("LeftLegRigAnchor"));
+    LeftLegRigAnchor->SetupAttachment(LeftFootPoint);
+    LeftLegRigAnchor->SetRelativeLocation(-LeftSlotLocation);
+    LeftLegRigAnchor->bEditableWhenInherited = true;
+    LeftFootPoint->SetLegRigControlAnchor(LeftLegRigAnchor);
+
+    USceneComponent* RightLegRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("RightLegRigAnchor"));
+    RightLegRigAnchor->SetupAttachment(RightFootPoint);
+    RightLegRigAnchor->SetRelativeLocation(-RightSlotLocation);
+    RightLegRigAnchor->bEditableWhenInherited = true;
+    RightFootPoint->SetLegRigControlAnchor(RightLegRigAnchor);
+
+    USceneComponent* LeftArmRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("LeftArmRigAnchor"));
+    LeftArmRigAnchor->SetupAttachment(LeftFootPoint);
+    LeftArmRigAnchor->SetRelativeLocationAndRotation(
+        FVector::ZeroVector,
+        FRotator::ZeroRotator);
+    LeftArmRigAnchor->bEditableWhenInherited = true;
+    LeftFootPoint->SetArmRigControlAnchor(LeftArmRigAnchor);
+
+    USceneComponent* RightArmRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("RightArmRigAnchor"));
+    RightArmRigAnchor->SetupAttachment(RightFootPoint);
+    RightArmRigAnchor->SetRelativeLocationAndRotation(
+        FVector::ZeroVector,
+        FRotator::ZeroRotator);
+    RightArmRigAnchor->bEditableWhenInherited = true;
+    RightFootPoint->SetArmRigControlAnchor(RightArmRigAnchor);
+
+    USceneComponent* LeftHeadRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("LeftHeadRigAnchor"));
+    LeftHeadRigAnchor->SetupAttachment(LeftFootPoint);
+    LeftHeadRigAnchor->SetRelativeLocationAndRotation(
+        FVector::ZeroVector,
+        FRotator::ZeroRotator);
+    LeftHeadRigAnchor->bEditableWhenInherited = true;
+    LeftFootPoint->SetHeadRigControlAnchor(LeftHeadRigAnchor);
+
+    USceneComponent* RightHeadRigAnchor =
+        CreateDefaultSubobject<USceneComponent>(TEXT("RightHeadRigAnchor"));
+    RightHeadRigAnchor->SetupAttachment(RightFootPoint);
+    RightHeadRigAnchor->SetRelativeLocationAndRotation(
+        FVector::ZeroVector,
+        FRotator::ZeroRotator);
+    RightHeadRigAnchor->bEditableWhenInherited = true;
+    RightFootPoint->SetHeadRigControlAnchor(RightHeadRigAnchor);
+
+    CameraBoom = CreateDefaultSubobject<USpringArmComponent>(
+        TEXT("CameraBoom")
+    );
+    CameraBoom->SetupAttachment(BodyMesh);
+    CameraBoom->SetUsingAbsoluteRotation(true);
+    CameraBoom->TargetArmLength = DefaultCameraDistance;
+    CameraBoom->SetRelativeRotation(
+        FRotator(InitialCameraPitch, 0.0f, 0.0f)
+    );
+    CameraBoom->SocketOffset = CameraSocketOffset;
+    CameraBoom->TargetOffset = FVector(
+        -CameraFollowBackOffset,
+        0.0f,
+        0.0f
+    );
+    CameraBoom->bUsePawnControlRotation = false;
+    CameraBoom->bInheritPitch = false;
+    CameraBoom->bInheritYaw = false;
+    CameraBoom->bInheritRoll = false;
+    CameraBoom->bEnableCameraLag = bEnableCameraLag;
+    CameraBoom->CameraLagSpeed = CameraLagSpeed;
+    CameraBoom->CameraLagMaxDistance = CameraLagMaxDistance;
+    CameraBoom->bEnableCameraRotationLag = bEnableCameraRotationLag;
+    CameraBoom->CameraRotationLagSpeed = CameraRotationLagSpeed;
+    CameraBoom->bDoCollisionTest = false;
+    CameraBoom->ProbeChannel = ECC_Camera;
+
+    FollowCamera = CreateDefaultSubobject<UCameraComponent>(
+        TEXT("FollowCamera")
+    );
+    FollowCamera->SetupAttachment(
+        CameraBoom,
+        USpringArmComponent::SocketName
+    );
+    FollowCamera->bUsePawnControlRotation = false;
+
+    CameraOcclusionComponent = CreateDefaultSubobject<
+        UCMCameraOcclusionComponent>(TEXT("CameraOcclusionComponent"));
+
+    BodySegments.Add(BodyMesh);
+    LeftFootPoints.Add(LeftFootPoint);
+    RightFootPoints.Add(RightFootPoint);
+    PartSlotPoints.Add(LeftFootPoint);
+    PartSlotPoints.Add(RightFootPoint);
+    LegRigControlAnchors.Add(LeftLegRigAnchor);
+    LegRigControlAnchors.Add(RightLegRigAnchor);
+    ArmRigControlAnchors.Add(LeftArmRigAnchor);
+    ArmRigControlAnchors.Add(RightArmRigAnchor);
+    HeadRigControlAnchors.Add(LeftHeadRigAnchor);
+    HeadRigControlAnchors.Add(RightHeadRigAnchor);
+
+    for (int32 Index = 1; Index < MaxSegmentCount; ++Index)
+    {
+        UBoxComponent* SegmentBody =
+            CreateDefaultSubobject<UBoxComponent>(
+                *FString::Printf(TEXT("BodyMesh_%d"), Index + 1)
+            );
+        SegmentBody->SetupAttachment(BodyMesh);
+        SegmentBody->SetRelativeLocation(
+            FVector(-SegmentSpacing * Index, 0.0f, 0.0f)
+        );
+        SegmentBody->SetBoxExtent(FVector(
+            BodyCollisionHalfLength,
+            BodyCollisionHalfWidth,
+            BodyCollisionHalfHeight
+        ));
+        // 생성자에서는 물리를 시작하지 않는다. 충돌 바디와 활성 마디 수가 확정된 뒤
+        // ConfigureSegments에서 서버 물리 Body를 한 번에 활성화한다.
+        SegmentBody->SetSimulatePhysics(false);
+        SegmentBody->SetEnableGravity(bEnableBodyGravity);
+        SegmentBody->SetLinearDamping(BodyLinearDamping);
+        SegmentBody->SetAngularDamping(BodyAngularDamping);
+        SegmentBody->SetCollisionProfileName(BodyCollisionProfile);
+        SegmentBody->SetCollisionResponseToChannel(
+            CMCollision::WeaponTrace,
+            ECR_Ignore
+        );
+        SegmentBody->SetUseCCD(bUseBodyCCD, NAME_None);
+
+        UCMPartSlotComponent* SegmentLeftFoot =
+            CreateDefaultSubobject<UCMPartSlotComponent>(
+                *FString::Printf(TEXT("LeftFootPoint_%d"), Index + 1)
+            );
+        SegmentLeftFoot->SetupAttachment(SegmentBody);
+        SegmentLeftFoot->SetRelativeLocation(LeftSlotLocation);
+        SegmentLeftFoot->InitializeSlotAddress(Index, 0);
+
+        UCMPartSlotComponent* SegmentRightFoot =
+            CreateDefaultSubobject<UCMPartSlotComponent>(
+                *FString::Printf(TEXT("RightFootPoint_%d"), Index + 1)
+            );
+        SegmentRightFoot->SetupAttachment(SegmentBody);
+        SegmentRightFoot->SetRelativeLocation(RightSlotLocation);
+        SegmentRightFoot->InitializeSlotAddress(Index, 1);
+
+        USceneComponent* SegmentLeftRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("LeftLegRigAnchor_%d"), Index + 1)
+            );
+        SegmentLeftRigAnchor->SetupAttachment(SegmentLeftFoot);
+        SegmentLeftRigAnchor->SetRelativeLocation(-LeftSlotLocation);
+        SegmentLeftRigAnchor->bEditableWhenInherited = true;
+        SegmentLeftFoot->SetLegRigControlAnchor(SegmentLeftRigAnchor);
+
+        USceneComponent* SegmentRightRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("RightLegRigAnchor_%d"), Index + 1)
+            );
+        SegmentRightRigAnchor->SetupAttachment(SegmentRightFoot);
+        SegmentRightRigAnchor->SetRelativeLocation(-RightSlotLocation);
+        SegmentRightRigAnchor->bEditableWhenInherited = true;
+        SegmentRightFoot->SetLegRigControlAnchor(SegmentRightRigAnchor);
+
+        USceneComponent* SegmentLeftArmRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("LeftArmRigAnchor_%d"), Index + 1)
+            );
+        SegmentLeftArmRigAnchor->SetupAttachment(SegmentLeftFoot);
+        SegmentLeftArmRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentLeftArmRigAnchor->bEditableWhenInherited = true;
+        SegmentLeftFoot->SetArmRigControlAnchor(SegmentLeftArmRigAnchor);
+
+        USceneComponent* SegmentRightArmRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("RightArmRigAnchor_%d"), Index + 1)
+            );
+        SegmentRightArmRigAnchor->SetupAttachment(SegmentRightFoot);
+        SegmentRightArmRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentRightArmRigAnchor->bEditableWhenInherited = true;
+        SegmentRightFoot->SetArmRigControlAnchor(SegmentRightArmRigAnchor);
+
+        USceneComponent* SegmentLeftHeadRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("LeftHeadRigAnchor_%d"), Index + 1)
+            );
+        SegmentLeftHeadRigAnchor->SetupAttachment(SegmentLeftFoot);
+        SegmentLeftHeadRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentLeftHeadRigAnchor->bEditableWhenInherited = true;
+        SegmentLeftFoot->SetHeadRigControlAnchor(SegmentLeftHeadRigAnchor);
+
+        USceneComponent* SegmentRightHeadRigAnchor =
+            CreateDefaultSubobject<USceneComponent>(
+                *FString::Printf(TEXT("RightHeadRigAnchor_%d"), Index + 1)
+            );
+        SegmentRightHeadRigAnchor->SetupAttachment(SegmentRightFoot);
+        SegmentRightHeadRigAnchor->SetRelativeLocationAndRotation(
+            FVector::ZeroVector,
+            FRotator::ZeroRotator);
+        SegmentRightHeadRigAnchor->bEditableWhenInherited = true;
+        SegmentRightFoot->SetHeadRigControlAnchor(SegmentRightHeadRigAnchor);
+
+        BodySegments.Add(SegmentBody);
+        LeftFootPoints.Add(SegmentLeftFoot);
+        RightFootPoints.Add(SegmentRightFoot);
+        PartSlotPoints.Add(SegmentLeftFoot);
+        PartSlotPoints.Add(SegmentRightFoot);
+        LegRigControlAnchors.Add(SegmentLeftRigAnchor);
+        LegRigControlAnchors.Add(SegmentRightRigAnchor);
+        ArmRigControlAnchors.Add(SegmentLeftArmRigAnchor);
+        ArmRigControlAnchors.Add(SegmentRightArmRigAnchor);
+        HeadRigControlAnchors.Add(SegmentLeftHeadRigAnchor);
+        HeadRigControlAnchors.Add(SegmentRightHeadRigAnchor);
+    }
+
+    for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
+    {
+        UChildActorComponent* SegmentPresentation =
+            CreateDefaultSubobject<UChildActorComponent>(
+                *FString::Printf(
+                    TEXT("SegmentPresentation_%d"),
+                    Index + 1));
+        SegmentPresentation->SetupAttachment(BodySegments[Index]);
+        SegmentPresentation->SetChildActorClass(
+            BodySegmentPresentationClass);
+        SegmentPresentationComponents.Add(SegmentPresentation);
+
+        UBoxComponent* SegmentHurtbox =
+            CreateDefaultSubobject<UBoxComponent>(
+                *FString::Printf(TEXT("SegmentHurtbox_%d"), Index + 1)
+            );
+        SegmentHurtbox->SetupAttachment(BodySegments[Index]);
+        SegmentHurtbox->SetBoxExtent(FVector(50.0f, 40.0f, 37.0f));
+        SegmentHurtbox->SetCollisionProfileName(TEXT("CMHurtbox"));
+        SegmentHurtbox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        SegmentHurtbox->SetCollisionObjectType(CMCollision::ChimeraHurtbox);
+        SegmentHurtbox->SetCollisionResponseToAllChannels(ECR_Ignore);
+        SegmentHurtbox->SetCollisionResponseToChannel(
+            ECC_WorldDynamic,
+            ECR_Overlap
+        );
+        SegmentHurtbox->SetCollisionResponseToChannel(
+            CMCollision::WeaponTrace,
+            ECR_Block
+        );
+        SegmentHurtbox->SetGenerateOverlapEvents(true);
+        SegmentHurtbox->SetCanEverAffectNavigation(false);
+        SegmentHurtboxes.Add(SegmentHurtbox);
+    }
+
+    for (int32 PartSlotFlatIndex = 0;
+        PartSlotFlatIndex < CMControl::MaxPartSlots;
+        ++PartSlotFlatIndex)
+    {
+        UCMPartSlotComponent* PartSlotPoint =
+            PartSlotPoints[PartSlotFlatIndex];
+
+        UStaticMeshComponent* Marker =
+            CreateDefaultSubobject<UStaticMeshComponent>(
+                *FString::Printf(
+                    TEXT("ControlAssignmentMarker_%d"),
+                    PartSlotFlatIndex + 1
+                )
+            );
+        Marker->SetupAttachment(PartSlotPoint);
+        Marker->SetAbsolute(false, false, true);
+        Marker->SetRelativeLocation(
+            FVector(0.0f, 0.0f, ControlMarkerHeightOffset)
+        );
+        Marker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Marker->SetGenerateOverlapEvents(false);
+        Marker->SetCanEverAffectNavigation(false);
+        Marker->SetCastShadow(false);
+        Marker->SetHiddenInGame(true);
+        Marker->SetVisibility(false);
+
+        if (MarkerMeshAsset.Succeeded())
+        {
+            Marker->SetStaticMesh(MarkerMeshAsset.Object);
+        }
+        if (MarkerMaterialAsset.Succeeded())
+        {
+            Marker->SetMaterial(0, MarkerMaterialAsset.Object);
+        }
+
+        ControlAssignmentMarkers.Add(Marker);
+
+        UTextRenderComponent* MarkerText =
+            CreateDefaultSubobject<UTextRenderComponent>(
+                *FString::Printf(
+                    TEXT("ControlAssignmentMarkerText_%d"),
+                    PartSlotFlatIndex + 1
+                )
+            );
+        MarkerText->SetupAttachment(PartSlotPoint);
+        MarkerText->SetAbsolute(false, true, true);
+        MarkerText->SetRelativeLocation(FVector(
+            0.0f,
+            0.0f,
+            ControlMarkerHeightOffset + ControlMarkerTextHeightOffset
+        ));
+        MarkerText->SetWorldSize(ControlMarkerTextWorldSize);
+        MarkerText->SetHorizontalAlignment(EHTA_Center);
+        MarkerText->SetVerticalAlignment(EVRTA_TextCenter);
+        MarkerText->SetTextRenderColor(FColor::Black);
+        if (MarkerTextMaterialAsset.Succeeded())
+        {
+            MarkerText->SetTextMaterial(MarkerTextMaterialAsset.Object);
+        }
+        MarkerText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        MarkerText->SetGenerateOverlapEvents(false);
+        MarkerText->SetCanEverAffectNavigation(false);
+        MarkerText->SetCastShadow(false);
+        MarkerText->SetTranslucentSortPriority(10);
+        MarkerText->SetHiddenInGame(true);
+        MarkerText->SetVisibility(false);
+        ControlAssignmentMarkerTexts.Add(MarkerText);
+    }
+
+}
+
+void ACMChimera::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // ASC의 OwnerActor와 AvatarActor는 모두 Shared Chimera Pawn이다.
+    // 플레이어는 이 Pawn을 각자 소유하지 않고, ControlBody를 통해 입력 권한만 전달한다.
+    AbilitySystemComponent->InitAbilityActorInfo(this, this);
+
+    // 순서가 중요하다.
+    // 1) CSV/DT 값을 ASC·마디 체력·물리 변수로 분배하고
+    // 2) 그 물리 변수로 실제 마디 컴포넌트와 Constraint를 설정한다.
+    InitializeFromBodyData();
+    ConfigureSegments();
+    ConfigureNetworkPhysics();
+    RefreshTentacleSegments();
+
+}
+
+void ACMChimera::OnConstruction(const FTransform& Transform)
+{
+    Super::OnConstruction(Transform);
+    ApplyBlueprintSettings();
+}
+
+void ACMChimera::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (!HasAuthority())
+    {
+        ApplyReplicatedSegmentStates(DeltaTime);
+        return;
+    }
+
+    if (MovementCoordinator)
+    {
+        MovementCoordinator->UpdateServerMovement(*this);
+    }
+
+    UpdatePlanarKnockback(DeltaTime);
+    UpdateStuckRecovery(DeltaTime);
+
+    UpdateReplicatedSegmentStates();
+}
+
+// 모든 활성 마디를 하나의 몸처럼 전후 이동하고 좌우 회전시키는 테스트 입력 처리
+void ACMChimera::ApplyDebugMovementInput(
+    float ForwardInput,
+    float TurnInput)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    TArray<UBoxComponent*> SimulatedSegments;
+    FVector CombinedForwardDirection = FVector::ZeroVector;
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount, BodySegments.Num());
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!SegmentBody || !SegmentBody->IsSimulatingPhysics())
+        {
+            continue;
+        }
+
+        SimulatedSegments.Add(SegmentBody);
+        FVector SegmentForward = SegmentBody->GetForwardVector();
+        SegmentForward.Z = 0.0f;
+        CombinedForwardDirection += SegmentForward.GetSafeNormal();
+    }
+
+    if (SimulatedSegments.IsEmpty())
+    {
+        return;
+    }
+
+    const FVector ForwardDirection =
+        CombinedForwardDirection.GetSafeNormal();
+
+    if (!FMath::IsNearlyZero(ForwardInput)
+        && !ForwardDirection.IsNearlyZero())
+    {
+        const FVector DebugAcceleration =
+            ForwardDirection * ForwardInput * DebugMovementForce;
+        for (UBoxComponent* SegmentBody : SimulatedSegments)
+        {
+            // 모든 마디에 같은 가속도를 적용해 질량과 마디 수 영향을 제거
+            SegmentBody->AddForce(
+                DebugAcceleration,
+                NAME_None,
+                true);
+        }
+    }
+
+    if (!FMath::IsNearlyZero(TurnInput))
+    {
+        const FVector DebugAngularAcceleration =
+            FVector::UpVector * TurnInput * DebugTurnTorque;
+        for (UBoxComponent* SegmentBody : SimulatedSegments)
+        {
+            // 모든 마디에 같은 각가속도를 적용해 몸 전체가 함께 회전
+            SegmentBody->AddTorqueInRadians(
+                DebugAngularAcceleration,
+                NAME_None,
+                true);
+        }
+    }
+}
+
+void ACMChimera::GetLifetimeReplicatedProps(
+    TArray<FLifetimeProperty>& OutLifetimeProps
+) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(ACMChimera, ReplicatedSegmentStates);
+    DOREPLIFETIME(ACMChimera, SegmentHealthStates);
+    DOREPLIFETIME(ACMChimera, PressedPartSlotMask);
+    DOREPLIFETIME(ACMChimera, ReplicatedPartSlotPressStartTimes);
+    DOREPLIFETIME(ACMChimera, ActiveSegmentCount);
+}
+
+UAbilitySystemComponent* ACMChimera::GetAbilitySystemComponent() const
+{
+    return AbilitySystemComponent;
+}
+
+void ACMChimera::SetActiveSegmentCountForPlayers(int32 PlayerCount)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    const int32 NewSegmentCount = FMath::Clamp(
+        PlayerCount * CMControl::SegmentsPerPlayer,
+        1,
+        CMControl::MaxSegments
+    );
+    if (ActiveSegmentCount == NewSegmentCount
+        && SegmentHealthStates.Num() == NewSegmentCount)
+    {
+        return;
+    }
+
+    const int32 OldSegmentCount = ActiveSegmentCount;
+    ActiveSegmentCount = NewSegmentCount;
+
+    if (ConfiguredSegmentMaxHealth > 0.0f)
+    {
+        const int32 PreviousHealthStateCount =
+            SegmentHealthStates.Num();
+        SegmentHealthStates.SetNum(NewSegmentCount);
+        for (int32 SegmentIndex = PreviousHealthStateCount;
+            SegmentIndex < NewSegmentCount;
+            ++SegmentIndex)
+        {
+            FCMBodySegmentHealthState& SegmentState =
+                SegmentHealthStates[SegmentIndex];
+            SegmentState.SegmentIndex = SegmentIndex;
+            SegmentState.Health = ConfiguredSegmentMaxHealth;
+            SegmentState.MaxHealth = ConfiguredSegmentMaxHealth;
+            SegmentState.bDead = false;
+        }
+    }
+
+    bAllSegmentsDeathNotified = false;
+    ConfigureSegments();
+    ConfigureNetworkPhysics();
+    RefreshTentacleSegments();
+    OnSegmentStatesChanged.Broadcast();
+    ForceNetUpdate();
+
+    UE_LOG(LogChimeraLineBody, Log,
+        TEXT("[Player Count -> Segments] Active segments changed %d -> %d. PartSlots=%d"),
+        OldSegmentCount,
+        ActiveSegmentCount,
+        ActiveSegmentCount * CMControl::PartSlotsPerSegment);
+}
+
+void ACMChimera::RefreshTentacleSegments()
+{
+    RefreshBodySegmentPresentationClasses();
+    TentacleSegments.SetNum(CMControl::MaxSegments);
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < CMControl::MaxSegments;
+        ++SegmentIndex)
+    {
+        ACMChimeraBodySegmentActor* Presentation =
+            GetBodySegmentPresentation(SegmentIndex);
+        UPrimitiveComponent* SegmentBody =
+            BodySegments.IsValidIndex(SegmentIndex)
+                ? BodySegments[SegmentIndex]
+                : nullptr;
+        if (!Presentation || !SegmentBody)
+        {
+            TentacleSegments[SegmentIndex] = nullptr;
+            continue;
+        }
+
+        if (HasAuthority())
+        {
+            Presentation->SetTentacleActorClass(TentacleSegmentClass);
+        }
+        Presentation->InitializeForSegment(
+            this,
+            SegmentIndex,
+            SegmentBody);
+        Presentation->SetSegmentPresentation(
+            SegmentIndex < ActiveSegmentCount,
+            CMChimeraVisual::ResolveSegmentVisualRole(
+                SegmentIndex,
+                ActiveSegmentCount));
+        TentacleSegments[SegmentIndex] = Presentation->GetTentacleActor();
+    }
+}
+
+void ACMChimera::RefreshBodySegmentPresentationClasses()
+{
+    if (!BodySegmentPresentationClass)
+    {
+        return;
+    }
+
+    for (UChildActorComponent* PresentationComponent
+        : SegmentPresentationComponents)
+    {
+        if (PresentationComponent
+            && PresentationComponent->GetChildActorClass()
+                != BodySegmentPresentationClass)
+        {
+            PresentationComponent->SetChildActorClass(
+                BodySegmentPresentationClass);
+        }
+    }
+}
+
+int32 ACMChimera::GetActiveSegmentCount() const
+{
+    return ActiveSegmentCount;
+}
+
+ACMChimeraBodySegmentActor* ACMChimera::GetBodySegmentPresentation(
+    const int32 SegmentIndex) const
+{
+    const UChildActorComponent* PresentationComponent =
+        SegmentPresentationComponents.IsValidIndex(SegmentIndex)
+            ? SegmentPresentationComponents[SegmentIndex]
+            : nullptr;
+    return PresentationComponent
+        ? Cast<ACMChimeraBodySegmentActor>(
+            PresentationComponent->GetChildActor())
+        : nullptr;
+}
+
+float ACMChimera::AdjustLocalCameraDistance(float WheelInput)
+{
+    if (!CameraBoom || FMath::IsNearlyZero(WheelInput))
+    {
+        return CameraBoom ? CameraBoom->TargetArmLength : 0.0f;
+    }
+
+    const float SafeMinimum = FMath::Max(MinimumCameraDistance, 0.0f);
+    const float SafeMaximum = FMath::Max(
+        MaximumCameraDistance,
+        SafeMinimum
+    );
+    CameraBoom->TargetArmLength = FMath::Clamp(
+        CameraBoom->TargetArmLength
+            - WheelInput * FMath::Max(CameraDistanceStep, 0.0f),
+        SafeMinimum,
+        SafeMaximum
+    );
+    return CameraBoom->TargetArmLength;
+}
+
+void ACMChimera::ApplyPlanarKnockback(FVector WorldDirection, float Speed)
+{
+    if (!HasAuthority())
+        return;
+
+    WorldDirection.Z = 0.0f;
+    const float SafeSpeed = CMChimeraPhysics::ResolveLinearSpeedLimit(
+        Speed,
+        MaximumSafeLinearSpeed);
+    const FVector VelocityChange = WorldDirection.GetSafeNormal() * SafeSpeed;
+    if (VelocityChange.IsNearlyZero())
+        return;
+
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    for (int32 SegmentIndex = 0; SegmentIndex < SegmentCount; ++SegmentIndex)
+    {
+        UBoxComponent* Segment = BodySegments[SegmentIndex];
+        if (Segment && Segment->IsSimulatingPhysics())
+            Segment->AddImpulse(VelocityChange, NAME_None, true);
+    }
+}
+
+void ACMChimera::StartPlanarKnockback(
+    FVector WorldDirection,
+    const float DistanceCm
+)
+{
+    if (!HasAuthority() || BodySegments.IsEmpty() || DistanceCm <= 0.0f)
+    {
+        return;
+    }
+    WorldDirection.Z = 0.0f;
+    if (!WorldDirection.Normalize())
+    {
+        return;
+    }
+
+    UBoxComponent* ReferenceBody = BodySegments[0];
+    if (!ReferenceBody || !ReferenceBody->IsSimulatingPhysics())
+    {
+        return;
+    }
+    bPlanarKnockbackActive = true;
+    PlanarKnockbackStartLocation = ReferenceBody->GetComponentLocation();
+    PlanarKnockbackDirection = WorldDirection;
+    PlanarKnockbackDistanceCm = DistanceCm;
+    PlanarKnockbackElapsedSeconds = 0.0f;
+    SetBodyHitNotifications(true);
+    ApplyPlanarKnockback(
+        PlanarKnockbackDirection,
+        FMath::Max(DistanceCm / 0.35f, 300.0f));
+}
+
+void ACMChimera::UpdatePlanarKnockback(const float DeltaTime)
+{
+    if (!bPlanarKnockbackActive || BodySegments.IsEmpty())
+    {
+        return;
+    }
+    UBoxComponent* ReferenceBody = BodySegments[0];
+    if (!ReferenceBody)
+    {
+        bPlanarKnockbackActive = false;
+        SetBodyHitNotifications(false);
+        return;
+    }
+
+    PlanarKnockbackElapsedSeconds += DeltaTime;
+    const float Travel = FVector::DotProduct(
+        ReferenceBody->GetComponentLocation()
+            - PlanarKnockbackStartLocation,
+        PlanarKnockbackDirection);
+    if (Travel >= PlanarKnockbackDistanceCm
+        || PlanarKnockbackElapsedSeconds >= 0.75f)
+    {
+        bPlanarKnockbackActive = false;
+        SetBodyHitNotifications(false);
+        const int32 SegmentCount = FMath::Min(
+            ActiveSegmentCount, BodySegments.Num());
+        for (int32 SegmentIndex = 0;
+            SegmentIndex < SegmentCount; ++SegmentIndex)
+        {
+            UBoxComponent* Segment = BodySegments[SegmentIndex];
+            if (!Segment || !Segment->IsSimulatingPhysics())
+            {
+                continue;
+            }
+            const float VerticalSpeed =
+                Segment->GetPhysicsLinearVelocity().Z;
+            Segment->SetPhysicsLinearVelocity(
+                FVector::UpVector * VerticalSpeed);
+        }
+        return;
+    }
+
+    const float RemainingDistance = PlanarKnockbackDistanceCm - Travel;
+    const float Speed = CMChimeraPhysics::ResolveLinearSpeedLimit(
+        FMath::Max(RemainingDistance / 0.2f, 150.0f),
+        MaximumSafeLinearSpeed);
+    const int32 SegmentCount = FMath::Min(
+        ActiveSegmentCount, BodySegments.Num());
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < SegmentCount; ++SegmentIndex)
+    {
+        UBoxComponent* Segment = BodySegments[SegmentIndex];
+        if (!Segment || !Segment->IsSimulatingPhysics())
+        {
+            continue;
+        }
+        const float VerticalSpeed = Segment->GetPhysicsLinearVelocity().Z;
+        Segment->SetPhysicsLinearVelocity(
+            CMChimeraPhysics::ClampLinearVelocity(
+                PlanarKnockbackDirection * Speed
+                    + FVector::UpVector * VerticalSpeed,
+                MaximumSafeLinearSpeed));
+    }
+}
+
+// 파츠와 ControlBody를 제외하고 활성 BodySegment 컴포넌트만 Volume과 비교
+bool ACMChimera::AreAllActiveBodySegmentsOverlapping(
+    const UPrimitiveComponent* Volume) const
+{
+    if (!IsValid(Volume) || ActiveSegmentCount <= 0)
+    {
+        return false;
+    }
+
+    for (int32 SegmentIndex = 0;
+        SegmentIndex < ActiveSegmentCount;
+        ++SegmentIndex)
+    {
+        const UBoxComponent* SegmentBody =
+            BodySegments.IsValidIndex(SegmentIndex)
+                ? BodySegments[SegmentIndex]
+                : nullptr;
+        if (!IsValid(SegmentBody)
+            || !SegmentBody->IsOverlappingComponent(Volume))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ACMChimera::IsAnyActiveBodySegmentOverlapping(
+    const UPrimitiveComponent* Volume) const
+{
+    if (!IsValid(Volume))
+    {
+        return false;
+    }
+
+    const int32 SegmentCount = FMath::Min(ActiveSegmentCount, BodySegments.Num());
+    for (int32 Index = 0; Index < SegmentCount; ++Index)
+    {
+        const UBoxComponent* Segment = BodySegments[Index];
+        if (IsValid(Segment) && Segment->IsOverlappingComponent(Volume))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ACMChimera::ApplyBlueprintSettings()
+{
+    ActiveSegmentCount = FMath::Clamp(
+        ActiveSegmentCount,
+        1,
+        BodySegments.Num()
+    );
+    RefreshBodyAssembly();
+
+    // Do not change ChildActorClass from OnConstruction. Setting it rebuilds
+    // the owning actor's construction hierarchy; doing that while the
+    // Blueprint editor creates its preview actor recursively re-enters this
+    // function and can overflow the stack. BeginPlay/RefreshTentacleSegments
+    // performs the same synchronization once the runtime actor is stable.
+
+    for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
+    {
+        UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!SegmentBody)
+        {
+            continue;
+        }
+
+        SegmentBody->SetEnableGravity(bEnableBodyGravity);
+        SegmentBody->SetLinearDamping(BodyLinearDamping);
+        SegmentBody->SetAngularDamping(BodyAngularDamping);
+        SegmentBody->SetCollisionProfileName(BodyCollisionProfile);
+        SegmentBody->SetCollisionResponseToChannel(
+            CMCollision::WeaponTrace,
+            ECR_Ignore
+        );
+        if (BodySegmentMass > 0.0f)
+        {
+            SegmentBody->SetMassOverrideInKg(
+                NAME_None,
+                BodySegmentMass,
+                true
+            );
+        }
+        if (RuntimeBodyPhysicalMaterial)
+        {
+            SegmentBody->SetPhysMaterialOverride(
+                RuntimeBodyPhysicalMaterial
+            );
+        }
+        if (Index > 0 && !SegmentBody->IsSimulatingPhysics())
+        {
+            const FVector SegmentLocation =
+                BodyMesh->GetComponentLocation()
+                - BodyMesh->GetForwardVector()
+                    * SegmentSpacing * Index;
+            SegmentBody->SetWorldLocationAndRotation(
+                SegmentLocation,
+                BodyMesh->GetComponentQuat()
+            );
+        }
+
+        const bool bIsActive = Index < ActiveSegmentCount;
+        SetSegmentVisualsActive(SegmentBody, bIsActive);
+    }
+
+    for (UPhysicsConstraintComponent* Constraint : SegmentConstraints)
+    {
+        if (Constraint)
+        {
+            Constraint->SetDisableCollision(
+                bDisableCollisionBetweenSegments
+            );
+        }
+    }
+
+    const FVector MarkerScale(
+        ControlMarkerRadius / 50.0f,
+        ControlMarkerRadius / 50.0f,
+        ControlMarkerThickness / 100.0f
+    );
+    for (UStaticMeshComponent* Marker : ControlAssignmentMarkers)
+    {
+        if (Marker)
+        {
+            Marker->SetRelativeLocation(
+                FVector(0.0f, 0.0f, ControlMarkerHeightOffset)
+            );
+            Marker->SetRelativeScale3D(MarkerScale);
+        }
+    }
+
+    for (UTextRenderComponent* MarkerText : ControlAssignmentMarkerTexts)
+    {
+        if (MarkerText)
+        {
+            MarkerText->SetRelativeLocation(FVector(
+                0.0f,
+                0.0f,
+                ControlMarkerHeightOffset + ControlMarkerTextHeightOffset
+            ));
+            MarkerText->SetWorldSize(ControlMarkerTextWorldSize);
+        }
+    }
+
+    if (CameraBoom)
+    {
+        CameraBoom->SetUsingAbsoluteRotation(true);
+        CameraBoom->bUsePawnControlRotation = false;
+        CameraBoom->bInheritPitch = false;
+        CameraBoom->bInheritYaw = false;
+        CameraBoom->bInheritRoll = false;
+        CameraBoom->TargetArmLength = FMath::Max(
+            DefaultCameraDistance,
+            0.0f
+        );
+        CameraBoom->SetRelativeRotation(
+            FRotator(InitialCameraPitch, 0.0f, 0.0f)
+        );
+        CameraBoom->SocketOffset = CameraSocketOffset;
+        UpdateCameraFollowOffset();
+        CameraBoom->bEnableCameraLag = bEnableCameraLag;
+        CameraBoom->CameraLagSpeed = CameraLagSpeed;
+        CameraBoom->CameraLagMaxDistance = CameraLagMaxDistance;
+        CameraBoom->bEnableCameraRotationLag =
+            bEnableCameraRotationLag;
+        CameraBoom->CameraRotationLagSpeed =
+            CameraRotationLagSpeed;
+        CameraBoom->bDoCollisionTest = false;
+        CameraBoom->ProbeChannel = ECC_Camera;
+    }
+
+}
+
+void ACMChimera::RefreshBodyAssembly()
+{
+    const float SlotZ = -BodyCollisionHalfHeight + InitialGroundClearance;
+    const FVector LeftSlotLocation(
+        0.0f,
+        -BodySlotLateralOffset,
+        SlotZ
+    );
+    const FVector RightSlotLocation(
+        0.0f,
+        BodySlotLateralOffset,
+        SlotZ
+    );
+
+    for (int32 Index = 0; Index < BodySegments.Num(); ++Index)
+    {
+        UBoxComponent* SegmentBody = BodySegments[Index];
+        if (!SegmentBody)
+        {
+            continue;
+        }
+
+        SegmentBody->SetBoxExtent(FVector(
+            BodyCollisionHalfLength,
+            BodyCollisionHalfWidth,
+            BodyCollisionHalfHeight
+        ));
+        SegmentBody->SetWorldScale3D(FVector::OneVector);
+        if (Index > 0 && !SegmentBody->IsSimulatingPhysics())
+        {
+            SegmentBody->SetRelativeLocation(FVector(
+                -SegmentSpacing * Index,
+                0.0f,
+                0.0f
+            ));
+        }
+
+        UCMPartSlotComponent* LeftSlot = LeftFootPoints.IsValidIndex(Index)
+            ? Cast<UCMPartSlotComponent>(LeftFootPoints[Index])
+            : nullptr;
+        if (LeftSlot)
+        {
+            LeftSlot->SetRelativeLocation(LeftSlotLocation);
+            if (USceneComponent* Anchor = LeftSlot->GetLegRigControlAnchor())
+            {
+                Anchor->SetRelativeLocationAndRotation(
+                    -LeftSlotLocation,
+                    FRotator::ZeroRotator
+                );
+            }
+        }
+
+        UCMPartSlotComponent* RightSlot = RightFootPoints.IsValidIndex(Index)
+            ? Cast<UCMPartSlotComponent>(RightFootPoints[Index])
+            : nullptr;
+        if (RightSlot)
+        {
+            RightSlot->SetRelativeLocation(RightSlotLocation);
+            if (USceneComponent* Anchor = RightSlot->GetLegRigControlAnchor())
+            {
+                Anchor->SetRelativeLocationAndRotation(
+                    -RightSlotLocation,
+                    FRotator::ZeroRotator
+                );
+            }
+        }
+    }
+}
+
+void ACMChimera::SetSegmentVisualsActive(
+    USceneComponent* SegmentBody,
+    const bool bActive
+)
+{
+    if (!SegmentBody)
+    {
+        return;
+    }
+
+    TArray<USceneComponent*> Descendants;
+    SegmentBody->GetChildrenComponents(true, Descendants);
+    for (USceneComponent* Descendant : Descendants)
+    {
+        if (USkeletalMeshComponent* BodyVisual =
+            Cast<USkeletalMeshComponent>(Descendant))
+        {
+            BodyVisual->SetVisibility(bActive, false);
+            BodyVisual->SetHiddenInGame(!bActive, false);
+        }
+    }
+}
+
+void ACMChimera::UpdateCameraFollowOffset()
+{
+    if (!CameraBoom)
+    {
+        return;
+    }
+
+    CameraBoom->TargetOffset = FVector(
+        -CameraFollowBackOffset,
+        0.0f,
+        0.0f
+    );
+}
+
